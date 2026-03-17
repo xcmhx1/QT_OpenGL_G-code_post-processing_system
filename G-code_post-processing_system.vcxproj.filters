@@ -50,6 +50,7 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="README.md" />
+    <None Include=".clauderules" />
   </ItemGroup>
   <ItemGroup>
     <QtMoc Include="include\Gcode_postprocessing_system.h">

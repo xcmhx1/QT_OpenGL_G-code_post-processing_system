@@ -1,0 +1,19 @@
+﻿# 项目开发规范 (Laser CAD/CAM)
+
+## 代码风格 (C++)
+- 括号风格：必须使用 Allman Style (也称为 BSD 风格)。每个左大括号 '{' 和右大括号 '}' 必须独占一行，并与声明语句对齐。
+- 命名规范：
+  - 类名：PascalCase
+  - 函数/变量：camelCase
+  - 类成员变量：m_ 前缀 (如 m_laserPower)
+- 现代 C++：使用 ISO C++17 标准。
+
+## 技术栈上下文
+- 框架：Qt 6.9 (Widgets)
+- 渲染：QOpenGLWidget + GLSL 330
+- 核心库：Clipper2, dxflib, Eigen
+- 平台：Windows (Visual Studio 2026)
+
+## 开发逻辑
+- 遵循MVC架构
+- 按需查询README.md中所引用的文件，避免上下文膨胀

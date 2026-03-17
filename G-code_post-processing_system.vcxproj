@@ -66,6 +66,7 @@
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
       <AdditionalIncludeDirectories>./include;./include/libdxfrw;./include/libdxfrw/intern</AdditionalIncludeDirectories>
+      <LanguageStandard>stdcpp17</LanguageStandard>
     </ClCompile>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)' == 'Debug|x64'" Label="Configuration">
@@ -101,6 +102,7 @@
     <QtUic Include="Gcode_postprocessing_system.ui" />
   </ItemGroup>
   <ItemGroup>
+    <None Include=".clauderules" />
     <None Include="README.md" />
   </ItemGroup>
   <ItemGroup>
