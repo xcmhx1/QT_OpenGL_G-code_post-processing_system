@@ -1,4 +1,4 @@
-#include "Gcode_postprocessing_system.h"
+﻿#include "Gcode_postprocessing_system.h"
 #include <QtWidgets/QApplication>
 
 int main(int argc, char *argv[])

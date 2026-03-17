@@ -63,6 +63,11 @@
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'Release|x64'">
   </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <AdditionalIncludeDirectories>./include;./include/libdxfrw;./include/libdxfrw/intern</AdditionalIncludeDirectories>
+    </ClCompile>
+  </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)' == 'Debug|x64'" Label="Configuration">
     <ClCompile>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
@@ -94,12 +99,70 @@
   <ItemGroup>
     <QtRcc Include="Gcode_postprocessing_system.qrc" />
     <QtUic Include="Gcode_postprocessing_system.ui" />
-    <QtMoc Include="Gcode_postprocessing_system.h" />
-    <ClCompile Include="Gcode_postprocessing_system.cpp" />
-    <ClCompile Include="main.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="README.md" />
+  </ItemGroup>
+  <ItemGroup>
+    <QtMoc Include="include\Gcode_postprocessing_system.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="src\dx_iface.cpp" />
+    <ClCompile Include="src\Gcode_postprocessing_system.cpp" />
+    <ClCompile Include="src\libdxfrw\drw_base.cpp" />
+    <ClCompile Include="src\libdxfrw\drw_classes.cpp" />
+    <ClCompile Include="src\libdxfrw\drw_entities.cpp" />
+    <ClCompile Include="src\libdxfrw\drw_header.cpp" />
+    <ClCompile Include="src\libdxfrw\drw_objects.cpp" />
+    <ClCompile Include="src\libdxfrw\intern\drw_dbg.cpp" />
+    <ClCompile Include="src\libdxfrw\intern\drw_textcodec.cpp" />
+    <ClCompile Include="src\libdxfrw\intern\dwgbuffer.cpp" />
+    <ClCompile Include="src\libdxfrw\intern\dwgreader.cpp" />
+    <ClCompile Include="src\libdxfrw\intern\dwgreader15.cpp" />
+    <ClCompile Include="src\libdxfrw\intern\dwgreader18.cpp" />
+    <ClCompile Include="src\libdxfrw\intern\dwgreader21.cpp" />
+    <ClCompile Include="src\libdxfrw\intern\dwgreader24.cpp" />
+    <ClCompile Include="src\libdxfrw\intern\dwgreader27.cpp" />
+    <ClCompile Include="src\libdxfrw\intern\dwgutil.cpp" />
+    <ClCompile Include="src\libdxfrw\intern\dxfreader.cpp" />
+    <ClCompile Include="src\libdxfrw\intern\dxfwriter.cpp" />
+    <ClCompile Include="src\libdxfrw\intern\rscodec.cpp" />
+    <ClCompile Include="src\libdxfrw\libdwgr.cpp" />
+    <ClCompile Include="src\libdxfrw\libdxfrw.cpp" />
+    <ClCompile Include="src\main.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="include\dx_data.h" />
+    <ClInclude Include="include\dx_iface.h" />
+    <ClInclude Include="include\libdxfrw\drw_base.h" />
+    <ClInclude Include="include\libdxfrw\drw_classes.h" />
+    <ClInclude Include="include\libdxfrw\drw_entities.h" />
+    <ClInclude Include="include\libdxfrw\drw_header.h" />
+    <ClInclude Include="include\libdxfrw\drw_interface.h" />
+    <ClInclude Include="include\libdxfrw\drw_objects.h" />
+    <ClInclude Include="include\libdxfrw\intern\drw_cptable932.h" />
+    <ClInclude Include="include\libdxfrw\intern\drw_cptable936.h" />
+    <ClInclude Include="include\libdxfrw\intern\drw_cptable949.h" />
+    <ClInclude Include="include\libdxfrw\intern\drw_cptable950.h" />
+    <ClInclude Include="include\libdxfrw\intern\drw_cptables.h" />
+    <ClInclude Include="include\libdxfrw\intern\drw_dbg.h" />
+    <ClInclude Include="include\libdxfrw\intern\drw_reserve.h" />
+    <ClInclude Include="include\libdxfrw\intern\drw_textcodec.h" />
+    <ClInclude Include="include\libdxfrw\intern\dwgbuffer.h" />
+    <ClInclude Include="include\libdxfrw\intern\dwgreader.h" />
+    <ClInclude Include="include\libdxfrw\intern\dwgreader15.h" />
+    <ClInclude Include="include\libdxfrw\intern\dwgreader18.h" />
+    <ClInclude Include="include\libdxfrw\intern\dwgreader21.h" />
+    <ClInclude Include="include\libdxfrw\intern\dwgreader24.h" />
+    <ClInclude Include="include\libdxfrw\intern\dwgreader27.h" />
+    <ClInclude Include="include\libdxfrw\intern\dwgreader32.h" />
+    <ClInclude Include="include\libdxfrw\intern\dwgutil.h" />
+    <ClInclude Include="include\libdxfrw\intern\dxfreader.h" />
+    <ClInclude Include="include\libdxfrw\intern\dxfwriter.h" />
+    <ClInclude Include="include\libdxfrw\intern\rscodec.h" />
+    <ClInclude Include="include\libdxfrw\libdwgr.h" />
+    <ClInclude Include="include\libdxfrw\libdxfrw.h" />
+    <ClInclude Include="include\libdxfrw\main_doc.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Condition="Exists('$(QtMsBuild)\qt.targets')">
