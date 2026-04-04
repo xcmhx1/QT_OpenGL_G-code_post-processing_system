@@ -158,5 +158,6 @@ private:
     CameraViewMode m_viewMode = CameraViewMode::Planar2D;
     ViewInteractionMode m_interactionMode = ViewInteractionMode::Idle;
     QPoint m_lastMousePos;
+    bool m_ignoreNextOrbitDelta = false;
     EntityId m_selectedEntityId = 0;
 };

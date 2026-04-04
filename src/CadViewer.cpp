@@ -374,8 +374,9 @@ void OrbitalCamera::resetTo2DTopView()
 void OrbitalCamera::enter3DFrom2D()
 {
     const QQuaternion topViewOrientation = quaternionFromBasis(buildCameraBasis(kWorldDown, kNorthUp, kFallbackRight));
-    const QQuaternion pitchOffset = QQuaternion::fromAxisAndAngle(QVector3D(1.0f, 0.0f, 0.0f), -12.0f);
-    orientation = pitchOffset * topViewOrientation;
+    const QQuaternion yawOffset = QQuaternion::fromAxisAndAngle(kWorldUp, 35.0f);
+    const QQuaternion pitchOffset = QQuaternion::fromAxisAndAngle(QVector3D(1.0f, 0.0f, 0.0f), 25.0f);
+    orientation = yawOffset * pitchOffset * topViewOrientation;
     orientation.normalize();
 }
 
@@ -439,6 +440,7 @@ void CadViewer::fitScene()
 
     m_camera.fitAll(m_sceneMin, m_sceneMax, aspectRatio());
     m_viewMode = CameraViewMode::Planar2D;
+    m_ignoreNextOrbitDelta = false;
     update();
 }
 
@@ -550,6 +552,11 @@ void CadViewer::mousePressEvent(QMouseEvent* event)
             {
                 m_camera.enter3DFrom2D();
                 m_viewMode = CameraViewMode::Orbit3D;
+                m_ignoreNextOrbitDelta = true;
+            }
+            else
+            {
+                m_ignoreNextOrbitDelta = false;
             }
 
             m_interactionMode = ViewInteractionMode::Orbiting;
@@ -557,8 +564,10 @@ void CadViewer::mousePressEvent(QMouseEvent* event)
         else
         {
             m_interactionMode = ViewInteractionMode::Panning;
+            m_ignoreNextOrbitDelta = false;
         }
 
+        m_lastMousePos = event->pos();
         update();
 
         return;
@@ -576,6 +585,13 @@ void CadViewer::mousePressEvent(QMouseEvent* event)
 
 void CadViewer::mouseMoveEvent(QMouseEvent* event)
 {
+    if (m_interactionMode == ViewInteractionMode::Orbiting && m_ignoreNextOrbitDelta)
+    {
+        m_lastMousePos = event->pos();
+        m_ignoreNextOrbitDelta = false;
+        return;
+    }
+
     const QPoint delta = event->pos() - m_lastMousePos;
     m_lastMousePos = event->pos();
 
@@ -601,6 +617,7 @@ void CadViewer::mouseReleaseEvent(QMouseEvent* event)
     if (event->button() == Qt::MiddleButton)
     {
         m_interactionMode = ViewInteractionMode::Idle;
+        m_ignoreNextOrbitDelta = false;
         return;
     }
 
@@ -640,6 +657,7 @@ void CadViewer::keyPressEvent(QKeyEvent* event)
     case Qt::Key_Home:
         m_camera.resetTo2DTopView();
         m_viewMode = CameraViewMode::Planar2D;
+        m_ignoreNextOrbitDelta = false;
         update();
         return;
     case Qt::Key_Plus:
