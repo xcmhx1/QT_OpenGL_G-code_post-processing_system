@@ -35,6 +35,7 @@ const QVector3D kLocalRight(1.0f, 0.0f, 0.0f);
 const QVector3D kLocalUp(0.0f, 1.0f, 0.0f);
 const QVector3D kFallbackRight(1.0f, 0.0f, 0.0f);
 
+
 EntityId toEntityId(const CadItem* entity)
 {
     return static_cast<EntityId>(reinterpret_cast<quintptr>(entity));
@@ -152,6 +153,7 @@ QQuaternion quaternionFromBasis(const CameraBasis& basis)
     return orientation;
 }
 
+
 float quaternionDot(const QQuaternion& lhs, const QQuaternion& rhs)
 {
     return lhs.scalar() * rhs.scalar()
@@ -206,22 +208,10 @@ bool violatesViewConstraint(const QQuaternion& orientation)
 {
     const QQuaternion q = normalizedQuaternionOrIdentity(orientation);
     const QVector3D forward = normalizedOr(q.rotatedVector(kLocalForward), kLocalForward);
-    const QVector3D up = normalizedOr(q.rotatedVector(kLocalUp), kLocalUp);
 
     const float forwardUpDot = QVector3D::dotProduct(forward, kWorldUp);
-    const float upUpDot = QVector3D::dotProduct(up, kWorldUp);
 
-    if (forwardUpDot >= kPoleConeDot || forwardUpDot <= -kPoleConeDot)
-    {
-        return true;
-    }
-
-    if (upUpDot <= kMinUpDot)
-    {
-        return true;
-    }
-
-    return false;
+    return forwardUpDot >= kPoleConeDot || forwardUpDot <= -kPoleConeDot;
 }
 
 GLenum primitiveTypeForEntity(const CadItem* entity)
@@ -286,6 +276,15 @@ QMatrix4x4 OrbitalCamera::viewProjectionMatrix(float aspectRatio) const
     return projectionMatrix(aspectRatio) * viewMatrix();
 }
 
+QQuaternion stabilizedOrientationFromForward(const QQuaternion& orientation)
+{
+    const QQuaternion q = normalizedQuaternionOrIdentity(orientation);
+    const QVector3D forward = normalizedOr(q.rotatedVector(kLocalForward), kLocalForward);
+
+    // 用世界 Z 作为首选 up，给当前 forward 构造唯一且连续的相机基
+    return quaternionFromBasis(buildCameraBasis(forward, kWorldUp, kNorthUp));
+}
+
 void OrbitalCamera::orbit(float deltaAzimuth, float deltaElevation)
 {
     const QQuaternion previousOrientation = normalizedQuaternionOrIdentity(orientation);
@@ -293,7 +292,8 @@ void OrbitalCamera::orbit(float deltaAzimuth, float deltaElevation)
 
     if (!qFuzzyIsNull(deltaAzimuth))
     {
-        QQuaternion yawOrientation = QQuaternion::fromAxisAndAngle(kWorldUp, deltaAzimuth) * candidateOrientation;
+        QQuaternion yawOrientation =
+            QQuaternion::fromAxisAndAngle(kWorldUp, deltaAzimuth) * candidateOrientation;
         yawOrientation.normalize();
 
         if (!violatesViewConstraint(yawOrientation))
@@ -304,8 +304,11 @@ void OrbitalCamera::orbit(float deltaAzimuth, float deltaElevation)
 
     if (!qFuzzyIsNull(deltaElevation))
     {
-        const QVector3D pitchAxis = normalizedOr(candidateOrientation.rotatedVector(kLocalRight), kLocalRight);
-        QQuaternion pitchOrientation = QQuaternion::fromAxisAndAngle(pitchAxis, deltaElevation) * candidateOrientation;
+        const QVector3D pitchAxis =
+            normalizedOr(candidateOrientation.rotatedVector(kLocalRight), kLocalRight);
+
+        QQuaternion pitchOrientation =
+            QQuaternion::fromAxisAndAngle(pitchAxis, deltaElevation) * candidateOrientation;
         pitchOrientation.normalize();
 
         if (!violatesViewConstraint(pitchOrientation))
@@ -314,6 +317,7 @@ void OrbitalCamera::orbit(float deltaAzimuth, float deltaElevation)
         }
     }
 
+    candidateOrientation = stabilizedOrientationFromForward(candidateOrientation);
     orientation = alignQuaternionHemisphere(previousOrientation, candidateOrientation);
 }
 
@@ -1020,7 +1024,9 @@ void CadViewer::orbitCameraAroundSceneCenter(float deltaAzimuth, float deltaElev
 
     if (!qFuzzyIsNull(deltaAzimuth))
     {
-        const QQuaternion yawRotation = QQuaternion::fromAxisAndAngle(QVector3D(0.0f, 0.0f, 1.0f), deltaAzimuth);
+        const QQuaternion yawRotation =
+            QQuaternion::fromAxisAndAngle(QVector3D(0.0f, 0.0f, 1.0f), deltaAzimuth);
+
         const QVector3D yawedEye = pivot + yawRotation.rotatedVector(candidateEye - pivot);
         const QVector3D yawedTarget = pivot + yawRotation.rotatedVector(candidateTarget - pivot);
         QQuaternion yawedOrientation = yawRotation * candidateOrientation;
@@ -1036,8 +1042,12 @@ void CadViewer::orbitCameraAroundSceneCenter(float deltaAzimuth, float deltaElev
 
     if (!qFuzzyIsNull(deltaElevation))
     {
-        const QVector3D pitchAxis = normalizedOr(candidateOrientation.rotatedVector(kLocalRight), kLocalRight);
-        const QQuaternion pitchRotation = QQuaternion::fromAxisAndAngle(pitchAxis, deltaElevation);
+        const QVector3D pitchAxis =
+            normalizedOr(candidateOrientation.rotatedVector(kLocalRight), kLocalRight);
+
+        const QQuaternion pitchRotation =
+            QQuaternion::fromAxisAndAngle(pitchAxis, deltaElevation);
+
         const QVector3D pitchedEye = pivot + pitchRotation.rotatedVector(candidateEye - pivot);
         const QVector3D pitchedTarget = pivot + pitchRotation.rotatedVector(candidateTarget - pivot);
         QQuaternion pitchedOrientation = pitchRotation * candidateOrientation;
@@ -1050,6 +1060,8 @@ void CadViewer::orbitCameraAroundSceneCenter(float deltaAzimuth, float deltaElev
             candidateOrientation = pitchedOrientation;
         }
     }
+
+    candidateOrientation = stabilizedOrientationFromForward(candidateOrientation);
 
     m_camera.target = candidateTarget;
     m_camera.distance = distance;
