@@ -14,18 +14,18 @@
 
 #include <QDebug>
 
-DxfDocument::DxfDocument(QObject* parent)
+CadDocument::CadDocument(QObject* parent)
     : QObject(parent)
 {
     clearAll();
 }
 
-DxfDocument::~DxfDocument()
+CadDocument::~CadDocument()
 {
     clearAll();
 }
 
-void DxfDocument::readDxfDocument(const QString& filePath)
+void CadDocument::readDxfDocument(const QString& filePath)
 {
     clearAll();
 
@@ -33,27 +33,27 @@ void DxfDocument::readDxfDocument(const QString& filePath)
 
     init();
 
-    qDebug() << "DxfDocument::readDxfDocument() ->" << filePath << "导入成功";
+    qDebug() << "CadDocument::readDxfDocument() ->" << filePath << "导入成功";
 }
 
-void DxfDocument::saveDxfDocument(const QString& filePath)
+void CadDocument::saveDxfDocument(const QString& filePath)
 {
     Q_UNUSED(filePath);
 }
 
-void DxfDocument::eportDxfDocument(const QString& filePath)
+void CadDocument::eportDxfDocument(const QString& filePath)
 {
     Q_UNUSED(filePath);
 }
 
-void DxfDocument::clearAll()
+void CadDocument::clearAll()
 {
     qDeleteAll(m_entities);
     m_entities.clear();
     m_data = std::make_unique<dx_data>();
 }
 
-void DxfDocument::init()
+void CadDocument::init()
 {
     for (auto* entity : m_data->mBlock->ent)
     {
@@ -69,7 +69,7 @@ void DxfDocument::init()
     }
 }
 
-CadItem* DxfDocument::createCadItem(DRW_Entity* entity)
+CadItem* CadDocument::createCadItem(DRW_Entity* entity)
 {
     switch (entity->eType)
     {

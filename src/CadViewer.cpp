@@ -1,4 +1,4 @@
-#include "pch.h"
+﻿#include "pch.h"
 
 #include "CadViewer.h"
 
@@ -263,7 +263,7 @@ CadViewer::~CadViewer()
     }
 }
 
-void CadViewer::setDocument(DxfDocument* document)
+void CadViewer::setDocument(CadDocument* document)
 {
     m_scene = document;
     m_selectedEntityId = 0;

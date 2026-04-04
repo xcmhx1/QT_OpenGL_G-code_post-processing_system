@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <memory>
 #include <unordered_map>
@@ -17,7 +17,7 @@
 #include <QWheelEvent>
 
 class CadItem;
-class DxfDocument;
+class CadDocument;
 
 using EntityId = quintptr;
 
@@ -77,7 +77,7 @@ public:
     explicit CadViewer(QWidget* parent = nullptr);
     ~CadViewer() override;
 
-    void setDocument(DxfDocument* document);
+    void setDocument(CadDocument* document);
     void fitScene();
     void zoomIn(float factor = 1.1f);
     void zoomOut(float factor = 1.1f);
@@ -118,7 +118,7 @@ private:
     float pixelToWorldScale() const;
 
 private:
-    DxfDocument* m_scene = nullptr;
+    CadDocument* m_scene = nullptr;
     OrbitalCamera m_camera;
 
     std::unique_ptr<QOpenGLShaderProgram> m_entityShader;

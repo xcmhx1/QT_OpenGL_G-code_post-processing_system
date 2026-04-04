@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "CadDocument.h"
 
@@ -20,5 +20,5 @@ public:
 
 private:
     Ui::Gcode_postprocessing_systemClass* ui = nullptr;
-    DxfDocument m_document;
+    CadDocument m_document;
 };
