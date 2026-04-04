@@ -368,7 +368,10 @@ void CadViewer::resizeGL(int w, int h)
 
 void CadViewer::paintGL()
 {
-    glViewport(0, 0, m_viewportWidth, m_viewportHeight);
+    const int framebufferWidth = std::max(1, static_cast<int>(std::round(width() * devicePixelRatioF())));
+    const int framebufferHeight = std::max(1, static_cast<int>(std::round(height() * devicePixelRatioF())));
+
+    glViewport(0, 0, framebufferWidth, framebufferHeight);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
     if (!m_glInitialized)
@@ -382,8 +385,8 @@ void CadViewer::paintGL()
     }
 
     renderGrid();
-    renderAxis();
     renderEntities();
+    renderAxis();
 }
 
 void CadViewer::mousePressEvent(QMouseEvent* event)
@@ -674,10 +677,16 @@ void CadViewer::renderGrid()
     m_gridShader->setUniformValue("uColor", QVector3D(0.22f, 0.24f, 0.28f));
     m_gridShader->setUniformValue("uPointSize", 1.0f);
 
+    glDisable(GL_DEPTH_TEST);
+    glDepthMask(GL_FALSE);
+    glLineWidth(1.0f);
+
     m_gridVao.bind();
     glDrawArrays(GL_LINES, 0, m_gridVertexCount);
     m_gridVao.release();
 
+    glDepthMask(GL_TRUE);
+    glEnable(GL_DEPTH_TEST);
     m_gridShader->release();
 }
 
@@ -692,6 +701,9 @@ void CadViewer::renderAxis()
     m_gridShader->setUniformValue("uMvp", m_camera.viewProjectionMatrix(aspectRatio()));
     m_gridShader->setUniformValue("uPointSize", 1.0f);
 
+    glDisable(GL_DEPTH_TEST);
+    glLineWidth(3.0f);
+
     m_axisVao.bind();
 
     m_gridShader->setUniformValue("uColor", QVector3D(0.95f, 0.30f, 0.25f));
@@ -704,6 +716,8 @@ void CadViewer::renderAxis()
     glDrawArrays(GL_LINES, 4, 2);
 
     m_axisVao.release();
+    glLineWidth(1.0f);
+    glEnable(GL_DEPTH_TEST);
     m_gridShader->release();
 }
 
