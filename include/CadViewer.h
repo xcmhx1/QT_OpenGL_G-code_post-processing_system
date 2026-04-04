@@ -110,8 +110,10 @@ private:
     void renderGrid();
     void renderAxis();
     void renderEntities();
+    void renderOrbitMarker();
 
     void updateSceneBounds();
+    void syncCameraToOrbitCenter();
     EntityId pickEntity(const QPoint& screenPos) const;
 
     float aspectRatio() const;
@@ -134,6 +136,9 @@ private:
     QOpenGLVertexArrayObject m_axisVao;
     int m_axisVertexCount = 0;
 
+    QOpenGLBuffer m_orbitMarkerVbo{ QOpenGLBuffer::VertexBuffer };
+    QOpenGLVertexArrayObject m_orbitMarkerVao;
+
     int m_viewportWidth = 1;
     int m_viewportHeight = 1;
     bool m_glInitialized = false;
@@ -142,6 +147,7 @@ private:
 
     QVector3D m_sceneMin;
     QVector3D m_sceneMax;
+    QVector3D m_orbitCenter;
 
     ViewInteractionMode m_interactionMode = ViewInteractionMode::Idle;
     QPoint m_lastMousePos;

@@ -262,6 +262,8 @@ CadViewer::~CadViewer()
         m_gridVbo.destroy();
         m_axisVao.destroy();
         m_axisVbo.destroy();
+        m_orbitMarkerVao.destroy();
+        m_orbitMarkerVbo.destroy();
         doneCurrent();
     }
 }
@@ -390,6 +392,7 @@ void CadViewer::paintGL()
     renderGrid();
     renderEntities();
     renderAxis();
+    renderOrbitMarker();
 }
 
 void CadViewer::mousePressEvent(QMouseEvent* event)
@@ -401,6 +404,13 @@ void CadViewer::mousePressEvent(QMouseEvent* event)
         m_interactionMode = (event->modifiers() & Qt::ShiftModifier) != 0
             ? ViewInteractionMode::Orbiting
             : ViewInteractionMode::Panning;
+
+        if (m_interactionMode == ViewInteractionMode::Orbiting)
+        {
+            syncCameraToOrbitCenter();
+            update();
+        }
+
         return;
     }
 
@@ -508,9 +518,19 @@ void CadViewer::initShaders()
     static constexpr const char* fragmentShaderSource = R"(
         #version 450 core
         uniform vec3 uColor;
+        uniform int uRoundPoint;
         out vec4 fragColor;
         void main()
         {
+            if (uRoundPoint != 0)
+            {
+                vec2 pointCoord = gl_PointCoord * 2.0 - vec2(1.0, 1.0);
+                if (dot(pointCoord, pointCoord) > 1.0)
+                {
+                    discard;
+                }
+            }
+
             fragColor = vec4(uColor, 1.0);
         }
     )";
@@ -588,6 +608,20 @@ void CadViewer::initAxisBuffer()
 
 void CadViewer::initSelectionBoxBuffer()
 {
+    const QVector3D initialPoint(0.0f, 0.0f, 0.0f);
+
+    m_orbitMarkerVao.create();
+    m_orbitMarkerVao.bind();
+
+    m_orbitMarkerVbo.create();
+    m_orbitMarkerVbo.bind();
+    m_orbitMarkerVbo.allocate(&initialPoint, static_cast<int>(sizeof(QVector3D)));
+
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(QVector3D), nullptr);
+
+    m_orbitMarkerVbo.release();
+    m_orbitMarkerVao.release();
 }
 
 void CadViewer::uploadEntity(const CadItem* entity)
@@ -679,6 +713,7 @@ void CadViewer::renderGrid()
     m_gridShader->setUniformValue("uMvp", m_camera.viewProjectionMatrix(aspectRatio()));
     m_gridShader->setUniformValue("uColor", QVector3D(0.22f, 0.24f, 0.28f));
     m_gridShader->setUniformValue("uPointSize", 1.0f);
+    m_gridShader->setUniformValue("uRoundPoint", 0);
 
     glDisable(GL_DEPTH_TEST);
     glDepthMask(GL_FALSE);
@@ -703,6 +738,7 @@ void CadViewer::renderAxis()
     m_gridShader->bind();
     m_gridShader->setUniformValue("uMvp", m_camera.viewProjectionMatrix(aspectRatio()));
     m_gridShader->setUniformValue("uPointSize", 1.0f);
+    m_gridShader->setUniformValue("uRoundPoint", 0);
 
     glDisable(GL_DEPTH_TEST);
     glLineWidth(3.0f);
@@ -733,6 +769,7 @@ void CadViewer::renderEntities()
 
     m_entityShader->bind();
     m_entityShader->setUniformValue("uMvp", m_camera.viewProjectionMatrix(aspectRatio()));
+    m_entityShader->setUniformValue("uRoundPoint", 0);
 
     for (CadItem* entity : m_scene->m_entities)
     {
@@ -757,6 +794,29 @@ void CadViewer::renderEntities()
         buffer.vao.release();
     }
 
+    m_entityShader->release();
+}
+
+void CadViewer::renderOrbitMarker()
+{
+    if (m_interactionMode != ViewInteractionMode::Orbiting || !m_hasSceneBounds || !m_entityShader || !m_orbitMarkerVao.isCreated())
+    {
+        return;
+    }
+
+    m_entityShader->bind();
+    m_entityShader->setUniformValue("uMvp", m_camera.viewProjectionMatrix(aspectRatio()));
+    m_entityShader->setUniformValue("uColor", QVector3D(0.10f, 0.95f, 0.25f));
+    m_entityShader->setUniformValue("uPointSize", 14.0f);
+    m_entityShader->setUniformValue("uRoundPoint", 1);
+
+    glDisable(GL_DEPTH_TEST);
+
+    m_orbitMarkerVao.bind();
+    glDrawArrays(GL_POINTS, 0, 1);
+    m_orbitMarkerVao.release();
+
+    glEnable(GL_DEPTH_TEST);
     m_entityShader->release();
 }
 
@@ -804,7 +864,39 @@ void CadViewer::updateSceneBounds()
 
     m_sceneMin = minPoint;
     m_sceneMax = maxPoint;
+    m_orbitCenter = (m_sceneMin + m_sceneMax) * 0.5f;
     m_hasSceneBounds = true;
+
+    if (m_glInitialized && m_orbitMarkerVbo.isCreated())
+    {
+        m_orbitMarkerVbo.bind();
+        m_orbitMarkerVbo.write(0, &m_orbitCenter, static_cast<int>(sizeof(QVector3D)));
+        m_orbitMarkerVbo.release();
+    }
+}
+
+void CadViewer::syncCameraToOrbitCenter()
+{
+    if (!m_hasSceneBounds)
+    {
+        return;
+    }
+
+    const QVector3D eye = m_camera.eyePosition();
+    const QVector3D offset = eye - m_orbitCenter;
+    const float distance = offset.length();
+
+    if (qFuzzyIsNull(distance))
+    {
+        m_camera.target = m_orbitCenter;
+        return;
+    }
+
+    m_camera.distance = distance;
+    m_camera.azimuth = std::atan2(offset.y(), offset.x()) / kDegToRad;
+    m_camera.elevation = std::asin(std::clamp(offset.z() / distance, -1.0f, 1.0f)) / kDegToRad;
+    m_camera.elevation = std::clamp(m_camera.elevation, OrbitalCamera::kMinElevation, OrbitalCamera::kMaxElevation);
+    m_camera.target = m_orbitCenter;
 }
 
 EntityId CadViewer::pickEntity(const QPoint& screenPos) const
