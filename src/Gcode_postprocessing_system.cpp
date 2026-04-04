@@ -1,6 +1,8 @@
+#include "pch.h"
+
 #include "Gcode_postprocessing_system.h"
 
-Gcode_postprocessing_system::Gcode_postprocessing_system(QWidget *parent)
+Gcode_postprocessing_system::Gcode_postprocessing_system(QWidget* parent)
     : QMainWindow(parent)
     , ui(new Ui::Gcode_postprocessing_systemClass())
 {
@@ -11,4 +13,3 @@ Gcode_postprocessing_system::~Gcode_postprocessing_system()
 {
     delete ui;
 }
-

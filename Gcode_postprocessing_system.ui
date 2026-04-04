@@ -1,29 +1,103 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<UI version="4.0" >
+<ui version="4.0">
  <class>Gcode_postprocessing_systemClass</class>
- <widget class="QMainWindow" name="Gcode_postprocessing_systemClass" >
-  <property name="objectName" >
-   <string notr="true">Gcode_postprocessing_systemClass</string>
-  </property>
-  <property name="geometry" >
+ <widget class="QMainWindow" name="Gcode_postprocessing_systemClass">
+  <property name="geometry">
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>600</width>
-    <height>400</height>
+    <width>1280</width>
+    <height>720</height>
    </rect>
   </property>
-  <property name="windowTitle" >
+  <property name="windowTitle">
    <string>Gcode_postprocessing_system</string>
-  </property>  <widget class="QMenuBar" name="menuBar" />
-  <widget class="QToolBar" name="mainToolBar" />
-  <widget class="QWidget" name="centralWidget" />
-  <widget class="QStatusBar" name="statusBar" />
+  </property>
+  <widget class="QWidget" name="centralWidget">
+   <layout class="QVBoxLayout" name="verticalLayout">
+    <item>
+     <widget class="DxfViewer" name="openGLWidget"/>
+    </item>
+   </layout>
+  </widget>
+  <widget class="QMenuBar" name="menuBar">
+   <property name="geometry">
+    <rect>
+     <x>0</x>
+     <y>0</y>
+     <width>1280</width>
+     <height>21</height>
+    </rect>
+   </property>
+   <widget class="QMenu" name="menuFile">
+    <property name="title">
+     <string>文件</string>
+    </property>
+    <addaction name="action_File_Import_Dxf"/>
+    <addaction name="separator"/>
+    <addaction name="action_File_Export_G"/>
+   </widget>
+   <widget class="QMenu" name="menuEdit">
+    <property name="title">
+     <string>编辑</string>
+    </property>
+    <addaction name="action_Edit_ReversePeocess"/>
+   </widget>
+   <widget class="QMenu" name="menuSort">
+    <property name="title">
+     <string>排序</string>
+    </property>
+   </widget>
+   <widget class="QMenu" name="menuSet">
+    <property name="title">
+     <string>设置</string>
+    </property>
+   </widget>
+   <addaction name="menuFile"/>
+   <addaction name="menuEdit"/>
+   <addaction name="menuSort"/>
+   <addaction name="menuSet"/>
+  </widget>
+  <widget class="QToolBar" name="mainToolBar">
+   <attribute name="toolBarArea">
+    <enum>TopToolBarArea</enum>
+   </attribute>
+   <attribute name="toolBarBreak">
+    <bool>false</bool>
+   </attribute>
+  </widget>
+  <widget class="QStatusBar" name="statusBar"/>
+  <action name="action_File_Import_Dxf">
+   <property name="text">
+    <string>导入Dxf</string>
+   </property>
+  </action>
+  <action name="action_FileExport">
+   <property name="text">
+    <string>导出</string>
+   </property>
+  </action>
+  <action name="action_File_Export_G">
+   <property name="text">
+    <string>导出G代码</string>
+   </property>
+  </action>
+  <action name="action_Edit_ReversePeocess">
+   <property name="text">
+    <string>反向加工</string>
+   </property>
+  </action>
  </widget>
- <layoutDefault spacing="6" margin="11" />
- <pixmapfunction></pixmapfunction>
+ <layoutdefault spacing="6" margin="11"/>
+ <customwidgets>
+  <customwidget>
+   <class>DxfViewer</class>
+   <extends>QOpenGLWidget</extends>
+   <header>DxfViewer.h</header>
+  </customwidget>
+ </customwidgets>
  <resources>
-   <include location="Gcode_postprocessing_system.qrc"/>
+  <include location="Gcode_postprocessing_system.qrc"/>
  </resources>
  <connections/>
-</UI>
+</ui>

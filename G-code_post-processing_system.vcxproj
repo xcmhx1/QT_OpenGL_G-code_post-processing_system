@@ -37,7 +37,7 @@
   </ImportGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'Debug|x64'" Label="QtSettings">
     <QtInstall>6.9.3_msvc2022_64</QtInstall>
-    <QtModules>core;gui;widgets</QtModules>
+    <QtModules>core;gui;widgets;opengl;openglwidgets</QtModules>
     <QtBuildConfig>debug</QtBuildConfig>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'Release|x64'" Label="QtSettings">
@@ -67,6 +67,7 @@
     <ClCompile>
       <AdditionalIncludeDirectories>./include;./include/libdxfrw;./include/libdxfrw/intern</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp17</LanguageStandard>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)' == 'Debug|x64'" Label="Configuration">
@@ -102,15 +103,59 @@
     <QtUic Include="Gcode_postprocessing_system.ui" />
   </ItemGroup>
   <ItemGroup>
-    <None Include=".clauderules" />
+    <None Include="AGENTS.md" />
     <None Include="README.md" />
   </ItemGroup>
   <ItemGroup>
     <QtMoc Include="include\Gcode_postprocessing_system.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="src\pch.cpp">
+      <PrecompiledHeader>Create</PrecompiledHeader>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+    </ClCompile>
+    <ClCompile Include="include\CadItem.cpp">
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+    </ClCompile>
+    <ClCompile Include="src\CadArcItem.cpp">
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+    </ClCompile>
+    <ClCompile Include="src\CadCircleItem.cpp">
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+    </ClCompile>
+    <ClCompile Include="src\CadEllipseItem.cpp">
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+    </ClCompile>
+    <ClCompile Include="src\CadLineItem.cpp">
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+    </ClCompile>
+    <ClCompile Include="src\CadLWPolylineItem.cpp">
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+    </ClCompile>
+    <ClCompile Include="src\CadPointItem.cpp">
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+    </ClCompile>
+    <ClCompile Include="src\CadPolylineItem.cpp">
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+    </ClCompile>
+    <ClCompile Include="src\CadViewer.cpp" />
+    <ClCompile Include="src\CadDocument.cpp">
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+    </ClCompile>
     <ClCompile Include="src\dx_iface.cpp" />
-    <ClCompile Include="src\Gcode_postprocessing_system.cpp" />
+    <ClCompile Include="src\Gcode_postprocessing_system.cpp">
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+    </ClCompile>
     <ClCompile Include="src\libdxfrw\drw_base.cpp" />
     <ClCompile Include="src\libdxfrw\drw_classes.cpp" />
     <ClCompile Include="src\libdxfrw\drw_entities.cpp" />
@@ -131,11 +176,26 @@
     <ClCompile Include="src\libdxfrw\intern\rscodec.cpp" />
     <ClCompile Include="src\libdxfrw\libdwgr.cpp" />
     <ClCompile Include="src\libdxfrw\libdxfrw.cpp" />
-    <ClCompile Include="src\main.cpp" />
+    <ClCompile Include="src\main.cpp">
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
+    <QtMoc Include="include\CadViewer.h" />
+    <ClInclude Include="include\CadArcItem.h" />
+    <ClInclude Include="include\CadCircleItem.h" />
+    <ClInclude Include="include\CadEllipseItem.h" />
+    <QtMoc Include="include\CadItem.h" />
+    <ClInclude Include="include\CadLineItem.h" />
+    <ClInclude Include="include\CadLWPolylineItem.h" />
+    <ClInclude Include="include\CadPointItem.h" />
+    <ClInclude Include="include\CadPolylineItem.h" />
+    <ClInclude Include="include\CadDocument.h" />
+    <ClInclude Include="include\DxfViewer.h" />
     <ClInclude Include="include\dx_data.h" />
     <ClInclude Include="include\dx_iface.h" />
+    <ClInclude Include="include\pch.h" />
     <ClInclude Include="include\libdxfrw\drw_base.h" />
     <ClInclude Include="include\libdxfrw\drw_classes.h" />
     <ClInclude Include="include\libdxfrw\drw_entities.h" />
