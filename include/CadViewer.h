@@ -13,6 +13,7 @@
 #include <QOpenGLVertexArrayObject>
 #include <QOpenGLWidget>
 #include <QPoint>
+#include <QQuaternion>
 #include <QVector3D>
 #include <QWheelEvent>
 
@@ -25,16 +26,13 @@ struct OrbitalCamera
 {
     QVector3D target = { 0.0f, 0.0f, 0.0f };
     float distance = 500.0f;
-    float azimuth = -90.0f;
-    float elevation = 89.9f;
     float viewHeight = 200.0f;
     float nearPlane = -100000.0f;
     float farPlane = 100000.0f;
+    QQuaternion orientation = QQuaternion(1.0f, 0.0f, 0.0f, 0.0f);
 
     static constexpr float kMinViewHeight = 0.001f;
     static constexpr float kMaxViewHeight = 1.0e7f;
-    static constexpr float kMinElevation = -89.9f;
-    static constexpr float kMaxElevation = 89.9f;
 
     QVector3D eyePosition() const;
     QVector3D forwardDirection() const;
@@ -50,6 +48,8 @@ struct OrbitalCamera
     void zoom(float factor);
     void zoomAtPoint(float factor, const QVector3D& worldAnchor, float aspectRatio);
     void fitAll(const QVector3D& sceneMin, const QVector3D& sceneMax, float aspectRatio);
+    void resetTo2DTopView();
+    void enter3DFrom2D();
 };
 
 struct EntityGpuBuffer
@@ -67,6 +67,12 @@ enum class ViewInteractionMode
     Orbiting,
     Panning,
     SelectionBox,
+};
+
+enum class CameraViewMode
+{
+    Planar2D,
+    Orbit3D,
 };
 
 class CadViewer : public QOpenGLWidget, protected QOpenGLFunctions_4_5_Core
@@ -149,6 +155,7 @@ private:
     QVector3D m_sceneMax;
     QVector3D m_orbitCenter;
 
+    CameraViewMode m_viewMode = CameraViewMode::Planar2D;
     ViewInteractionMode m_interactionMode = ViewInteractionMode::Idle;
     QPoint m_lastMousePos;
     EntityId m_selectedEntityId = 0;
