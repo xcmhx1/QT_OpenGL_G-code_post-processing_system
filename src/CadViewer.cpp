@@ -7,6 +7,7 @@
 
 #include <QKeyEvent>
 #include <QOpenGLContext>
+#include <QQuaternion>
 #include <QSurfaceFormat>
 #include <QVector4D>
 #include <QWheelEvent>
@@ -73,6 +74,24 @@ float distanceToSegmentSquared(const QPointF& point, const QPointF& start, const
     const QPointF projection = start + segment * t;
     const QPointF delta = point - projection;
     return static_cast<float>(delta.x() * delta.x() + delta.y() * delta.y());
+}
+
+void setCameraFromEyeTarget(OrbitalCamera& camera, const QVector3D& eye, const QVector3D& target)
+{
+    const QVector3D offset = eye - target;
+    const float distance = offset.length();
+
+    if (qFuzzyIsNull(distance))
+    {
+        camera.target = target;
+        return;
+    }
+
+    camera.distance = distance;
+    camera.azimuth = std::atan2(offset.y(), offset.x()) / kDegToRad;
+    camera.elevation = std::asin(std::clamp(offset.z() / distance, -1.0f, 1.0f)) / kDegToRad;
+    camera.elevation = std::clamp(camera.elevation, OrbitalCamera::kMinElevation, OrbitalCamera::kMaxElevation);
+    camera.target = target;
 }
 
 GLenum primitiveTypeForEntity(const CadItem* entity)
@@ -404,12 +423,7 @@ void CadViewer::mousePressEvent(QMouseEvent* event)
         m_interactionMode = (event->modifiers() & Qt::ShiftModifier) != 0
             ? ViewInteractionMode::Orbiting
             : ViewInteractionMode::Panning;
-
-        if (m_interactionMode == ViewInteractionMode::Orbiting)
-        {
-            syncCameraToOrbitCenter();
-            update();
-        }
+        update();
 
         return;
     }
@@ -436,7 +450,7 @@ void CadViewer::mouseMoveEvent(QMouseEvent* event)
         update();
         return;
     case ViewInteractionMode::Orbiting:
-        m_camera.orbit(-delta.x() * 0.4f, -delta.y() * 0.4f);
+        orbitCameraAroundSceneCenter(-delta.x() * 0.4f, -delta.y() * 0.4f);
         update();
         return;
     default:
@@ -804,6 +818,13 @@ void CadViewer::renderOrbitMarker()
         return;
     }
 
+    if (m_orbitMarkerVbo.isCreated())
+    {
+        m_orbitMarkerVbo.bind();
+        m_orbitMarkerVbo.write(0, &m_orbitCenter, static_cast<int>(sizeof(QVector3D)));
+        m_orbitMarkerVbo.release();
+    }
+
     m_entityShader->bind();
     m_entityShader->setUniformValue("uMvp", m_camera.viewProjectionMatrix(aspectRatio()));
     m_entityShader->setUniformValue("uColor", QVector3D(0.10f, 0.95f, 0.25f));
@@ -818,6 +839,57 @@ void CadViewer::renderOrbitMarker()
 
     glEnable(GL_DEPTH_TEST);
     m_entityShader->release();
+}
+
+void CadViewer::orbitCameraAroundSceneCenter(float deltaAzimuth, float deltaElevation)
+{
+    if (!m_hasSceneBounds)
+    {
+        m_camera.orbit(deltaAzimuth, deltaElevation);
+        return;
+    }
+
+    const QVector3D pivot = m_orbitCenter;
+    QVector3D eye = m_camera.eyePosition();
+    QVector3D target = m_camera.target;
+
+    if (!qFuzzyIsNull(deltaAzimuth))
+    {
+        const QQuaternion yawRotation = QQuaternion::fromAxisAndAngle(QVector3D(0.0f, 0.0f, 1.0f), deltaAzimuth);
+        eye = pivot + yawRotation.rotatedVector(eye - pivot);
+        target = pivot + yawRotation.rotatedVector(target - pivot);
+    }
+
+    if (!qFuzzyIsNull(deltaElevation))
+    {
+        QVector3D forward = target - eye;
+
+        if (!qFuzzyIsNull(forward.lengthSquared()))
+        {
+            forward.normalize();
+        }
+        else
+        {
+            forward = QVector3D(0.0f, 0.0f, -1.0f);
+        }
+
+        QVector3D pitchAxis = QVector3D::crossProduct(forward, QVector3D(0.0f, 0.0f, 1.0f));
+
+        if (qFuzzyIsNull(pitchAxis.lengthSquared()))
+        {
+            pitchAxis = m_camera.rightDirection();
+        }
+
+        if (!qFuzzyIsNull(pitchAxis.lengthSquared()))
+        {
+            pitchAxis.normalize();
+            const QQuaternion pitchRotation = QQuaternion::fromAxisAndAngle(pitchAxis, deltaElevation);
+            eye = pivot + pitchRotation.rotatedVector(eye - pivot);
+            target = pivot + pitchRotation.rotatedVector(target - pivot);
+        }
+    }
+
+    setCameraFromEyeTarget(m_camera, eye, target);
 }
 
 void CadViewer::updateSceneBounds()
@@ -873,30 +945,6 @@ void CadViewer::updateSceneBounds()
         m_orbitMarkerVbo.write(0, &m_orbitCenter, static_cast<int>(sizeof(QVector3D)));
         m_orbitMarkerVbo.release();
     }
-}
-
-void CadViewer::syncCameraToOrbitCenter()
-{
-    if (!m_hasSceneBounds)
-    {
-        return;
-    }
-
-    const QVector3D eye = m_camera.eyePosition();
-    const QVector3D offset = eye - m_orbitCenter;
-    const float distance = offset.length();
-
-    if (qFuzzyIsNull(distance))
-    {
-        m_camera.target = m_orbitCenter;
-        return;
-    }
-
-    m_camera.distance = distance;
-    m_camera.azimuth = std::atan2(offset.y(), offset.x()) / kDegToRad;
-    m_camera.elevation = std::asin(std::clamp(offset.z() / distance, -1.0f, 1.0f)) / kDegToRad;
-    m_camera.elevation = std::clamp(m_camera.elevation, OrbitalCamera::kMinElevation, OrbitalCamera::kMaxElevation);
-    m_camera.target = m_orbitCenter;
 }
 
 EntityId CadViewer::pickEntity(const QPoint& screenPos) const

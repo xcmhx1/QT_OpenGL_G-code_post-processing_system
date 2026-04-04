@@ -113,7 +113,7 @@ private:
     void renderOrbitMarker();
 
     void updateSceneBounds();
-    void syncCameraToOrbitCenter();
+    void orbitCameraAroundSceneCenter(float deltaAzimuth, float deltaElevation);
     EntityId pickEntity(const QPoint& screenPos) const;
 
     float aspectRatio() const;
