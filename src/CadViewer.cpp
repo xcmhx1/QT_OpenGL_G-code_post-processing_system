@@ -123,15 +123,8 @@ QVector3D OrbitalCamera::forwardDirection() const
 
 QVector3D OrbitalCamera::rightDirection() const
 {
-    const QVector3D forward = forwardDirection();
-    QVector3D referenceUp(0.0f, 0.0f, 1.0f);
-
-    if (std::abs(QVector3D::dotProduct(forward, referenceUp)) > 0.99f)
-    {
-        referenceUp = QVector3D(0.0f, 1.0f, 0.0f);
-    }
-
-    QVector3D right = QVector3D::crossProduct(forward, referenceUp);
+    const float azimuthRad = azimuth * kDegToRad;
+    QVector3D right(-std::sin(azimuthRad), std::cos(azimuthRad), 0.0f);
 
     if (qFuzzyIsNull(right.lengthSquared()))
     {
@@ -147,14 +140,24 @@ QVector3D OrbitalCamera::rightDirection() const
 
 QVector3D OrbitalCamera::upDirection() const
 {
-    QVector3D up = QVector3D::crossProduct(rightDirection(), forwardDirection());
+    const float azimuthRad = azimuth * kDegToRad;
+    const float elevationRad = elevation * kDegToRad;
+    QVector3D up
+    (
+        -std::sin(elevationRad) * std::cos(azimuthRad),
+        -std::sin(elevationRad) * std::sin(azimuthRad),
+        std::cos(elevationRad)
+    );
 
     if (qFuzzyIsNull(up.lengthSquared()))
     {
-        return QVector3D(0.0f, 1.0f, 0.0f);
+        up = QVector3D(0.0f, 1.0f, 0.0f);
+    }
+    else
+    {
+        up.normalize();
     }
 
-    up.normalize();
     return up;
 }
 
@@ -183,7 +186,7 @@ QMatrix4x4 OrbitalCamera::viewProjectionMatrix(float aspectRatio) const
 
 void OrbitalCamera::orbit(float deltaAzimuth, float deltaElevation)
 {
-    azimuth += deltaAzimuth;
+    azimuth = std::remainder(azimuth + deltaAzimuth, 360.0f);
     elevation = std::clamp(elevation + deltaElevation, kMinElevation, kMaxElevation);
 }
 

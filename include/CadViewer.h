@@ -25,8 +25,8 @@ struct OrbitalCamera
 {
     QVector3D target = { 0.0f, 0.0f, 0.0f };
     float distance = 500.0f;
-    float azimuth = 0.0f;
-    float elevation = 90.0f;
+    float azimuth = -90.0f;
+    float elevation = 89.9f;
     float viewHeight = 200.0f;
     float nearPlane = -100000.0f;
     float farPlane = 100000.0f;
