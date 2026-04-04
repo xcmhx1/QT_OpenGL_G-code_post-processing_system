@@ -7,7 +7,7 @@ class CadLWPolylineItem : public CadItem
 public:
     explicit CadLWPolylineItem(DRW_Entity* entity, QObject* parent = nullptr);
 
-    DRW_LWPolyline* m_data;
+    void buildGeometryDatay() override;
 
-    void buildGeometryDatay();
+    DRW_LWPolyline* m_data = nullptr;
 };

@@ -7,7 +7,7 @@ class CadPolylineItem : public CadItem
 public:
     explicit CadPolylineItem(DRW_Entity* entity, QObject* parent = nullptr);
 
-    DRW_Polyline* m_data;
+    void buildGeometryDatay() override;
 
-    void buildGeometryDatay();
+    DRW_Polyline* m_data = nullptr;
 };

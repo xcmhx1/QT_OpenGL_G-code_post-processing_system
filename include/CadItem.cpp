@@ -6,12 +6,37 @@ CadItem::CadItem(DRW_Entity* entity, QObject* parent)
     : QObject(parent)
     , m_nativeEntity(entity)
 {
+    if (m_nativeEntity == nullptr)
+    {
+        return;
+    }
+
     m_type = m_nativeEntity->eType;
     m_color = buildColor();
 }
 
 void CadItem::buildProcessDirection()
 {
+    m_processDirection = QVector3D();
+
+    if (m_geometry.vertices.size() < 2)
+    {
+        return;
+    }
+
+    const QVector3D& start = m_geometry.vertices.front();
+
+    for (int i = 1; i < m_geometry.vertices.size(); ++i)
+    {
+        QVector3D direction = m_geometry.vertices.at(i) - start;
+
+        if (!qFuzzyIsNull(direction.lengthSquared()))
+        {
+            direction.normalize();
+            m_processDirection = m_isReverse ? -direction : direction;
+            return;
+        }
+    }
 }
 
 QColor CadItem::buildColor()
@@ -98,6 +123,5 @@ QColor CadItem::colorFromLayer()
     // 当前 CadItem 不持有图层表，无法在此解析图层颜色。
     return QColor(Qt::white);
 }
-
 
 
