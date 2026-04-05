@@ -511,9 +511,26 @@ CadViewer::~CadViewer()
 // - 最后执行 fitScene()
 void CadViewer::setDocument(CadDocument* document)
 {
+    if (m_scene != nullptr)
+    {
+        disconnect(m_sceneChangedConnection);
+    }
+
     m_scene = document;
     m_selectedEntityId = 0;
     m_buffersDirty = true;
+
+    if (m_scene != nullptr)
+    {
+        m_sceneChangedConnection = connect
+        (
+            m_scene,
+            &CadDocument::sceneChanged,
+            this,
+            &CadViewer::handleDocumentSceneChanged
+        );
+    }
+
     updateSceneBounds();
 
     if (m_glInitialized)
@@ -525,6 +542,12 @@ void CadViewer::setDocument(CadDocument* document)
 
     fitScene();
     update();
+}
+
+void CadViewer::setEditer(CadEditer* editer)
+{
+    m_editer = editer;
+    m_controller.setEditer(editer);
 }
 
 // 适配整个场景，并回到 2D 平面视图。
@@ -650,6 +673,11 @@ void CadViewer::consumeIgnoreNextOrbitDelta()
 void CadViewer::requestViewUpdate()
 {
     update();
+}
+
+CadItem* CadViewer::selectedEntity() const
+{
+    return findEntityById(m_selectedEntityId);
 }
 
 // 放大视图。
@@ -795,7 +823,7 @@ void CadViewer::mouseReleaseEvent(QMouseEvent* event)
     {
         QOpenGLWidget::mouseReleaseEvent(event);
     }
-}
+} 
 
 // 滚轮缩放：
 // 1. 通过 screenToWorld 求出鼠标位置对应的近远平面点
@@ -1349,6 +1377,26 @@ void CadViewer::updateSceneBounds()
     }
 }
 
+void CadViewer::handleDocumentSceneChanged()
+{
+    m_buffersDirty = true;
+    updateSceneBounds();
+
+    if (findEntityById(m_selectedEntityId) == nullptr)
+    {
+        m_selectedEntityId = 0;
+    }
+
+    if (m_glInitialized)
+    {
+        makeCurrent();
+        rebuildAllBuffers();
+        doneCurrent();
+    }
+
+    update();
+}
+
 // 屏幕空间拾取：
 // - 点实体：测鼠标点到投影点距离
 // - 线实体：测鼠标点到各投影线段距离
@@ -1402,6 +1450,24 @@ EntityId CadViewer::pickEntity(const QPoint& screenPos) const
     }
 
     return bestId;
+}
+
+CadItem* CadViewer::findEntityById(EntityId id) const
+{
+    if (id == 0 || m_scene == nullptr)
+    {
+        return nullptr;
+    }
+
+    for (const std::unique_ptr<CadItem>& entity : m_scene->m_entities)
+    {
+        if (toEntityId(entity.get()) == id)
+        {
+            return entity.get();
+        }
+    }
+
+    return nullptr;
 }
 
 // 计算当前视口宽高比。

@@ -1,7 +1,8 @@
-﻿#pragma once
+#pragma once
 
 #include <QColor>
 #include <QPoint>
+#include <QVector>
 #include <QVector3D>
 
 // 定义绘图图元类型的枚举
@@ -77,6 +78,19 @@ enum class LWPolylineDrawSubMode
     AwaitArcEndPoint,     // 等待用户指定圆弧段的终点
 };
 
+enum class EditType
+{
+    None,
+    Move,
+};
+
+enum class MoveEditSubMode
+{
+    Idle,
+    AwaitBasePoint,
+    AwaitTargetPoint,
+};
+
 // 统一维护绘图/编辑阶段会复用的状态和鼠标上下文。
 // 这是一个状态机类，用于管理用户在绘图或编辑时的各种交互状态。
 class DrawStateMachine
@@ -84,6 +98,9 @@ class DrawStateMachine
 public:
     // 重置所有状态到默认值
     void reset();
+
+    // 是否存在正在执行中的绘图或编辑命令
+    bool hasActiveCommand() const;
 
     // 返回全局唯一的实例，方便其他类的访问
     static DrawStateMachine& instance()
@@ -98,6 +115,14 @@ public:
     DrawType drawType = DrawType::None;
     // 当前绘图的颜色，默认为白色
     QColor drawingColor = QColor(255, 255, 255);
+
+    // 当前编辑命令类型
+    EditType editType = EditType::None;
+    // Move 命令子状态
+    MoveEditSubMode moveSubMode = MoveEditSubMode::Idle;
+
+    // 当前命令过程里已采集的控制点
+    QVector<QVector3D> commandPoints;
 
     // 各图元自己的子状态机，当前由 drawingPrimitiveKind 决定使用哪一个。
     // 这些成员变量用于存储特定图元绘制过程中的子状态。

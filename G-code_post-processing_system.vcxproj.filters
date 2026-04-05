@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
     <Filter Include="Source Files">
@@ -97,6 +97,9 @@
     </ClCompile>
     <ClCompile Include="src\CadPolylineItem.cpp">
       <Filter>Source Files\Item</Filter>
+    </ClCompile>
+    <ClCompile Include="src\CadEditer.cpp">
+      <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="src\libdxfrw\intern\drw_dbg.cpp">
       <Filter>Source Files\Model\libdxfrw\intern</Filter>
@@ -282,6 +285,9 @@
     </ClInclude>
     <ClInclude Include="include\CadCircleItem.h">
       <Filter>Header Files\Item</Filter>
+    </ClInclude>
+    <ClInclude Include="include\CadEditer.h">
+      <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="include\CadEllipseItem.h">
       <Filter>Header Files\Item</Filter>

@@ -1,4 +1,4 @@
-﻿#include "pch.h"
+#include "pch.h"
 
 #include "Gcode_postprocessing_system.h"
 
@@ -12,6 +12,8 @@ Gcode_postprocessing_system::Gcode_postprocessing_system(QWidget* parent)
     , ui(new Ui::Gcode_postprocessing_systemClass())
 {
     ui->setupUi(this);
+    m_editer.setDocument(&m_document);
+    ui->openGLWidget->setEditer(&m_editer);
     ui->openGLWidget->setDocument(&m_document);
 
     connect
@@ -34,6 +36,7 @@ Gcode_postprocessing_system::Gcode_postprocessing_system(QWidget* parent)
                 return;
             }
 
+            m_editer.clearHistory();
             m_document.readDxfDocument(filePath);
             ui->openGLWidget->setDocument(&m_document);
             statusBar()->showMessage(QStringLiteral("已导入: %1").arg(QFileInfo(filePath).fileName()), 5000);

@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include <QColor>
 #include <QKeyEvent>
@@ -9,12 +9,14 @@
 #include "DrawStateMachine.h"
 
 class CadViewer;
+class CadEditer;
 
 // 解释用户输入
 class CadController
 {
 public:
     void setViewer(CadViewer* viewer);
+    void setEditer(CadEditer* editer);
     void reset();
 
     void beginDrawing(DrawType primitiveKind, const QColor& color = QColor(255, 255, 255));
@@ -32,10 +34,11 @@ public:
 private:
     void resetSubModes();
     void preparePrimitiveSubMode();
-    void handleLeftPressInDrawing(const QVector3D& worldPos);
+    void handleLeftPressInCommand(const QVector3D& worldPos);
     QVector3D currentWorldPos(const QPoint& screenPos) const;
 
 private:
     CadViewer* m_viewer = nullptr;
+    CadEditer* m_editer = nullptr;
     DrawStateMachine m_drawState;
 };

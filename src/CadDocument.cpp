@@ -1,4 +1,4 @@
-﻿#include "pch.h"
+#include "pch.h"
 
 #include "CadDocument.h"
 
@@ -14,7 +14,7 @@
 
 #include <QDebug>
 
-std::unique_ptr<CadItem> createCadItem(DRW_Entity* entity)
+std::unique_ptr<CadItem> CadDocument::createCadItemForEntity(DRW_Entity* entity)
 {
     if (!entity)
     {
@@ -68,6 +68,7 @@ void CadDocument::readDxfDocument(const QString& filePath)
     std::make_unique<dx_iface>()->fileImport(filePath.toLocal8Bit().constData(), m_data.get(), false);
 
     init();
+    emit sceneChanged();
 
     qDebug() << "CadDocument::readDxfDocument() ->" << filePath << "导入成功";
 }
@@ -97,11 +98,105 @@ void CadDocument::init()
             continue;
         }
 
-        if (std::unique_ptr<CadItem> item = createCadItem(entity))
+        if (std::unique_ptr<CadItem> item = createCadItemForEntity(entity))
         {
             m_entities.push_back(std::move(item));
         }
     }
+}
+
+CadItem* CadDocument::appendEntity(std::unique_ptr<DRW_Entity> entity, std::unique_ptr<CadItem> item)
+{
+    if (entity == nullptr)
+    {
+        return nullptr;
+    }
+
+    if (item == nullptr)
+    {
+        item = createCadItemForEntity(entity.get());
+    }
+
+    if (item == nullptr)
+    {
+        return nullptr;
+    }
+
+    DRW_Entity* nativeEntity = entity.release();
+    CadItem* rawItem = item.get();
+
+    m_data->mBlock->ent.push_back(nativeEntity);
+    m_entities.push_back(std::move(item));
+
+    emit sceneChanged();
+    return rawItem;
+}
+
+std::pair<std::unique_ptr<DRW_Entity>, std::unique_ptr<CadItem>> CadDocument::takeEntity(CadItem* item)
+{
+    if (item == nullptr)
+    {
+        return {};
+    }
+
+    const auto itemIt = std::find_if
+    (
+        m_entities.begin(),
+        m_entities.end(),
+        [item](const std::unique_ptr<CadItem>& candidate)
+        {
+            return candidate.get() == item;
+        }
+    );
+
+    if (itemIt == m_entities.end())
+    {
+        return {};
+    }
+
+    const auto nativeIt = std::find(m_data->mBlock->ent.begin(), m_data->mBlock->ent.end(), item->m_nativeEntity);
+
+    if (nativeIt == m_data->mBlock->ent.end())
+    {
+        return {};
+    }
+
+    std::unique_ptr<DRW_Entity> entity(*nativeIt);
+    std::unique_ptr<CadItem> removedItem = std::move(*itemIt);
+
+    m_data->mBlock->ent.erase(nativeIt);
+    m_entities.erase(itemIt);
+
+    emit sceneChanged();
+    return { std::move(entity), std::move(removedItem) };
+}
+
+bool CadDocument::refreshEntity(CadItem* item)
+{
+    if (!containsEntity(item))
+    {
+        return false;
+    }
+
+    item->buildGeometryDatay();
+    item->buildProcessDirection();
+    item->m_color = item->buildColor();
+
+    emit sceneChanged();
+    return true;
+}
+
+bool CadDocument::containsEntity(const CadItem* item) const
+{
+    return std::any_of
+    (
+        m_entities.begin(),
+        m_entities.end(),
+        [item](const std::unique_ptr<CadItem>& candidate)
+        {
+            return candidate.get() == item;
+        }
+    );
 }
 
 

@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" ToolsVersion="18.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|x64">
@@ -146,6 +146,10 @@
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
     </ClCompile>
+    <ClCompile Include="src\CadEditer.cpp">
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+    </ClCompile>
     <ClCompile Include="src\CadViewer.cpp" />
     <ClCompile Include="src\CadController.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
@@ -193,6 +197,7 @@
     <QtMoc Include="include\CadViewer.h" />
     <ClInclude Include="include\CadArcItem.h" />
     <ClInclude Include="include\CadCircleItem.h" />
+    <ClInclude Include="include\CadEditer.h" />
     <ClInclude Include="include\CadEllipseItem.h" />
     <QtMoc Include="include\CadItem.h" />
     <ClInclude Include="include\CadLineItem.h" />

@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include <memory>
 #include <unordered_map>
@@ -24,6 +24,7 @@
 class CadItem;
 // 数据层类
 class CadDocument;
+class CadEditer;
 
 using EntityId = quintptr;
 
@@ -161,6 +162,7 @@ public:
 
     // 设置当前显示文档/场景。
     void setDocument(CadDocument* document);
+    void setEditer(CadEditer* editer);
 
     // 视图适配整个场景。
     void fitScene();
@@ -193,6 +195,7 @@ public:
     bool shouldIgnoreNextOrbitDelta() const;
     void consumeIgnoreNextOrbitDelta();
     void requestViewUpdate();
+    CadItem* selectedEntity() const;
 
 protected:
     // OpenGL 初始化。
@@ -261,12 +264,14 @@ private:
 
     // 重新计算场景包围盒和轨道中心。
     void updateSceneBounds();
+    void handleDocumentSceneChanged();
 
     // 围绕场景中心进行轨道旋转。
     void orbitCameraAroundSceneCenter(float deltaAzimuth, float deltaElevation);
 
     // 简单屏幕空间拾取，返回命中的实体 ID。
     EntityId pickEntity(const QPoint& screenPos) const;
+    CadItem* findEntityById(EntityId id) const;
 
     // 当前视口宽高比。
     float aspectRatio() const;
@@ -278,6 +283,7 @@ private:
 private:
     // 当前场景文档，不拥有其生命周期。
     CadDocument* m_scene = nullptr;
+    CadEditer* m_editer = nullptr;
 
     // 视图相机。
     OrbitalCamera m_camera;
@@ -336,6 +342,7 @@ private:
     ViewInteractionMode m_interactionMode = ViewInteractionMode::Idle;
     bool m_ignoreNextOrbitDelta = false;
     EntityId m_selectedEntityId = 0;
+    QMetaObject::Connection m_sceneChangedConnection;
 
     // 控制器负责接收 Viewer 输入并维护绘图状态。
     CadController m_controller;

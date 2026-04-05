@@ -1,5 +1,6 @@
-﻿#pragma once
+#pragma once
 
+#include "CadEditer.h"
 #include "CadDocument.h"
 
 #include <QtWidgets/QMainWindow>
@@ -20,5 +21,6 @@ public:
 
 private:
     Ui::Gcode_postprocessing_systemClass* ui = nullptr;
+    CadEditer m_editer;
     CadDocument m_document;
 };

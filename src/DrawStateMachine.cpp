@@ -1,4 +1,4 @@
-﻿#include "pch.h" // 假设这是预编译头文件，如果不是，请根据实际情况移除或修改
+#include "pch.h" // 假设这是预编译头文件，如果不是，请根据实际情况移除或修改
 
 #include "DrawStateMachine.h" // 包含 DrawStateMachine 的头文件
 
@@ -13,6 +13,9 @@ void DrawStateMachine::reset()
     isDrawing = false;
     drawType = DrawType::None; 
     drawingColor = QColor(255, 255, 255); 
+    editType = EditType::None;
+    moveSubMode = MoveEditSubMode::Idle;
+    commandPoints.clear();
 
     // 重置所有图元的子状态机为 Idle
     pointSubMode = PointDrawSubMode::Idle;
@@ -34,4 +37,9 @@ void DrawStateMachine::reset()
     activeButton = Qt::NoButton;
     pressedButtons = Qt::NoButton;
     keyboardModifiers = Qt::NoModifier;
+}
+
+bool DrawStateMachine::hasActiveCommand() const
+{
+    return isDrawing || editType != EditType::None;
 }
