@@ -5,7 +5,7 @@
 #include <QVector3D>
 
 // 定义绘图图元类型的枚举
-enum class DrawPrimitiveKind
+enum class DrawType
 {
     None,     // 无图元
     Point,    // 点
@@ -95,7 +95,7 @@ public:
     // 是否正在进行绘图操作
     bool isDrawing = false;
     // 当前正在绘制的图元类型
-    DrawPrimitiveKind drawType = DrawPrimitiveKind::None;
+    DrawType drawType = DrawType::None;
     // 当前绘图的颜色，默认为白色
     QColor drawingColor = QColor(255, 255, 255);
 
@@ -115,6 +115,13 @@ public:
     PolylineDrawSubMode polylineSubMode = PolylineDrawSubMode::Idle;
     // 轻量多段线状态机
     LWPolylineDrawSubMode lwPolylineSubMode = LWPolylineDrawSubMode::Idle;
+
+    // 鼠标上一次的世界坐标（3D）
+    QPoint lastScreenPos;
+    // 鼠标当前的屏幕坐标
+    QPoint currentScreenPos;
+    // 鼠标按下时的屏幕坐标
+    QPoint pressScreenPos;
 
     // 鼠标上一次的世界坐标（3D）
     QVector3D lastPos;

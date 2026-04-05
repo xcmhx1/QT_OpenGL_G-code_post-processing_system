@@ -11,7 +11,7 @@ void DrawStateMachine::reset()
 {
     // 重置基本状态
     isDrawing = false;
-    drawType = DrawPrimitiveKind::None; 
+    drawType = DrawType::None; 
     drawingColor = QColor(255, 255, 255); 
 
     // 重置所有图元的子状态机为 Idle
@@ -24,6 +24,9 @@ void DrawStateMachine::reset()
     lwPolylineSubMode = LWPolylineDrawSubMode::Idle; 
 
     // 重置鼠标相关的世界坐标位置
+    pressScreenPos = QPoint();
+    lastScreenPos = QPoint();
+    currentScreenPos = QPoint();
     lastPos = QVector3D();     
     currentPos = QVector3D();
 

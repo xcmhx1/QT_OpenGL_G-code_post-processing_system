@@ -170,6 +170,9 @@
     <ClCompile Include="src\CadViewer.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="src\CadController.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="src\DrawStateMachine.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -299,6 +302,9 @@
       <Filter>Header Files\View</Filter>
     </ClInclude>
     <ClInclude Include="include\CadDocument.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="include\CadController.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="include\DrawStateMachine.h">

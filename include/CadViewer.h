@@ -17,7 +17,7 @@
 #include <QVector3D>
 #include <QWheelEvent>
 
-#include "DrawStateMachine.h"
+#include "CadController.h"
 
 ///前向声明
 // 图元类
@@ -178,6 +178,22 @@ public:
     // 世界坐标投影到屏幕坐标。
     QPoint worldToScreen(const QVector3D& worldPos) const;
 
+    // 供控制器调用的视图动作接口。
+    void beginOrbitInteraction();
+    void beginPanInteraction();
+    void updateOrbitInteraction(const QPoint& screenDelta);
+    void updatePanInteraction(const QPoint& screenDelta);
+    void endViewInteraction();
+    void selectEntityAt(const QPoint& screenPos);
+    void zoomAtScreenPosition(const QPoint& screenPos, float factor);
+    void resetToTopView();
+    void fitSceneView();
+    CameraViewMode viewMode() const;
+    ViewInteractionMode interactionMode() const;
+    bool shouldIgnoreNextOrbitDelta() const;
+    void consumeIgnoreNextOrbitDelta();
+    void requestViewUpdate();
+
 protected:
     // OpenGL 初始化。
     void initializeGL() override;
@@ -321,6 +337,6 @@ private:
     bool m_ignoreNextOrbitDelta = false;
     EntityId m_selectedEntityId = 0;
 
-    // 统一管理绘图/编辑会复用的鼠标上下文。
-    DrawStateMachine m_drawState;
+    // 控制器负责接收 Viewer 输入并维护绘图状态。
+    CadController m_controller;
 };

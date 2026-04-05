@@ -48,6 +48,8 @@ public:
     int m_processOrder = -1;
     // 是否反向加工
     bool m_isReverse = false;
+    // 是否被选择中
+    bool m_isSelected = false;
     // 集合形状
     GeometryData m_geometry;
     // 加工方向矢量

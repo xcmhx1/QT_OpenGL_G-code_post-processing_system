@@ -481,6 +481,8 @@ CadViewer::CadViewer(QWidget* parent)
 
     setMouseTracking(true);
     setFocusPolicy(Qt::StrongFocus);
+
+    m_controller.setViewer(this);
 }
 
 // 析构时释放 OpenGL 资源。
@@ -539,7 +541,114 @@ void CadViewer::fitScene()
     m_viewMode = CameraViewMode::Planar2D;
     m_interactionMode = ViewInteractionMode::Idle;
     m_ignoreNextOrbitDelta = false;
-    m_drawState.reset();
+    m_controller.reset();
+    update();
+}
+
+void CadViewer::beginOrbitInteraction()
+{
+    if (m_viewMode == CameraViewMode::Planar2D)
+    {
+        m_camera.enter3DFrom2D();
+        m_viewMode = CameraViewMode::Orbit3D;
+        m_ignoreNextOrbitDelta = true;
+    }
+    else
+    {
+        m_ignoreNextOrbitDelta = false;
+    }
+
+    m_interactionMode = ViewInteractionMode::Orbiting;
+    update();
+}
+
+void CadViewer::beginPanInteraction()
+{
+    m_interactionMode = ViewInteractionMode::Panning;
+    m_ignoreNextOrbitDelta = false;
+    update();
+}
+
+void CadViewer::updateOrbitInteraction(const QPoint& screenDelta)
+{
+    orbitCameraAroundSceneCenter(-screenDelta.x() * 0.4f, -screenDelta.y() * 0.4f);
+    update();
+}
+
+void CadViewer::updatePanInteraction(const QPoint& screenDelta)
+{
+    m_camera.pan(-screenDelta.x() * pixelToWorldScale(), screenDelta.y() * pixelToWorldScale());
+    update();
+}
+
+void CadViewer::endViewInteraction()
+{
+    m_interactionMode = ViewInteractionMode::Idle;
+    m_ignoreNextOrbitDelta = false;
+}
+
+void CadViewer::selectEntityAt(const QPoint& screenPos)
+{
+    m_selectedEntityId = pickEntity(screenPos);
+    update();
+}
+
+void CadViewer::zoomAtScreenPosition(const QPoint& screenPos, float factor)
+{
+    const QVector3D nearPoint = screenToWorld(screenPos, -1.0f);
+    const QVector3D farPoint = screenToWorld(screenPos, 1.0f);
+    const QVector3D rayDirection = farPoint - nearPoint;
+    const QVector3D planeNormal = m_camera.forwardDirection();
+
+    QVector3D anchor = m_camera.target;
+    const float denominator = QVector3D::dotProduct(rayDirection, planeNormal);
+
+    if (!qFuzzyIsNull(denominator))
+    {
+        const float t = QVector3D::dotProduct(m_camera.target - nearPoint, planeNormal) / denominator;
+        anchor = nearPoint + rayDirection * t;
+    }
+
+    m_camera.zoomAtPoint(factor, anchor);
+    update();
+}
+
+void CadViewer::resetToTopView()
+{
+    m_camera.resetTo2DTopView();
+    m_viewMode = CameraViewMode::Planar2D;
+    m_interactionMode = ViewInteractionMode::Idle;
+    m_ignoreNextOrbitDelta = false;
+    update();
+}
+
+void CadViewer::fitSceneView()
+{
+    fitScene();
+}
+
+CameraViewMode CadViewer::viewMode() const
+{
+    return m_viewMode;
+}
+
+ViewInteractionMode CadViewer::interactionMode() const
+{
+    return m_interactionMode;
+}
+
+bool CadViewer::shouldIgnoreNextOrbitDelta() const
+{
+    return m_ignoreNextOrbitDelta;
+}
+
+void CadViewer::consumeIgnoreNextOrbitDelta()
+{
+    m_ignoreNextOrbitDelta = false;
+}
+
+void CadViewer::requestViewUpdate()
+{
     update();
 }
 
@@ -662,54 +771,10 @@ void CadViewer::paintGL()
 // - 左键：执行拾取
 void CadViewer::mousePressEvent(QMouseEvent* event)
 {
-    m_drawState.lastMousePos = m_drawState.currentMousePos;
-    m_drawState.pressMousePos = event->pos();
-    m_drawState.currentMousePos = event->pos();
-    m_drawState.activeButton = event->button();
-    m_drawState.pressedButtons = event->buttons();
-    m_drawState.keyboardModifiers = event->modifiers();
-    m_drawState.pressWorldPos = screenToWorld(event->pos());
-    m_drawState.currentWorldPos = m_drawState.pressWorldPos;
-    m_drawState.hasPressWorldPos = true;
-    m_drawState.hasCurrentWorldPos = true;
-
-    if (event->button() == Qt::MiddleButton)
+    if (!m_controller.handleMousePress(event))
     {
-        if ((event->modifiers() & Qt::ShiftModifier) != 0)
-        {
-            // 从 2D 首次切换到 3D 时，先进入一个固定初始 3D 角度，
-            // 并忽略首帧鼠标增量，避免刚按下时发生视角跳变。
-            if (m_viewMode == CameraViewMode::Planar2D)
-            {
-                m_camera.enter3DFrom2D();
-                m_viewMode = CameraViewMode::Orbit3D;
-                m_ignoreNextOrbitDelta = true;
-            }
-            else
-            {
-                m_ignoreNextOrbitDelta = false;
-            }
-
-            m_interactionMode = ViewInteractionMode::Orbiting;
-        }
-        else
-        {
-            m_interactionMode = ViewInteractionMode::Panning;
-            m_ignoreNextOrbitDelta = false;
-        }
-        update();
-
-        return;
+        QOpenGLWidget::mousePressEvent(event);
     }
-
-    if (event->button() == Qt::LeftButton)
-    {
-        m_selectedEntityId = pickEntity(event->pos());
-        update();
-        return;
-    }
-
-    QOpenGLWidget::mousePressEvent(event);
 }
 
 // 鼠标移动：
@@ -717,53 +782,19 @@ void CadViewer::mousePressEvent(QMouseEvent* event)
 // - 旋转模式：围绕场景中心轨道旋转
 void CadViewer::mouseMoveEvent(QMouseEvent* event)
 {
-    m_drawState.lastMousePos = m_drawState.currentMousePos;
-    m_drawState.currentMousePos = event->pos();
-    m_drawState.pressedButtons = event->buttons();
-    m_drawState.keyboardModifiers = event->modifiers();
-    m_drawState.currentWorldPos = screenToWorld(event->pos());
-    m_drawState.hasCurrentWorldPos = true;
-
-    if (m_interactionMode == ViewInteractionMode::Orbiting && m_ignoreNextOrbitDelta)
+    if (!m_controller.handleMouseMove(event))
     {
-        m_ignoreNextOrbitDelta = false;
-        return;
+        QOpenGLWidget::mouseMoveEvent(event);
     }
-
-    const QPoint delta = m_drawState.mouseDelta();
-
-    switch (m_interactionMode)
-    {
-    case ViewInteractionMode::Panning:
-        m_camera.pan(-delta.x() * pixelToWorldScale(), delta.y() * pixelToWorldScale());
-        update();
-        return;
-    case ViewInteractionMode::Orbiting:
-        orbitCameraAroundSceneCenter(-delta.x() * 0.4f, -delta.y() * 0.4f);
-        update();
-        return;
-    default:
-        break;
-    }
-
-    QOpenGLWidget::mouseMoveEvent(event);
 }
 
 // 鼠标释放中键后退出当前交互模式。
 void CadViewer::mouseReleaseEvent(QMouseEvent* event)
 {
-    if (event->button() == Qt::MiddleButton)
+    if (!m_controller.handleMouseRelease(event))
     {
-        m_drawState.lastMousePos = m_drawState.currentMousePos;
-        m_drawState.currentMousePos = event->pos();
-        m_drawState.pressedButtons = event->buttons();
-        m_drawState.keyboardModifiers = event->modifiers();
-        m_interactionMode = ViewInteractionMode::Idle;
-        m_ignoreNextOrbitDelta = false;
-        return;
+        QOpenGLWidget::mouseReleaseEvent(event);
     }
-
-    QOpenGLWidget::mouseReleaseEvent(event);
 }
 
 // 滚轮缩放：
@@ -773,25 +804,10 @@ void CadViewer::mouseReleaseEvent(QMouseEvent* event)
 // 4. 以该交点为锚点做缩放
 void CadViewer::wheelEvent(QWheelEvent* event)
 {
-    const float factor = event->angleDelta().y() > 0 ? 1.1f : (1.0f / 1.1f);
-    const QVector3D nearPoint = screenToWorld(event->position().toPoint(), -1.0f);
-    const QVector3D farPoint = screenToWorld(event->position().toPoint(), 1.0f);
-    const QVector3D rayDirection = farPoint - nearPoint;
-    const QVector3D planeNormal = m_camera.forwardDirection();
-
-    QVector3D anchor = m_camera.target;
-    const float denominator = QVector3D::dotProduct(rayDirection, planeNormal);
-
-    // 射线和平面不平行时取交点，否则退化为当前 target。
-    if (!qFuzzyIsNull(denominator))
+    if (!m_controller.handleWheel(event))
     {
-        const float t = QVector3D::dotProduct(m_camera.target - nearPoint, planeNormal) / denominator;
-        anchor = nearPoint + rayDirection * t;
+        QOpenGLWidget::wheelEvent(event);
     }
-
-    m_camera.zoomAtPoint(factor, anchor);
-    update();
-    event->accept();
 }
 
 // 键盘快捷键：
@@ -800,32 +816,10 @@ void CadViewer::wheelEvent(QWheelEvent* event)
 // +/-：缩放
 void CadViewer::keyPressEvent(QKeyEvent* event)
 {
-    switch (event->key())
+    if (!m_controller.handleKeyPress(event))
     {
-    case Qt::Key_F:
-        fitScene();
-        return;
-    case Qt::Key_T:
-    case Qt::Key_Home:
-        m_camera.resetTo2DTopView();
-        m_viewMode = CameraViewMode::Planar2D;
-        m_interactionMode = ViewInteractionMode::Idle;
-        m_ignoreNextOrbitDelta = false;
-        update();
-        return;
-    case Qt::Key_Plus:
-    case Qt::Key_Equal:
-        zoomIn();
-        return;
-    case Qt::Key_Minus:
-    case Qt::Key_Underscore:
-        zoomOut();
-        return;
-    default:
-        break;
+        QOpenGLWidget::keyPressEvent(event);
     }
-
-    QOpenGLWidget::keyPressEvent(event);
 }
 
 // 初始化着色器。
