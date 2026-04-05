@@ -147,6 +147,10 @@
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
     </ClCompile>
     <ClCompile Include="src\CadViewer.cpp" />
+    <ClCompile Include="src\DrawStateMachine.cpp">
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+    </ClCompile>
     <ClCompile Include="src\CadDocument.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
@@ -192,6 +196,7 @@
     <ClInclude Include="include\CadPointItem.h" />
     <ClInclude Include="include\CadPolylineItem.h" />
     <QtMoc Include="include\CadDocument.h" />
+    <ClInclude Include="include\DrawStateMachine.h" />
     <ClInclude Include="include\DxfViewer.h" />
     <ClInclude Include="include\dx_data.h" />
     <ClInclude Include="include\dx_iface.h" />

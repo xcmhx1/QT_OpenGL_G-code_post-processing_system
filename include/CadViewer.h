@@ -17,13 +17,14 @@
 #include <QVector3D>
 #include <QWheelEvent>
 
+#include "DrawStateMachine.h"
+
 ///前向声明
 // 图元类
 class CadItem;
 // 数据层类
 class CadDocument;
 
-// 以实体对象地址作为稳定标识，用于管理 GPU 缓冲和选中状态。
 using EntityId = quintptr;
 
 // 轨道相机：
@@ -132,26 +133,16 @@ struct EntityGpuBuffer
     QVector3D color = { 1.0f, 1.0f, 1.0f };
 };
 
-// 当前鼠标交互模式。
 enum class ViewInteractionMode
 {
-    // 无交互。
     Idle,
-
-    // 正在轨道旋转。
     Orbiting,
-
-    // 正在平移视图。
     Panning,
 };
 
-// 当前相机视图模式。
 enum class CameraViewMode
 {
-    // 二维平面视图。
     Planar2D,
-
-    // 三维轨道视图。
     Orbit3D,
 };
 
@@ -325,18 +316,11 @@ private:
     // 场景轨道旋转中心，一般取包围盒中心。
     QVector3D m_orbitCenter;
 
-    // 当前视图模式。
     CameraViewMode m_viewMode = CameraViewMode::Planar2D;
-
-    // 当前交互状态。
     ViewInteractionMode m_interactionMode = ViewInteractionMode::Idle;
-
-    // 上一帧鼠标位置。
-    QPoint m_lastMousePos;
-
-    // 从 2D 切到 3D 的首帧忽略鼠标增量，避免视角瞬间跳变。
     bool m_ignoreNextOrbitDelta = false;
-
-    // 当前选中实体 ID，0 表示无选中。
     EntityId m_selectedEntityId = 0;
+
+    // 统一管理绘图/编辑会复用的鼠标上下文。
+    DrawStateMachine m_drawState;
 };

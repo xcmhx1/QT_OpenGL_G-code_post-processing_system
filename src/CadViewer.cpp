@@ -537,7 +537,9 @@ void CadViewer::fitScene()
 
     m_camera.fitAll(m_sceneMin, m_sceneMax, aspectRatio());
     m_viewMode = CameraViewMode::Planar2D;
+    m_interactionMode = ViewInteractionMode::Idle;
     m_ignoreNextOrbitDelta = false;
+    m_drawState.reset();
     update();
 }
 
@@ -660,7 +662,16 @@ void CadViewer::paintGL()
 // - 左键：执行拾取
 void CadViewer::mousePressEvent(QMouseEvent* event)
 {
-    m_lastMousePos = event->pos();
+    m_drawState.lastMousePos = m_drawState.currentMousePos;
+    m_drawState.pressMousePos = event->pos();
+    m_drawState.currentMousePos = event->pos();
+    m_drawState.activeButton = event->button();
+    m_drawState.pressedButtons = event->buttons();
+    m_drawState.keyboardModifiers = event->modifiers();
+    m_drawState.pressWorldPos = screenToWorld(event->pos());
+    m_drawState.currentWorldPos = m_drawState.pressWorldPos;
+    m_drawState.hasPressWorldPos = true;
+    m_drawState.hasCurrentWorldPos = true;
 
     if (event->button() == Qt::MiddleButton)
     {
@@ -686,8 +697,6 @@ void CadViewer::mousePressEvent(QMouseEvent* event)
             m_interactionMode = ViewInteractionMode::Panning;
             m_ignoreNextOrbitDelta = false;
         }
-
-        m_lastMousePos = event->pos();
         update();
 
         return;
@@ -708,15 +717,20 @@ void CadViewer::mousePressEvent(QMouseEvent* event)
 // - 旋转模式：围绕场景中心轨道旋转
 void CadViewer::mouseMoveEvent(QMouseEvent* event)
 {
+    m_drawState.lastMousePos = m_drawState.currentMousePos;
+    m_drawState.currentMousePos = event->pos();
+    m_drawState.pressedButtons = event->buttons();
+    m_drawState.keyboardModifiers = event->modifiers();
+    m_drawState.currentWorldPos = screenToWorld(event->pos());
+    m_drawState.hasCurrentWorldPos = true;
+
     if (m_interactionMode == ViewInteractionMode::Orbiting && m_ignoreNextOrbitDelta)
     {
-        m_lastMousePos = event->pos();
         m_ignoreNextOrbitDelta = false;
         return;
     }
 
-    const QPoint delta = event->pos() - m_lastMousePos;
-    m_lastMousePos = event->pos();
+    const QPoint delta = m_drawState.mouseDelta();
 
     switch (m_interactionMode)
     {
@@ -740,6 +754,10 @@ void CadViewer::mouseReleaseEvent(QMouseEvent* event)
 {
     if (event->button() == Qt::MiddleButton)
     {
+        m_drawState.lastMousePos = m_drawState.currentMousePos;
+        m_drawState.currentMousePos = event->pos();
+        m_drawState.pressedButtons = event->buttons();
+        m_drawState.keyboardModifiers = event->modifiers();
         m_interactionMode = ViewInteractionMode::Idle;
         m_ignoreNextOrbitDelta = false;
         return;
@@ -791,6 +809,7 @@ void CadViewer::keyPressEvent(QKeyEvent* event)
     case Qt::Key_Home:
         m_camera.resetTo2DTopView();
         m_viewMode = CameraViewMode::Planar2D;
+        m_interactionMode = ViewInteractionMode::Idle;
         m_ignoreNextOrbitDelta = false;
         update();
         return;
