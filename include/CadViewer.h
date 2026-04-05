@@ -30,6 +30,7 @@ struct OrbitalCamera
     float nearPlane = -100000.0f;
     float farPlane = 100000.0f;
     QQuaternion orientation = QQuaternion(1.0f, 0.0f, 0.0f, 0.0f);
+    // 相机越过水平线后，用于提示 Z 轴切换为虚线。
     bool m_axesSwapped = false;
 
     static constexpr float kMinViewHeight = 0.001f;
@@ -47,8 +48,9 @@ struct OrbitalCamera
     void orbit(float deltaAzimuth, float deltaElevation);
     void pan(float worldDx, float worldDy);
     void zoom(float factor);
-    void zoomAtPoint(float factor, const QVector3D& worldAnchor, float aspectRatio);
+    void zoomAtPoint(float factor, const QVector3D& worldAnchor);
     void fitAll(const QVector3D& sceneMin, const QVector3D& sceneMax, float aspectRatio);
+    // 视角对齐接口保留给顶视图/三维切换使用。
     void resetTo2DTopView();
     void enter3DFrom2D();
     bool axesSwapped() const { return m_axesSwapped; }
@@ -69,7 +71,6 @@ enum class ViewInteractionMode
     Idle,
     Orbiting,
     Panning,
-    SelectionBox,
 };
 
 enum class CameraViewMode
@@ -109,7 +110,7 @@ private:
     void initShaders();
     void initGridBuffer();
     void initAxisBuffer();
-    void initSelectionBoxBuffer();
+    void initOrbitMarkerBuffer();
 
     void uploadEntity(const CadItem* entity);
     void removeEntityBuffer(EntityId id);
@@ -143,6 +144,7 @@ private:
 
     QOpenGLBuffer m_axisVbo{ QOpenGLBuffer::VertexBuffer };
     QOpenGLVertexArrayObject m_axisVao;
+    // X/Y 固定实线，Z 按状态在实线和虚线顶点段间切换。
     int m_axisXyVertexCount = 4;
     int m_axisZSolidOffset = 4;
     int m_axisZSolidVertexCount = 2;
@@ -165,6 +167,7 @@ private:
     CameraViewMode m_viewMode = CameraViewMode::Planar2D;
     ViewInteractionMode m_interactionMode = ViewInteractionMode::Idle;
     QPoint m_lastMousePos;
+    // 从 2D 切到 3D 的首帧忽略鼠标增量，避免视角跳变。
     bool m_ignoreNextOrbitDelta = false;
     EntityId m_selectedEntityId = 0;
 };

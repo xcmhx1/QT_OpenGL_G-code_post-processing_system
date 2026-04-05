@@ -337,7 +337,7 @@ void OrbitalCamera::zoom(float factor)
     viewHeight = std::clamp(viewHeight / factor, kMinViewHeight, kMaxViewHeight);
 }
 
-void OrbitalCamera::zoomAtPoint(float factor, const QVector3D& worldAnchor, float aspectRatio)
+void OrbitalCamera::zoomAtPoint(float factor, const QVector3D& worldAnchor)
 {
     if (factor <= 0.0f)
     {
@@ -351,7 +351,6 @@ void OrbitalCamera::zoomAtPoint(float factor, const QVector3D& worldAnchor, floa
 
     zoom(factor);
     target += deltaTarget;
-    Q_UNUSED(aspectRatio);
 }
 
 void OrbitalCamera::fitAll(const QVector3D& sceneMin, const QVector3D& sceneMax, float aspectRatio)
@@ -373,12 +372,14 @@ void OrbitalCamera::fitAll(const QVector3D& sceneMin, const QVector3D& sceneMax,
 
 void OrbitalCamera::resetTo2DTopView()
 {
+    // 顶视图固定从 +Z 朝向 XY 平面。
     orientation = quaternionFromBasis(buildCameraBasis(kWorldDown, kNorthUp, kFallbackRight));
     updateAxesSwappedState();
 }
 
 void OrbitalCamera::enter3DFrom2D()
 {
+    // 从顶视图引入一组固定 yaw/pitch，得到稳定的初始 3D 视角。
     const QQuaternion topViewOrientation = quaternionFromBasis(buildCameraBasis(kWorldDown, kNorthUp, kFallbackRight));
     const QQuaternion yawOffset = QQuaternion::fromAxisAndAngle(kWorldUp, 35.0f);
     const QQuaternion pitchOffset = QQuaternion::fromAxisAndAngle(QVector3D(1.0f, 0.0f, 0.0f), 25.0f);
@@ -515,7 +516,7 @@ void CadViewer::initializeGL()
     initShaders();
     initGridBuffer();
     initAxisBuffer();
-    initSelectionBoxBuffer();
+    initOrbitMarkerBuffer();
 
     m_glInitialized = true;
     rebuildAllBuffers();
@@ -653,7 +654,7 @@ void CadViewer::wheelEvent(QWheelEvent* event)
         anchor = nearPoint + rayDirection * t;
     }
 
-    m_camera.zoomAtPoint(factor, anchor, aspectRatio());
+    m_camera.zoomAtPoint(factor, anchor);
     update();
     event->accept();
 }
@@ -789,6 +790,7 @@ void CadViewer::initAxisBuffer()
 
     m_axisZDashedOffset = static_cast<int>(vertices.size());
 
+    // 用多段短线生成 Z 轴虚线版本，避免依赖固定管线线型。
     for (float z = 0.0f; z < axisLength; z += dashLength + gapLength)
     {
         const float z0 = z;
@@ -814,7 +816,7 @@ void CadViewer::initAxisBuffer()
     m_axisVao.release();
 }
 
-void CadViewer::initSelectionBoxBuffer()
+void CadViewer::initOrbitMarkerBuffer()
 {
     const QVector3D initialPoint(0.0f, 0.0f, 0.0f);
 
