@@ -24,7 +24,7 @@ constexpr float kPi = 3.14159265358979323846f;
 constexpr float kDegToRad = kPi / 180.0f;
 constexpr float kPickThresholdPixels = 10.0f;
 constexpr float kBasisEpsilon = 1.0e-8f;
-constexpr float kPoleConeHalfAngleDeg = 0.0001f;
+constexpr float kPoleConeHalfAngleDeg = 0.01f;
 const float kPoleConeDot = std::cos(kPoleConeHalfAngleDeg * kDegToRad);
 constexpr float kMinUpDot = 0.0001f;
 const QVector3D kWorldUp(0.0f, 0.0f, 1.0f);
@@ -317,7 +317,7 @@ void OrbitalCamera::orbit(float deltaAzimuth, float deltaElevation)
         }
     }
 
-    candidateOrientation = stabilizedOrientationFromForward(candidateOrientation);
+    candidateOrientation.normalize();
     orientation = alignQuaternionHemisphere(previousOrientation, candidateOrientation);
     updateAxesSwappedState();
 }
@@ -1098,7 +1098,7 @@ void CadViewer::orbitCameraAroundSceneCenter(float deltaAzimuth, float deltaElev
         }
     }
 
-    candidateOrientation = stabilizedOrientationFromForward(candidateOrientation);
+    candidateOrientation.normalize();
 
     m_camera.target = candidateTarget;
     m_camera.distance = distance;
