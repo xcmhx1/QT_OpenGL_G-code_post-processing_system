@@ -41,6 +41,58 @@ G-code_post-processing_system/
 - `dx_iface`、`dx_data`：DXF 读取适配层，负责把 `libdxfrw` 的解析结果转换为本项目可用的数据结构。
 - `src/libdxfrw/`、`include/libdxfrw/`：第三方 DXF/DWG 解析库源码与头文件，原则上不随意改动。
 
+## 系统组织架构
+
+系统整体采用“界面层 -> 视图层 -> 文档模型层 -> 数据导入层”的组织方式，核心目标是把 CAD 文件导入、三维图元组织、OpenGL 显示与后续 G-code 后处理能力解耦。
+
+### 分层关系
+
+```text
+用户操作 / Qt Widgets UI
+        |
+        v
+Gcode_postprocessing_system
+        |
+        v
+CadViewer
+        |
+        v
+CadDocument
+        |
+        v
+CadItem / CadLineItem / CadArcItem / ...
+        ^
+        |
+dx_iface / dx_data
+        |
+        v
+libdxfrw
+```
+
+### 各层职责
+
+- 界面层：由 `Gcode_postprocessing_system` 和 `.ui` 文件组成，负责菜单、导入动作、窗口布局和用户命令入口。
+- 视图层：由 `CadViewer` 负责，承担 OpenGL 渲染、视角变换、点选、高亮、网格与坐标轴显示。
+- 文档层：由 `CadDocument` 负责，统一管理当前场景中的 CAD 图元集合，是界面和数据之间的中枢对象。
+- 图元层：由 `CadItem` 基类及各个 `Cad*Item` 派生类组成，负责不同 CAD 实体的几何离散、颜色、加工方向等对象级数据。
+- 导入适配层：由 `dx_iface` 和 `dx_data` 负责，把 `libdxfrw` 的 DXF/DWG 解析结果转换成项目内部的 `CadDocument + CadItem` 结构。
+- 第三方解析层：`libdxfrw` 提供底层文件解析能力，本项目原则上只在适配层消费其输出，不直接把第三方类型暴露给视图层。
+
+### 典型工作流
+
+1. 用户在界面层触发文件导入。
+2. `Gcode_postprocessing_system` 调用 `dx_iface` 读取 DXF/DWG。
+3. `dx_iface` 基于 `libdxfrw` 解析结果构建 `CadDocument` 和各类 `Cad*Item`。
+4. `CadViewer` 接收 `CadDocument`，为各图元建立 GPU 缓冲并完成视图显示。
+5. 用户继续进行缩放、平移、旋转、点选等交互，交互结果始终作用于 `CadViewer`，而图元数据仍由 `CadDocument` 统一持有。
+
+### 架构特点
+
+- 模型数据与渲染实现分离，便于后续把 CAD 几何继续送入 G-code 路径规划或工艺分析模块。
+- 图元以独立类建模，便于逐类扩展三维几何、加工属性和后处理策略。
+- 视图层只依赖项目内部文档模型，不直接依赖 `libdxfrw`，降低第三方库变更对上层交互逻辑的影响。
+- 当前状态机式视图控制已经为后续扩展顶视、三维轨道、水平视图等专用观察模式预留了结构空间。
+
 ## 当前代码特征
 
 - 当前仓库以 Qt 6 Widgets 桌面程序为主，工程由 Visual Studio 2026 + QtMsBuild 管理。

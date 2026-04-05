@@ -319,6 +319,7 @@ void OrbitalCamera::orbit(float deltaAzimuth, float deltaElevation)
 
     candidateOrientation = stabilizedOrientationFromForward(candidateOrientation);
     orientation = alignQuaternionHemisphere(previousOrientation, candidateOrientation);
+    updateAxesSwappedState();
 }
 
 void OrbitalCamera::pan(float worldDx, float worldDy)
@@ -373,6 +374,7 @@ void OrbitalCamera::fitAll(const QVector3D& sceneMin, const QVector3D& sceneMax,
 void OrbitalCamera::resetTo2DTopView()
 {
     orientation = quaternionFromBasis(buildCameraBasis(kWorldDown, kNorthUp, kFallbackRight));
+    updateAxesSwappedState();
 }
 
 void OrbitalCamera::enter3DFrom2D()
@@ -382,6 +384,12 @@ void OrbitalCamera::enter3DFrom2D()
     const QQuaternion pitchOffset = QQuaternion::fromAxisAndAngle(QVector3D(1.0f, 0.0f, 0.0f), 25.0f);
     orientation = yawOffset * pitchOffset * topViewOrientation;
     orientation.normalize();
+    updateAxesSwappedState();
+}
+
+void OrbitalCamera::updateAxesSwappedState()
+{
+    m_axesSwapped = forwardDirection().z() > 0.0f;
 }
 
 CadViewer::CadViewer(QWidget* parent)
@@ -761,21 +769,43 @@ void CadViewer::initGridBuffer()
 void CadViewer::initAxisBuffer()
 {
     constexpr float axisLength = 300.0f;
-    const QVector3D vertices[]
-    {
-        QVector3D(0.0f, 0.0f, 0.0f), QVector3D(axisLength, 0.0f, 0.0f),
-        QVector3D(0.0f, 0.0f, 0.0f), QVector3D(0.0f, axisLength, 0.0f),
-        QVector3D(0.0f, 0.0f, 0.0f), QVector3D(0.0f, 0.0f, axisLength)
-    };
+    constexpr float dashLength = 18.0f;
+    constexpr float gapLength = 10.0f;
 
-    m_axisVertexCount = 6;
+    std::vector<QVector3D> vertices;
+    vertices.reserve(64);
+
+    vertices.emplace_back(0.0f, 0.0f, 0.0f);
+    vertices.emplace_back(axisLength, 0.0f, 0.0f);
+    vertices.emplace_back(0.0f, 0.0f, 0.0f);
+    vertices.emplace_back(0.0f, axisLength, 0.0f);
+
+    m_axisXyVertexCount = 4;
+
+    m_axisZSolidOffset = static_cast<int>(vertices.size());
+    vertices.emplace_back(0.0f, 0.0f, 0.0f);
+    vertices.emplace_back(0.0f, 0.0f, axisLength);
+    m_axisZSolidVertexCount = 2;
+
+    m_axisZDashedOffset = static_cast<int>(vertices.size());
+
+    for (float z = 0.0f; z < axisLength; z += dashLength + gapLength)
+    {
+        const float z0 = z;
+        const float z1 = std::min(z + dashLength, axisLength);
+
+        vertices.emplace_back(0.0f, 0.0f, z0);
+        vertices.emplace_back(0.0f, 0.0f, z1);
+    }
+
+    m_axisZDashedVertexCount = static_cast<int>(vertices.size()) - m_axisZDashedOffset;
 
     m_axisVao.create();
     m_axisVao.bind();
 
     m_axisVbo.create();
     m_axisVbo.bind();
-    m_axisVbo.allocate(vertices, static_cast<int>(sizeof(vertices)));
+    m_axisVbo.allocate(vertices.data(), static_cast<int>(vertices.size() * sizeof(QVector3D)));
 
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(QVector3D), nullptr);
@@ -908,7 +938,7 @@ void CadViewer::renderGrid()
 
 void CadViewer::renderAxis()
 {
-    if (m_axisVertexCount <= 0 || !m_gridShader)
+    if ((m_axisXyVertexCount <= 0 && m_axisZSolidVertexCount <= 0) || !m_gridShader)
     {
         return;
     }
@@ -930,7 +960,14 @@ void CadViewer::renderAxis()
     glDrawArrays(GL_LINES, 2, 2);
 
     m_gridShader->setUniformValue("uColor", QVector3D(0.30f, 0.55f, 0.95f));
-    glDrawArrays(GL_LINES, 4, 2);
+    if (m_camera.axesSwapped())
+    {
+        glDrawArrays(GL_LINES, m_axisZDashedOffset, m_axisZDashedVertexCount);
+    }
+    else
+    {
+        glDrawArrays(GL_LINES, m_axisZSolidOffset, m_axisZSolidVertexCount);
+    }
 
     m_axisVao.release();
     glLineWidth(1.0f);
@@ -1066,6 +1103,7 @@ void CadViewer::orbitCameraAroundSceneCenter(float deltaAzimuth, float deltaElev
     m_camera.target = candidateTarget;
     m_camera.distance = distance;
     m_camera.orientation = alignQuaternionHemisphere(previousOrientation, candidateOrientation);
+    m_camera.updateAxesSwappedState();
 }
 
 void CadViewer::updateSceneBounds()

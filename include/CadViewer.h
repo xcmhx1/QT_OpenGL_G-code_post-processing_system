@@ -30,6 +30,7 @@ struct OrbitalCamera
     float nearPlane = -100000.0f;
     float farPlane = 100000.0f;
     QQuaternion orientation = QQuaternion(1.0f, 0.0f, 0.0f, 0.0f);
+    bool m_axesSwapped = false;
 
     static constexpr float kMinViewHeight = 0.001f;
     static constexpr float kMaxViewHeight = 1.0e7f;
@@ -50,6 +51,8 @@ struct OrbitalCamera
     void fitAll(const QVector3D& sceneMin, const QVector3D& sceneMax, float aspectRatio);
     void resetTo2DTopView();
     void enter3DFrom2D();
+    bool axesSwapped() const { return m_axesSwapped; }
+    void updateAxesSwappedState();
 };
 
 struct EntityGpuBuffer
@@ -85,8 +88,8 @@ public:
 
     void setDocument(CadDocument* document);
     void fitScene();
-    void zoomIn(float factor = 1.1f);
-    void zoomOut(float factor = 1.1f);
+    void zoomIn(float factor = 1.4f);
+    void zoomOut(float factor = 1.4f);
 
     QVector3D screenToWorld(const QPoint& screenPos, float depth = 0.0f) const;
     QPoint worldToScreen(const QVector3D& worldPos) const;
@@ -140,7 +143,11 @@ private:
 
     QOpenGLBuffer m_axisVbo{ QOpenGLBuffer::VertexBuffer };
     QOpenGLVertexArrayObject m_axisVao;
-    int m_axisVertexCount = 0;
+    int m_axisXyVertexCount = 4;
+    int m_axisZSolidOffset = 4;
+    int m_axisZSolidVertexCount = 2;
+    int m_axisZDashedOffset = 0;
+    int m_axisZDashedVertexCount = 0;
 
     QOpenGLBuffer m_orbitMarkerVbo{ QOpenGLBuffer::VertexBuffer };
     QOpenGLVertexArrayObject m_orbitMarkerVao;
