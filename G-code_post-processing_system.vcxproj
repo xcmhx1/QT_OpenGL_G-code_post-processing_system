@@ -191,7 +191,7 @@
     <ClInclude Include="include\CadLWPolylineItem.h" />
     <ClInclude Include="include\CadPointItem.h" />
     <ClInclude Include="include\CadPolylineItem.h" />
-    <ClInclude Include="include\CadDocument.h" />
+    <QtMoc Include="include\CadDocument.h" />
     <ClInclude Include="include\DxfViewer.h" />
     <ClInclude Include="include\dx_data.h" />
     <ClInclude Include="include\dx_iface.h" />

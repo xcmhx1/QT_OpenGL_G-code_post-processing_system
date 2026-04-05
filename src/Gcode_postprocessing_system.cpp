@@ -1,4 +1,4 @@
-#include "pch.h"
+﻿#include "pch.h"
 
 #include "Gcode_postprocessing_system.h"
 
@@ -38,7 +38,7 @@ Gcode_postprocessing_system::Gcode_postprocessing_system(QWidget* parent)
             ui->openGLWidget->setDocument(&m_document);
             statusBar()->showMessage(QStringLiteral("已导入: %1").arg(QFileInfo(filePath).fileName()), 5000);
 
-            if (m_document.m_entities.isEmpty())
+            if (m_document.m_entities.empty())
             {
                 QMessageBox::warning(this, QStringLiteral("导入结果"), QStringLiteral("文件已读取，但未生成可显示的 CAD 图元。"));
             }

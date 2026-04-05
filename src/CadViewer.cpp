@@ -1036,9 +1036,9 @@ void CadViewer::rebuildAllBuffers()
         return;
     }
 
-    for (CadItem* entity : m_scene->m_entities)
+    for (auto& entity : m_scene->m_entities)
     {
-        uploadEntity(entity);
+        uploadEntity(entity.get());
     }
 
     m_buffersDirty = false;
@@ -1146,9 +1146,9 @@ void CadViewer::renderEntities()
     m_entityShader->setUniformValue("uMvp", m_camera.viewProjectionMatrix(aspectRatio()));
     m_entityShader->setUniformValue("uRoundPoint", 0);
 
-    for (CadItem* entity : m_scene->m_entities)
+    for (auto& entity : m_scene->m_entities)
     {
-        const EntityId id = toEntityId(entity);
+        const EntityId id = toEntityId(entity.get());
         const auto it = m_entityBuffers.find(id);
 
         if (it == m_entityBuffers.end())
@@ -1283,7 +1283,7 @@ void CadViewer::updateSceneBounds()
 {
     m_hasSceneBounds = false;
 
-    if (m_scene == nullptr || m_scene->m_entities.isEmpty())
+    if (m_scene == nullptr || m_scene->m_entities.empty())
     {
         return;
     }
@@ -1302,7 +1302,7 @@ void CadViewer::updateSceneBounds()
         -std::numeric_limits<float>::max()
     );
 
-    for (CadItem* entity : m_scene->m_entities)
+    for (auto& entity : m_scene->m_entities)
     {
         for (const QVector3D& vertex : entity->m_geometry.vertices)
         {
@@ -1354,7 +1354,7 @@ EntityId CadViewer::pickEntity(const QPoint& screenPos) const
     EntityId bestId = 0;
     float bestDistanceSquared = maxDistanceSquared;
 
-    for (CadItem* entity : m_scene->m_entities)
+    for (auto& entity : m_scene->m_entities)
     {
         const auto& vertices = entity->m_geometry.vertices;
 
@@ -1384,7 +1384,7 @@ EntityId CadViewer::pickEntity(const QPoint& screenPos) const
         if (entityDistanceSquared <= bestDistanceSquared)
         {
             bestDistanceSquared = entityDistanceSquared;
-            bestId = toEntityId(entity);
+            bestId = toEntityId(entity.get());
         }
     }
 

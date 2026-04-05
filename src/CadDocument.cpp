@@ -14,6 +14,42 @@
 
 #include <QDebug>
 
+std::unique_ptr<CadItem> createCadItem(DRW_Entity* entity)
+{
+    if (!entity)
+    {
+        return nullptr;
+    }
+
+    switch (entity->eType)
+    {
+    case DRW::ETYPE::LINE:
+        return std::make_unique<CadLineItem>(entity);
+
+    case DRW::ETYPE::CIRCLE:
+        return std::make_unique<CadCircleItem>(entity);
+
+    case DRW::ETYPE::ARC:
+        return std::make_unique<CadArcItem>(entity);
+
+    case DRW::ETYPE::ELLIPSE:
+        return std::make_unique<CadEllipseItem>(entity);
+
+    case DRW::ETYPE::LWPOLYLINE:
+        return std::make_unique<CadLWPolylineItem>(entity);
+
+    case DRW::ETYPE::POINT:
+        return std::make_unique<CadPointItem>(entity);
+
+    case DRW::ETYPE::POLYLINE:
+        return std::make_unique<CadPolylineItem>(entity);
+
+    default:
+        return nullptr;
+    }
+}
+
+
 CadDocument::CadDocument(QObject* parent)
     : QObject(parent)
 {
@@ -48,7 +84,6 @@ void CadDocument::eportDxfDocument(const QString& filePath)
 
 void CadDocument::clearAll()
 {
-    qDeleteAll(m_entities);
     m_entities.clear();
     m_data = std::make_unique<dx_data>();
 }
@@ -62,32 +97,11 @@ void CadDocument::init()
             continue;
         }
 
-        if (CadItem* item = createCadItem(entity))
+        if (std::unique_ptr<CadItem> item = createCadItem(entity))
         {
-            m_entities.append(item);
+            m_entities.push_back(std::move(item));
         }
     }
 }
 
-CadItem* CadDocument::createCadItem(DRW_Entity* entity)
-{
-    switch (entity->eType)
-    {
-    case DRW::ETYPE::LINE:
-        return new CadLineItem(entity);
-    case DRW::ETYPE::CIRCLE:
-        return new CadCircleItem(entity);
-    case DRW::ETYPE::ARC:
-        return new CadArcItem(entity);
-    case DRW::ETYPE::ELLIPSE:
-        return new CadEllipseItem(entity);
-    case DRW::ETYPE::LWPOLYLINE:
-        return new CadLWPolylineItem(entity);
-    case DRW::ETYPE::POINT:
-        return new CadPointItem(entity);
-    case DRW::ETYPE::POLYLINE:
-        return new CadPolylineItem(entity);
-    default:
-        return nullptr;
-    }
-}
+
