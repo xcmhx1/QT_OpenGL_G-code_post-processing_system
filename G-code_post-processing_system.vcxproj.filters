@@ -17,10 +17,6 @@
       <UniqueIdentifier>{99349809-55BA-4B9D-BF79-8FDBB0286EB3}</UniqueIdentifier>
       <Extensions>ui</Extensions>
     </Filter>
-    <Filter Include="Translation Files">
-      <UniqueIdentifier>{639EADAA-A684-42E4-A9AD-28FC9BCB8F7C}</UniqueIdentifier>
-      <Extensions>ts</Extensions>
-    </Filter>
     <Filter Include="Documentation">
       <UniqueIdentifier>{CF02A27D-5D25-4A31-A6D6-F2F9958351D5}</UniqueIdentifier>
     </Filter>
@@ -84,29 +80,23 @@
     <Filter Include="Header Files\Model\DX IO">
       <UniqueIdentifier>{755A190A-BE56-4C19-B8B1-40F95E2DF634}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Source Files\Model\ThirdParty\libdxfrw\intern">
-      <UniqueIdentifier>{8EDF2A07-E23A-47EF-A749-3AA6A100CF02}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="Header Files\Model\ThirdParty\libdxfrw\intern">
-      <UniqueIdentifier>{ECAC2D78-5E98-4C03-9672-AF77A482D815}</UniqueIdentifier>
-    </Filter>
     <Filter Include="Source Files\Item">
       <UniqueIdentifier>{FC314D80-5E66-4C0C-9824-3E9E17E107CB}</UniqueIdentifier>
     </Filter>
     <Filter Include="Header Files\Item">
       <UniqueIdentifier>{DD8B08FA-F121-4D40-9724-143CF8C0057C}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Header Files\Model\drw">
-      <UniqueIdentifier>{c54ebad9-c3bd-404a-98cc-134662e6b093}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="Header Files\Model\drw\libdxf">
+    <Filter Include="Header Files\Model\libdxfrw">
       <UniqueIdentifier>{6d26780b-ba68-461b-8583-e7a716ae8024}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Source Files\Model\drw">
-      <UniqueIdentifier>{da7cd8e9-1ea2-4a6c-b5c5-092813205a48}</UniqueIdentifier>
+    <Filter Include="Header Files\Model\libdxfrw\intern">
+      <UniqueIdentifier>{7bebb6db-b023-4f00-b12a-c5de980c69e5}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Source Files\Model\drw\libdxfrw">
+    <Filter Include="Source Files\Model\libdxfrw">
       <UniqueIdentifier>{0cd5bc2a-0a61-44ff-a50f-48f4db43daa6}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Model\libdxfrw\intern">
+      <UniqueIdentifier>{e049507f-f23f-404c-b551-1eb28022ff2c}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
@@ -239,45 +229,6 @@
     <ClCompile Include="src\CadBitmapVectorizer.cpp">
       <Filter>Source Files\Model</Filter>
     </ClCompile>
-    <ClCompile Include="src\libdxfrw\intern\drw_dbg.cpp">
-      <Filter>Source Files\Model\ThirdParty\libdxfrw\intern</Filter>
-    </ClCompile>
-    <ClCompile Include="src\libdxfrw\intern\drw_textcodec.cpp">
-      <Filter>Source Files\Model\ThirdParty\libdxfrw\intern</Filter>
-    </ClCompile>
-    <ClCompile Include="src\libdxfrw\intern\dwgbuffer.cpp">
-      <Filter>Source Files\Model\ThirdParty\libdxfrw\intern</Filter>
-    </ClCompile>
-    <ClCompile Include="src\libdxfrw\intern\dwgreader.cpp">
-      <Filter>Source Files\Model\ThirdParty\libdxfrw\intern</Filter>
-    </ClCompile>
-    <ClCompile Include="src\libdxfrw\intern\dwgreader15.cpp">
-      <Filter>Source Files\Model\ThirdParty\libdxfrw\intern</Filter>
-    </ClCompile>
-    <ClCompile Include="src\libdxfrw\intern\dwgreader18.cpp">
-      <Filter>Source Files\Model\ThirdParty\libdxfrw\intern</Filter>
-    </ClCompile>
-    <ClCompile Include="src\libdxfrw\intern\dwgreader21.cpp">
-      <Filter>Source Files\Model\ThirdParty\libdxfrw\intern</Filter>
-    </ClCompile>
-    <ClCompile Include="src\libdxfrw\intern\dwgreader24.cpp">
-      <Filter>Source Files\Model\ThirdParty\libdxfrw\intern</Filter>
-    </ClCompile>
-    <ClCompile Include="src\libdxfrw\intern\dwgreader27.cpp">
-      <Filter>Source Files\Model\ThirdParty\libdxfrw\intern</Filter>
-    </ClCompile>
-    <ClCompile Include="src\libdxfrw\intern\dwgutil.cpp">
-      <Filter>Source Files\Model\ThirdParty\libdxfrw\intern</Filter>
-    </ClCompile>
-    <ClCompile Include="src\libdxfrw\intern\dxfreader.cpp">
-      <Filter>Source Files\Model\ThirdParty\libdxfrw\intern</Filter>
-    </ClCompile>
-    <ClCompile Include="src\libdxfrw\intern\dxfwriter.cpp">
-      <Filter>Source Files\Model\ThirdParty\libdxfrw\intern</Filter>
-    </ClCompile>
-    <ClCompile Include="src\libdxfrw\intern\rscodec.cpp">
-      <Filter>Source Files\Model\ThirdParty\libdxfrw\intern</Filter>
-    </ClCompile>
     <ClCompile Include="include\CadItem.cpp">
       <Filter>Source Files\Item</Filter>
     </ClCompile>
@@ -302,26 +253,65 @@
     <ClCompile Include="src\CadPolylineItem.cpp">
       <Filter>Source Files\Item</Filter>
     </ClCompile>
-    <ClCompile Include="src\libdxfrw\drw_objects.cpp">
-      <Filter>Source Files\Model\drw</Filter>
-    </ClCompile>
-    <ClCompile Include="src\libdxfrw\drw_base.cpp">
-      <Filter>Source Files\Model\drw</Filter>
-    </ClCompile>
-    <ClCompile Include="src\libdxfrw\drw_classes.cpp">
-      <Filter>Source Files\Model\drw</Filter>
-    </ClCompile>
-    <ClCompile Include="src\libdxfrw\drw_entities.cpp">
-      <Filter>Source Files\Model\drw</Filter>
-    </ClCompile>
-    <ClCompile Include="src\libdxfrw\drw_header.cpp">
-      <Filter>Source Files\Model\drw</Filter>
-    </ClCompile>
     <ClCompile Include="src\libdxfrw\libdwgr.cpp">
-      <Filter>Source Files\Model\drw\libdxfrw</Filter>
+      <Filter>Source Files\Model\libdxfrw</Filter>
     </ClCompile>
     <ClCompile Include="src\libdxfrw\libdxfrw.cpp">
-      <Filter>Source Files\Model\drw\libdxfrw</Filter>
+      <Filter>Source Files\Model\libdxfrw</Filter>
+    </ClCompile>
+    <ClCompile Include="src\libdxfrw\drw_base.cpp">
+      <Filter>Source Files\Model\libdxfrw</Filter>
+    </ClCompile>
+    <ClCompile Include="src\libdxfrw\drw_classes.cpp">
+      <Filter>Source Files\Model\libdxfrw</Filter>
+    </ClCompile>
+    <ClCompile Include="src\libdxfrw\drw_entities.cpp">
+      <Filter>Source Files\Model\libdxfrw</Filter>
+    </ClCompile>
+    <ClCompile Include="src\libdxfrw\drw_header.cpp">
+      <Filter>Source Files\Model\libdxfrw</Filter>
+    </ClCompile>
+    <ClCompile Include="src\libdxfrw\drw_objects.cpp">
+      <Filter>Source Files\Model\libdxfrw</Filter>
+    </ClCompile>
+    <ClCompile Include="src\libdxfrw\intern\drw_dbg.cpp">
+      <Filter>Source Files\Model\libdxfrw\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="src\libdxfrw\intern\drw_textcodec.cpp">
+      <Filter>Source Files\Model\libdxfrw\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="src\libdxfrw\intern\dwgbuffer.cpp">
+      <Filter>Source Files\Model\libdxfrw\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="src\libdxfrw\intern\dwgreader.cpp">
+      <Filter>Source Files\Model\libdxfrw\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="src\libdxfrw\intern\dwgreader15.cpp">
+      <Filter>Source Files\Model\libdxfrw\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="src\libdxfrw\intern\dwgreader18.cpp">
+      <Filter>Source Files\Model\libdxfrw\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="src\libdxfrw\intern\dwgreader21.cpp">
+      <Filter>Source Files\Model\libdxfrw\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="src\libdxfrw\intern\dwgreader24.cpp">
+      <Filter>Source Files\Model\libdxfrw\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="src\libdxfrw\intern\dwgreader27.cpp">
+      <Filter>Source Files\Model\libdxfrw\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="src\libdxfrw\intern\dwgutil.cpp">
+      <Filter>Source Files\Model\libdxfrw\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="src\libdxfrw\intern\dxfreader.cpp">
+      <Filter>Source Files\Model\libdxfrw\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="src\libdxfrw\intern\dxfwriter.cpp">
+      <Filter>Source Files\Model\libdxfrw\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="src\libdxfrw\intern\rscodec.cpp">
+      <Filter>Source Files\Model\libdxfrw\intern</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -421,66 +411,6 @@
     <ClInclude Include="include\CadBitmapVectorizer.h">
       <Filter>Header Files\Model</Filter>
     </ClInclude>
-    <ClInclude Include="include\libdxfrw\intern\drw_cptable932.h">
-      <Filter>Header Files\Model\ThirdParty\libdxfrw\intern</Filter>
-    </ClInclude>
-    <ClInclude Include="include\libdxfrw\intern\drw_cptable936.h">
-      <Filter>Header Files\Model\ThirdParty\libdxfrw\intern</Filter>
-    </ClInclude>
-    <ClInclude Include="include\libdxfrw\intern\drw_cptable949.h">
-      <Filter>Header Files\Model\ThirdParty\libdxfrw\intern</Filter>
-    </ClInclude>
-    <ClInclude Include="include\libdxfrw\intern\drw_cptable950.h">
-      <Filter>Header Files\Model\ThirdParty\libdxfrw\intern</Filter>
-    </ClInclude>
-    <ClInclude Include="include\libdxfrw\intern\drw_cptables.h">
-      <Filter>Header Files\Model\ThirdParty\libdxfrw\intern</Filter>
-    </ClInclude>
-    <ClInclude Include="include\libdxfrw\intern\drw_dbg.h">
-      <Filter>Header Files\Model\ThirdParty\libdxfrw\intern</Filter>
-    </ClInclude>
-    <ClInclude Include="include\libdxfrw\intern\drw_reserve.h">
-      <Filter>Header Files\Model\ThirdParty\libdxfrw\intern</Filter>
-    </ClInclude>
-    <ClInclude Include="include\libdxfrw\intern\drw_textcodec.h">
-      <Filter>Header Files\Model\ThirdParty\libdxfrw\intern</Filter>
-    </ClInclude>
-    <ClInclude Include="include\libdxfrw\intern\dwgbuffer.h">
-      <Filter>Header Files\Model\ThirdParty\libdxfrw\intern</Filter>
-    </ClInclude>
-    <ClInclude Include="include\libdxfrw\intern\dwgreader.h">
-      <Filter>Header Files\Model\ThirdParty\libdxfrw\intern</Filter>
-    </ClInclude>
-    <ClInclude Include="include\libdxfrw\intern\dwgreader15.h">
-      <Filter>Header Files\Model\ThirdParty\libdxfrw\intern</Filter>
-    </ClInclude>
-    <ClInclude Include="include\libdxfrw\intern\dwgreader18.h">
-      <Filter>Header Files\Model\ThirdParty\libdxfrw\intern</Filter>
-    </ClInclude>
-    <ClInclude Include="include\libdxfrw\intern\dwgreader21.h">
-      <Filter>Header Files\Model\ThirdParty\libdxfrw\intern</Filter>
-    </ClInclude>
-    <ClInclude Include="include\libdxfrw\intern\dwgreader24.h">
-      <Filter>Header Files\Model\ThirdParty\libdxfrw\intern</Filter>
-    </ClInclude>
-    <ClInclude Include="include\libdxfrw\intern\dwgreader27.h">
-      <Filter>Header Files\Model\ThirdParty\libdxfrw\intern</Filter>
-    </ClInclude>
-    <ClInclude Include="include\libdxfrw\intern\dwgreader32.h">
-      <Filter>Header Files\Model\ThirdParty\libdxfrw\intern</Filter>
-    </ClInclude>
-    <ClInclude Include="include\libdxfrw\intern\dwgutil.h">
-      <Filter>Header Files\Model\ThirdParty\libdxfrw\intern</Filter>
-    </ClInclude>
-    <ClInclude Include="include\libdxfrw\intern\dxfreader.h">
-      <Filter>Header Files\Model\ThirdParty\libdxfrw\intern</Filter>
-    </ClInclude>
-    <ClInclude Include="include\libdxfrw\intern\dxfwriter.h">
-      <Filter>Header Files\Model\ThirdParty\libdxfrw\intern</Filter>
-    </ClInclude>
-    <ClInclude Include="include\libdxfrw\intern\rscodec.h">
-      <Filter>Header Files\Model\ThirdParty\libdxfrw\intern</Filter>
-    </ClInclude>
     <ClInclude Include="include\CadArcItem.h">
       <Filter>Header Files\Item</Filter>
     </ClInclude>
@@ -502,32 +432,92 @@
     <ClInclude Include="include\CadPolylineItem.h">
       <Filter>Header Files\Item</Filter>
     </ClInclude>
-    <ClInclude Include="include\libdxfrw\drw_base.h">
-      <Filter>Header Files\Model\drw</Filter>
-    </ClInclude>
-    <ClInclude Include="include\libdxfrw\drw_classes.h">
-      <Filter>Header Files\Model\drw</Filter>
-    </ClInclude>
-    <ClInclude Include="include\libdxfrw\drw_entities.h">
-      <Filter>Header Files\Model\drw</Filter>
-    </ClInclude>
-    <ClInclude Include="include\libdxfrw\drw_header.h">
-      <Filter>Header Files\Model\drw</Filter>
-    </ClInclude>
-    <ClInclude Include="include\libdxfrw\drw_interface.h">
-      <Filter>Header Files\Model\drw</Filter>
-    </ClInclude>
-    <ClInclude Include="include\libdxfrw\drw_objects.h">
-      <Filter>Header Files\Model\drw</Filter>
-    </ClInclude>
     <ClInclude Include="include\libdxfrw\libdwgr.h">
-      <Filter>Header Files\Model\drw\libdxf</Filter>
+      <Filter>Header Files\Model\libdxfrw</Filter>
     </ClInclude>
     <ClInclude Include="include\libdxfrw\libdxfrw.h">
-      <Filter>Header Files\Model\drw\libdxf</Filter>
+      <Filter>Header Files\Model\libdxfrw</Filter>
     </ClInclude>
     <ClInclude Include="G-code_p.863B5449\x64\Debug\qt\uic\ui_Gcode_postprocessing_system.h">
       <Filter>Header Files\View</Filter>
+    </ClInclude>
+    <ClInclude Include="include\libdxfrw\drw_objects.h">
+      <Filter>Header Files\Model\libdxfrw</Filter>
+    </ClInclude>
+    <ClInclude Include="include\libdxfrw\drw_base.h">
+      <Filter>Header Files\Model\libdxfrw</Filter>
+    </ClInclude>
+    <ClInclude Include="include\libdxfrw\drw_classes.h">
+      <Filter>Header Files\Model\libdxfrw</Filter>
+    </ClInclude>
+    <ClInclude Include="include\libdxfrw\drw_entities.h">
+      <Filter>Header Files\Model\libdxfrw</Filter>
+    </ClInclude>
+    <ClInclude Include="include\libdxfrw\drw_header.h">
+      <Filter>Header Files\Model\libdxfrw</Filter>
+    </ClInclude>
+    <ClInclude Include="include\libdxfrw\drw_interface.h">
+      <Filter>Header Files\Model\libdxfrw</Filter>
+    </ClInclude>
+    <ClInclude Include="include\libdxfrw\intern\rscodec.h">
+      <Filter>Header Files\Model\libdxfrw\intern</Filter>
+    </ClInclude>
+    <ClInclude Include="include\libdxfrw\intern\drw_cptable932.h">
+      <Filter>Header Files\Model\libdxfrw\intern</Filter>
+    </ClInclude>
+    <ClInclude Include="include\libdxfrw\intern\drw_cptable936.h">
+      <Filter>Header Files\Model\libdxfrw\intern</Filter>
+    </ClInclude>
+    <ClInclude Include="include\libdxfrw\intern\drw_cptable949.h">
+      <Filter>Header Files\Model\libdxfrw\intern</Filter>
+    </ClInclude>
+    <ClInclude Include="include\libdxfrw\intern\drw_cptable950.h">
+      <Filter>Header Files\Model\libdxfrw\intern</Filter>
+    </ClInclude>
+    <ClInclude Include="include\libdxfrw\intern\drw_cptables.h">
+      <Filter>Header Files\Model\libdxfrw\intern</Filter>
+    </ClInclude>
+    <ClInclude Include="include\libdxfrw\intern\drw_dbg.h">
+      <Filter>Header Files\Model\libdxfrw\intern</Filter>
+    </ClInclude>
+    <ClInclude Include="include\libdxfrw\intern\drw_reserve.h">
+      <Filter>Header Files\Model\libdxfrw\intern</Filter>
+    </ClInclude>
+    <ClInclude Include="include\libdxfrw\intern\drw_textcodec.h">
+      <Filter>Header Files\Model\libdxfrw\intern</Filter>
+    </ClInclude>
+    <ClInclude Include="include\libdxfrw\intern\dwgbuffer.h">
+      <Filter>Header Files\Model\libdxfrw\intern</Filter>
+    </ClInclude>
+    <ClInclude Include="include\libdxfrw\intern\dwgreader.h">
+      <Filter>Header Files\Model\libdxfrw\intern</Filter>
+    </ClInclude>
+    <ClInclude Include="include\libdxfrw\intern\dwgreader15.h">
+      <Filter>Header Files\Model\libdxfrw\intern</Filter>
+    </ClInclude>
+    <ClInclude Include="include\libdxfrw\intern\dwgreader18.h">
+      <Filter>Header Files\Model\libdxfrw\intern</Filter>
+    </ClInclude>
+    <ClInclude Include="include\libdxfrw\intern\dwgreader21.h">
+      <Filter>Header Files\Model\libdxfrw\intern</Filter>
+    </ClInclude>
+    <ClInclude Include="include\libdxfrw\intern\dwgreader24.h">
+      <Filter>Header Files\Model\libdxfrw\intern</Filter>
+    </ClInclude>
+    <ClInclude Include="include\libdxfrw\intern\dwgreader27.h">
+      <Filter>Header Files\Model\libdxfrw\intern</Filter>
+    </ClInclude>
+    <ClInclude Include="include\libdxfrw\intern\dwgreader32.h">
+      <Filter>Header Files\Model\libdxfrw\intern</Filter>
+    </ClInclude>
+    <ClInclude Include="include\libdxfrw\intern\dwgutil.h">
+      <Filter>Header Files\Model\libdxfrw\intern</Filter>
+    </ClInclude>
+    <ClInclude Include="include\libdxfrw\intern\dxfreader.h">
+      <Filter>Header Files\Model\libdxfrw\intern</Filter>
+    </ClInclude>
+    <ClInclude Include="include\libdxfrw\intern\dxfwriter.h">
+      <Filter>Header Files\Model\libdxfrw\intern</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

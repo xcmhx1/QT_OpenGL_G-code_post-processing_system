@@ -16,7 +16,7 @@
   <widget class="QWidget" name="centralWidget">
    <layout class="QVBoxLayout" name="verticalLayout">
     <item>
-     <widget class="DxfViewer" name="openGLWidget"/>
+     <widget class="CadViewer" name="openGLWidget"/>
     </item>
    </layout>
   </widget>
@@ -91,9 +91,9 @@
  <layoutdefault spacing="6" margin="11"/>
  <customwidgets>
   <customwidget>
-   <class>DxfViewer</class>
+   <class>CadViewer</class>
    <extends>QOpenGLWidget</extends>
-   <header>DxfViewer.h</header>
+   <header>CadViewer.h</header>
   </customwidget>
  </customwidgets>
  <resources>
