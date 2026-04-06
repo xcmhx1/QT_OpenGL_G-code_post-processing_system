@@ -220,6 +220,10 @@
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
     </ClCompile>
+    <ClCompile Include="src\GProfile.cpp">
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+    </ClCompile>
     <ClCompile Include="src\dx_iface.cpp" />
     <ClCompile Include="src\Gcode_postprocessing_system.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
@@ -289,6 +293,7 @@
     <QtMoc Include="include\CadDocument.h" />
     <ClInclude Include="include\CadController.h" />
     <ClInclude Include="include\DrawStateMachine.h" />
+    <ClInclude Include="include\GProfile.h" />
     <ClInclude Include="include\dx_data.h" />
     <ClInclude Include="include\dx_iface.h" />
     <ClInclude Include="include\pch.h" />
