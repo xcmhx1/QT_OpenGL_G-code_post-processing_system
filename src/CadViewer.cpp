@@ -26,8 +26,15 @@ namespace
     constexpr float kPi = 3.14159265358979323846f;
     constexpr float kDegToRad = kPi / 180.0f;
 
-    // 屏幕空间拾取阈值：鼠标点到实体投影的最大允许距离（像素）。
-    constexpr float kPickThresholdPixels = 10.0f;
+    // 屏幕空间拾取框半尺寸（像素）。
+    // 该值同时用于屏幕空间拾取判定和十字线中心方框绘制，确保视觉与交互一致。
+    constexpr float kPickBoxHalfSizePixels = 10.0f;
+
+    // 十字线与拾取框颜色。
+    const QVector3D kCrosshairColor(0.38f, 0.88f, 1.0f);
+
+    // 十字线固定半长（世界坐标）。
+    constexpr float kCrosshairHalfLengthWorld = 100000.0f;
 
     // 判断向量是否退化为零向量的阈值。
     constexpr float kBasisEpsilon = 1.0e-8f;
@@ -761,6 +768,7 @@ CadViewer::CadViewer(QWidget* parent)
     setMouseTracking(true);
     setAcceptDrops(true);
     setFocusPolicy(Qt::StrongFocus);
+    setCursor(Qt::BlankCursor);
 
     m_controller.setViewer(this);
 }
@@ -1112,6 +1120,9 @@ void CadViewer::paintGL()
 // - 左键：执行拾取
 void CadViewer::mousePressEvent(QMouseEvent* event)
 {
+    m_cursorScreenPos = event->pos();
+    m_showCrosshairOverlay = rect().contains(event->pos());
+
     if (!m_controller.handleMousePress(event))
     {
         QOpenGLWidget::mousePressEvent(event);
@@ -1119,11 +1130,7 @@ void CadViewer::mousePressEvent(QMouseEvent* event)
 
     updateHoveredWorldPosition(event->pos());
     refreshCommandPrompt();
-
-    if (m_controller.drawState().hasActiveCommand())
-    {
-        update();
-    }
+    update();
 }
 
 // 鼠标移动：
@@ -1131,22 +1138,31 @@ void CadViewer::mousePressEvent(QMouseEvent* event)
 // - 旋转模式：围绕场景中心轨道旋转
 void CadViewer::mouseMoveEvent(QMouseEvent* event)
 {
+    m_cursorScreenPos = event->pos();
+    m_showCrosshairOverlay = rect().contains(event->pos());
+
     if (!m_controller.handleMouseMove(event))
     {
         QOpenGLWidget::mouseMoveEvent(event);
     }
 
     updateHoveredWorldPosition(event->pos());
+    update();
+}
 
-    if (m_controller.drawState().hasActiveCommand())
-    {
-        update();
-    }
+void CadViewer::leaveEvent(QEvent* event)
+{
+    m_showCrosshairOverlay = false;
+    update();
+    QOpenGLWidget::leaveEvent(event);
 }
 
 // 鼠标释放中键后退出当前交互模式。
 void CadViewer::mouseReleaseEvent(QMouseEvent* event)
 {
+    m_cursorScreenPos = event->pos();
+    m_showCrosshairOverlay = rect().contains(event->pos());
+
     if (!m_controller.handleMouseRelease(event))
     {
         QOpenGLWidget::mouseReleaseEvent(event);
@@ -1154,6 +1170,7 @@ void CadViewer::mouseReleaseEvent(QMouseEvent* event)
 
     updateHoveredWorldPosition(event->pos());
     refreshCommandPrompt();
+    update();
 } 
 
 // 滚轮缩放：
@@ -1659,41 +1676,56 @@ void CadViewer::renderTransientPrimitives()
         return;
     }
 
-    const std::vector<TransientPrimitive> primitives = buildTransientPrimitives();
+    const std::vector<TransientPrimitive> commandPrimitives = buildTransientPrimitives();
+    std::vector<TransientPrimitive> crosshairPrimitives;
+    appendCrosshairPrimitives(crosshairPrimitives);
 
-    if (primitives.empty())
+    if (commandPrimitives.empty() && crosshairPrimitives.empty())
     {
         return;
     }
 
     m_entityShader->bind();
     m_entityShader->setUniformValue("uMvp", m_camera.viewProjectionMatrix(aspectRatio()));
-
-    glDisable(GL_DEPTH_TEST);
-    glLineWidth(2.0f);
-
     m_transientVao.bind();
 
-    for (const TransientPrimitive& primitive : primitives)
+    auto drawPrimitives = [this](const std::vector<TransientPrimitive>& primitives)
     {
-        if (primitive.vertices.isEmpty())
+        for (const TransientPrimitive& primitive : primitives)
         {
-            continue;
+            if (primitive.vertices.isEmpty())
+            {
+                continue;
+            }
+
+            m_transientVbo.bind();
+            m_transientVbo.allocate
+            (
+                primitive.vertices.constData(),
+                primitive.vertices.size() * static_cast<int>(sizeof(QVector3D))
+            );
+
+            m_entityShader->setUniformValue("uColor", primitive.color);
+            m_entityShader->setUniformValue("uPointSize", primitive.pointSize);
+            m_entityShader->setUniformValue("uRoundPoint", primitive.roundPoint ? 1 : 0);
+
+            glDrawArrays(primitive.primitiveType, 0, primitive.vertices.size());
+            m_transientVbo.release();
         }
+    };
 
-        m_transientVbo.bind();
-        m_transientVbo.allocate
-        (
-            primitive.vertices.constData(),
-            primitive.vertices.size() * static_cast<int>(sizeof(QVector3D))
-        );
+    if (!commandPrimitives.empty())
+    {
+        glDisable(GL_DEPTH_TEST);
+        glLineWidth(2.0f);
+        drawPrimitives(commandPrimitives);
+    }
 
-        m_entityShader->setUniformValue("uColor", primitive.color);
-        m_entityShader->setUniformValue("uPointSize", primitive.pointSize);
-        m_entityShader->setUniformValue("uRoundPoint", primitive.roundPoint ? 1 : 0);
-
-        glDrawArrays(primitive.primitiveType, 0, primitive.vertices.size());
-        m_transientVbo.release();
+    if (!crosshairPrimitives.empty())
+    {
+        glEnable(GL_DEPTH_TEST);
+        glLineWidth(1.0f);
+        drawPrimitives(crosshairPrimitives);
     }
 
     m_transientVao.release();
@@ -1858,6 +1890,70 @@ void CadViewer::updateHoveredWorldPosition(const QPoint& screenPos)
     emit hoveredWorldPositionChanged(screenToGroundPlane(screenPos));
 }
 
+QVector3D CadViewer::screenToWorkPlane(const QPoint& screenPos, float planeZ) const
+{
+    const QVector3D nearPoint = screenToWorld(screenPos, -1.0f);
+    const QVector3D farPoint = screenToWorld(screenPos, 1.0f);
+    const QVector3D rayDirection = farPoint - nearPoint;
+
+    if (!qFuzzyIsNull(rayDirection.z()))
+    {
+        const float t = (planeZ - nearPoint.z()) / rayDirection.z();
+        return nearPoint + rayDirection * t;
+    }
+
+    return QVector3D(nearPoint.x(), nearPoint.y(), planeZ);
+}
+
+void CadViewer::appendCrosshairPrimitives(std::vector<TransientPrimitive>& primitives) const
+{
+    if (!m_showCrosshairOverlay || width() <= 0 || height() <= 0 || m_interactionMode == ViewInteractionMode::Orbiting)
+    {
+        return;
+    }
+
+    const QPoint cursorPoint
+    (
+        std::clamp(m_cursorScreenPos.x(), 0, std::max(0, width() - 1)),
+        std::clamp(m_cursorScreenPos.y(), 0, std::max(0, height() - 1))
+    );
+    const QVector3D worldCenter = screenToWorkPlane(cursorPoint, m_crosshairPlaneZ);
+    const float boxHalfSizeWorld = kPickBoxHalfSizePixels * pixelToWorldScale();
+
+    TransientPrimitive horizontalLine;
+    horizontalLine.primitiveType = GL_LINES;
+    horizontalLine.color = kCrosshairColor;
+    horizontalLine.vertices =
+    {
+        worldCenter + QVector3D(-kCrosshairHalfLengthWorld, 0.0f, 0.0f),
+        worldCenter + QVector3D(kCrosshairHalfLengthWorld, 0.0f, 0.0f)
+    };
+    primitives.push_back(std::move(horizontalLine));
+
+    TransientPrimitive verticalLine;
+    verticalLine.primitiveType = GL_LINES;
+    verticalLine.color = kCrosshairColor;
+    verticalLine.vertices =
+    {
+        worldCenter + QVector3D(0.0f, -kCrosshairHalfLengthWorld, 0.0f),
+        worldCenter + QVector3D(0.0f, kCrosshairHalfLengthWorld, 0.0f)
+    };
+    primitives.push_back(std::move(verticalLine));
+
+    TransientPrimitive pickBox;
+    pickBox.primitiveType = GL_LINE_STRIP;
+    pickBox.color = kCrosshairColor;
+    pickBox.vertices =
+    {
+        worldCenter + QVector3D(-boxHalfSizeWorld, -boxHalfSizeWorld, 0.0f),
+        worldCenter + QVector3D(boxHalfSizeWorld, -boxHalfSizeWorld, 0.0f),
+        worldCenter + QVector3D(boxHalfSizeWorld, boxHalfSizeWorld, 0.0f),
+        worldCenter + QVector3D(-boxHalfSizeWorld, boxHalfSizeWorld, 0.0f),
+        worldCenter + QVector3D(-boxHalfSizeWorld, -boxHalfSizeWorld, 0.0f)
+    };
+    primitives.push_back(std::move(pickBox));
+}
+
 // 屏幕空间拾取：
 // - 点实体：测鼠标点到投影点距离
 // - 线实体：测鼠标点到各投影线段距离
@@ -1871,7 +1967,7 @@ EntityId CadViewer::pickEntity(const QPoint& screenPos) const
 
     const QMatrix4x4 viewProjection = m_camera.viewProjectionMatrix(aspectRatio());
     const QPointF clickPoint(screenPos);
-    const float maxDistanceSquared = kPickThresholdPixels * kPickThresholdPixels;
+    const float maxDistanceSquared = kPickBoxHalfSizePixels * kPickBoxHalfSizePixels;
 
     EntityId bestId = 0;
     float bestDistanceSquared = maxDistanceSquared;

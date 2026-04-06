@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <memory>
 #include <unordered_map>
@@ -236,6 +236,8 @@ protected:
     // 鼠标移动事件。
     void mouseMoveEvent(QMouseEvent* event) override;
 
+    void leaveEvent(QEvent* event) override;
+
     // 鼠标释放事件。
     void mouseReleaseEvent(QMouseEvent* event) override;
 
@@ -290,6 +292,8 @@ private:
     void updateSceneBounds();
     void handleDocumentSceneChanged();
     void updateHoveredWorldPosition(const QPoint& screenPos);
+    QVector3D screenToWorkPlane(const QPoint& screenPos, float planeZ) const;
+    void appendCrosshairPrimitives(std::vector<TransientPrimitive>& primitives) const;
 
     // 围绕场景中心进行轨道旋转。
     void orbitCameraAroundSceneCenter(float deltaAzimuth, float deltaElevation);
@@ -370,6 +374,9 @@ private:
     ViewInteractionMode m_interactionMode = ViewInteractionMode::Idle;
     bool m_ignoreNextOrbitDelta = false;
     EntityId m_selectedEntityId = 0;
+    QPoint m_cursorScreenPos;
+    bool m_showCrosshairOverlay = false;
+    float m_crosshairPlaneZ = 0.0f;
     QMetaObject::Connection m_sceneChangedConnection;
 
     // 控制器负责接收 Viewer 输入并维护绘图状态。
