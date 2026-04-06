@@ -230,6 +230,9 @@
     <ClCompile Include="src\GProfile.cpp">
       <Filter>Source Files\Document</Filter>
     </ClCompile>
+    <ClCompile Include="src\GGenerator.cpp">
+      <Filter>Source Files\Document</Filter>
+    </ClCompile>
     <ClCompile Include="src\dx_iface.cpp">
       <Filter>Source Files\Model\DX IO</Filter>
     </ClCompile>
@@ -404,6 +407,9 @@
       <Filter>Header Files\Editing</Filter>
     </ClInclude>
     <ClInclude Include="include\GProfile.h">
+      <Filter>Header Files\Document</Filter>
+    </ClInclude>
+    <ClInclude Include="include\GGenerator.h">
       <Filter>Header Files\Document</Filter>
     </ClInclude>
     <ClInclude Include="include\dx_data.h">
