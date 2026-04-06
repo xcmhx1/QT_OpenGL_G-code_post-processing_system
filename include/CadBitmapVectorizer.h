@@ -66,10 +66,18 @@ struct CadBitmapImportOptions
     int cannyHighThreshold = 150;
     int morphologyKernelSize = 3;
     double scale = 1.0;
+    double insertOffsetX = 0.0;
+    double insertOffsetY = 0.0;
     double approxEpsilon = 2.5;
     double minContourArea = 24.0;
+    double minLineLength = 4.0;
+    double lineFitTolerance = 1.6;
+    double arcFitTolerance = 1.4;
+    double minArcAngleDegrees = 18.0;
     int maxEntityCount = 5000;
+    QString layerName = QStringLiteral("BITMAP_IMPORT");
     QColor entityColor = QColor(255, 255, 255);
+    bool autoFitScene = true;
 };
 
 struct CadBitmapPreviewData
@@ -87,6 +95,7 @@ struct CadBitmapImportResult
     int importedEntityCount = 0;
     int pointCount = 0;
     int lineCount = 0;
+    int arcCount = 0;
     int circleCount = 0;
     int ellipseCount = 0;
     int polylineCount = 0;

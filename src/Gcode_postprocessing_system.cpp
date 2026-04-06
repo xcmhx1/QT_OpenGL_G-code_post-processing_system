@@ -153,24 +153,31 @@ bool Gcode_postprocessing_system::importBitmapFile(const QString& filePath)
         return false;
     }
 
+    const CadBitmapImportOptions importOptions = dialog.options();
     CadBitmapImportResult importResult;
     QString errorMessage;
 
-    if (!CadBitmapVectorizer::vectorize(dialog.sourceImage(), dialog.options(), importResult, &errorMessage))
+    if (!CadBitmapVectorizer::vectorize(dialog.sourceImage(), importOptions, importResult, &errorMessage))
     {
         QMessageBox::warning(this, QStringLiteral("位图导入失败"), errorMessage);
         return false;
     }
 
-    const bool replaceExisting = dialog.options().importMode == CadBitmapImportMode::ReplaceDocument;
+    const bool replaceExisting = importOptions.importMode == CadBitmapImportMode::ReplaceDocument;
     m_editer.clearHistory();
 
     const int appendedCount = m_document.appendEntities(std::move(importResult.entities), replaceExisting);
-    ui->openGLWidget->setDocument(&m_document);
+
+    if (importOptions.autoFitScene)
+    {
+        ui->openGLWidget->fitScene();
+    }
+
     ui->openGLWidget->appendCommandMessage
     (
-        QStringLiteral("位图导入完成: %1，%2")
+        QStringLiteral("位图导入完成: %1，图层 %2，%3")
             .arg(QFileInfo(filePath).fileName())
+            .arg(importOptions.layerName)
             .arg(importResult.summaryText)
     );
     ui->openGLWidget->refreshCommandPrompt();

@@ -5,15 +5,17 @@
 #include "CadBitmapImportDialog.h"
 
 #include <QCheckBox>
+#include <QColorDialog>
+#include <QColor>
 #include <QDialogButtonBox>
 #include <QFileInfo>
 #include <QFormLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QLineEdit>
 #include <QPushButton>
 #include <QResizeEvent>
-#include <QScrollArea>
 #include <QSpinBox>
 #include <QSplitter>
 #include <QVBoxLayout>
@@ -114,15 +116,13 @@ void CadBitmapImportDialog::buildUi()
     QWidget* settingsPanel = new QWidget(splitter);
     QVBoxLayout* settingsPanelLayout = new QVBoxLayout(settingsPanel);
     settingsPanelLayout->setContentsMargins(0, 0, 0, 0);
+    settingsPanelLayout->setSpacing(10);
 
-    QScrollArea* scrollArea = new QScrollArea(settingsPanel);
-    scrollArea->setWidgetResizable(true);
-    settingsPanelLayout->addWidget(scrollArea);
-
-    QWidget* settingsContainer = new QWidget(scrollArea);
+    QWidget* settingsContainer = new QWidget(settingsPanel);
     QVBoxLayout* settingsLayout = new QVBoxLayout(settingsContainer);
     settingsLayout->setContentsMargins(0, 0, 0, 0);
     settingsLayout->setSpacing(10);
+    settingsPanelLayout->addWidget(settingsContainer);
 
     QGroupBox* importGroup = new QGroupBox(QStringLiteral("导入方式"), settingsContainer);
     QFormLayout* importLayout = new QFormLayout(importGroup);
@@ -130,7 +130,33 @@ void CadBitmapImportDialog::buildUi()
     m_importModeCombo->addItem(QStringLiteral("替换当前文档"), static_cast<int>(CadBitmapImportMode::ReplaceDocument));
     m_importModeCombo->addItem(QStringLiteral("追加到当前文档"), static_cast<int>(CadBitmapImportMode::AppendToDocument));
     importLayout->addRow(QStringLiteral("写入策略"), m_importModeCombo);
+
+    m_autoFitSceneCheckBox = new QCheckBox(QStringLiteral("导入完成后自动适配视图"), importGroup);
+    m_autoFitSceneCheckBox->setChecked(true);
+    importLayout->addRow(QStringLiteral("视图"), m_autoFitSceneCheckBox);
     settingsLayout->addWidget(importGroup);
+
+    QGroupBox* placementGroup = new QGroupBox(QStringLiteral("放置参数"), settingsContainer);
+    QFormLayout* placementLayout = new QFormLayout(placementGroup);
+
+    m_insertXSpinBox = new QDoubleSpinBox(placementGroup);
+    m_insertXSpinBox->setRange(-1000000.0, 1000000.0);
+    m_insertXSpinBox->setDecimals(3);
+    m_insertXSpinBox->setSingleStep(1.0);
+    placementLayout->addRow(QStringLiteral("插入点 X"), m_insertXSpinBox);
+
+    m_insertYSpinBox = new QDoubleSpinBox(placementGroup);
+    m_insertYSpinBox->setRange(-1000000.0, 1000000.0);
+    m_insertYSpinBox->setDecimals(3);
+    m_insertYSpinBox->setSingleStep(1.0);
+    placementLayout->addRow(QStringLiteral("插入点 Y"), m_insertYSpinBox);
+
+    m_layerLineEdit = new QLineEdit(QStringLiteral("BITMAP_IMPORT"), placementGroup);
+    placementLayout->addRow(QStringLiteral("目标图层"), m_layerLineEdit);
+
+    m_colorButton = new QPushButton(QStringLiteral("选择颜色"), placementGroup);
+    placementLayout->addRow(QStringLiteral("图元颜色"), m_colorButton);
+    settingsLayout->addWidget(placementGroup);
 
     QGroupBox* preprocessGroup = new QGroupBox(QStringLiteral("预处理"), settingsContainer);
     QFormLayout* preprocessLayout = new QFormLayout(preprocessGroup);
@@ -232,6 +258,34 @@ void CadBitmapImportDialog::buildUi()
     m_minContourAreaSpinBox->setValue(24.0);
     fittingLayout->addRow(QStringLiteral("最小面积"), m_minContourAreaSpinBox);
 
+    m_minLineLengthSpinBox = new QDoubleSpinBox(fittingGroup);
+    m_minLineLengthSpinBox->setRange(0.0, 10000.0);
+    m_minLineLengthSpinBox->setDecimals(2);
+    m_minLineLengthSpinBox->setSingleStep(0.5);
+    m_minLineLengthSpinBox->setValue(4.0);
+    fittingLayout->addRow(QStringLiteral("最小线长"), m_minLineLengthSpinBox);
+
+    m_lineFitToleranceSpinBox = new QDoubleSpinBox(fittingGroup);
+    m_lineFitToleranceSpinBox->setRange(0.1, 100.0);
+    m_lineFitToleranceSpinBox->setDecimals(2);
+    m_lineFitToleranceSpinBox->setSingleStep(0.1);
+    m_lineFitToleranceSpinBox->setValue(1.6);
+    fittingLayout->addRow(QStringLiteral("线段容差"), m_lineFitToleranceSpinBox);
+
+    m_arcFitToleranceSpinBox = new QDoubleSpinBox(fittingGroup);
+    m_arcFitToleranceSpinBox->setRange(0.1, 100.0);
+    m_arcFitToleranceSpinBox->setDecimals(2);
+    m_arcFitToleranceSpinBox->setSingleStep(0.1);
+    m_arcFitToleranceSpinBox->setValue(1.4);
+    fittingLayout->addRow(QStringLiteral("圆弧容差"), m_arcFitToleranceSpinBox);
+
+    m_minArcAngleSpinBox = new QDoubleSpinBox(fittingGroup);
+    m_minArcAngleSpinBox->setRange(1.0, 180.0);
+    m_minArcAngleSpinBox->setDecimals(1);
+    m_minArcAngleSpinBox->setSingleStep(1.0);
+    m_minArcAngleSpinBox->setValue(18.0);
+    fittingLayout->addRow(QStringLiteral("最小圆弧角"), m_minArcAngleSpinBox);
+
     m_maxEntityCountSpinBox = new QSpinBox(fittingGroup);
     m_maxEntityCountSpinBox->setRange(1, 200000);
     m_maxEntityCountSpinBox->setValue(5000);
@@ -239,8 +293,6 @@ void CadBitmapImportDialog::buildUi()
     settingsLayout->addWidget(fittingGroup);
 
     settingsLayout->addStretch(1);
-
-    scrollArea->setWidget(settingsContainer);
 
     splitter->addWidget(previewPanel);
     splitter->addWidget(settingsPanel);
@@ -253,6 +305,8 @@ void CadBitmapImportDialog::buildUi()
     connect(m_buttonBox, &QDialogButtonBox::accepted, this, &QDialog::accept);
     connect(m_buttonBox, &QDialogButtonBox::rejected, this, &QDialog::reject);
     rootLayout->addWidget(m_buttonBox);
+
+    updateColorButton();
 }
 
 void CadBitmapImportDialog::connectSignals()
@@ -277,9 +331,36 @@ void CadBitmapImportDialog::connectSignals()
     connect(m_cannyHighSpinBox, qOverload<int>(&QSpinBox::valueChanged), this, refreshLambda);
     connect(m_morphologyKernelSpinBox, qOverload<int>(&QSpinBox::valueChanged), this, refreshLambda);
     connect(m_scaleSpinBox, qOverload<double>(&QDoubleSpinBox::valueChanged), this, refreshLambda);
+    connect(m_insertXSpinBox, qOverload<double>(&QDoubleSpinBox::valueChanged), this, refreshLambda);
+    connect(m_insertYSpinBox, qOverload<double>(&QDoubleSpinBox::valueChanged), this, refreshLambda);
     connect(m_approxEpsilonSpinBox, qOverload<double>(&QDoubleSpinBox::valueChanged), this, refreshLambda);
     connect(m_minContourAreaSpinBox, qOverload<double>(&QDoubleSpinBox::valueChanged), this, refreshLambda);
+    connect(m_minLineLengthSpinBox, qOverload<double>(&QDoubleSpinBox::valueChanged), this, refreshLambda);
+    connect(m_lineFitToleranceSpinBox, qOverload<double>(&QDoubleSpinBox::valueChanged), this, refreshLambda);
+    connect(m_arcFitToleranceSpinBox, qOverload<double>(&QDoubleSpinBox::valueChanged), this, refreshLambda);
+    connect(m_minArcAngleSpinBox, qOverload<double>(&QDoubleSpinBox::valueChanged), this, refreshLambda);
     connect(m_maxEntityCountSpinBox, qOverload<int>(&QSpinBox::valueChanged), this, refreshLambda);
+    connect(m_autoFitSceneCheckBox, &QCheckBox::checkStateChanged, this, refreshLambda);
+    connect(m_layerLineEdit, &QLineEdit::textChanged, this, refreshLambda);
+    connect
+    (
+        m_colorButton,
+        &QPushButton::clicked,
+        this,
+        [this]()
+        {
+            const QColor selectedColor = QColorDialog::getColor(m_selectedColor, this, QStringLiteral("选择导入图元颜色"));
+
+            if (!selectedColor.isValid())
+            {
+                return;
+            }
+
+            m_selectedColor = selectedColor;
+            updateColorButton();
+            refreshPreview();
+        }
+    );
 }
 
 void CadBitmapImportDialog::refreshPreview()
@@ -327,6 +408,25 @@ void CadBitmapImportDialog::updatePreviewLabel(QLabel* label, const QImage& imag
     label->setPixmap(pixmap);
 }
 
+void CadBitmapImportDialog::updateColorButton()
+{
+    if (m_colorButton == nullptr)
+    {
+        return;
+    }
+
+    m_colorButton->setText(m_selectedColor.name(QColor::HexRgb).toUpper());
+    m_colorButton->setStyleSheet
+    (
+        QStringLiteral
+        (
+            "QPushButton { background-color: %1; color: %2; border: 1px solid rgb(92, 98, 108); padding: 4px 8px; }"
+        )
+        .arg(m_selectedColor.name(QColor::HexRgb))
+        .arg(m_selectedColor.lightness() >= 128 ? QStringLiteral("#111111") : QStringLiteral("#F4F6F8"))
+    );
+}
+
 CadBitmapImportOptions CadBitmapImportDialog::collectOptions() const
 {
     CadBitmapImportOptions importOptions;
@@ -346,8 +446,17 @@ CadBitmapImportOptions CadBitmapImportDialog::collectOptions() const
     importOptions.cannyHighThreshold = m_cannyHighSpinBox->value();
     importOptions.morphologyKernelSize = m_morphologyKernelSpinBox->value();
     importOptions.scale = m_scaleSpinBox->value();
+    importOptions.insertOffsetX = m_insertXSpinBox->value();
+    importOptions.insertOffsetY = m_insertYSpinBox->value();
     importOptions.approxEpsilon = m_approxEpsilonSpinBox->value();
     importOptions.minContourArea = m_minContourAreaSpinBox->value();
+    importOptions.minLineLength = m_minLineLengthSpinBox->value();
+    importOptions.lineFitTolerance = m_lineFitToleranceSpinBox->value();
+    importOptions.arcFitTolerance = m_arcFitToleranceSpinBox->value();
+    importOptions.minArcAngleDegrees = m_minArcAngleSpinBox->value();
     importOptions.maxEntityCount = m_maxEntityCountSpinBox->value();
+    importOptions.layerName = m_layerLineEdit->text().trimmed().isEmpty() ? QStringLiteral("BITMAP_IMPORT") : m_layerLineEdit->text().trimmed();
+    importOptions.entityColor = m_selectedColor;
+    importOptions.autoFitScene = m_autoFitSceneCheckBox->isChecked();
     return importOptions;
 }

@@ -15,6 +15,8 @@ class QComboBox;
 class QDialogButtonBox;
 class QDoubleSpinBox;
 class QLabel;
+class QLineEdit;
+class QPushButton;
 class QSpinBox;
 
 class CadBitmapImportDialog : public QDialog
@@ -35,6 +37,7 @@ private:
     void connectSignals();
     void refreshPreview();
     void updatePreviewLabel(QLabel* label, const QImage& image, const QString& fallbackText);
+    void updateColorButton();
     CadBitmapImportOptions collectOptions() const;
 
 private:
@@ -51,8 +54,11 @@ private:
     QComboBox* m_morphologyCombo = nullptr;
     QComboBox* m_contourModeCombo = nullptr;
     QComboBox* m_fitStrategyCombo = nullptr;
+    QLineEdit* m_layerLineEdit = nullptr;
+    QPushButton* m_colorButton = nullptr;
     QCheckBox* m_invertCheckBox = nullptr;
     QCheckBox* m_blurCheckBox = nullptr;
+    QCheckBox* m_autoFitSceneCheckBox = nullptr;
     QSpinBox* m_blurKernelSpinBox = nullptr;
     QSpinBox* m_thresholdSpinBox = nullptr;
     QSpinBox* m_adaptiveBlockSizeSpinBox = nullptr;
@@ -61,8 +67,15 @@ private:
     QSpinBox* m_cannyHighSpinBox = nullptr;
     QSpinBox* m_morphologyKernelSpinBox = nullptr;
     QDoubleSpinBox* m_scaleSpinBox = nullptr;
+    QDoubleSpinBox* m_insertXSpinBox = nullptr;
+    QDoubleSpinBox* m_insertYSpinBox = nullptr;
     QDoubleSpinBox* m_approxEpsilonSpinBox = nullptr;
     QDoubleSpinBox* m_minContourAreaSpinBox = nullptr;
+    QDoubleSpinBox* m_minLineLengthSpinBox = nullptr;
+    QDoubleSpinBox* m_lineFitToleranceSpinBox = nullptr;
+    QDoubleSpinBox* m_arcFitToleranceSpinBox = nullptr;
+    QDoubleSpinBox* m_minArcAngleSpinBox = nullptr;
     QSpinBox* m_maxEntityCountSpinBox = nullptr;
     QDialogButtonBox* m_buttonBox = nullptr;
+    QColor m_selectedColor = QColor(255, 255, 255);
 };
