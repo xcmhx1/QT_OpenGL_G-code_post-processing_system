@@ -7,6 +7,7 @@
 CadPointItem::CadPointItem(DRW_Entity* entity, QObject* parent)
     : CadItem(entity, parent)
 {
+    // 绑定原生点实体，后续所有几何数据都直接从 basePoint 提取。
     m_data = static_cast<DRW_Point*>(m_nativeEntity);
     buildGeometryDatay();
     buildProcessDirection();
@@ -21,5 +22,6 @@ void CadPointItem::buildGeometryDatay()
         return;
     }
 
+    // 点图元没有边，只保留一个位置顶点供渲染层绘制。
     m_geometry.vertices.append(QVector3D(m_data->basePoint.x, m_data->basePoint.y, m_data->basePoint.z));
 }

@@ -9,7 +9,9 @@ class CadLWPolylineItem : public CadItem
 public:
     explicit CadLWPolylineItem(DRW_Entity* entity, QObject* parent = nullptr);
 
+    // 轻量多段线和普通多段线处理思路一致，但顶点来源是 2D 顶点列表加统一 elevation。
     void buildGeometryDatay() override;
 
+    // 指向原生轻量多段线实体，包含 2D 顶点、bulge 和 elevation。
     DRW_LWPolyline* m_data = nullptr;
 };

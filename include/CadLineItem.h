@@ -9,9 +9,9 @@ class CadLineItem : public CadItem
 public:
     explicit CadLineItem(DRW_Entity* entity, QObject* parent = nullptr);
 
-    // 生成几何体
+    // 直线只需要两个端点即可完成离散。
     void buildGeometryDatay() override;
 
-    // 直线数据指针
+    // 缓存强类型原生实体，避免重复 static_cast。
     DRW_Line* m_data = nullptr;
 };

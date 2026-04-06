@@ -9,7 +9,9 @@ class CadPointItem : public CadItem
 public:
     explicit CadPointItem(DRW_Entity* entity, QObject* parent = nullptr);
 
+    // 点图元的离散结果只包含一个顶点。
     void buildGeometryDatay() override;
 
+    // 指向原生点实体，直接读取 basePoint 作为显示位置。
     DRW_Point* m_data = nullptr;
 };

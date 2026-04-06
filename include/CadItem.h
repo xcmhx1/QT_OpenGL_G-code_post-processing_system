@@ -12,7 +12,8 @@
 // 几何数据
 struct GeometryData
 {
-    // 三维顶点
+    // 按渲染顺序存放离散后的三维顶点。
+    // 对线段类图元通常是关键点，对圆弧/椭圆/多段线则是采样后的折线点列。
     QVector<QVector3D> vertices;      
 };
 
@@ -22,40 +23,43 @@ class CadItem : public QObject
     Q_OBJECT
 
 public:
+    // entity 由文档层持有，CadItem 只保存原生实体指针并围绕它构建显示数据。
     explicit CadItem(DRW_Entity* entity, QObject* parent = nullptr);
     virtual ~CadItem() = default;
 
-    // 生成几何数据
+    // 从原生 DXF 实体重建当前图元的离散几何。
+    // 每个派生类都需要把自身实体转换为适合 OpenGL 绘制的顶点序列。
     virtual void buildGeometryDatay() = 0;
 
-    // 生成加工方向（单个三维向量）,根据几何数据生成
+    // 根据离散后的几何顶点推导一个加工方向向量。
+    // 当前实现取首个有效边方向，并按 m_isReverse 决定是否翻转。
     void buildProcessDirection();
 
-    // 生成颜色(根据颜色综合解析)
+    // 综合 true color、ACI 索引色和图层色规则得到最终显示颜色。
     QColor buildColor();
 
     ///颜色解析
-    // 由AutoCad颜色索引得到颜色
+    // 按 AutoCAD ACI 索引解析颜色。
     QColor colorFromIndex();
-    // 由Color24得到颜色
+    // 解析 24 位真彩色。
     QColor colorFromTrueColor();
-    // 由图层颜色得到颜色
+    // 解析图层颜色；当前基类里仅提供兜底行为。
     QColor colorFromLayer();
 
-    // 原始数据指针
+    // 指向原始 libdxfrw 实体，几何和颜色都从这里读取。
     DRW_Entity* m_nativeEntity = nullptr;
-    // 图元类型
+    // 缓存实体类型，避免每次都回查原生对象。
     DRW::ETYPE m_type;
-    // 加工顺序
+    // 供后续排序/后处理使用的加工顺序标记。
     int m_processOrder = -1;
-    // 是否反向加工
+    // 标记当前图元是否采用反向加工方向。
     bool m_isReverse = false;
-    // 是否被选择中
+    // 记录当前图元是否处于选中状态。
     bool m_isSelected = false;
-    // 集合形状
+    // 渲染层直接消费的离散几何缓存。
     GeometryData m_geometry;
-    // 加工方向矢量
+    // 由几何推导出的标准化加工方向。
     QVector3D m_processDirection;
-    // 颜色
+    // 当前图元的最终显示颜色缓存。
     QColor m_color;
 };
