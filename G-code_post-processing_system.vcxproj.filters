@@ -143,6 +143,9 @@
     <ClCompile Include="src\Gcode_postprocessing_system.cpp">
       <Filter>Source Files\Application</Filter>
     </ClCompile>
+    <ClCompile Include="src\CadBitmapImportDialog.cpp">
+      <Filter>Source Files\Application</Filter>
+    </ClCompile>
     <ClCompile Include="src\CadViewer.cpp">
       <Filter>Source Files\View</Filter>
     </ClCompile>
@@ -220,6 +223,9 @@
     </ClCompile>
     <ClCompile Include="src\dx_iface.cpp">
       <Filter>Source Files\Model\DX IO</Filter>
+    </ClCompile>
+    <ClCompile Include="src\CadBitmapVectorizer.cpp">
+      <Filter>Source Files\Model</Filter>
     </ClCompile>
     <ClCompile Include="src\libdxfrw\drw_base.cpp">
       <Filter>Source Files\Model\ThirdParty\libdxfrw</Filter>
@@ -310,6 +316,9 @@
     <ClInclude Include="include\pch.h">
       <Filter>Header Files\Application</Filter>
     </ClInclude>
+    <ClInclude Include="include\CadBitmapImportDialog.h">
+      <Filter>Header Files\Application</Filter>
+    </ClInclude>
     <ClInclude Include="include\CadCommandLineWidget.h">
       <Filter>Header Files\View</Filter>
     </ClInclude>
@@ -393,6 +402,9 @@
     </ClInclude>
     <ClInclude Include="include\dx_iface.h">
       <Filter>Header Files\Model\DX IO</Filter>
+    </ClInclude>
+    <ClInclude Include="include\CadBitmapVectorizer.h">
+      <Filter>Header Files\Model</Filter>
     </ClInclude>
     <ClInclude Include="include\libdxfrw\drw_base.h">
       <Filter>Header Files\Model\ThirdParty\libdxfrw</Filter>

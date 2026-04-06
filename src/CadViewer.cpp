@@ -28,6 +28,16 @@ namespace
 {
     constexpr bool kEnableViewerPerfLogging = false;
     constexpr qint64 kSlowFrameThresholdMs = 16;
+
+    bool isSupportedDropFile(const QString& localFile)
+    {
+        return localFile.endsWith(QStringLiteral(".dxf"), Qt::CaseInsensitive)
+            || localFile.endsWith(QStringLiteral(".dwg"), Qt::CaseInsensitive)
+            || localFile.endsWith(QStringLiteral(".bmp"), Qt::CaseInsensitive)
+            || localFile.endsWith(QStringLiteral(".png"), Qt::CaseInsensitive)
+            || localFile.endsWith(QStringLiteral(".jpg"), Qt::CaseInsensitive)
+            || localFile.endsWith(QStringLiteral(".jpeg"), Qt::CaseInsensitive);
+    }
 }
 
 // 构造函数：
@@ -438,8 +448,7 @@ void CadViewer::dragEnterEvent(QDragEnterEvent* event)
     {
         const QString localFile = url.toLocalFile();
 
-        if (localFile.endsWith(QStringLiteral(".dxf"), Qt::CaseInsensitive)
-            || localFile.endsWith(QStringLiteral(".dwg"), Qt::CaseInsensitive))
+        if (isSupportedDropFile(localFile))
         {
             event->acceptProposedAction();
             return;
@@ -463,8 +472,7 @@ void CadViewer::dropEvent(QDropEvent* event)
     {
         const QString localFile = url.toLocalFile();
 
-        if (localFile.endsWith(QStringLiteral(".dxf"), Qt::CaseInsensitive)
-            || localFile.endsWith(QStringLiteral(".dwg"), Qt::CaseInsensitive))
+        if (isSupportedDropFile(localFile))
         {
             emit fileDropRequested(localFile);
             event->acceptProposedAction();

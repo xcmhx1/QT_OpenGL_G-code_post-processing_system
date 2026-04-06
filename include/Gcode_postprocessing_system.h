@@ -23,6 +23,8 @@ public:
 
 private:
     bool importCadFile(const QString& filePath);
+    bool importDxfFile(const QString& filePath);
+    bool importBitmapFile(const QString& filePath);
 
 private:
     Ui::Gcode_postprocessing_systemClass* ui = nullptr;

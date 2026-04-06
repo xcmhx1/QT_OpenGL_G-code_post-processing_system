@@ -59,16 +59,29 @@
     <Import Project="$(QtMsBuild)\Qt.props" />
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
+  <PropertyGroup>
+    <OpenCVRoot>D:\develop\opencv</OpenCVRoot>
+    <OpenCVIncludeDir>$(OpenCVRoot)\build\include</OpenCVIncludeDir>
+    <OpenCVLibDir>$(OpenCVRoot)\build\x64\vc16\lib</OpenCVLibDir>
+    <OpenCVBinDir>$(OpenCVRoot)\build\x64\vc16\bin</OpenCVBinDir>
+  </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'Debug|x64'">
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'Release|x64'">
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>./include;./include/libdxfrw;./include/libdxfrw/intern</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>./include;./include/libdxfrw;./include/libdxfrw/intern;$(OpenCVIncludeDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp17</LanguageStandard>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
+    <Link>
+      <AdditionalLibraryDirectories>$(OpenCVLibDir);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>opencv_world4110d.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+    <PostBuildEvent>
+      <Command>if exist "$(OpenCVBinDir)\opencv_world4110d.dll" copy /Y "$(OpenCVBinDir)\opencv_world4110d.dll" "$(OutDir)"</Command>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)' == 'Debug|x64'" Label="Configuration">
     <ClCompile>
@@ -96,7 +109,17 @@
       <GenerateDebugInformation>false</GenerateDebugInformation>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
+      <AdditionalLibraryDirectories>$(OpenCVLibDir);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>opencv_world4110.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
+    <PostBuildEvent>
+      <Command>if exist "$(OpenCVBinDir)\opencv_world4110.dll" copy /Y "$(OpenCVBinDir)\opencv_world4110.dll" "$(OutDir)"</Command>
+    </PostBuildEvent>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <AdditionalIncludeDirectories>./include;./include/libdxfrw;./include/libdxfrw/intern;$(OpenCVIncludeDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
     <QtRcc Include="Gcode_postprocessing_system.qrc" />
@@ -147,6 +170,14 @@
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
     </ClCompile>
     <ClCompile Include="src\CadCommandLineWidget.cpp">
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+    </ClCompile>
+    <ClCompile Include="src\CadBitmapImportDialog.cpp">
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+    </ClCompile>
+    <ClCompile Include="src\CadBitmapVectorizer.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
     </ClCompile>
@@ -229,6 +260,8 @@
     <ClInclude Include="include\CadCircleItem.h" />
     <ClInclude Include="include\CadCommandLineWidget.h" />
     <ClInclude Include="include\CadCrosshairBuilder.h" />
+    <ClInclude Include="include\CadBitmapImportDialog.h" />
+    <ClInclude Include="include\CadBitmapVectorizer.h" />
     <ClInclude Include="include\CadEditer.h" />
     <ClInclude Include="include\CadEntityPicker.h" />
     <ClInclude Include="include\CadEntityRenderer.h" />
@@ -255,6 +288,7 @@
     <ClInclude Include="include\CadViewerUtils.h" />
     <QtMoc Include="include\CadDocument.h" />
     <ClInclude Include="include\CadController.h" />
+    <ClInclude Include="include\DxfViewer.h" />
     <ClInclude Include="include\DrawStateMachine.h" />
     <ClInclude Include="include\dx_data.h" />
     <ClInclude Include="include\dx_iface.h" />

@@ -36,6 +36,9 @@ public:
     // 向文档中追加一个实体及其对应图元
     CadItem* appendEntity(std::unique_ptr<DRW_Entity> entity, std::unique_ptr<CadItem> item = nullptr);
 
+    // 批量追加实体，可选择直接替换当前文档内容
+    int appendEntities(std::vector<std::unique_ptr<DRW_Entity>> entities, bool replaceExisting);
+
     // 从文档中取出一个图元，并将所有权交还给调用方
     std::pair<std::unique_ptr<DRW_Entity>, std::unique_ptr<CadItem>> takeEntity(CadItem* item);
 

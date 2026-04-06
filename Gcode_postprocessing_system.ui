@@ -69,7 +69,7 @@
   <widget class="QStatusBar" name="statusBar"/>
   <action name="action_File_Import_Dxf">
    <property name="text">
-    <string>导入Dxf</string>
+    <string>导入文件</string>
    </property>
   </action>
   <action name="action_FileExport">

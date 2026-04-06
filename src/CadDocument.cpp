@@ -147,6 +147,42 @@ CadItem* CadDocument::appendEntity(std::unique_ptr<DRW_Entity> entity, std::uniq
     return rawItem;
 }
 
+int CadDocument::appendEntities(std::vector<std::unique_ptr<DRW_Entity>> entities, bool replaceExisting)
+{
+    int appendedCount = 0;
+
+    if (replaceExisting)
+    {
+        clearAll();
+    }
+
+    for (std::unique_ptr<DRW_Entity>& entity : entities)
+    {
+        if (entity == nullptr)
+        {
+            continue;
+        }
+
+        std::unique_ptr<CadItem> item = createCadItemForEntity(entity.get());
+
+        if (item == nullptr)
+        {
+            continue;
+        }
+
+        m_data->mBlock->ent.push_back(entity.release());
+        m_entities.push_back(std::move(item));
+        ++appendedCount;
+    }
+
+    if (replaceExisting || appendedCount > 0)
+    {
+        emit sceneChanged();
+    }
+
+    return appendedCount;
+}
+
 std::pair<std::unique_ptr<DRW_Entity>, std::unique_ptr<CadItem>> CadDocument::takeEntity(CadItem* item)
 {
     // 删除/撤销等操作需要同时取回“原始实体 + 内部图元”这对对象。
