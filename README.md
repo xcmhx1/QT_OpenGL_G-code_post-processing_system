@@ -1,4 +1,4 @@
-﻿# G-code Post Processing System
+# G-code Post Processing System
 
 [G/M 代码参考](./technical_file/G-M_Code.md)
 
@@ -71,15 +71,15 @@ G-code_post-processing_system/
 |   |-- CadEditer.h                         # 编辑器与命令栈接口
 |   |-- CadDocument.h                       # 文档模型
 |   |-- CadItem.h / CadItem.cpp             # 图元基类
-|   |-- CadLineItem.h / .hpp                # 直线图元
-|   |-- CadCircleItem.h / .hpp              # 圆图元
-|   |-- CadArcItem.h / .hpp                 # 圆弧图元
-|   |-- CadEllipseItem.h / .hpp             # 椭圆图元
-|   |-- CadPointItem.h / .hpp               # 点图元
-|   |-- CadPolylineItem.h / .hpp            # 多段线图元
-|   |-- CadLWPolylineItem.h / .hpp          # 轻量多段线图元
-|   |-- CadCommandLineWidget.h / .hpp       # 命令栏组件
-|   |-- CadStatusPaneWidget.h / .hpp        # 状态栏组件
+|   |-- CadLineItem.h                       # 直线图元
+|   |-- CadCircleItem.h                     # 圆图元
+|   |-- CadArcItem.h                        # 圆弧图元
+|   |-- CadEllipseItem.h                    # 椭圆图元
+|   |-- CadPointItem.h                      # 点图元
+|   |-- CadPolylineItem.h                   # 多段线图元
+|   |-- CadLWPolylineItem.h                 # 轻量多段线图元
+|   |-- CadCommandLineWidget.h              # 命令栏组件
+|   |-- CadStatusPaneWidget.h               # 状态栏组件
 |   |-- CadGraphicsCoordinator.h            # 渲染协调层
 |   |-- CadSceneCoordinator.h               # 场景协调层
 |   |-- CadSceneContext.h                   # 场景上下文
@@ -99,7 +99,6 @@ G-code_post-processing_system/
 |   |-- CadInteractionConstants.h           # 交互常量
 |   |-- dx_data.h                           # DXF 中间数据结构
 |   |-- dx_iface.h                          # libdxfrw 接入层
-|   |-- DxfDocument.hpp                     # 历史遗留兼容头
 |   |-- DxfViewer.h                         # 工程/UI 中仍引用的历史包装头
 |   `-- libdxfrw/                           # 第三方头文件
 |       `-- intern/                         # 第三方内部头文件
