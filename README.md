@@ -1,108 +1,176 @@
-# G-code Post Processing System
+﻿# G-code Post Processing System
 
-[G-M代码指导]: ./technical_file/G-M_Code.md
+[G/M 代码参考](./technical_file/G-M_Code.md)
 
-本项目是基于 Qt 6 Widgets、OpenGL 4.5 Core Profile、Visual Studio 2026 的 Windows 桌面 CAD / G-code 后处理程序。当前重点能力包括：
+本项目是一个基于 Qt 6 Widgets、OpenGL 4.5 Core Profile、Visual Studio 2026 的 Windows 桌面 CAD / G-code 后处理程序。当前代码主线已经具备 DXF / DWG 导入、二维 CAD 图元显示、基础交互、简单绘图与编辑命令，但 G 代码导出链路仍未接通，项目整体仍处于 CAD 视图与编辑基础设施持续完善阶段。
 
-- DXF / DWG 文件导入与 OpenGL 显示
-- 7 类基础 CAD 图元的离散化显示
-- 顶视图 / 轨道观察 / 平移 / 缩放 / 拾取
-- 视图内拖拽 `.dxf` / `.dwg` 文件导入
-- 底部状态栏坐标显示与命令历史栏
-- 绘图与移动过程中的 transient / 橡皮筋预览
-- 基于 MVC 思路的文档模型、控制器、视图分层
-- 基于命令模式的绘图创建、删除、移动、改色、Undo / Redo
+## 项目现状
 
-当前支持的图元类型：
+当前已实现：
 
-- 点 `Point`
-- 直线 `Line`
-- 圆 `Circle`
-- 圆弧 `Arc`
-- 椭圆 `Ellipse`
-- 多段线 `Polyline`
-- 轻量多段线 `LWPolyline`
+- 导入 `.dxf` / `.dwg` 文件
+- 使用 OpenGL 4.5 Core Profile 渲染 CAD 场景
+- 支持点、直线、圆、圆弧、椭圆、多段线、轻量多段线的内部图元构建与显示
+- 视图平移、缩放、顶视图切换、轨道观察、屏幕拾取
+- 鼠标拖拽文件到视图区域直接导入
+- 命令提示栏、命令历史栏、底部坐标状态栏
+- 点/线/圆/圆弧/椭圆/多段线/轻量多段线的交互式绘制
+- 删除、移动、改色、Undo / Redo
+- transient 预览、十字光标叠加、选中高亮
 
-当前绘图策略遵循 AutoCAD 风格的二维绘图约束：
+当前未完成或未接线：
 
-- 所有新创建图元统一落在世界坐标 `Z=0` 平面
-- 即使当前在 3D 观察角度下绘图，鼠标坐标也会先投影到 `Z=0` 平面再建模
-- 已导入文件中的原始 Z 值仍会按文件内容显示，不会被强制改写
+- `Gcode_postprocessing_system.ui` 中的“导出 G 代码”“反向加工”等菜单项目前没有业务绑定
+- `CadDocument::saveDxfDocument()` 与 `CadDocument::eportDxfDocument()` 目前为空实现
+- 仓库没有独立自动化测试工程，验证仍以手工构建和手工交互检查为主
 
-## 1. 仓库结构
+## 技术栈
+
+- C++17
+- Qt `6.9.3_msvc2022_64`
+- Qt Widgets
+- OpenGL 4.5 Core Profile
+- Visual Studio 2026 / MSBuild
+- `libdxfrw` 作为 DXF / DWG 读写底层库
+
+图形相关约束：
+
+- 视图层基于 `QOpenGLFunctions_4_5_Core`
+- 着色器与渲染路径按 OpenGL 4.5 Core Profile 设计
+- 不应回退到旧式固定管线写法
+
+## 快速开始
+
+### 环境要求
+
+- Windows x64
+- Visual Studio 2026
+- Qt `6.9.3_msvc2022_64`
+- QtMsBuild 已正确安装并可被 Visual Studio 识别
+
+### 构建命令
+
+```powershell
+msbuild .\G-code_post-processing_system.vcxproj /p:Configuration=Debug /p:Platform=x64
+msbuild .\G-code_post-processing_system.vcxproj /p:Configuration=Release /p:Platform=x64
+devenv .\G-code_post-processing_system.slnx
+```
+
+建议优先使用 `Debug|x64` 进行日常开发和交互验证。
+
+## 仓库结构
 
 ```text
 G-code_post-processing_system/
-|-- include/
-|   |-- pch.h                              # 预编译头
-|   |-- Gcode_postprocessing_system.h      # 主窗口类声明
-|   |-- DxfViewer.h                        # Viewer 包装类
-|   |-- CadViewer.h                        # OpenGL 视图层
-|   |-- CadController.h                    # 输入控制器
-|   |-- CadCommandLineWidget.h / .hpp      # 命令历史栏组件
-|   |-- CadStatusPaneWidget.h / .hpp       # 底部状态栏组件
-|   |-- CadEditer.h / .hpp                 # 编辑器与命令栈接口
-|   |-- DrawStateMachine.h                 # 绘图/编辑状态机
-|   |-- CadDocument.h                      # 文档模型
-|   |-- CadItem.h / .cpp                   # 图元基类
-|   |-- CadLineItem.h                      # 直线图元声明
-|   |-- CadCircleItem.h                    # 圆图元声明
-|   |-- CadArcItem.h                       # 圆弧图元声明
-|   |-- CadEllipseItem.h                   # 椭圆图元声明
-|   |-- CadPointItem.h                     # 点图元声明
-|   |-- CadPolylineItem.h                  # 多段线图元声明
-|   |-- CadLWPolylineItem.h                # 轻量多段线图元声明
-|   |-- dx_data.h                          # DXF 中间数据结构
-|   |-- dx_iface.h                         # libdxfrw 接入层
-|   `-- libdxfrw/                          # 第三方头文件
-|       `-- intern/                        # 第三方内部头文件
-|-- src/
-|   |-- pch.cpp                            # 预编译头实现
-|   |-- main.cpp                           # 程序入口
-|   |-- Gcode_postprocessing_system.cpp    # 主窗口实现
-|   |-- CadViewer.cpp                      # OpenGL 视图实现
-|   |-- CadController.cpp                  # 交互控制逻辑实现
-|   |-- CadCommandLineWidget.cpp           # 命令历史栏实现
-|   |-- CadStatusPaneWidget.cpp            # 底部状态栏实现
-|   |-- CadEditer.cpp                      # 编辑器、命令、绘图创建实现
-|   |-- DrawStateMachine.cpp               # 状态机默认值与辅助逻辑
-|   |-- CadDocument.cpp                    # 文档模型实现
-|   |-- CadLineItem.cpp                    # 直线离散化
-|   |-- CadCircleItem.cpp                  # 圆离散化
-|   |-- CadArcItem.cpp                     # 圆弧离散化
-|   |-- CadEllipseItem.cpp                 # 椭圆离散化
-|   |-- CadPointItem.cpp                   # 点离散化
-|   |-- CadPolylineItem.cpp                # 多段线离散化
-|   |-- CadLWPolylineItem.cpp              # 轻量多段线离散化
-|   |-- dx_iface.cpp                       # DXF 导入导出桥接
-|   `-- libdxfrw/                          # 第三方源代码
-|       `-- intern/                        # 第三方内部实现
+|-- include/                                # 公共头文件
+|   |-- pch.h                               # 预编译头
+|   |-- Gcode_postprocessing_system.h       # 主窗口类声明
+|   |-- CadViewer.h                         # OpenGL 视图主类
+|   |-- CadController.h                     # 输入控制器
+|   |-- DrawStateMachine.h                  # 绘图/编辑状态机
+|   |-- CadEditer.h                         # 编辑器与命令栈接口
+|   |-- CadDocument.h                       # 文档模型
+|   |-- CadItem.h / CadItem.cpp             # 图元基类
+|   |-- CadLineItem.h / .hpp                # 直线图元
+|   |-- CadCircleItem.h / .hpp              # 圆图元
+|   |-- CadArcItem.h / .hpp                 # 圆弧图元
+|   |-- CadEllipseItem.h / .hpp             # 椭圆图元
+|   |-- CadPointItem.h / .hpp               # 点图元
+|   |-- CadPolylineItem.h / .hpp            # 多段线图元
+|   |-- CadLWPolylineItem.h / .hpp          # 轻量多段线图元
+|   |-- CadCommandLineWidget.h / .hpp       # 命令栏组件
+|   |-- CadStatusPaneWidget.h / .hpp        # 状态栏组件
+|   |-- CadGraphicsCoordinator.h            # 渲染协调层
+|   |-- CadSceneCoordinator.h               # 场景协调层
+|   |-- CadSceneContext.h                   # 场景上下文
+|   |-- CadSceneRenderCache.h               # GPU 缓冲缓存
+|   |-- CadEntityRenderer.h                 # 实体绘制器
+|   |-- CadEntityPicker.h                   # 屏幕拾取器
+|   |-- CadOverlayRenderer.h                # overlay 绘制
+|   |-- CadReferenceRenderer.h              # 网格/坐标轴等参考图形绘制
+|   |-- CadShaderManager.h                  # shader 管理
+|   |-- CadCrosshairBuilder.h               # 十字光标预览构建
+|   |-- CadPreviewBuilder.h                 # 命令 transient 预览构建
+|   |-- CadCamera*.h                        # 相机与视图数学
+|   |-- CadViewTransform.h                  # 屏幕/世界坐标转换
+|   |-- CadViewInteractionController.h      # 视图交互控制
+|   |-- CadViewerUtils.h                    # Viewer 辅助方法
+|   |-- CadRenderTypes.h                    # 渲染数据类型
+|   |-- CadInteractionConstants.h           # 交互常量
+|   |-- dx_data.h                           # DXF 中间数据结构
+|   |-- dx_iface.h                          # libdxfrw 接入层
+|   |-- DxfDocument.hpp                     # 历史遗留兼容头
+|   |-- DxfViewer.h                         # 工程/UI 中仍引用的历史包装头
+|   `-- libdxfrw/                           # 第三方头文件
+|       `-- intern/                         # 第三方内部头文件
+|-- src/                                    # 主要源码
+|   |-- pch.cpp                             # 预编译头实现
+|   |-- main.cpp                            # 程序入口
+|   |-- Gcode_postprocessing_system.cpp     # 主窗口实现
+|   |-- CadViewer.cpp                       # 视图与 OpenGL 主流程
+|   |-- CadController.cpp                   # 输入解释与快捷键分发
+|   |-- DrawStateMachine.cpp                # 状态机默认逻辑
+|   |-- CadEditer.cpp                       # 绘图、编辑、命令栈实现
+|   |-- CadDocument.cpp                     # 文档模型实现
+|   |-- CadLineItem.cpp                     # 直线几何离散
+|   |-- CadCircleItem.cpp                   # 圆几何离散
+|   |-- CadArcItem.cpp                      # 圆弧几何离散
+|   |-- CadEllipseItem.cpp                  # 椭圆几何离散
+|   |-- CadPointItem.cpp                    # 点几何离散
+|   |-- CadPolylineItem.cpp                 # 多段线几何离散
+|   |-- CadLWPolylineItem.cpp               # 轻量多段线几何离散
+|   |-- CadCommandLineWidget.cpp            # 命令栏实现
+|   |-- CadStatusPaneWidget.cpp             # 状态栏实现
+|   |-- CadGraphicsCoordinator.cpp          # 渲染协调实现
+|   |-- CadSceneCoordinator.cpp             # 场景协调实现
+|   |-- CadSceneContext.cpp                 # 场景上下文实现
+|   |-- CadSceneRenderCache.cpp             # GPU 缓冲缓存实现
+|   |-- CadEntityRenderer.cpp               # 实体绘制实现
+|   |-- CadEntityPicker.cpp                 # 拾取实现
+|   |-- CadOverlayRenderer.cpp              # overlay 渲染实现
+|   |-- CadReferenceRenderer.cpp            # 参考图形渲染实现
+|   |-- CadShaderManager.cpp                # shader 初始化实现
+|   |-- CadCrosshairBuilder.cpp             # 十字光标构建实现
+|   |-- CadPreviewBuilder.cpp               # transient 预览实现
+|   |-- CadCamera.cpp / CadCameraMath.cpp   # 相机逻辑
+|   |-- CadCameraUtils.cpp                  # 相机辅助计算
+|   |-- CadViewTransform.cpp                # 坐标转换实现
+|   |-- CadViewInteractionController.cpp    # 视图交互实现
+|   |-- CadViewerUtils.cpp                  # Viewer 辅助实现
+|   |-- CadOpenGLState.cpp                  # OpenGL 状态控制
+|   |-- dx_iface.cpp                        # DXF / DWG 读写桥接
+|   `-- libdxfrw/                           # 第三方源代码
+|       `-- intern/                         # 第三方内部实现
 |-- technical_file/
-|   `-- G-M_Code.md                        # G/M 代码相关资料
-|-- Gcode_postprocessing_system.ui         # Qt Widgets UI
-|-- Gcode_postprocessing_system.qrc        # Qt 资源文件
-|-- G-code_post-processing_system.vcxproj  # VS/Qt 工程
-|-- G-code_post-processing_system.slnx     # 解决方案
-|-- AGENTS.md                              # 仓库协作规则
-|-- README.md                              # 当前文档
-|-- x64/                                   # 构建输出，不提交
-`-- .vs/                                   # IDE 状态，不提交
+|   `-- G-M_Code.md                         # G/M 代码资料
+|-- Gcode_postprocessing_system.ui          # Qt Widgets UI
+|-- Gcode_postprocessing_system.qrc         # Qt 资源文件
+|-- G-code_post-processing_system.vcxproj   # VS/Qt 工程
+|-- G-code_post-processing_system.slnx      # 解决方案
+|-- AGENTS.md                               # 仓库协作规则
+|-- README.md                               # 当前文档
+|-- x64/                                    # 构建输出，不提交
+`-- .vs/                                    # IDE 状态，不提交
 ```
 
-## 2. 当前总体架构
+## 总体架构
 
-项目整体按 MVC 思路组织，但结合 Qt/OpenGL 的实际落地，使用的是“主窗口 + Viewer + Controller + Editer + Document + Item + DXF Adapter”的组合结构。
+项目当前按“主窗口 + Viewer + Controller + Editer + Document + 渲染协调层 + DXF Adapter”的组合结构组织。相比早期版本，`CadViewer` 内部职责已经进一步拆分给 `CadSceneCoordinator`、`CadGraphicsCoordinator`、`CadEntityRenderer`、`CadEntityPicker` 等子模块。
 
 ```text
-用户输入 / Qt 菜单 / 键盘鼠标
+用户输入 / Qt 菜单 / 拖拽文件 / 键盘鼠标
         |
         v
-Gcode_postprocessing_system               (窗口层 / 组装层)
+Gcode_postprocessing_system                (窗口层 / 组装层)
+        |
+        +------> CadCommandLineWidget      (命令栏显示)
+        |
+        +------> CadStatusPaneWidget       (坐标状态显示)
         |
         v
-CadViewer                                 (View)
+CadViewer                                  (View)
         |
-        +------> CadController            (Controller)
+        +------> CadController             (输入解释)
         |              |
         |              +------> DrawStateMachine
         |              |
@@ -110,8 +178,17 @@ CadViewer                                 (View)
         |                              |
         |                              +------> EditCommand 栈
         |
+        +------> CadSceneCoordinator       (文档绑定 / 包围盒 / 缓冲脏标记)
+        |
+        +------> CadGraphicsCoordinator    (OpenGL / Shader / 参考图形 / Overlay)
+        |              |
+        |              +------> CadEntityRenderer
+        |              +------> CadEntityPicker
+        |              +------> CadPreviewBuilder
+        |              +------> CadCrosshairBuilder
+        |
         v
-CadDocument                               (Model)
+CadDocument                                (Model)
         |
         +------> CadItem / Cad*Item
         |
@@ -121,221 +198,144 @@ CadDocument                               (Model)
                      libdxfrw
 ```
 
-### 2.1 各层职责
+### 分层职责
 
 #### 主窗口层
 
 `Gcode_postprocessing_system`
 
-- 负责 UI 初始化
-- 负责菜单动作绑定
-- 负责把 `CadDocument`、`CadEditer`、`CadViewer` 组装在一起
-- 当前导入文件后会清空编辑历史并刷新 Viewer
+- 负责 UI 初始化与窗口装配
+- 创建命令栏、状态栏并插入中心布局
+- 绑定“导入 Dxf”菜单与拖拽导入信号
+- 持有 `CadDocument` 与 `CadEditer`
 
 #### 视图层
 
 `CadViewer`
 
-- 负责 OpenGL 上下文和着色器初始化
-- 负责网格、坐标轴、轨道中心、实体绘制
-- 负责 transient 预览层绘制
-- 负责屏幕坐标与世界坐标互转
-- 负责实体拾取和高亮
-- 负责拖拽导入入口和坐标 / 命令提示信号发出
-- 不直接改业务数据，只消费 `CadDocument`
-- 通过 `sceneChanged` 自动重建 GPU 缓冲
+- 负责 `QOpenGLWidget` 生命周期和事件入口
+- 管理相机、场景刷新、坐标转换
+- 将键鼠事件转交 `CadController`
+- 消费 `CadDocument` 数据并驱动渲染
 
-#### 控制器层
+#### 输入控制层
 
-`CadController`
+`CadController` + `DrawStateMachine`
 
-- 负责接收鼠标、键盘、滚轮事件
-- 负责视图交互命令和绘图命令分流
-- 维护 `DrawStateMachine`
-- 在左键绘图时先把鼠标位置投影到 `Z=0` 平面
-- 将创建 / 删除 / 移动 / 改色 / undo / redo 等操作转交 `CadEditer`
+- 解释鼠标、键盘、滚轮输入
+- 分流视图命令、绘图命令和编辑命令
+- 维护当前命令状态、控制点、提示文本
+- 处理多段线圆弧/直线输入切换
 
 #### 编辑器层
 
 `CadEditer`
 
-- 接收 Controller 发起的编辑命令
-- 根据 `DrawStateMachine` 的阶段信息完成图元创建
-- 提供删除、移动、改色等模型操作
-- 通过命令模式维护 undo / redo 栈
-- 当前内置命令类型包括：
-  - `AddEntityCommand`
-  - `DeleteEntityCommand`
-  - `MoveEntityCommand`
-  - `ChangeColorCommand`
-
-#### 状态机层
-
-`DrawStateMachine`
-
-- 维护当前是否在绘图
-- 维护当前图元类型和颜色
-- 维护点、线、圆、圆弧、椭圆、多段线的子状态
-- 维护移动命令的编辑子状态
-- 维护命令过程中采集的控制点 `commandPoints`
-- 维护鼠标屏幕坐标、世界坐标、按钮和修饰键
+- 根据状态机创建新实体
+- 执行删除、移动、改色
+- 维护 Undo / Redo 命令栈
+- 将模型修改统一提交给 `CadDocument`
 
 #### 文档模型层
 
 `CadDocument`
 
-- 持有 `dx_data`
+- 持有原始 `dx_data`
 - 持有场景中的 `CadItem` 容器
-- 从导入的原始 `DRW_Entity` 构建内部图元对象
-- 对外提供统一的：
-  - `appendEntity`
-  - `takeEntity`
-  - `refreshEntity`
-  - `containsEntity`
-- 通过 `sceneChanged` 通知 Viewer 重建显示
+- 把导入得到的 `DRW_Entity` 转换成内部图元
+- 通过 `sceneChanged` 驱动视图刷新
 
-#### 图元层
+#### 渲染协调层
 
-`CadItem` + `Cad*Item`
+`CadSceneCoordinator` + `CadGraphicsCoordinator`
 
-- `CadItem` 是抽象基类
-- 每个派生类负责把一个 DXF 实体离散为 `GeometryData.vertices`
-- 负责颜色解析
-- 负责加工方向向量生成
-
-当前主要派生类：
-
-- `CadPointItem`
-- `CadLineItem`
-- `CadCircleItem`
-- `CadArcItem`
-- `CadEllipseItem`
-- `CadPolylineItem`
-- `CadLWPolylineItem`
+- `CadSceneCoordinator` 负责文档绑定、边界计算、GPU 缓冲重建时机
+- `CadGraphicsCoordinator` 负责 OpenGL 状态、shader、网格、坐标轴和 overlay 渲染
+- `CadEntityRenderer` 负责实体绘制
+- `CadEntityPicker` 负责屏幕空间拾取
+- `CadPreviewBuilder` / `CadCrosshairBuilder` 负责 transient 预览
 
 #### DXF 适配层
 
 `dx_iface` + `dx_data`
 
-- `dx_iface` 负责实现 `DRW_Interface`
-- `dx_data` 负责保存导入后的头、图层、实体、块等数据
-- `CadDocument` 再把 `dx_data->mBlock->ent` 转成 `CadItem`
+- `dx_iface` 实现 `DRW_Interface`
+- `dx_data` 保存头、图层、块、实体等原始解析结果
+- `CadDocument` 再将模型空间实体转换为内部图元
 
-#### 第三方库层
+### 核心数据流
 
-`libdxfrw`
+#### 导入流程
 
-- 负责底层 DXF / DWG 读写
-- 本项目原则上只通过 `dx_iface` / `dx_data` 与其交互
-- 非必要不要直接修改 `src/libdxfrw/` 和 `include/libdxfrw/`
-
-## 3. 关键类速查
-
-### 3.1 视图和交互
-
-- `Gcode_postprocessing_system`
-  - 主窗口
-  - 导入菜单入口
-- `DxfViewer`
-  - `CadViewer` 的轻量包装，供 `.ui` 使用
-- `CadViewer`
-  - 场景显示、相机、拾取、OpenGL 缓冲
-- `CadController`
-  - 输入解释层
-- `DrawStateMachine`
-  - 绘图 / 编辑命令状态容器
-- `CadEditer`
-  - 命令执行与撤销重做层
-
-### 3.2 模型与图元
-
-- `CadDocument`
-  - 当前场景数据容器
-- `CadItem`
-  - 通用图元基类
-- `CadPointItem`
-  - 点
-- `CadLineItem`
-  - 线
-- `CadCircleItem`
-  - 圆
-- `CadArcItem`
-  - 圆弧
-- `CadEllipseItem`
-  - 椭圆
-- `CadPolylineItem`
-  - 多段线
-- `CadLWPolylineItem`
-  - 轻量多段线
-
-### 3.3 DXF 数据与适配
-
-- `dx_data`
-  - 导入后数据总表
-- `dx_ifaceBlock`
-  - 模型空间 / 块空间实体容器
-- `dx_iface`
-  - 读写桥接实现
-
-## 4. 核心数据流
-
-### 4.1 导入流程
-
-1. 用户在主窗口触发“导入 Dxf”，或直接把 `.dxf/.dwg` 拖入 `CadViewer`
-2. `Gcode_postprocessing_system` 调用 `CadDocument::readDxfDocument`
-3. `CadDocument` 内部通过 `dx_iface` 使用 `libdxfrw` 解析文件
-4. `dx_data->mBlock->ent` 收集所有原始 `DRW_Entity`
-5. `CadDocument::init` 将其转换为 `CadItem`
+1. 用户通过菜单或拖拽方式导入 `.dxf` / `.dwg`
+2. `Gcode_postprocessing_system` 调用 `CadDocument::readDxfDocument()`
+3. `CadDocument` 通过 `dx_iface` 使用 `libdxfrw` 读取文件
+4. 原始实体进入 `dx_data->mBlock->ent`
+5. `CadDocument::init()` 将支持的实体转换为 `CadItem`
 6. `CadDocument` 发出 `sceneChanged`
-7. `CadViewer` 重建缓冲并显示实体
+7. `CadViewer` 通过 `CadSceneCoordinator` / `CadGraphicsCoordinator` 重建缓冲并刷新显示
 
-### 4.2 绘图流程
+#### 绘图流程
 
-1. 用户通过键盘命令进入绘图模式
+1. 用户通过快捷键进入绘图命令
 2. `CadController` 更新 `DrawStateMachine`
-3. 鼠标点击时，Controller 将屏幕射线投影到 `Z=0` 平面
-4. `CadEditer` 根据当前子状态收集控制点
-5. 当控制点足够时，`CadEditer` 构造新的 `DRW_Entity`
-6. 新实体进入 `CadDocument`
-7. `CadDocument` 发出 `sceneChanged`
-8. `CadViewer` 自动刷新
-9. 该操作作为命令压入 undo 栈
+3. 鼠标点击位置被投影到 `Z=0` 绘图平面
+4. `CadEditer` 根据当前子状态采集控制点并构造 `DRW_Entity`
+5. 新实体进入 `CadDocument`
+6. `CadDocument` 发出 `sceneChanged`
+7. `CadViewer` 自动刷新，命令对象进入 Undo 栈
 
-### 4.3 编辑流程
+#### 编辑流程
 
-1. 用户选中图元
-2. 触发删除 / 移动 / 改色命令
-3. `CadController` 把命令转给 `CadEditer`
-4. `CadEditer` 执行命令对象
-5. `CadDocument` 更新模型并发出 `sceneChanged`
-6. `CadViewer` 重建显示
-7. 命令进入 undo 栈，redo 栈按标准事务规则清空
+1. 用户拾取实体并触发删除、移动、改色
+2. `CadController` 将命令转给 `CadEditer`
+3. `CadEditer` 执行具体命令对象
+4. `CadDocument` 更新实体并重建内部图元几何
+5. `CadDocument` 发出 `sceneChanged`
+6. `CadViewer` 重建显示，Undo / Redo 栈按事务规则更新
 
-### 4.4 transient 预览与命令提示流程
+## 使用说明
 
-1. `CadController` 在鼠标移动时持续更新 `DrawStateMachine.currentPos`
-2. `CadViewer` 根据当前状态即时构造 transient 图元
-3. transient 图元只参与渲染，不写入 `CadDocument`
-4. 命令完成或取消后，transient 图元立即消失
-5. `CadViewer` 同时发出：
-   - 当前鼠标工作平面坐标
-   - 当前命令 prompt
-   - 最新 command message
-6. `CadCommandLineWidget` 与 `CadStatusPaneWidget` 只负责显示，不参与业务决策
+### 文件导入
 
-## 5. 当前交互与快捷键
+- 菜单“文件 -> 导入Dxf”
+- 直接将 `.dxf` 或 `.dwg` 文件拖入主视图
 
-### 5.1 视图
+导入后会：
+
+- 清空当前编辑历史
+- 调用 `CadDocument::readDxfDocument()` 重新解析模型
+- 自动刷新 Viewer
+- 在命令栏和状态栏显示导入结果
+
+### 当前支持显示与编辑的图元
+
+- `Point`
+- `Line`
+- `Circle`
+- `Arc`
+- `Ellipse`
+- `Polyline`
+- `LWPolyline`
+
+说明：
+
+- `libdxfrw` 底层可读取更多实体类型
+- 但当前 `CadDocument::createCadItemForEntity()` 只会把上面 7 类实体转换为项目内部 `CadItem`
+- 其它实体即使被读入，也不会生成当前可显示/可编辑的内部图元
+
+### 视图交互
 
 - `F`：适配场景
-- `T` 或 `Home`：回顶视图
-- `+`：放大
-- `-`：缩小
+- `T` 或 `Home`：回到顶视图
+- `+` / `=`：放大
+- `-` / `_`：缩小
 - 中键拖动：平移
 - `Shift + 中键拖动`：轨道旋转
 - 左键：拾取图元
+- 滚轮：以鼠标附近为锚点缩放
 
-### 5.2 绘图
+### 绘图命令
 
 - `P`：点
 - `L`：直线
@@ -344,19 +344,16 @@ CadDocument                               (Model)
 - `E`：椭圆
 - `O`：多段线
 - `W`：轻量多段线
-- 多段线 / 轻量多段线绘制中 `A`：切换为圆弧段输入
-- 多段线 / 轻量多段线绘制中 `L`：切回直线段输入
-- `Enter` / `Space`：结束多段线
-- 多段线模式下 `C`：闭合多段线
 - `Esc`：取消当前命令
 
-多段线圆弧段当前采用“直接指定圆弧终点”的方式输入：
+多段线命令补充：
 
-- 需先有至少一段前置线段或圆弧段，系统会沿前一段终点切线自动续接
-- Viewer 会显示圆弧段的橡皮筋预览
-- 最终数据写入 `Polyline / LWPolyline` 的 `bulge` 字段，而不是拆成独立 `Arc`
+- `A`：切换为圆弧段输入
+- `L`：切回直线段输入
+- `Enter` / `Space`：结束多段线
+- `C`：闭合多段线
 
-### 5.3 编辑
+### 编辑命令
 
 - `Delete`：删除当前选中图元
 - `M`：移动当前选中图元
@@ -365,144 +362,69 @@ CadDocument                               (Model)
 - `Ctrl + Y`：重做
 - `Ctrl + Shift + Z`：重做
 
-### 5.4 UI 状态显示
+## 绘图平面约束
 
-- 底部状态栏显示当前鼠标对应的世界坐标块 `X / Y / Z`
-- 状态栏右侧预留了吸附 / 正交 / 极轴等扩展位置
-- 命令栏位于底部状态栏上方
-- 平时只显示一行最新消息
-- 点击命令栏后展开为四行高度，并显示带滚动条的历史消息
+当前绘图逻辑按二维 CAD 方式实现，所有新建图元统一落在世界坐标 `Z=0` 平面：
+
+- `CadController` 会将鼠标位置投影到绘图平面
+- `CadEditer` 在创建实体时再次将坐标压到 `Z=0`
+- 即使当前视角处于轨道观察状态，新建图元也不会写入任意 Z 深度
+
+这是一项显式设计。现阶段项目支持“二维绘制 + 三维观察”，不支持完整 3D 建模工作流。
+
+## 渲染与显示子系统
+
+围绕 `CadViewer` 的渲染子系统当前已经拆分为多个职责明确的模块：
+
+- `CadGraphicsCoordinator`：初始化 OpenGL 状态、Shader、参考图元和叠加层渲染器
+- `CadSceneCoordinator`：维护场景上下文、包围盒、GPU 缓冲重建时机
+- `CadEntityRenderer`：实体绘制
+- `CadEntityPicker`：屏幕空间拾取
+- `CadPreviewBuilder`：命令过程中的 transient 图元预览
+- `CadCrosshairBuilder`：十字光标叠加
+- `CadViewTransform` / `CadCamera*`：视图变换、相机数学和观察控制
+
+这意味着后续如果扩展显示功能，优先应在上述子模块中局部修改，而不是继续把逻辑堆回 `CadViewer.cpp`。
+
+## UI 组件
+
+### 命令栏
+
+`CadCommandLineWidget`
+
+- 默认显示最新消息或当前提示
+- 点击后展开为历史模式
+- 展开时显示 4 行高的只读历史记录
 - 点击其它区域后自动收起
 
-## 6. 绘图平面与 Z 轴策略
+### 状态栏
 
-当前绘图功能按二维 CAD 方式处理，规则如下：
+`CadStatusPaneWidget`
 
-- 所有新建图元都写入世界坐标 `Z=0`
-- 点、线、圆、圆弧、椭圆、多段线、轻量多段线全部遵循这一规则
-- 控制器会先求“屏幕射线与 `Z=0` 平面”的交点
-- 编辑器中的创建函数还会再次把坐标压到 `Z=0`，作为兜底
-- 这样即使当前相机处于 3D 视图，新绘图元也不会“高高在上”
+- 实时显示当前鼠标对应的世界坐标
+- 为“吸附 / 正交 / 极轴”等后续能力预留显示位置
 
-这部分是显式设计，不是偶然副作用。后续如果要支持真正的 3D 绘图，应单独引入：
+## 手工验证建议
 
-- 用户工作平面 `UCS/WCS`
-- 明确的绘图基准高程
-- 3D 捕捉或构造平面
+当前仓库没有自动化测试工程。每次修改后建议至少完成以下检查：
 
-在未做这些扩展前，不应把当前二维绘图逻辑改回任意 Z 深度。
+1. 成功构建 `Debug|x64`
+2. 导入一个包含点、线、圆、圆弧、椭圆、多段线的 DXF 文件
+3. 验证平移、缩放、顶视图、轨道观察、拾取是否正常
+4. 验证绘图命令、移动、删除、改色、Undo / Redo 是否正常
+5. 验证命令栏提示、状态栏坐标、拖拽导入是否正常
 
-## 7. 主要源码文件说明
+## 已知注意事项
 
-### 7.1 顶层窗口
+- 当前内部仅完整支持 7 类 CAD 图元的可视化与编辑
+- 新建图元强制落在 `Z=0` 平面
+- 第三方 `libdxfrw` 目录不应轻易修改
+- 工程里仍存在部分历史遗留命名与文件引用，修改构建配置前需要先核对 `.ui`、`.vcxproj` 与当前源码是否一致
 
-- `src/Gcode_postprocessing_system.cpp`
-  - 创建文档、编辑器、Viewer
-  - 绑定导入动作
-
-### 7.2 视图层
-
-- `src/CadViewer.cpp`
-  - OpenGL 初始化
-  - 网格、坐标轴、实体绘制
-  - transient 橡皮筋预览
-  - 屏幕拾取
-  - 视图拖拽导入
-  - 坐标与命令提示信号
-  - 文档变化后缓冲重建
-
-### 7.3 控制器层
-
-- `src/CadController.cpp`
-  - 键盘鼠标解释
-  - 绘图平面投影
-  - 命令分发到 `CadEditer`
-  - 命令 prompt 与 message 触发
-
-### 7.3A UI 组件层
-
-- `src/CadCommandLineWidget.cpp`
-  - 命令栏折叠 / 展开
-  - 最新消息与历史消息显示
-- `src/CadStatusPaneWidget.cpp`
-  - 当前鼠标工作平面坐标显示
-  - 后续状态开关位预留
-
-### 7.4 编辑器层
-
-- `src/CadEditer.cpp`
-  - 图元创建
-  - 删除 / 移动 / 改色
-  - Undo / Redo
-  - 命令对象定义
-
-### 7.5 文档层
-
-- `src/CadDocument.cpp`
-  - DXF 导入
-  - `DRW_Entity` 到 `CadItem` 的转换
-  - 文档实体增删改
-
-### 7.6 图元层
-
-- `src/CadLineItem.cpp`
-- `src/CadCircleItem.cpp`
-- `src/CadArcItem.cpp`
-- `src/CadEllipseItem.cpp`
-- `src/CadPointItem.cpp`
-- `src/CadPolylineItem.cpp`
-- `src/CadLWPolylineItem.cpp`
-
-这些文件只应关注各图元的几何离散逻辑，不应直接承担窗口交互和业务命令职责。
-
-## 8. 构建方式
-
-### 8.1 Visual Studio
-
-```powershell
-devenv .\G-code_post-processing_system.slnx
-```
-
-### 8.2 MSBuild
-
-```powershell
-msbuild .\G-code_post-processing_system.vcxproj /p:Configuration=Debug /p:Platform=x64
-msbuild .\G-code_post-processing_system.vcxproj /p:Configuration=Release /p:Platform=x64
-```
-
-### 8.3 环境要求
-
-- Visual Studio 2026
-- Qt `6.9.3_msvc2022_64`
-- QtMsBuild 可用
-- Windows x64
-
-## 9. 当前已知约束
-
-- 当前绘图只支持 `Z=0` 平面，不支持真正的 3D 建模
-- 当前没有独立自动化测试工程，主要依赖手工验证
-- `libdxfrw` 第三方头文件仍有既有编译警告，不属于本次业务层修改
-- Viewer 使用 OpenGL 4.5 Core Profile，不允许退回固定管线写法
-
-## 10. 后续扩展建议
-
-后续如果继续迭代，建议优先按下面顺序扩展：
-
-1. 增加对象捕捉、正交、极轴等状态开关并接到底部状态栏
-2. 增加命令行文本输入，形成更接近 AutoCAD 的命令窗口
-3. 增加导出 DXF / 保存修改后的文档
-4. 增加图层、线型、颜色索引等更完整的 CAD 属性编辑
-5. 增加自动化测试或最少的模型层回归测试
-6. 当且仅当有明确需求时，再引入 3D 绘图工作平面体系
-
-## 11. 协作约束摘要
+## 协作约束摘要
 
 - 默认使用中文沟通
-- 保持 MVC 分层，不要把文档编辑逻辑塞入 Viewer
-- 修改第三方目录 `src/libdxfrw/` 或 `include/libdxfrw/` 前先确认必要性
-- 文本文件统一使用 Windows `CRLF`
-- OpenGL 部分保持 4.5 Core Profile
-
-## 12. 参考资料
-
-- [G-M代码指导]
+- 遵循 MVC / 分层思路，不要把文档编辑逻辑塞进 Viewer
+- 修改 `src/libdxfrw/` 或 `include/libdxfrw/` 时应明确说明原因和影响范围
+- 文本文件统一保持 Windows `CRLF`
+- OpenGL 保持 4.5 Core Profile

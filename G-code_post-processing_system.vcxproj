@@ -255,7 +255,6 @@
     <QtMoc Include="include\CadDocument.h" />
     <ClInclude Include="include\CadController.h" />
     <ClInclude Include="include\DrawStateMachine.h" />
-    <ClInclude Include="include\DxfViewer.h" />
     <ClInclude Include="include\dx_data.h" />
     <ClInclude Include="include\dx_iface.h" />
     <ClInclude Include="include\pch.h" />
