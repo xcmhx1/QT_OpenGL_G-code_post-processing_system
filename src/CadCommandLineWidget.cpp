@@ -108,7 +108,9 @@ void CadCommandLineWidget::appendMessage(const QString& message)
 
 bool CadCommandLineWidget::eventFilter(QObject* watched, QEvent* event)
 {
-    if (watched == qApp && m_isExpanded && event->type() == QEvent::MouseButtonPress)
+    Q_UNUSED(watched);
+
+    if (m_isExpanded && event->type() == QEvent::MouseButtonPress)
     {
         const QMouseEvent* mouseEvent = static_cast<const QMouseEvent*>(event);
         const QPoint globalPos = mouseEvent->globalPosition().toPoint();
@@ -151,14 +153,23 @@ void CadCommandLineWidget::setExpanded(bool expanded)
 
 void CadCommandLineWidget::refreshSummary()
 {
-    QString summaryText = m_lastMessage;
+    QString summaryText;
 
-    if (summaryText.isEmpty())
+    // 收起态优先直接显示当前命令提示，避免提示被历史消息覆盖。
+    if (!m_prompt.isEmpty())
     {
-        summaryText = m_prompt;
-    }
+        summaryText = QStringLiteral("当前提示: %1").arg(m_prompt);
 
-    if (summaryText.isEmpty())
+        if (!m_lastMessage.isEmpty())
+        {
+            summaryText.append(QStringLiteral("    最新消息: %1").arg(m_lastMessage));
+        }
+    }
+    else if (!m_lastMessage.isEmpty())
+    {
+        summaryText = QStringLiteral("最新消息: %1").arg(m_lastMessage);
+    }
+    else
     {
         summaryText = QStringLiteral("命令栏就绪");
     }
