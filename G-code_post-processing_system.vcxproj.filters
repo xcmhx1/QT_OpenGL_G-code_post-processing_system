@@ -96,11 +96,17 @@
     <Filter Include="Header Files\Item">
       <UniqueIdentifier>{DD8B08FA-F121-4D40-9724-143CF8C0057C}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Header Files\drw">
+    <Filter Include="Header Files\Model\drw">
       <UniqueIdentifier>{c54ebad9-c3bd-404a-98cc-134662e6b093}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Header Files\drw\libdxf">
+    <Filter Include="Header Files\Model\drw\libdxf">
       <UniqueIdentifier>{6d26780b-ba68-461b-8583-e7a716ae8024}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Model\drw">
+      <UniqueIdentifier>{da7cd8e9-1ea2-4a6c-b5c5-092813205a48}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Model\drw\libdxfrw">
+      <UniqueIdentifier>{0cd5bc2a-0a61-44ff-a50f-48f4db43daa6}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
@@ -290,26 +296,26 @@
     <ClCompile Include="src\CadPolylineItem.cpp">
       <Filter>Source Files\Item</Filter>
     </ClCompile>
+    <ClCompile Include="src\libdxfrw\drw_objects.cpp">
+      <Filter>Source Files\Model\drw</Filter>
+    </ClCompile>
     <ClCompile Include="src\libdxfrw\drw_base.cpp">
-      <Filter>Source Files</Filter>
+      <Filter>Source Files\Model\drw</Filter>
     </ClCompile>
     <ClCompile Include="src\libdxfrw\drw_classes.cpp">
-      <Filter>Source Files</Filter>
+      <Filter>Source Files\Model\drw</Filter>
     </ClCompile>
     <ClCompile Include="src\libdxfrw\drw_entities.cpp">
-      <Filter>Source Files</Filter>
+      <Filter>Source Files\Model\drw</Filter>
     </ClCompile>
     <ClCompile Include="src\libdxfrw\drw_header.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="src\libdxfrw\drw_objects.cpp">
-      <Filter>Source Files</Filter>
+      <Filter>Source Files\Model\drw</Filter>
     </ClCompile>
     <ClCompile Include="src\libdxfrw\libdwgr.cpp">
-      <Filter>Source Files</Filter>
+      <Filter>Source Files\Model\drw\libdxfrw</Filter>
     </ClCompile>
     <ClCompile Include="src\libdxfrw\libdxfrw.cpp">
-      <Filter>Source Files</Filter>
+      <Filter>Source Files\Model\drw\libdxfrw</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -484,35 +490,32 @@
     <ClInclude Include="include\CadPolylineItem.h">
       <Filter>Header Files\Item</Filter>
     </ClInclude>
-    <ClInclude Include="G-code_p.863B5449\x64\Debug\qt\uic\ui_Gcode_postprocessing_system.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="include\libdxfrw\drw_base.h">
-      <Filter>Header Files\drw</Filter>
+      <Filter>Header Files\Model\drw</Filter>
     </ClInclude>
     <ClInclude Include="include\libdxfrw\drw_classes.h">
-      <Filter>Header Files\drw</Filter>
+      <Filter>Header Files\Model\drw</Filter>
     </ClInclude>
     <ClInclude Include="include\libdxfrw\drw_entities.h">
-      <Filter>Header Files\drw</Filter>
+      <Filter>Header Files\Model\drw</Filter>
     </ClInclude>
     <ClInclude Include="include\libdxfrw\drw_header.h">
-      <Filter>Header Files\drw</Filter>
+      <Filter>Header Files\Model\drw</Filter>
     </ClInclude>
     <ClInclude Include="include\libdxfrw\drw_interface.h">
-      <Filter>Header Files\drw</Filter>
+      <Filter>Header Files\Model\drw</Filter>
     </ClInclude>
     <ClInclude Include="include\libdxfrw\drw_objects.h">
-      <Filter>Header Files\drw</Filter>
+      <Filter>Header Files\Model\drw</Filter>
     </ClInclude>
     <ClInclude Include="include\libdxfrw\libdwgr.h">
-      <Filter>Header Files\drw\libdxf</Filter>
+      <Filter>Header Files\Model\drw\libdxf</Filter>
     </ClInclude>
     <ClInclude Include="include\libdxfrw\libdxfrw.h">
-      <Filter>Header Files\drw\libdxf</Filter>
+      <Filter>Header Files\Model\drw\libdxf</Filter>
     </ClInclude>
-    <ClInclude Include="include\libdxfrw\main_doc.h">
-      <Filter>Header Files\drw\libdxf</Filter>
+    <ClInclude Include="G-code_p.863B5449\x64\Debug\qt\uic\ui_Gcode_postprocessing_system.h">
+      <Filter>Header Files\View</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

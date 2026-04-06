@@ -320,7 +320,6 @@
     <ClInclude Include="include\libdxfrw\intern\rscodec.h" />
     <ClInclude Include="include\libdxfrw\libdwgr.h" />
     <ClInclude Include="include\libdxfrw\libdxfrw.h" />
-    <ClInclude Include="include\libdxfrw\main_doc.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Condition="Exists('$(QtMsBuild)\qt.targets')">
