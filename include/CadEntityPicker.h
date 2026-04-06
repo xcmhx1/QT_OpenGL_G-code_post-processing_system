@@ -1,3 +1,5 @@
+// 声明 CadEntityPicker 模块，对外暴露当前组件的核心类型、接口和协作边界。
+// 实体拾取模块，负责基于屏幕空间距离规则选择当前命中的图元。
 #pragma once
 
 #include <memory>

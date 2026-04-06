@@ -1,3 +1,5 @@
+// 实现 CadCameraMath 模块，对应头文件中声明的主要行为和协作流程。
+// 相机数学模块，提供视图矩阵、投影矩阵和几何计算所需的底层公式。
 #include "pch.h"
 
 #include "CadCameraMath.h"

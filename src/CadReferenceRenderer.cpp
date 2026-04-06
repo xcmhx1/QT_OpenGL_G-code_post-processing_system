@@ -1,3 +1,5 @@
+// 实现 CadReferenceRenderer 模块，对应头文件中声明的主要行为和协作流程。
+// 参考图形渲染模块，负责网格、坐标轴和轨道中心等辅助元素绘制。
 #include "pch.h"
 
 #include "CadReferenceRenderer.h"

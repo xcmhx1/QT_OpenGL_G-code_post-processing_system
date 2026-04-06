@@ -1,3 +1,5 @@
+// 声明 CadStatusPaneWidget 模块，对外暴露当前组件的核心类型、接口和协作边界。
+// 状态栏模块，负责显示当前鼠标世界坐标和后续状态位预留区域。
 #pragma once
 
 #include <QLabel>

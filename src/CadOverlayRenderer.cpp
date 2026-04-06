@@ -1,3 +1,5 @@
+// 实现 CadOverlayRenderer 模块，对应头文件中声明的主要行为和协作流程。
+// 叠加层渲染模块，负责命令预览、十字光标等 overlay 图元的绘制。
 #include "pch.h"
 
 #include "CadOverlayRenderer.h"

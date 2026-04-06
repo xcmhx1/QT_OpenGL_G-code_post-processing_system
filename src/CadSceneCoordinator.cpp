@@ -1,3 +1,5 @@
+// 实现 CadSceneCoordinator 模块，对应头文件中声明的主要行为和协作流程。
+// 场景协调模块，负责包围盒刷新、GPU 缓冲重建和场景级查询。
 #include "pch.h"
 
 #include "CadSceneCoordinator.h"

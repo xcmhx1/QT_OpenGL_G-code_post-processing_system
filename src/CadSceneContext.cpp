@@ -1,3 +1,5 @@
+// 实现 CadSceneContext 模块，对应头文件中声明的主要行为和协作流程。
+// 场景上下文模块，负责文档绑定、场景边界和实体遍历等基础上下文能力。
 #include "pch.h"
 
 #include "CadSceneContext.h"

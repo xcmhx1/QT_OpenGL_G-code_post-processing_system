@@ -1,3 +1,5 @@
+// 实现 CadEntityPicker 模块，对应头文件中声明的主要行为和协作流程。
+// 实体拾取模块，负责基于屏幕空间距离规则选择当前命中的图元。
 #include "pch.h"
 
 #include "CadEntityPicker.h"

@@ -1,3 +1,5 @@
+// 声明 CadController 模块，对外暴露当前组件的核心类型、接口和协作边界。
+// 输入控制模块，负责解释键盘、鼠标、滚轮事件并驱动绘图/编辑命令。
 #pragma once
 
 #include <QColor>

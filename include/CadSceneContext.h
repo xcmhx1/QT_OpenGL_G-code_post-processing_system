@@ -1,3 +1,5 @@
+// 声明 CadSceneContext 模块，对外暴露当前组件的核心类型、接口和协作边界。
+// 场景上下文模块，负责文档绑定、场景边界和实体遍历等基础上下文能力。
 #pragma once
 
 #include <QMetaObject>

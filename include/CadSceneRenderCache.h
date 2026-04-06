@@ -1,3 +1,5 @@
+// 声明 CadSceneRenderCache 模块，对外暴露当前组件的核心类型、接口和协作边界。
+// 场景渲染缓存模块，负责维护实体对应的 GPU 资源与缓存数据。
 #pragma once
 
 #include <memory>

@@ -1,3 +1,5 @@
+// 实现 CadPreviewBuilder 模块，对应头文件中声明的主要行为和协作流程。
+// 预览构建模块，负责根据当前命令状态生成 transient 预览图元。
 #include "pch.h"
 
 #include "CadPreviewBuilder.h"

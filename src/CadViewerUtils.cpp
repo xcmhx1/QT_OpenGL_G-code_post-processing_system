@@ -1,3 +1,5 @@
+// 实现 CadViewerUtils 模块，对应头文件中声明的主要行为和协作流程。
+// Viewer 辅助模块，整理视图层复用的工具函数和辅助计算逻辑。
 #include "pch.h"
 
 #include "CadViewerUtils.h"

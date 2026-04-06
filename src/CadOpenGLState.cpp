@@ -1,3 +1,5 @@
+// 实现 CadOpenGLState 模块，对应头文件中声明的主要行为和协作流程。
+// OpenGL 状态模块，负责封装渲染阶段常用的状态切换和恢复逻辑。
 #include "pch.h"
 
 #include "CadOpenGLState.h"

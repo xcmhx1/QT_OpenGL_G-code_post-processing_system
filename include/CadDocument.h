@@ -1,3 +1,5 @@
+// 声明 CadDocument 模块，对外暴露当前组件的核心类型、接口和协作边界。
+// 文档模型模块，负责持有原始 DXF 数据、内部图元容器以及场景变更通知。
 #pragma once
 
 #include <memory>

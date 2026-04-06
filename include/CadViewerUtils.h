@@ -1,3 +1,5 @@
+// 声明 CadViewerUtils 模块，对外暴露当前组件的核心类型、接口和协作边界。
+// Viewer 辅助模块，整理视图层复用的工具函数和辅助计算逻辑。
 #pragma once
 
 #include <QMatrix4x4>

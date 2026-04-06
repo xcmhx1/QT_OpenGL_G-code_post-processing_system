@@ -1,3 +1,5 @@
+// 实现 CadCircleItem 模块，对应头文件中声明的主要行为和协作流程。
+// 圆图元模块，负责圆实体的离散显示数据和加工方向生成。
 #include "pch.h"
 
 #include "CadCircleItem.h"

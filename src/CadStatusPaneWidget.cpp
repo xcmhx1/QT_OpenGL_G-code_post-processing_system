@@ -1,3 +1,5 @@
+// 实现 CadStatusPaneWidget 模块，对应头文件中声明的主要行为和协作流程。
+// 状态栏模块，负责显示当前鼠标世界坐标和后续状态位预留区域。
 #include "pch.h"
 
 #include "CadStatusPaneWidget.h"

@@ -1,3 +1,5 @@
+// 声明 CadRenderTypes 模块，对外暴露当前组件的核心类型、接口和协作边界。
+// 渲染数据类型模块，定义顶点、缓存和 transient 图元等核心结构。
 #pragma once
 
 #include <QOpenGLBuffer>

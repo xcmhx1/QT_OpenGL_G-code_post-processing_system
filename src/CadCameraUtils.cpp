@@ -1,3 +1,5 @@
+// 实现 CadCameraUtils 模块，对应头文件中声明的主要行为和协作流程。
+// 相机辅助模块，整理相机相关的公共工具函数和复用计算流程。
 #include "pch.h"
 
 #include "CadCameraUtils.h"

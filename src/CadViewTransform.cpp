@@ -1,3 +1,5 @@
+// 实现 CadViewTransform 模块，对应头文件中声明的主要行为和协作流程。
+// 视图变换模块，负责屏幕坐标、世界坐标与相机参数之间的转换。
 #include "pch.h"
 
 #include "CadViewTransform.h"

@@ -1,3 +1,5 @@
+// 声明 CadViewInteractionController 模块，对外暴露当前组件的核心类型、接口和协作边界。
+// 视图交互模块，负责平移、轨道观察和顶视图切换等观察控制。
 #pragma once
 
 #include <QPoint>

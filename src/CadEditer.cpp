@@ -1,3 +1,5 @@
+// 实现 CadEditer 模块，对应头文件中声明的主要行为和协作流程。
+// 编辑器模块，负责绘图创建、实体修改以及 Undo/Redo 命令栈管理。
 #include "pch.h"
 
 #include "CadEditer.h"

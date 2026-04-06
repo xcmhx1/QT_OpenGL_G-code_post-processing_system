@@ -1,3 +1,5 @@
+// 实现 CadLineItem 模块，对应头文件中声明的主要行为和协作流程。
+// 直线图元模块，负责直线实体的几何离散、颜色解析和方向生成。
 #include "pch.h"
 
 #include "CadLineItem.h"

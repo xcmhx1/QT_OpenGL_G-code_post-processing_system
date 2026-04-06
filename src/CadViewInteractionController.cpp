@@ -1,3 +1,5 @@
+// 实现 CadViewInteractionController 模块，对应头文件中声明的主要行为和协作流程。
+// 视图交互模块，负责平移、轨道观察和顶视图切换等观察控制。
 #include "pch.h"
 
 #include "CadViewInteractionController.h"

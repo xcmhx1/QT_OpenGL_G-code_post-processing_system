@@ -1,3 +1,5 @@
+// 实现 CadArcItem 模块，对应头文件中声明的主要行为和协作流程。
+// 圆弧图元模块，封装圆弧实体的几何离散、颜色解析和方向信息。
 #include "pch.h"
 
 #include "CadArcItem.h"

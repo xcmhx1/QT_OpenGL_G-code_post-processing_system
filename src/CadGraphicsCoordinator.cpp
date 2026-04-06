@@ -1,3 +1,5 @@
+// 实现 CadGraphicsCoordinator 模块，对应头文件中声明的主要行为和协作流程。
+// 渲染协调模块，负责 OpenGL 状态、Shader 以及参考图形/Overlay 渲染器的装配。
 #include "pch.h"
 
 #include "CadGraphicsCoordinator.h"

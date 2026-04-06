@@ -1,3 +1,5 @@
+// 声明 CadSceneCoordinator 模块，对外暴露当前组件的核心类型、接口和协作边界。
+// 场景协调模块，负责包围盒刷新、GPU 缓冲重建和场景级查询。
 #pragma once
 
 #include "CadRenderTypes.h"

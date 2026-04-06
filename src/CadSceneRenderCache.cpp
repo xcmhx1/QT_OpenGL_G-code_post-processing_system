@@ -1,3 +1,5 @@
+// 实现 CadSceneRenderCache 模块，对应头文件中声明的主要行为和协作流程。
+// 场景渲染缓存模块，负责维护实体对应的 GPU 资源与缓存数据。
 #include "pch.h"
 
 #include "CadSceneRenderCache.h"

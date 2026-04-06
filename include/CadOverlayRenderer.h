@@ -1,3 +1,5 @@
+// 声明 CadOverlayRenderer 模块，对外暴露当前组件的核心类型、接口和协作边界。
+// 叠加层渲染模块，负责命令预览、十字光标等 overlay 图元的绘制。
 #pragma once
 
 #include <vector>

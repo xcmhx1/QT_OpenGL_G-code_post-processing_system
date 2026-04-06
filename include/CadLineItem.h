@@ -1,5 +1,7 @@
 ﻿#pragma once
 
+// 声明 CadLineItem 模块，对外暴露当前组件的核心类型、接口和协作边界。
+// 直线图元模块，负责直线实体的几何离散、颜色解析和方向生成。
 #include "CadItem.h"
 
 class CadLineItem : public CadItem

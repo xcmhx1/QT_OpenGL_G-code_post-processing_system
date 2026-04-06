@@ -1,3 +1,5 @@
+// 声明 CadReferenceRenderer 模块，对外暴露当前组件的核心类型、接口和协作边界。
+// 参考图形渲染模块，负责网格、坐标轴和轨道中心等辅助元素绘制。
 #pragma once
 
 #include <QMatrix4x4>

@@ -1,3 +1,5 @@
+// 声明 CadViewTransform 模块，对外暴露当前组件的核心类型、接口和协作边界。
+// 视图变换模块，负责屏幕坐标、世界坐标与相机参数之间的转换。
 #pragma once
 
 #include <QPoint>

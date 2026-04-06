@@ -1,5 +1,7 @@
 ﻿#pragma once
 
+// 声明 CadItem 模块，对外暴露当前组件的核心类型、接口和协作边界。
+// 图元基类模块，定义原生实体绑定、几何缓存和公共图元行为。
 #include <QColor>
 #include <QObject>
 #include <QVector>

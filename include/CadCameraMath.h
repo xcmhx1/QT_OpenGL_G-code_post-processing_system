@@ -1,3 +1,5 @@
+// 声明 CadCameraMath 模块，对外暴露当前组件的核心类型、接口和协作边界。
+// 相机数学模块，提供视图矩阵、投影矩阵和几何计算所需的底层公式。
 #pragma once
 
 #include <QQuaternion>

@@ -1,5 +1,7 @@
 ﻿#include "pch.h"
 
+// 实现 CadViewer 模块，对应头文件中声明的主要行为和协作流程。
+// CAD 主视图模块，负责 OpenGL 生命周期、输入接入、场景刷新和信号分发。
 #include "CadViewer.h"
 
 #include "CadCrosshairBuilder.h"

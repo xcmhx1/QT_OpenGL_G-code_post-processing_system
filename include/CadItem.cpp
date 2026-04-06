@@ -1,5 +1,7 @@
 ﻿#include "pch.h"
 
+// 实现 CadItem 模块，对应头文件中声明的主要行为和协作流程。
+// 图元基类模块，定义原生实体绑定、几何缓存和公共图元行为。
 #include "CadItem.h"
 
 CadItem::CadItem(DRW_Entity* entity, QObject* parent)
@@ -123,5 +125,4 @@ QColor CadItem::colorFromLayer()
     // 当前 CadItem 不持有图层表，无法在此解析图层颜色。
     return QColor(Qt::white);
 }
-
 

@@ -1,3 +1,5 @@
+// 实现 CadPolylineItem 模块，对应头文件中声明的主要行为和协作流程。
+// 多段线图元模块，负责多段线的离散显示和 bulge 圆弧段解释。
 #include "pch.h"
 
 #include "CadPolylineItem.h"

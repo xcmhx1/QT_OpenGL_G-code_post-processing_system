@@ -1,3 +1,5 @@
+// 实现 CadCrosshairBuilder 模块，对应头文件中声明的主要行为和协作流程。
+// 十字光标构建模块，负责生成视图中的辅助准星和拾取框预览图元。
 #include "pch.h"
 
 #include "CadCrosshairBuilder.h"

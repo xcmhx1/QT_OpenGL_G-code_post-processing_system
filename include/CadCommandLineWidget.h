@@ -1,3 +1,5 @@
+// 声明 CadCommandLineWidget 模块，对外暴露当前组件的核心类型、接口和协作边界。
+// 命令栏模块，负责命令提示、最新消息和历史记录的界面展示。
 #pragma once
 
 #include <QLabel>

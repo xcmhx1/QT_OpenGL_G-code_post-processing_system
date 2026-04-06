@@ -1,3 +1,5 @@
+// 实现 CadEllipseItem 模块，对应头文件中声明的主要行为和协作流程。
+// 椭圆图元模块，负责椭圆实体的离散显示数据和方向信息构建。
 #include "pch.h"
 
 #include "CadEllipseItem.h"

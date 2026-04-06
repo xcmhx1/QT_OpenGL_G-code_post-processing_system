@@ -1,3 +1,5 @@
+// 声明 CadGraphicsCoordinator 模块，对外暴露当前组件的核心类型、接口和协作边界。
+// 渲染协调模块，负责 OpenGL 状态、Shader 以及参考图形/Overlay 渲染器的装配。
 #pragma once
 
 #include <vector>

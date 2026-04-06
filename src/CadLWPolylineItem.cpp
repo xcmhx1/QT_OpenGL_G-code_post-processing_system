@@ -1,3 +1,5 @@
+// 实现 CadLWPolylineItem 模块，对应头文件中声明的主要行为和协作流程。
+// 轻量多段线图元模块，负责轻量多段线的离散显示和 bulge 解释。
 #include "pch.h"
 
 #include "CadLWPolylineItem.h"

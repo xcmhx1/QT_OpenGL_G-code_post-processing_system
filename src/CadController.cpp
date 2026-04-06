@@ -1,3 +1,5 @@
+// 实现 CadController 模块，对应头文件中声明的主要行为和协作流程。
+// 输入控制模块，负责解释键盘、鼠标、滚轮事件并驱动绘图/编辑命令。
 #include "pch.h"
 
 #include "CadController.h"

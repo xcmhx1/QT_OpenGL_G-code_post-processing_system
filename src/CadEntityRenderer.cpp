@@ -1,3 +1,5 @@
+// 实现 CadEntityRenderer 模块，对应头文件中声明的主要行为和协作流程。
+// 实体渲染模块，负责把缓存好的图元数据提交给 OpenGL 绘制。
 #include "pch.h"
 
 #include "CadEntityRenderer.h"

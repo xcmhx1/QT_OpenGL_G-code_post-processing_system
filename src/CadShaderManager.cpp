@@ -1,3 +1,5 @@
+// 实现 CadShaderManager 模块，对应头文件中声明的主要行为和协作流程。
+// Shader 管理模块，负责创建、持有并提供绘制流程所需的着色器程序。
 #include "pch.h"
 
 #include "CadShaderManager.h"

@@ -1,3 +1,5 @@
+// 实现 CadPointItem 模块，对应头文件中声明的主要行为和协作流程。
+// 点图元模块，负责点实体的显示数据构建和基础图元属性整理。
 #include "pch.h"
 
 #include "CadPointItem.h"

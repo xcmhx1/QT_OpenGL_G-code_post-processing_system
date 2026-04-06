@@ -1,3 +1,5 @@
+// 实现 CadCamera 模块，对应头文件中声明的主要行为和协作流程。
+// 轨道相机模块，维护观察目标、缩放参数和视角切换等核心状态。
 #include "pch.h"
 
 #include "CadCamera.h"

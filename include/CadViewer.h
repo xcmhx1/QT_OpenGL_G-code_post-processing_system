@@ -1,5 +1,7 @@
 ﻿#pragma once
 
+// 声明 CadViewer 模块，对外暴露当前组件的核心类型、接口和协作边界。
+// CAD 主视图模块，负责 OpenGL 生命周期、输入接入、场景刷新和信号分发。
 #include <memory>
 
 #include <QDragEnterEvent>
