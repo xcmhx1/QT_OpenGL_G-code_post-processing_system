@@ -4,6 +4,8 @@
 #include <unordered_map>
 
 #include <QColor>
+#include <QDragEnterEvent>
+#include <QDropEvent>
 #include <QKeyEvent>
 #include <QMatrix4x4>
 #include <QMouseEvent>
@@ -134,6 +136,15 @@ struct EntityGpuBuffer
     QVector3D color = { 1.0f, 1.0f, 1.0f };
 };
 
+struct TransientPrimitive
+{
+    QVector<QVector3D> vertices;
+    GLenum primitiveType = GL_LINE_STRIP;
+    QVector3D color = { 0.25f, 0.85f, 1.0f };
+    float pointSize = 1.0f;
+    bool roundPoint = false;
+};
+
 enum class ViewInteractionMode
 {
     Idle,
@@ -176,6 +187,7 @@ public:
     // 屏幕坐标转世界坐标。
     // depth 为 NDC 深度，常用 -1 表示近平面，+1 表示远平面。
     QVector3D screenToWorld(const QPoint& screenPos, float depth = 0.0f) const;
+    QVector3D screenToGroundPlane(const QPoint& screenPos) const;
 
     // 世界坐标投影到屏幕坐标。
     QPoint worldToScreen(const QVector3D& worldPos) const;
@@ -196,6 +208,14 @@ public:
     void consumeIgnoreNextOrbitDelta();
     void requestViewUpdate();
     CadItem* selectedEntity() const;
+    void appendCommandMessage(const QString& message);
+    void refreshCommandPrompt();
+
+signals:
+    void hoveredWorldPositionChanged(const QVector3D& worldPos);
+    void commandPromptChanged(const QString& prompt);
+    void commandMessageAppended(const QString& message);
+    void fileDropRequested(const QString& filePath);
 
 protected:
     // OpenGL 初始化。
@@ -224,6 +244,8 @@ protected:
 
     // 键盘快捷键处理。
     void keyPressEvent(QKeyEvent* event) override;
+    void dragEnterEvent(QDragEnterEvent* event) override;
+    void dropEvent(QDropEvent* event) override;
 
 private:
     // 初始化着色器程序。
@@ -237,6 +259,7 @@ private:
 
     // 初始化轨道中心标记缓冲。
     void initOrbitMarkerBuffer();
+    void initTransientBuffer();
 
     // 上传单个实体到 GPU。
     void uploadEntity(const CadItem* entity);
@@ -261,10 +284,12 @@ private:
 
     // 绘制轨道旋转中心标记。
     void renderOrbitMarker();
+    void renderTransientPrimitives();
 
     // 重新计算场景包围盒和轨道中心。
     void updateSceneBounds();
     void handleDocumentSceneChanged();
+    void updateHoveredWorldPosition(const QPoint& screenPos);
 
     // 围绕场景中心进行轨道旋转。
     void orbitCameraAroundSceneCenter(float deltaAzimuth, float deltaElevation);
@@ -272,6 +297,7 @@ private:
     // 简单屏幕空间拾取，返回命中的实体 ID。
     EntityId pickEntity(const QPoint& screenPos) const;
     CadItem* findEntityById(EntityId id) const;
+    std::vector<TransientPrimitive> buildTransientPrimitives() const;
 
     // 当前视口宽高比。
     float aspectRatio() const;
@@ -317,6 +343,8 @@ private:
     // 轨道中心标记缓冲。
     QOpenGLBuffer m_orbitMarkerVbo{ QOpenGLBuffer::VertexBuffer };
     QOpenGLVertexArrayObject m_orbitMarkerVao;
+    QOpenGLBuffer m_transientVbo{ QOpenGLBuffer::VertexBuffer };
+    QOpenGLVertexArrayObject m_transientVao;
 
     // 当前视口尺寸。
     int m_viewportWidth = 1;

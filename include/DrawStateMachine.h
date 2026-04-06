@@ -123,6 +123,12 @@ public:
 
     // 当前命令过程里已采集的控制点
     QVector<QVector3D> commandPoints;
+    // 多段线已确认段的 bulge；索引 i 对应 commandPoints[i] -> commandPoints[i + 1]
+    QVector<double> commandBulges;
+
+    // 多段线当前输入模式
+    bool polylineArcMode = false;
+    bool lwPolylineArcMode = false;
 
     // 各图元自己的子状态机，当前由 drawingPrimitiveKind 决定使用哪一个。
     // 这些成员变量用于存储特定图元绘制过程中的子状态。

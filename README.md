@@ -7,6 +7,9 @@
 - DXF / DWG 文件导入与 OpenGL 显示
 - 7 类基础 CAD 图元的离散化显示
 - 顶视图 / 轨道观察 / 平移 / 缩放 / 拾取
+- 视图内拖拽 `.dxf` / `.dwg` 文件导入
+- 底部状态栏坐标显示与命令历史栏
+- 绘图与移动过程中的 transient / 橡皮筋预览
 - 基于 MVC 思路的文档模型、控制器、视图分层
 - 基于命令模式的绘图创建、删除、移动、改色、Undo / Redo
 
@@ -36,6 +39,8 @@ G-code_post-processing_system/
 |   |-- DxfViewer.h                        # Viewer 包装类
 |   |-- CadViewer.h                        # OpenGL 视图层
 |   |-- CadController.h                    # 输入控制器
+|   |-- CadCommandLineWidget.h / .hpp      # 命令历史栏组件
+|   |-- CadStatusPaneWidget.h / .hpp       # 底部状态栏组件
 |   |-- CadEditer.h / .hpp                 # 编辑器与命令栈接口
 |   |-- DrawStateMachine.h                 # 绘图/编辑状态机
 |   |-- CadDocument.h                      # 文档模型
@@ -57,6 +62,8 @@ G-code_post-processing_system/
 |   |-- Gcode_postprocessing_system.cpp    # 主窗口实现
 |   |-- CadViewer.cpp                      # OpenGL 视图实现
 |   |-- CadController.cpp                  # 交互控制逻辑实现
+|   |-- CadCommandLineWidget.cpp           # 命令历史栏实现
+|   |-- CadStatusPaneWidget.cpp            # 底部状态栏实现
 |   |-- CadEditer.cpp                      # 编辑器、命令、绘图创建实现
 |   |-- DrawStateMachine.cpp               # 状态机默认值与辅助逻辑
 |   |-- CadDocument.cpp                    # 文档模型实现
@@ -131,8 +138,10 @@ CadDocument                               (Model)
 
 - 负责 OpenGL 上下文和着色器初始化
 - 负责网格、坐标轴、轨道中心、实体绘制
+- 负责 transient 预览层绘制
 - 负责屏幕坐标与世界坐标互转
 - 负责实体拾取和高亮
+- 负责拖拽导入入口和坐标 / 命令提示信号发出
 - 不直接改业务数据，只消费 `CadDocument`
 - 通过 `sceneChanged` 自动重建 GPU 缓冲
 
@@ -272,7 +281,7 @@ CadDocument                               (Model)
 
 ### 4.1 导入流程
 
-1. 用户在主窗口触发“导入 Dxf”
+1. 用户在主窗口触发“导入 Dxf”，或直接把 `.dxf/.dwg` 拖入 `CadViewer`
 2. `Gcode_postprocessing_system` 调用 `CadDocument::readDxfDocument`
 3. `CadDocument` 内部通过 `dx_iface` 使用 `libdxfrw` 解析文件
 4. `dx_data->mBlock->ent` 收集所有原始 `DRW_Entity`
@@ -302,6 +311,18 @@ CadDocument                               (Model)
 6. `CadViewer` 重建显示
 7. 命令进入 undo 栈，redo 栈按标准事务规则清空
 
+### 4.4 transient 预览与命令提示流程
+
+1. `CadController` 在鼠标移动时持续更新 `DrawStateMachine.currentPos`
+2. `CadViewer` 根据当前状态即时构造 transient 图元
+3. transient 图元只参与渲染，不写入 `CadDocument`
+4. 命令完成或取消后，transient 图元立即消失
+5. `CadViewer` 同时发出：
+   - 当前鼠标工作平面坐标
+   - 当前命令 prompt
+   - 最新 command message
+6. `CadCommandLineWidget` 与 `CadStatusPaneWidget` 只负责显示，不参与业务决策
+
 ## 5. 当前交互与快捷键
 
 ### 5.1 视图
@@ -323,9 +344,17 @@ CadDocument                               (Model)
 - `E`：椭圆
 - `O`：多段线
 - `W`：轻量多段线
+- 多段线 / 轻量多段线绘制中 `A`：切换为圆弧段输入
+- 多段线 / 轻量多段线绘制中 `L`：切回直线段输入
 - `Enter` / `Space`：结束多段线
 - 多段线模式下 `C`：闭合多段线
 - `Esc`：取消当前命令
+
+多段线圆弧段当前采用“直接指定圆弧终点”的方式输入：
+
+- 需先有至少一段前置线段或圆弧段，系统会沿前一段终点切线自动续接
+- Viewer 会显示圆弧段的橡皮筋预览
+- 最终数据写入 `Polyline / LWPolyline` 的 `bulge` 字段，而不是拆成独立 `Arc`
 
 ### 5.3 编辑
 
@@ -335,6 +364,15 @@ CadDocument                               (Model)
 - `Ctrl + Z`：撤销
 - `Ctrl + Y`：重做
 - `Ctrl + Shift + Z`：重做
+
+### 5.4 UI 状态显示
+
+- 底部状态栏显示当前鼠标对应的世界坐标块 `X / Y / Z`
+- 状态栏右侧预留了吸附 / 正交 / 极轴等扩展位置
+- 命令栏位于底部状态栏上方
+- 平时只显示一行最新消息
+- 点击命令栏后展开为四行高度，并显示带滚动条的历史消息
+- 点击其它区域后自动收起
 
 ## 6. 绘图平面与 Z 轴策略
 
@@ -367,7 +405,10 @@ CadDocument                               (Model)
 - `src/CadViewer.cpp`
   - OpenGL 初始化
   - 网格、坐标轴、实体绘制
+  - transient 橡皮筋预览
   - 屏幕拾取
+  - 视图拖拽导入
+  - 坐标与命令提示信号
   - 文档变化后缓冲重建
 
 ### 7.3 控制器层
@@ -376,6 +417,16 @@ CadDocument                               (Model)
   - 键盘鼠标解释
   - 绘图平面投影
   - 命令分发到 `CadEditer`
+  - 命令 prompt 与 message 触发
+
+### 7.3A UI 组件层
+
+- `src/CadCommandLineWidget.cpp`
+  - 命令栏折叠 / 展开
+  - 最新消息与历史消息显示
+- `src/CadStatusPaneWidget.cpp`
+  - 当前鼠标工作平面坐标显示
+  - 后续状态开关位预留
 
 ### 7.4 编辑器层
 
@@ -437,8 +488,8 @@ msbuild .\G-code_post-processing_system.vcxproj /p:Configuration=Release /p:Plat
 
 后续如果继续迭代，建议优先按下面顺序扩展：
 
-1. 补绘图预览与橡皮筋
-2. 把命令提示和状态信息显示到 UI
+1. 增加对象捕捉、正交、极轴等状态开关并接到底部状态栏
+2. 增加命令行文本输入，形成更接近 AutoCAD 的命令窗口
 3. 增加导出 DXF / 保存修改后的文档
 4. 增加图层、线型、颜色索引等更完整的 CAD 属性编辑
 5. 增加自动化测试或最少的模型层回归测试

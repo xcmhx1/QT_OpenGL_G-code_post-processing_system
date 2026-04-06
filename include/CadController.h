@@ -3,6 +3,7 @@
 #include <QColor>
 #include <QKeyEvent>
 #include <QMouseEvent>
+#include <QString>
 #include <QVector3D>
 #include <QWheelEvent>
 
@@ -30,11 +31,15 @@ public:
 
     DrawStateMachine& drawState();
     const DrawStateMachine& drawState() const;
+    QString currentPrompt() const;
+    QString currentCommandName() const;
 
 private:
     void resetSubModes();
     void preparePrimitiveSubMode();
     void handleLeftPressInCommand(const QVector3D& worldPos);
+    bool isPolylineCommandActive() const;
+    bool setPolylineInputMode(bool useArc);
     QVector3D currentWorldPos(const QPoint& screenPos) const;
 
 private:

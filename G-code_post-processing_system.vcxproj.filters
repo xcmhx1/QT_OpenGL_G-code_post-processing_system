@@ -98,6 +98,12 @@
     <ClCompile Include="src\CadPolylineItem.cpp">
       <Filter>Source Files\Item</Filter>
     </ClCompile>
+    <ClCompile Include="src\CadCommandLineWidget.cpp">
+      <Filter>Source Files\View</Filter>
+    </ClCompile>
+    <ClCompile Include="src\CadStatusPaneWidget.cpp">
+      <Filter>Source Files\View</Filter>
+    </ClCompile>
     <ClCompile Include="src\CadEditer.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -286,6 +292,9 @@
     <ClInclude Include="include\CadCircleItem.h">
       <Filter>Header Files\Item</Filter>
     </ClInclude>
+    <ClInclude Include="include\CadCommandLineWidget.h">
+      <Filter>Header Files\View</Filter>
+    </ClInclude>
     <ClInclude Include="include\CadEditer.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -303,6 +312,9 @@
     </ClInclude>
     <ClInclude Include="include\CadPolylineItem.h">
       <Filter>Header Files\Item</Filter>
+    </ClInclude>
+    <ClInclude Include="include\CadStatusPaneWidget.h">
+      <Filter>Header Files\View</Filter>
     </ClInclude>
     <ClInclude Include="include\DxfViewer.h">
       <Filter>Header Files\View</Filter>

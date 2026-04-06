@@ -16,6 +16,9 @@ void DrawStateMachine::reset()
     editType = EditType::None;
     moveSubMode = MoveEditSubMode::Idle;
     commandPoints.clear();
+    commandBulges.clear();
+    polylineArcMode = false;
+    lwPolylineArcMode = false;
 
     // 重置所有图元的子状态机为 Idle
     pointSubMode = PointDrawSubMode::Idle;

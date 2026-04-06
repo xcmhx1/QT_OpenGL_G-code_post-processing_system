@@ -5,7 +5,9 @@
 #include "CadDocument.h"
 #include "CadItem.h"
 
+#include <QDragEnterEvent>
 #include <QKeyEvent>
+#include <QMimeData>
 #include <QMatrix3x3>
 #include <QOpenGLContext>
 #include <QQuaternion>
@@ -269,6 +271,283 @@ namespace
             return GL_LINE_STRIP;
         }
     }
+
+    QVector3D flattenedToGroundPlane(const QVector3D& point)
+    {
+        return QVector3D(point.x(), point.y(), 0.0f);
+    }
+
+    void appendCirclePreview(QVector<QVector3D>& vertices, const QVector3D& center, float radius, int segments = 96)
+    {
+        if (radius <= 1.0e-6f)
+        {
+            return;
+        }
+
+        vertices.reserve(segments + 1);
+
+        for (int i = 0; i <= segments; ++i)
+        {
+            const float angle = 2.0f * kPi * static_cast<float>(i) / static_cast<float>(segments);
+            vertices.append
+            (
+                QVector3D
+                (
+                    center.x() + std::cos(angle) * radius,
+                    center.y() + std::sin(angle) * radius,
+                    center.z()
+                )
+            );
+        }
+    }
+
+    QVector3D projectPointToRadius(const QVector3D& center, const QVector3D& radiusPoint, const QVector3D& currentPoint)
+    {
+        const float radius = (radiusPoint - center).length();
+
+        if (radius <= 1.0e-6f)
+        {
+            return radiusPoint;
+        }
+
+        QVector3D direction = currentPoint - center;
+
+        if (direction.lengthSquared() <= 1.0e-10f)
+        {
+            direction = radiusPoint - center;
+        }
+
+        if (direction.lengthSquared() <= 1.0e-10f)
+        {
+            return radiusPoint;
+        }
+
+        direction.normalize();
+        return center + direction * radius;
+    }
+
+    void appendArcPreview
+    (
+        QVector<QVector3D>& vertices,
+        const QVector3D& center,
+        const QVector3D& startPoint,
+        const QVector3D& endPoint,
+        int segments = 96
+    )
+    {
+        const float radius = (startPoint - center).length();
+
+        if (radius <= 1.0e-6f)
+        {
+            return;
+        }
+
+        float startAngle = std::atan2(startPoint.y() - center.y(), startPoint.x() - center.x());
+        float endAngle = std::atan2(endPoint.y() - center.y(), endPoint.x() - center.x());
+
+        while (endAngle <= startAngle)
+        {
+            endAngle += 2.0f * kPi;
+        }
+
+        vertices.reserve(segments + 1);
+
+        for (int i = 0; i <= segments; ++i)
+        {
+            const float t = startAngle + (endAngle - startAngle) * static_cast<float>(i) / static_cast<float>(segments);
+            vertices.append
+            (
+                QVector3D
+                (
+                    center.x() + std::cos(t) * radius,
+                    center.y() + std::sin(t) * radius,
+                    center.z()
+                )
+            );
+        }
+    }
+
+    void appendEllipsePreview
+    (
+        QVector<QVector3D>& vertices,
+        const QVector3D& center,
+        const QVector3D& majorAxisPoint,
+        const QVector3D& ratioPoint,
+        int segments = 96
+    )
+    {
+        const QVector3D majorAxis = majorAxisPoint - center;
+        const float majorLength = majorAxis.length();
+
+        if (majorLength <= 1.0e-6f)
+        {
+            return;
+        }
+
+        const QVector3D toRatioPoint = ratioPoint - center;
+        const float projectedLength = QVector3D::dotProduct(toRatioPoint, majorAxis) / majorLength;
+        const float minorSquared = std::max(0.0f, toRatioPoint.lengthSquared() - projectedLength * projectedLength);
+        const float minorLength = std::sqrt(minorSquared);
+
+        if (minorLength <= 1.0e-6f)
+        {
+            return;
+        }
+
+        QVector3D majorDirection = majorAxis;
+        majorDirection.normalize();
+        const QVector3D minorDirection(-majorDirection.y(), majorDirection.x(), 0.0f);
+
+        vertices.reserve(segments + 1);
+
+        for (int i = 0; i <= segments; ++i)
+        {
+            const float angle = 2.0f * kPi * static_cast<float>(i) / static_cast<float>(segments);
+            vertices.append
+            (
+                center
+                + majorDirection * (std::cos(angle) * majorLength)
+                + minorDirection * (std::sin(angle) * minorLength)
+            );
+        }
+    }
+
+    QVector3D normalizedOrZero(const QVector3D& vector)
+    {
+        if (vector.lengthSquared() <= kBasisEpsilon)
+        {
+            return QVector3D();
+        }
+
+        QVector3D normalized = vector;
+        normalized.normalize();
+        return normalized;
+    }
+
+    void appendBulgePreview(QVector<QVector3D>& vertices, const QVector3D& startPoint, const QVector3D& endPoint, double bulge)
+    {
+        const double dx = endPoint.x() - startPoint.x();
+        const double dy = endPoint.y() - startPoint.y();
+        const double chordLength = std::sqrt(dx * dx + dy * dy);
+
+        if (chordLength <= 1.0e-10 || std::abs(bulge) < 1.0e-8)
+        {
+            vertices.append(endPoint);
+            return;
+        }
+
+        const double midpointX = (startPoint.x() + endPoint.x()) * 0.5;
+        const double midpointY = (startPoint.y() + endPoint.y()) * 0.5;
+        const double centerOffset = chordLength * (1.0 / bulge - bulge) * 0.25;
+        const double centerX = midpointX - centerOffset * (dy / chordLength);
+        const double centerY = midpointY + centerOffset * (dx / chordLength);
+        const double radius = std::hypot(startPoint.x() - centerX, startPoint.y() - centerY);
+        const double startAngle = std::atan2(startPoint.y() - centerY, startPoint.x() - centerX);
+        const double sweepAngle = 4.0 * std::atan(bulge);
+        const int segments = std::max(4, static_cast<int>(std::ceil(std::abs(sweepAngle) / (2.0 * kPi) * 128.0)));
+
+        for (int i = 1; i <= segments; ++i)
+        {
+            const double factor = static_cast<double>(i) / static_cast<double>(segments);
+            const double angle = startAngle + sweepAngle * factor;
+
+            vertices.append
+            (
+                QVector3D
+                (
+                    static_cast<float>(centerX + radius * std::cos(angle)),
+                    static_cast<float>(centerY + radius * std::sin(angle)),
+                    0.0f
+                )
+            );
+        }
+    }
+
+    QVector3D bulgeArcCenter(const QVector3D& startPoint, const QVector3D& endPoint, double bulge, bool* valid = nullptr)
+    {
+        const QVector3D chord = endPoint - startPoint;
+        const double chordLength = chord.length();
+
+        if (valid != nullptr)
+        {
+            *valid = false;
+        }
+
+        if (chordLength <= 1.0e-10 || std::abs(bulge) < 1.0e-8)
+        {
+            return QVector3D();
+        }
+
+        const QVector3D midpoint = (startPoint + endPoint) * 0.5f;
+        const double centerOffset = chordLength * (1.0 / bulge - bulge) * 0.25;
+        const QVector3D leftNormal
+        (
+            static_cast<float>(-chord.y() / chordLength),
+            static_cast<float>(chord.x() / chordLength),
+            0.0f
+        );
+
+        if (valid != nullptr)
+        {
+            *valid = true;
+        }
+
+        return midpoint + leftNormal * static_cast<float>(centerOffset);
+    }
+
+    QVector3D polylineEndTangent(const QVector<QVector3D>& points, const QVector<double>& bulges)
+    {
+        if (points.size() < 2)
+        {
+            return QVector3D();
+        }
+
+        const QVector3D startPoint = flattenedToGroundPlane(points[points.size() - 2]);
+        const QVector3D endPoint = flattenedToGroundPlane(points.back());
+        const double bulge = bulges.size() >= points.size() - 1 ? bulges[points.size() - 2] : 0.0;
+
+        if (std::abs(bulge) < 1.0e-8)
+        {
+            return normalizedOrZero(endPoint - startPoint);
+        }
+
+        bool valid = false;
+        const QVector3D center = bulgeArcCenter(startPoint, endPoint, bulge, &valid);
+
+        if (!valid)
+        {
+            return normalizedOrZero(endPoint - startPoint);
+        }
+
+        const QVector3D radiusVector = endPoint - center;
+        const QVector3D tangent = bulge > 0.0
+            ? QVector3D(-radiusVector.y(), radiusVector.x(), 0.0f)
+            : QVector3D(radiusVector.y(), -radiusVector.x(), 0.0f);
+
+        return normalizedOrZero(tangent);
+    }
+
+    double bulgeFromTangent(const QVector3D& startPoint, const QVector3D& tangentDirection, const QVector3D& endPoint)
+    {
+        const QVector3D planarTangent = normalizedOrZero(QVector3D(tangentDirection.x(), tangentDirection.y(), 0.0f));
+        const QVector3D chordVector = flattenedToGroundPlane(endPoint) - flattenedToGroundPlane(startPoint);
+
+        if (planarTangent.lengthSquared() <= 1.0e-10 || chordVector.lengthSquared() <= 1.0e-10)
+        {
+            return 0.0;
+        }
+
+        const double dotValue = QVector3D::dotProduct(planarTangent, chordVector);
+        const double crossValue = planarTangent.x() * chordVector.y() - planarTangent.y() * chordVector.x();
+        const double alpha = std::atan2(crossValue, dotValue);
+
+        if (std::abs(std::abs(alpha) - kPi) <= 1.0e-6)
+        {
+            return std::numeric_limits<double>::infinity();
+        }
+
+        return std::tan(alpha * 0.5);
+    }
 }
 
 // 由 target、forward 和 distance 计算相机眼点。
@@ -480,6 +759,7 @@ CadViewer::CadViewer(QWidget* parent)
     setFormat(surfaceFormat);
 
     setMouseTracking(true);
+    setAcceptDrops(true);
     setFocusPolicy(Qt::StrongFocus);
 
     m_controller.setViewer(this);
@@ -499,6 +779,8 @@ CadViewer::~CadViewer()
         m_axisVbo.destroy();
         m_orbitMarkerVao.destroy();
         m_orbitMarkerVbo.destroy();
+        m_transientVao.destroy();
+        m_transientVbo.destroy();
         doneCurrent();
     }
 }
@@ -680,6 +962,19 @@ CadItem* CadViewer::selectedEntity() const
     return findEntityById(m_selectedEntityId);
 }
 
+void CadViewer::appendCommandMessage(const QString& message)
+{
+    if (!message.trimmed().isEmpty())
+    {
+        emit commandMessageAppended(message.trimmed());
+    }
+}
+
+void CadViewer::refreshCommandPrompt()
+{
+    emit commandPromptChanged(m_controller.currentPrompt());
+}
+
 // 放大视图。
 void CadViewer::zoomIn(float factor)
 {
@@ -717,6 +1012,21 @@ QVector3D CadViewer::screenToWorld(const QPoint& screenPos, float depth) const
     return world.toVector3DAffine();
 }
 
+QVector3D CadViewer::screenToGroundPlane(const QPoint& screenPos) const
+{
+    const QVector3D nearPoint = screenToWorld(screenPos, -1.0f);
+    const QVector3D farPoint = screenToWorld(screenPos, 1.0f);
+    const QVector3D rayDirection = farPoint - nearPoint;
+
+    if (!qFuzzyIsNull(rayDirection.z()))
+    {
+        const float t = -nearPoint.z() / rayDirection.z();
+        return nearPoint + rayDirection * t;
+    }
+
+    return flattenedToGroundPlane(nearPoint);
+}
+
 // 世界坐标 -> 屏幕坐标。
 QPoint CadViewer::worldToScreen(const QVector3D& worldPos) const
 {
@@ -750,10 +1060,12 @@ void CadViewer::initializeGL()
     initGridBuffer();
     initAxisBuffer();
     initOrbitMarkerBuffer();
+    initTransientBuffer();
 
     m_glInitialized = true;
     rebuildAllBuffers();
     fitScene();
+    refreshCommandPrompt();
 }
 
 // Qt 回调的逻辑尺寸变化。
@@ -789,6 +1101,7 @@ void CadViewer::paintGL()
 
     renderGrid();
     renderEntities();
+    renderTransientPrimitives();
     renderAxis();
     renderOrbitMarker();
 }
@@ -803,6 +1116,14 @@ void CadViewer::mousePressEvent(QMouseEvent* event)
     {
         QOpenGLWidget::mousePressEvent(event);
     }
+
+    updateHoveredWorldPosition(event->pos());
+    refreshCommandPrompt();
+
+    if (m_controller.drawState().hasActiveCommand())
+    {
+        update();
+    }
 }
 
 // 鼠标移动：
@@ -814,6 +1135,13 @@ void CadViewer::mouseMoveEvent(QMouseEvent* event)
     {
         QOpenGLWidget::mouseMoveEvent(event);
     }
+
+    updateHoveredWorldPosition(event->pos());
+
+    if (m_controller.drawState().hasActiveCommand())
+    {
+        update();
+    }
 }
 
 // 鼠标释放中键后退出当前交互模式。
@@ -823,6 +1151,9 @@ void CadViewer::mouseReleaseEvent(QMouseEvent* event)
     {
         QOpenGLWidget::mouseReleaseEvent(event);
     }
+
+    updateHoveredWorldPosition(event->pos());
+    refreshCommandPrompt();
 } 
 
 // 滚轮缩放：
@@ -836,6 +1167,8 @@ void CadViewer::wheelEvent(QWheelEvent* event)
     {
         QOpenGLWidget::wheelEvent(event);
     }
+
+    updateHoveredWorldPosition(event->position().toPoint());
 }
 
 // 键盘快捷键：
@@ -848,6 +1181,60 @@ void CadViewer::keyPressEvent(QKeyEvent* event)
     {
         QOpenGLWidget::keyPressEvent(event);
     }
+
+    refreshCommandPrompt();
+    update();
+}
+
+void CadViewer::dragEnterEvent(QDragEnterEvent* event)
+{
+    const QMimeData* mimeData = event->mimeData();
+
+    if (mimeData == nullptr || !mimeData->hasUrls())
+    {
+        event->ignore();
+        return;
+    }
+
+    for (const QUrl& url : mimeData->urls())
+    {
+        const QString localFile = url.toLocalFile();
+
+        if (localFile.endsWith(QStringLiteral(".dxf"), Qt::CaseInsensitive)
+            || localFile.endsWith(QStringLiteral(".dwg"), Qt::CaseInsensitive))
+        {
+            event->acceptProposedAction();
+            return;
+        }
+    }
+
+    event->ignore();
+}
+
+void CadViewer::dropEvent(QDropEvent* event)
+{
+    const QMimeData* mimeData = event->mimeData();
+
+    if (mimeData == nullptr || !mimeData->hasUrls())
+    {
+        event->ignore();
+        return;
+    }
+
+    for (const QUrl& url : mimeData->urls())
+    {
+        const QString localFile = url.toLocalFile();
+
+        if (localFile.endsWith(QStringLiteral(".dxf"), Qt::CaseInsensitive)
+            || localFile.endsWith(QStringLiteral(".dwg"), Qt::CaseInsensitive))
+        {
+            emit fileDropRequested(localFile);
+            event->acceptProposedAction();
+            return;
+        }
+    }
+
+    event->ignore();
 }
 
 // 初始化着色器。
@@ -1011,6 +1398,25 @@ void CadViewer::initOrbitMarkerBuffer()
 
     m_orbitMarkerVbo.release();
     m_orbitMarkerVao.release();
+}
+
+void CadViewer::initTransientBuffer()
+{
+    const QVector3D initialPoint(0.0f, 0.0f, 0.0f);
+
+    m_transientVao.create();
+    m_transientVao.bind();
+
+    m_transientVbo.create();
+    m_transientVbo.bind();
+    m_transientVbo.setUsagePattern(QOpenGLBuffer::DynamicDraw);
+    m_transientVbo.allocate(&initialPoint, static_cast<int>(sizeof(QVector3D)));
+
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(QVector3D), nullptr);
+
+    m_transientVbo.release();
+    m_transientVao.release();
 }
 
 // 上传单个实体到 GPU：
@@ -1246,6 +1652,56 @@ void CadViewer::renderOrbitMarker()
     m_entityShader->release();
 }
 
+void CadViewer::renderTransientPrimitives()
+{
+    if (!m_entityShader || !m_transientVao.isCreated() || !m_transientVbo.isCreated())
+    {
+        return;
+    }
+
+    const std::vector<TransientPrimitive> primitives = buildTransientPrimitives();
+
+    if (primitives.empty())
+    {
+        return;
+    }
+
+    m_entityShader->bind();
+    m_entityShader->setUniformValue("uMvp", m_camera.viewProjectionMatrix(aspectRatio()));
+
+    glDisable(GL_DEPTH_TEST);
+    glLineWidth(2.0f);
+
+    m_transientVao.bind();
+
+    for (const TransientPrimitive& primitive : primitives)
+    {
+        if (primitive.vertices.isEmpty())
+        {
+            continue;
+        }
+
+        m_transientVbo.bind();
+        m_transientVbo.allocate
+        (
+            primitive.vertices.constData(),
+            primitive.vertices.size() * static_cast<int>(sizeof(QVector3D))
+        );
+
+        m_entityShader->setUniformValue("uColor", primitive.color);
+        m_entityShader->setUniformValue("uPointSize", primitive.pointSize);
+        m_entityShader->setUniformValue("uRoundPoint", primitive.roundPoint ? 1 : 0);
+
+        glDrawArrays(primitive.primitiveType, 0, primitive.vertices.size());
+        m_transientVbo.release();
+    }
+
+    m_transientVao.release();
+    glLineWidth(1.0f);
+    glEnable(GL_DEPTH_TEST);
+    m_entityShader->release();
+}
+
 // 围绕场景中心做轨道旋转。
 // 与 OrbitalCamera::orbit() 的区别是：
 // 这里不仅更新 orientation，还会让 eye / target 围绕 pivot 一起旋转，
@@ -1397,6 +1853,11 @@ void CadViewer::handleDocumentSceneChanged()
     update();
 }
 
+void CadViewer::updateHoveredWorldPosition(const QPoint& screenPos)
+{
+    emit hoveredWorldPositionChanged(screenToGroundPlane(screenPos));
+}
+
 // 屏幕空间拾取：
 // - 点实体：测鼠标点到投影点距离
 // - 线实体：测鼠标点到各投影线段距离
@@ -1468,6 +1929,232 @@ CadItem* CadViewer::findEntityById(EntityId id) const
     }
 
     return nullptr;
+}
+
+std::vector<TransientPrimitive> CadViewer::buildTransientPrimitives() const
+{
+    std::vector<TransientPrimitive> primitives;
+    const DrawStateMachine& state = m_controller.drawState();
+
+    if (!state.hasActiveCommand())
+    {
+        return primitives;
+    }
+
+    if (state.editType == EditType::Move)
+    {
+        CadItem* selectedItem = selectedEntity();
+
+        if (selectedItem != nullptr && state.moveSubMode == MoveEditSubMode::AwaitTargetPoint && !state.commandPoints.isEmpty())
+        {
+            const QVector3D basePoint = state.commandPoints.front();
+            const QVector3D delta = state.currentPos - basePoint;
+
+            TransientPrimitive movedEntityPreview;
+            movedEntityPreview.primitiveType = primitiveTypeForEntity(selectedItem);
+            movedEntityPreview.color = QVector3D(0.98f, 0.67f, 0.12f);
+            movedEntityPreview.pointSize = movedEntityPreview.primitiveType == GL_POINTS ? 12.0f : 1.0f;
+            movedEntityPreview.roundPoint = movedEntityPreview.primitiveType == GL_POINTS;
+
+            movedEntityPreview.vertices.reserve(selectedItem->m_geometry.vertices.size());
+
+            for (const QVector3D& vertex : selectedItem->m_geometry.vertices)
+            {
+                movedEntityPreview.vertices.append(vertex + delta);
+            }
+
+            primitives.push_back(std::move(movedEntityPreview));
+
+            TransientPrimitive guideLine;
+            guideLine.primitiveType = GL_LINES;
+            guideLine.color = QVector3D(0.35f, 0.90f, 1.0f);
+            guideLine.vertices = { basePoint, state.currentPos };
+            primitives.push_back(std::move(guideLine));
+        }
+
+        return primitives;
+    }
+
+    switch (state.drawType)
+    {
+    case DrawType::Point:
+    {
+        if (state.pointSubMode == PointDrawSubMode::AwaitPosition)
+        {
+            TransientPrimitive pointPreview;
+            pointPreview.primitiveType = GL_POINTS;
+            pointPreview.color = QVector3D(0.35f, 0.90f, 1.0f);
+            pointPreview.pointSize = 10.0f;
+            pointPreview.roundPoint = true;
+            pointPreview.vertices = { flattenedToGroundPlane(state.currentPos) };
+            primitives.push_back(std::move(pointPreview));
+        }
+        break;
+    }
+    case DrawType::Line:
+    {
+        if (state.lineSubMode == LineDrawSubMode::AwaitEndPoint && !state.commandPoints.isEmpty())
+        {
+            TransientPrimitive linePreview;
+            linePreview.primitiveType = GL_LINES;
+            linePreview.color = QVector3D(0.35f, 0.90f, 1.0f);
+            linePreview.vertices = { state.commandPoints.front(), flattenedToGroundPlane(state.currentPos) };
+            primitives.push_back(std::move(linePreview));
+        }
+        break;
+    }
+    case DrawType::Circle:
+    {
+        if (state.circleSubMode == CircleDrawSubMode::AwaitRadius && !state.commandPoints.isEmpty())
+        {
+            const QVector3D center = state.commandPoints.front();
+            const QVector3D currentPoint = flattenedToGroundPlane(state.currentPos);
+            const float radius = (currentPoint - center).length();
+
+            TransientPrimitive radiusLine;
+            radiusLine.primitiveType = GL_LINES;
+            radiusLine.color = QVector3D(0.35f, 0.90f, 1.0f);
+            radiusLine.vertices = { center, currentPoint };
+            primitives.push_back(std::move(radiusLine));
+
+            TransientPrimitive circlePreview;
+            circlePreview.primitiveType = GL_LINE_STRIP;
+            circlePreview.color = QVector3D(0.35f, 0.90f, 1.0f);
+            appendCirclePreview(circlePreview.vertices, center, radius);
+            primitives.push_back(std::move(circlePreview));
+        }
+        break;
+    }
+    case DrawType::Arc:
+    {
+        if (state.arcSubMode == ArcDrawSubMode::AwaitRadius && !state.commandPoints.isEmpty())
+        {
+            TransientPrimitive radiusLine;
+            radiusLine.primitiveType = GL_LINES;
+            radiusLine.color = QVector3D(0.35f, 0.90f, 1.0f);
+            radiusLine.vertices = { state.commandPoints.front(), flattenedToGroundPlane(state.currentPos) };
+            primitives.push_back(std::move(radiusLine));
+        }
+        else if (state.arcSubMode == ArcDrawSubMode::AwaitStartAngle && state.commandPoints.size() >= 2)
+        {
+            const QVector3D center = state.commandPoints[0];
+            const QVector3D radiusPoint = state.commandPoints[1];
+            const QVector3D startPoint = projectPointToRadius(center, radiusPoint, flattenedToGroundPlane(state.currentPos));
+
+            TransientPrimitive circlePreview;
+            circlePreview.primitiveType = GL_LINE_STRIP;
+            circlePreview.color = QVector3D(0.35f, 0.90f, 1.0f);
+            appendCirclePreview(circlePreview.vertices, center, (radiusPoint - center).length());
+            primitives.push_back(std::move(circlePreview));
+
+            TransientPrimitive startLine;
+            startLine.primitiveType = GL_LINES;
+            startLine.color = QVector3D(0.35f, 0.90f, 1.0f);
+            startLine.vertices = { center, startPoint };
+            primitives.push_back(std::move(startLine));
+        }
+        else if (state.arcSubMode == ArcDrawSubMode::AwaitEndAngle && state.commandPoints.size() >= 3)
+        {
+            const QVector3D center = state.commandPoints[0];
+            const QVector3D radiusPoint = state.commandPoints[1];
+            const QVector3D startPoint = projectPointToRadius(center, radiusPoint, state.commandPoints[2]);
+            const QVector3D endPoint = projectPointToRadius(center, radiusPoint, flattenedToGroundPlane(state.currentPos));
+
+            TransientPrimitive arcPreview;
+            arcPreview.primitiveType = GL_LINE_STRIP;
+            arcPreview.color = QVector3D(0.35f, 0.90f, 1.0f);
+            appendArcPreview(arcPreview.vertices, center, startPoint, endPoint);
+            primitives.push_back(std::move(arcPreview));
+        }
+        break;
+    }
+    case DrawType::Ellipse:
+    {
+        if (state.ellipseSubMode == EllipseDrawSubMode::AwaitMajorAxis && !state.commandPoints.isEmpty())
+        {
+            TransientPrimitive axisLine;
+            axisLine.primitiveType = GL_LINES;
+            axisLine.color = QVector3D(0.35f, 0.90f, 1.0f);
+            axisLine.vertices = { state.commandPoints.front(), flattenedToGroundPlane(state.currentPos) };
+            primitives.push_back(std::move(axisLine));
+        }
+        else if (state.ellipseSubMode == EllipseDrawSubMode::AwaitMinorAxis && state.commandPoints.size() >= 2)
+        {
+            const QVector3D center = state.commandPoints[0];
+            const QVector3D axisEnd = state.commandPoints[1];
+            const QVector3D currentPoint = flattenedToGroundPlane(state.currentPos);
+
+            TransientPrimitive axisLine;
+            axisLine.primitiveType = GL_LINES;
+            axisLine.color = QVector3D(0.35f, 0.90f, 1.0f);
+            axisLine.vertices = { center, axisEnd };
+            primitives.push_back(std::move(axisLine));
+
+            TransientPrimitive ellipsePreview;
+            ellipsePreview.primitiveType = GL_LINE_STRIP;
+            ellipsePreview.color = QVector3D(0.35f, 0.90f, 1.0f);
+            appendEllipsePreview(ellipsePreview.vertices, center, axisEnd, currentPoint);
+            primitives.push_back(std::move(ellipsePreview));
+        }
+        break;
+    }
+    case DrawType::Polyline:
+    case DrawType::LWPolyline:
+    {
+        if (!state.commandPoints.isEmpty())
+        {
+            TransientPrimitive polylinePreview;
+            polylinePreview.primitiveType = GL_LINE_STRIP;
+            polylinePreview.color = QVector3D(0.35f, 0.90f, 1.0f);
+
+            polylinePreview.vertices.append(flattenedToGroundPlane(state.commandPoints.front()));
+
+            for (int i = 0; i + 1 < state.commandPoints.size(); ++i)
+            {
+                const QVector3D segmentStart = flattenedToGroundPlane(state.commandPoints[i]);
+                const QVector3D segmentEnd = flattenedToGroundPlane(state.commandPoints[i + 1]);
+                const double bulge = i < state.commandBulges.size() ? state.commandBulges[i] : 0.0;
+                appendBulgePreview(polylinePreview.vertices, segmentStart, segmentEnd, bulge);
+            }
+
+            const QVector3D currentPoint = flattenedToGroundPlane(state.currentPos);
+            const QVector3D lastPoint = flattenedToGroundPlane(state.commandPoints.back());
+
+            if ((currentPoint - lastPoint).lengthSquared() > 1.0e-10f)
+            {
+                const bool arcMode = state.drawType == DrawType::Polyline
+                    ? state.polylineSubMode == PolylineDrawSubMode::AwaitArcEndPoint
+                    : state.lwPolylineSubMode == LWPolylineDrawSubMode::AwaitArcEndPoint;
+
+                if (arcMode && state.commandPoints.size() >= 2)
+                {
+                    const QVector3D tangentDirection = polylineEndTangent(state.commandPoints, state.commandBulges);
+                    const double previewBulge = bulgeFromTangent(lastPoint, tangentDirection, currentPoint);
+
+                    if (std::isfinite(previewBulge))
+                    {
+                        appendBulgePreview(polylinePreview.vertices, lastPoint, currentPoint, previewBulge);
+                    }
+                    else
+                    {
+                        polylinePreview.vertices.append(currentPoint);
+                    }
+                }
+                else
+                {
+                    polylinePreview.vertices.append(currentPoint);
+                }
+            }
+
+            primitives.push_back(std::move(polylinePreview));
+        }
+        break;
+    }
+    default:
+        break;
+    }
+
+    return primitives;
 }
 
 // 计算当前视口宽高比。

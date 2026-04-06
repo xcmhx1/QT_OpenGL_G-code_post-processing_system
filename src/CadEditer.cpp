@@ -7,6 +7,7 @@
 #include "DrawStateMachine.h"
 
 #include <cmath>
+#include <limits>
 
 namespace
 {
@@ -141,6 +142,117 @@ namespace
 
         direction.normalize();
         return center + direction * static_cast<float>(radius);
+    }
+
+    QVector3D normalizedOrZero(const QVector3D& vector)
+    {
+        if (vector.lengthSquared() <= kGeometryEpsilon)
+        {
+            return QVector3D();
+        }
+
+        QVector3D normalized = vector;
+        normalized.normalize();
+        return normalized;
+    }
+
+    QVector3D bulgeArcCenter(const QVector3D& startPoint, const QVector3D& endPoint, double bulge, bool* valid = nullptr)
+    {
+        const QVector3D chord = endPoint - startPoint;
+        const double chordLength = chord.length();
+
+        if (valid != nullptr)
+        {
+            *valid = false;
+        }
+
+        if (chordLength <= kGeometryEpsilon || std::abs(bulge) <= kGeometryEpsilon)
+        {
+            return QVector3D();
+        }
+
+        const QVector3D midpoint = (startPoint + endPoint) * 0.5f;
+        const double centerOffset = chordLength * (1.0 / bulge - bulge) * 0.25;
+        const QVector3D leftNormal
+        (
+            static_cast<float>(-chord.y() / chordLength),
+            static_cast<float>(chord.x() / chordLength),
+            0.0f
+        );
+
+        if (valid != nullptr)
+        {
+            *valid = true;
+        }
+
+        return midpoint + leftNormal * static_cast<float>(centerOffset);
+    }
+
+    QVector3D polylineEndTangent
+    (
+        const QVector<QVector3D>& points,
+        const QVector<double>& bulges
+    )
+    {
+        if (points.size() < 2)
+        {
+            return QVector3D();
+        }
+
+        const QVector3D startPoint = flattenToDrawingPlane(points[points.size() - 2]);
+        const QVector3D endPoint = flattenToDrawingPlane(points.back());
+        const double bulge = bulges.size() >= points.size() - 1 ? bulges[points.size() - 2] : 0.0;
+
+        if (std::abs(bulge) <= kGeometryEpsilon)
+        {
+            return normalizedOrZero(endPoint - startPoint);
+        }
+
+        bool hasCenter = false;
+        const QVector3D center = bulgeArcCenter(startPoint, endPoint, bulge, &hasCenter);
+
+        if (!hasCenter)
+        {
+            return normalizedOrZero(endPoint - startPoint);
+        }
+
+        const QVector3D radiusVector = endPoint - center;
+        QVector3D tangent;
+
+        if (bulge > 0.0)
+        {
+            tangent = QVector3D(-radiusVector.y(), radiusVector.x(), 0.0f);
+        }
+        else
+        {
+            tangent = QVector3D(radiusVector.y(), -radiusVector.x(), 0.0f);
+        }
+
+        return normalizedOrZero(tangent);
+    }
+
+    double bulgeFromTangent(const QVector3D& startPoint, const QVector3D& tangentDirection, const QVector3D& endPoint)
+    {
+        const QVector3D planarStartPoint = flattenToDrawingPlane(startPoint);
+        const QVector3D planarEndPoint = flattenToDrawingPlane(endPoint);
+        const QVector3D planarTangent = normalizedOrZero(QVector3D(tangentDirection.x(), tangentDirection.y(), 0.0f));
+        const QVector3D chordVector = planarEndPoint - planarStartPoint;
+
+        if (planarTangent.lengthSquared() <= kGeometryEpsilon || chordVector.lengthSquared() <= kGeometryEpsilon)
+        {
+            return 0.0;
+        }
+
+        const double dotValue = QVector3D::dotProduct(planarTangent, chordVector);
+        const double crossValue = planarTangent.x() * chordVector.y() - planarTangent.y() * chordVector.x();
+        const double alpha = std::atan2(crossValue, dotValue);
+
+        if (std::abs(std::abs(alpha) - kPi) <= 1.0e-6)
+        {
+            return std::numeric_limits<double>::infinity();
+        }
+
+        return std::tan(alpha * 0.5);
     }
 
     std::unique_ptr<DRW_Entity> createPointEntity(const QVector3D& position, const QColor& color)
@@ -290,6 +402,7 @@ namespace
     std::unique_ptr<DRW_Entity> createPolylineEntity
     (
         const QVector<QVector3D>& points,
+        const QVector<double>& bulges,
         const QColor& color,
         bool closePolyline,
         bool lightweight
@@ -312,8 +425,12 @@ namespace
                 std::shared_ptr<DRW_Vertex2D> vertex = std::make_shared<DRW_Vertex2D>();
                 vertex->x = planarPoint.x();
                 vertex->y = planarPoint.y();
-                vertex->bulge = 0.0;
                 entity->vertlist.push_back(vertex);
+            }
+
+            for (int i = 0; i < entity->vertlist.size(); ++i)
+            {
+                entity->vertlist[static_cast<size_t>(i)]->bulge = i < bulges.size() ? bulges[i] : 0.0;
             }
 
             entity->vertexnum = static_cast<int>(entity->vertlist.size());
@@ -331,8 +448,12 @@ namespace
             vertex->basePoint.x = planarPoint.x();
             vertex->basePoint.y = planarPoint.y();
             vertex->basePoint.z = 0.0;
-            vertex->bulge = 0.0;
             entity->vertlist.push_back(vertex);
+        }
+
+        for (int i = 0; i < entity->vertlist.size(); ++i)
+        {
+            entity->vertlist[static_cast<size_t>(i)]->bulge = i < bulges.size() ? bulges[i] : 0.0;
         }
 
         entity->vertexcount = static_cast<int>(entity->vertlist.size());
@@ -654,9 +775,9 @@ bool CadEditer::handleLeftPress
     case DrawType::Ellipse:
         return handleEllipseDrawing(previousState, currentState, worldPos);
     case DrawType::Polyline:
-        return handlePolylineDrawing(currentState, worldPos, false);
+        return handlePolylineDrawing(previousState, currentState, worldPos, false);
     case DrawType::LWPolyline:
-        return handlePolylineDrawing(currentState, worldPos, true);
+        return handlePolylineDrawing(previousState, currentState, worldPos, true);
     default:
         break;
     }
@@ -685,6 +806,7 @@ bool CadEditer::finishActivePolyline(DrawStateMachine& drawState, bool closePoly
     std::unique_ptr<DRW_Entity> entity = createPolylineEntity
     (
         drawState.commandPoints,
+        drawState.commandBulges,
         drawState.drawingColor,
         closePolyline,
         lightweight
@@ -696,14 +818,17 @@ bool CadEditer::finishActivePolyline(DrawStateMachine& drawState, bool closePoly
     }
 
     drawState.commandPoints.clear();
+    drawState.commandBulges.clear();
 
     if (lightweight)
     {
         drawState.lwPolylineSubMode = LWPolylineDrawSubMode::AwaitFirstPoint;
+        drawState.lwPolylineArcMode = false;
     }
     else
     {
         drawState.polylineSubMode = PolylineDrawSubMode::AwaitFirstPoint;
+        drawState.polylineArcMode = false;
     }
 
     return true;
@@ -717,6 +842,7 @@ bool CadEditer::beginMove(DrawStateMachine& drawState, CadItem* item)
     }
 
     drawState.commandPoints.clear();
+    drawState.commandBulges.clear();
     drawState.isDrawing = false;
     drawState.drawType = DrawType::None;
     drawState.editType = EditType::Move;
@@ -981,9 +1107,81 @@ bool CadEditer::handleEllipseDrawing
     return false;
 }
 
-bool CadEditer::handlePolylineDrawing(DrawStateMachine& currentState, const QVector3D& worldPos, bool lightweight)
+bool CadEditer::handlePolylineDrawing
+(
+    const DrawStateMachine& previousState,
+    DrawStateMachine& currentState,
+    const QVector3D& worldPos,
+    bool lightweight
+)
 {
-    currentState.commandPoints.append(worldPos);
+    const QVector3D planarPoint = flattenToDrawingPlane(worldPos);
+    const bool arcMode = lightweight ? currentState.lwPolylineArcMode : currentState.polylineArcMode;
+
+    if ((lightweight && previousState.lwPolylineSubMode == LWPolylineDrawSubMode::AwaitFirstPoint)
+        || (!lightweight && previousState.polylineSubMode == PolylineDrawSubMode::AwaitFirstPoint))
+    {
+        currentState.commandPoints = { planarPoint };
+        currentState.commandBulges.clear();
+
+        if (lightweight)
+        {
+            currentState.lwPolylineSubMode = arcMode ? LWPolylineDrawSubMode::AwaitArcEndPoint : LWPolylineDrawSubMode::AwaitLineEndPoint;
+        }
+        else
+        {
+            currentState.polylineSubMode = arcMode ? PolylineDrawSubMode::AwaitArcEndPoint : PolylineDrawSubMode::AwaitLineEndPoint;
+        }
+
+        return true;
+    }
+
+    if (currentState.commandPoints.isEmpty())
+    {
+        return false;
+    }
+
+    const QVector3D lastPoint = flattenToDrawingPlane(currentState.commandPoints.back());
+
+    if ((planarPoint - lastPoint).lengthSquared() <= kGeometryEpsilon)
+    {
+        return false;
+    }
+
+    if ((lightweight && previousState.lwPolylineSubMode == LWPolylineDrawSubMode::AwaitArcEndPoint)
+        || (!lightweight && previousState.polylineSubMode == PolylineDrawSubMode::AwaitArcEndPoint))
+    {
+        const QVector3D tangentDirection = polylineEndTangent(currentState.commandPoints, currentState.commandBulges);
+
+        if (tangentDirection.lengthSquared() <= kGeometryEpsilon)
+        {
+            return false;
+        }
+
+        const double bulge = bulgeFromTangent(lastPoint, tangentDirection, planarPoint);
+
+        if (!std::isfinite(bulge))
+        {
+            return false;
+        }
+
+        currentState.commandBulges.append(bulge);
+        currentState.commandPoints.append(planarPoint);
+
+        if (lightweight)
+        {
+            currentState.lwPolylineSubMode = LWPolylineDrawSubMode::AwaitArcEndPoint;
+        }
+        else
+        {
+            currentState.polylineSubMode = PolylineDrawSubMode::AwaitArcEndPoint;
+        }
+
+        return true;
+    }
+
+    currentState.commandBulges.append(0.0);
+    currentState.commandPoints.append(planarPoint);
 
     if (lightweight)
     {

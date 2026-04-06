@@ -54,7 +54,7 @@ private:
     bool handleCircleDrawing(const DrawStateMachine& previousState, DrawStateMachine& currentState, const QVector3D& worldPos);
     bool handleArcDrawing(const DrawStateMachine& previousState, DrawStateMachine& currentState, const QVector3D& worldPos);
     bool handleEllipseDrawing(const DrawStateMachine& previousState, DrawStateMachine& currentState, const QVector3D& worldPos);
-    bool handlePolylineDrawing(DrawStateMachine& currentState, const QVector3D& worldPos, bool lightweight);
+    bool handlePolylineDrawing(const DrawStateMachine& previousState, DrawStateMachine& currentState, const QVector3D& worldPos, bool lightweight);
     bool handleMoveEditing(const DrawStateMachine& previousState, DrawStateMachine& currentState, const QVector3D& worldPos);
 
     bool addEntity(std::unique_ptr<DRW_Entity> entity);

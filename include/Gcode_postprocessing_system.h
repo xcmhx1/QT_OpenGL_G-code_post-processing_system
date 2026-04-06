@@ -1,7 +1,9 @@
 #pragma once
 
+#include "CadCommandLineWidget.h"
 #include "CadEditer.h"
 #include "CadDocument.h"
+#include "CadStatusPaneWidget.h"
 
 #include <QtWidgets/QMainWindow>
 
@@ -20,7 +22,12 @@ public:
     ~Gcode_postprocessing_system();
 
 private:
+    bool importCadFile(const QString& filePath);
+
+private:
     Ui::Gcode_postprocessing_systemClass* ui = nullptr;
+    CadCommandLineWidget* m_commandLineWidget = nullptr;
+    CadStatusPaneWidget* m_statusPaneWidget = nullptr;
     CadEditer m_editer;
     CadDocument m_document;
 };

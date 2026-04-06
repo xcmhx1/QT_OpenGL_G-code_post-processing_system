@@ -146,6 +146,14 @@
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
     </ClCompile>
+    <ClCompile Include="src\CadCommandLineWidget.cpp">
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+    </ClCompile>
+    <ClCompile Include="src\CadStatusPaneWidget.cpp">
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+    </ClCompile>
     <ClCompile Include="src\CadEditer.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
@@ -197,6 +205,7 @@
     <QtMoc Include="include\CadViewer.h" />
     <ClInclude Include="include\CadArcItem.h" />
     <ClInclude Include="include\CadCircleItem.h" />
+    <ClInclude Include="include\CadCommandLineWidget.h" />
     <ClInclude Include="include\CadEditer.h" />
     <ClInclude Include="include\CadEllipseItem.h" />
     <QtMoc Include="include\CadItem.h" />
@@ -204,6 +213,7 @@
     <ClInclude Include="include\CadLWPolylineItem.h" />
     <ClInclude Include="include\CadPointItem.h" />
     <ClInclude Include="include\CadPolylineItem.h" />
+    <ClInclude Include="include\CadStatusPaneWidget.h" />
     <QtMoc Include="include\CadDocument.h" />
     <ClInclude Include="include\CadController.h" />
     <ClInclude Include="include\DrawStateMachine.h" />
