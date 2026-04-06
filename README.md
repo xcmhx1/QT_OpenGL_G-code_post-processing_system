@@ -2,7 +2,7 @@
 
 [G/M 代码参考](./technical_file/G-M_Code.md)
 
-本项目是一个基于 Qt 6 Widgets、OpenGL 4.5 Core Profile、Visual Studio 2026 的 Windows 桌面 CAD / G-code 后处理程序。当前代码主线已经具备 CAD 文件导入、位图矢量化导入、二维图元显示、基础交互、简单绘图与编辑命令，但 G 代码导出链路仍未接通，整体仍处于 CAD 视图与编辑基础设施持续完善阶段。
+本项目是一个基于 Qt 6 Widgets、OpenGL 4.5 Core Profile、Visual Studio 2026 的 Windows 桌面 CAD / G-code 后处理程序。当前代码主线已经具备 CAD 文件导入、位图矢量化导入、二维图元显示、基础交互、简单绘图与编辑命令，并新增了纯 `2D` 激光加工 G 代码生成后端与 JSON Profile 配置能力；不过导出菜单和参数配置界面尚未接线，`3D` 生成模式也还未实现。
 
 ## 项目现状
 
@@ -18,10 +18,13 @@
 - 提供点、线、圆、圆弧、椭圆、多段线、轻量多段线的交互式绘制
 - 提供删除、移动、改色、Undo / Redo
 - 提供 transient 预览、十字光标叠加、选中高亮
+- 提供 `GProfile` JSON 配置读写，支持文件头尾、实体类型头尾、实体颜色头尾三类配置
+- 提供 `GGenerator` 纯 `2D` G 代码生成后端，支持 `Line`、`Arc`、`Circle`、`Ellipse`、`Polyline`、`LWPolyline`
 
 当前未完成或未接线：
 
-- `Gcode_postprocessing_system.ui` 中的“导出 G 代码”“反向加工”等菜单项当前没有业务绑定
+- `Gcode_postprocessing_system.ui` 中的“导出 G 代码”“反向加工”等菜单项当前仍没有业务绑定
+- `GGenerator` 当前仅实现纯 `2D` 生成，`3D` 模式入口已预留但未实现
 - [src/CadDocument.cpp](D:/projects/visual_studio_2026/G-code_post-processing_system/src/CadDocument.cpp) 中 `CadDocument::saveDxfDocument()` 与 `CadDocument::eportDxfDocument()` 仍为空实现
 - 仓库没有独立自动化测试工程，验证仍以手工构建和手工交互检查为主
 
@@ -85,6 +88,8 @@ G-code_post-processing_system/
 |   |-- CadDocument.h                       # 文档模型
 |   |-- CadBitmapImportDialog.h             # 位图导入参数对话框
 |   |-- CadBitmapVectorizer.h               # 位图预处理与矢量化拟合
+|   |-- GProfile.h                          # G 代码 Profile 配置模型
+|   |-- GGenerator.h                        # G 代码生成器
 |   |-- CadItem.h / CadItem.cpp             # 图元基类
 |   |-- CadLineItem.h                       # 直线图元
 |   |-- CadCircleItem.h                     # 圆图元
@@ -126,6 +131,8 @@ G-code_post-processing_system/
 |   |-- CadDocument.cpp                     # 文档模型实现
 |   |-- CadBitmapImportDialog.cpp           # 位图导入配置与预览
 |   |-- CadBitmapVectorizer.cpp             # 位图预处理、轮廓提取、图元拟合
+|   |-- GProfile.cpp                        # G 代码 Profile 配置读写
+|   |-- GGenerator.cpp                      # 纯 2D G 代码生成
 |   |-- Cad*Item.cpp                        # 各类图元几何离散与显示数据生成
 |   |-- CadGraphicsCoordinator.cpp          # 渲染协调实现
 |   |-- CadSceneCoordinator.cpp             # 场景协调实现
@@ -158,7 +165,7 @@ G-code_post-processing_system/
 
 ## 总体架构
 
-项目当前按“主窗口 + Viewer + Controller + Editer + Document + 渲染协调层 + DXF Adapter + Bitmap Vectorizer”的组合结构组织。相比早期版本，`CadViewer` 内部职责已经进一步拆分给 `CadSceneCoordinator`、`CadGraphicsCoordinator`、`CadEntityRenderer`、`CadEntityPicker` 等子模块。
+项目当前按“主窗口 + Viewer + Controller + Editer + Document + 渲染协调层 + DXF Adapter + Bitmap Vectorizer + G-code Backend”的组合结构组织。相比早期版本，`CadViewer` 内部职责已经进一步拆分给 `CadSceneCoordinator`、`CadGraphicsCoordinator`、`CadEntityRenderer`、`CadEntityPicker` 等子模块。
 
 ```text
 用户输入 / Qt 菜单 / 拖拽文件 / 键盘鼠标
@@ -202,6 +209,8 @@ CadDocument                                (Model)
                         |
                         v
                      libdxfrw
+        |
+        `------> GGenerator + GProfile      (2D 后处理 / Profile 配置)
 ```
 
 ### 分层职责
@@ -248,6 +257,13 @@ CadDocument                                (Model)
 - 将轮廓拟合为点、线、圆、圆弧、椭圆、多段线等实体
 - 将生成实体追加或替换到当前文档
 
+`GProfile` + `GGenerator`
+
+- `GProfile` 负责读取、保存 JSON 格式的 G 代码配置
+- 当前配置范围包括文件头尾、实体类型头尾、实体颜色头尾
+- `GGenerator` 直接解析现有 `CadItem` 子类和原始 `DRW_Entity` 参数生成 G 代码
+- 当前仅实现纯 `2D` 激光加工输出，`3D` 模式暂未实现
+
 `CadSceneCoordinator` + `CadGraphicsCoordinator`
 
 - `CadSceneCoordinator` 负责文档绑定、边界计算、GPU 缓冲重建时机
@@ -285,6 +301,18 @@ CadDocument                                (Model)
 4. `CadEditer` 根据当前状态创建或修改 `DRW_Entity`
 5. `CadDocument` 更新内部图元并发出 `sceneChanged`
 6. Viewer 自动刷新，Undo / Redo 栈按事务规则更新
+
+### G 代码生成
+
+1. `GGenerator` 绑定当前 `CadDocument`
+2. 生成时通过 `GProfile` 读取文件头尾、实体类型头尾、实体颜色头尾配置
+3. `GGenerator` 直接解析 `CadItem` 对应的原始实体参数
+4. 当前 `2D` 输出支持：
+   `Line -> G01`
+   `Arc/Circle -> G02/G03 + I/J`
+   `Polyline/LWPolyline -> 直线段 + bulge 圆弧段`
+   `Ellipse -> 离散为 G01`
+5. 生成器在导出时弹出文件保存对话框并输出 `.nc/.gcode/.txt`
 
 ## 使用说明
 
@@ -347,6 +375,23 @@ CadDocument                                (Model)
 - `Ctrl + Y`：重做
 - `Ctrl + Shift + Z`：重做
 
+### G 代码生成说明
+
+当前后处理后端已经具备以下能力：
+
+- 支持纯 `2D` G 代码生成
+- 支持 `Line`、`Arc`、`Circle`、`Ellipse`、`Polyline`、`LWPolyline`
+- 支持读取 `CadItem::m_processOrder` 作为导出顺序
+- 支持读取 `CadItem::m_isReverse` 作为反向加工标记
+- 支持按 `GProfile` 套用文件头尾、实体类型头尾、实体颜色头尾
+
+当前限制：
+
+- 尚未绑定到主窗口菜单动作
+- `Point` 当前不会输出加工轨迹
+- `Ellipse` 当前通过折线离散输出，不使用专门椭圆插补指令
+- `3D` 生成模式尚未实现
+
 ### 位图导入说明
 
 位图导入对话框当前支持以下能力：
@@ -377,13 +422,18 @@ CadDocument                                (Model)
 3. 导入一张简单黑白位图，验证预处理预览、矢量化结果和图层参数是否符合预期
 4. 验证平移、缩放、顶视图、轨道观察、拾取是否正常
 5. 验证绘图命令、移动、删除、改色、Undo / Redo 是否正常
-6. 验证命令栏提示、状态栏坐标、拖拽导入是否正常
+6. 载入一份 `GProfile` 配置并验证 JSON 读写是否正常
+7. 调用 `GGenerator` 导出一份纯 `2D` G 代码，检查头尾、类型配置、颜色配置和圆弧方向是否符合预期
+8. 验证命令栏提示、状态栏坐标、拖拽导入是否正常
 
 ## 已知注意事项
 
 - 当前内部仅完整支持 7 类 CAD 图元的可视化与编辑
 - 新建图元强制落在 `Z=0` 平面
 - 位图导入依赖 OpenCV 运行时 DLL 拷贝到输出目录
+- `GGenerator` 当前仅实现纯 `2D` 输出，`3D` 模式未完成
+- `GGenerator` 目前还是后端能力，尚未和主窗口导出菜单绑定
+- `Ellipse` 当前按折线离散导出，精度取决于固定采样密度
 - 第三方 `libdxfrw` 目录不应轻易修改
 - 工程里仍存在部分历史遗留命名，修改构建配置前需要先核对 `.ui`、`.vcxproj` 与当前源码是否一致
 
