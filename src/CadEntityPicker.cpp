@@ -21,6 +21,7 @@ namespace CadEntityPicker
         float pickThresholdPixels
     )
     {
+        // 拾取逻辑统一在屏幕空间里进行，避免直接在世界空间做投影相关判断。
         const QPointF clickPoint(screenPos);
         const float maxDistanceSquared = pickThresholdPixels * pickThresholdPixels;
 
@@ -31,6 +32,7 @@ namespace CadEntityPicker
         {
             const auto& vertices = entity->m_geometry.vertices;
 
+            // 没有离散几何的图元无法参与拾取。
             if (vertices.isEmpty())
             {
                 continue;
@@ -38,6 +40,7 @@ namespace CadEntityPicker
 
             float entityDistanceSquared = std::numeric_limits<float>::max();
 
+            // 点图元只需比较鼠标到投影点的距离。
             if (entity->m_type == DRW::ETYPE::POINT || vertices.size() == 1)
             {
                 const QPointF point = CadViewerUtils::projectToScreen
@@ -52,6 +55,7 @@ namespace CadEntityPicker
             }
             else
             {
+                // 折线类图元逐段比较“鼠标点到屏幕线段”的最短距离。
                 for (int i = 0; i < vertices.size() - 1; ++i)
                 {
                     const QPointF start = CadViewerUtils::projectToScreen
@@ -76,6 +80,7 @@ namespace CadEntityPicker
                 }
             }
 
+            // 只在阈值内保留最近命中的实体；后遍历到的更近对象会覆盖旧结果。
             if (entityDistanceSquared <= bestDistanceSquared)
             {
                 bestDistanceSquared = entityDistanceSquared;

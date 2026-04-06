@@ -14,6 +14,8 @@ class CadItem;
 
 namespace CadEntityPicker
 {
+    // 在屏幕空间执行简单拾取：
+    // 点图元测点到点距离，线/折线类图元测点到线段距离，返回最近命中的实体 ID。
     EntityId pickEntity
     (
         const std::vector<std::unique_ptr<CadItem>>& entities,

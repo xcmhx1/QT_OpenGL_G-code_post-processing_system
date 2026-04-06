@@ -9,7 +9,11 @@
 
 namespace CadViewTransform
 {
+    // 统一计算视口宽高比，内部会对高度为 0 的情况做保护。
     float aspectRatio(int viewportWidth, int viewportHeight);
+
+    // 从屏幕坐标反投影到世界坐标。
+    // depth 使用 NDC 深度，-1 对应近平面，1 对应远平面。
     QVector3D screenToWorld
     (
         const OrbitalCamera& camera,
@@ -18,6 +22,8 @@ namespace CadViewTransform
         const QPoint& screenPos,
         float depth = 0.0f
     );
+
+    // 把屏幕点投影到 Z=0 地平面，是二维绘图和坐标显示最常用的入口。
     QVector3D screenToGroundPlane
     (
         const OrbitalCamera& camera,
@@ -25,6 +31,8 @@ namespace CadViewTransform
         int viewportHeight,
         const QPoint& screenPos
     );
+
+    // 把屏幕点投影到任意固定 Z 平面。
     QVector3D screenToPlane
     (
         const OrbitalCamera& camera,
@@ -33,6 +41,8 @@ namespace CadViewTransform
         const QPoint& screenPos,
         float planeZ
     );
+
+    // 把世界坐标投影回屏幕像素坐标。
     QPoint worldToScreen
     (
         const OrbitalCamera& camera,
@@ -40,5 +50,7 @@ namespace CadViewTransform
         int viewportHeight,
         const QVector3D& worldPos
     );
+
+    // 估算一个屏幕像素在世界空间中对应的长度，当前主要用于平移和拾取辅助。
     float pixelToWorldScale(const OrbitalCamera& camera, int viewportHeight);
 }

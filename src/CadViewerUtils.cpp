@@ -14,6 +14,7 @@ namespace CadViewerUtils
 {
     EntityId toEntityId(const CadItem* entity)
     {
+        // 直接以对象地址作为运行期实体 ID，避免额外维护独立编号表。
         return static_cast<EntityId>(reinterpret_cast<quintptr>(entity));
     }
 
@@ -25,8 +26,10 @@ namespace CadViewerUtils
         int viewportHeight
     )
     {
+        // 先把世界坐标变到裁剪空间，再转换到 NDC。
         const QVector4D clip = viewProjection * QVector4D(worldPos, 1.0f);
 
+        // w 为 0 说明无法进行透视除法，此时返回空点作为兜底。
         if (qFuzzyIsNull(clip.w()))
         {
             return QPointF();
@@ -34,6 +37,7 @@ namespace CadViewerUtils
 
         const QVector3D ndc = clip.toVector3DAffine();
 
+        // Qt 屏幕坐标系的 Y 轴向下，因此这里对 NDC 的 Y 做翻转。
         return QPointF
         (
             (ndc.x() + 1.0f) * 0.5f * viewportWidth,
@@ -46,6 +50,7 @@ namespace CadViewerUtils
         const QPointF segment = end - start;
         const double lengthSquared = segment.x() * segment.x() + segment.y() * segment.y();
 
+        // 退化线段直接退化为“点到点距离”。
         if (lengthSquared <= 1.0e-12)
         {
             const QPointF delta = point - start;
@@ -53,6 +58,7 @@ namespace CadViewerUtils
         }
 
         const QPointF fromStart = point - start;
+        // 通过投影系数 t 把点投到线段上，并裁剪到 [0, 1] 范围内。
         const double t = std::clamp
         (
             (fromStart.x() * segment.x() + fromStart.y() * segment.y()) / lengthSquared,
@@ -67,6 +73,7 @@ namespace CadViewerUtils
 
     GLenum primitiveTypeForEntity(const CadItem* entity)
     {
+        // 空对象默认按折线处理，避免上层还要额外判空。
         if (entity == nullptr)
         {
             return GL_LINE_STRIP;
@@ -85,6 +92,7 @@ namespace CadViewerUtils
 
     QVector3D flattenedToGroundPlane(const QVector3D& point)
     {
+        // 当前二维绘图统一落在世界坐标 Z=0 平面。
         return QVector3D(point.x(), point.y(), 0.0f);
     }
 }

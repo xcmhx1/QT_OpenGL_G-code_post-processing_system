@@ -18,6 +18,7 @@ namespace
 
     QVector3D projectPointToRadius(const QVector3D& center, const QVector3D& radiusPoint, const QVector3D& currentPoint)
     {
+        // 把当前鼠标点投影到已知半径的圆上，便于圆/圆弧预览保持半径稳定。
         const float radius = (radiusPoint - center).length();
 
         if (radius <= 1.0e-6f)
@@ -43,6 +44,7 @@ namespace
 
     void appendCirclePreview(QVector<QVector3D>& vertices, const QVector3D& center, float radius, int segments = 96)
     {
+        // 用固定段数把圆预览离散为闭合折线。
         if (radius <= 1.0e-6f)
         {
             return;
@@ -74,6 +76,7 @@ namespace
         int segments = 96
     )
     {
+        // 圆弧预览沿起止角区间等角度采样。
         const float radius = (startPoint - center).length();
 
         if (radius <= 1.0e-6f)
@@ -84,6 +87,7 @@ namespace
         float startAngle = std::atan2(startPoint.y() - center.y(), startPoint.x() - center.x());
         float endAngle = std::atan2(endPoint.y() - center.y(), endPoint.x() - center.x());
 
+        // 展开到正向区间，避免结束角小于开始角时预览反向跳变。
         while (endAngle <= startAngle)
         {
             endAngle += 2.0f * kPi;
@@ -115,6 +119,7 @@ namespace
         int segments = 96
     )
     {
+        // 椭圆预览用“中心 + 长轴方向 + 短轴方向”的参数方程采样。
         const QVector3D majorAxis = majorAxisPoint - center;
         const float majorLength = majorAxis.length();
 
@@ -123,6 +128,7 @@ namespace
             return;
         }
 
+        // ratioPoint 用于确定短轴长度，先把它在长轴方向上的分量扣掉。
         const QVector3D toRatioPoint = ratioPoint - center;
         const float projectedLength = QVector3D::dotProduct(toRatioPoint, majorAxis) / majorLength;
         const float minorSquared = std::max(0.0f, toRatioPoint.lengthSquared() - projectedLength * projectedLength);
@@ -133,6 +139,7 @@ namespace
             return;
         }
 
+        // 这里默认在当前二维绘图平面里构造与长轴正交的短轴方向。
         QVector3D majorDirection = majorAxis;
         majorDirection.normalize();
         const QVector3D minorDirection(-majorDirection.y(), majorDirection.x(), 0.0f);
@@ -153,6 +160,7 @@ namespace
 
     QVector3D normalizedOrZero(const QVector3D& vector)
     {
+        // 归一化前先过滤退化向量，避免产生 NaN。
         if (vector.lengthSquared() <= kBasisEpsilon)
         {
             return QVector3D();
@@ -165,16 +173,19 @@ namespace
 
     void appendBulgePreview(QVector<QVector3D>& vertices, const QVector3D& startPoint, const QVector3D& endPoint, double bulge)
     {
+        // 多段线圆弧段预览与实体离散使用同一套 bulge 几何解释。
         const double dx = endPoint.x() - startPoint.x();
         const double dy = endPoint.y() - startPoint.y();
         const double chordLength = std::sqrt(dx * dx + dy * dy);
 
+        // bulge 为 0 或弦长退化时，直接追加终点即可。
         if (chordLength <= 1.0e-10 || std::abs(bulge) < 1.0e-8)
         {
             vertices.append(endPoint);
             return;
         }
 
+        // 由 bulge 恢复圆心、半径与扫角，再按弧长展开中间采样点。
         const double midpointX = (startPoint.x() + endPoint.x()) * 0.5;
         const double midpointY = (startPoint.y() + endPoint.y()) * 0.5;
         const double centerOffset = chordLength * (1.0 / bulge - bulge) * 0.25;
@@ -204,6 +215,7 @@ namespace
 
     QVector3D bulgeArcCenter(const QVector3D& startPoint, const QVector3D& endPoint, double bulge, bool* valid = nullptr)
     {
+        // 这个辅助函数用于从起终点和 bulge 直接恢复圆心位置。
         const QVector3D chord = endPoint - startPoint;
         const double chordLength = chord.length();
 
@@ -236,6 +248,7 @@ namespace
 
     QVector3D polylineEndTangent(const QVector<QVector3D>& points, const QVector<double>& bulges)
     {
+        // 计算当前多段线末段的切向，用于圆弧续接预览。
         if (points.size() < 2)
         {
             return QVector3D();
@@ -245,6 +258,7 @@ namespace
         const QVector3D endPoint = CadViewerUtils::flattenedToGroundPlane(points.back());
         const double bulge = bulges.size() >= points.size() - 1 ? bulges[points.size() - 2] : 0.0;
 
+        // 直线段的切向就是最后一段的方向。
         if (std::abs(bulge) < 1.0e-8)
         {
             return normalizedOrZero(endPoint - startPoint);
@@ -258,6 +272,7 @@ namespace
             return normalizedOrZero(endPoint - startPoint);
         }
 
+        // 圆弧段的末端切向与半径向量垂直，并由 bulge 正负决定朝向。
         const QVector3D radiusVector = endPoint - center;
         const QVector3D tangent = bulge > 0.0
             ? QVector3D(-radiusVector.y(), radiusVector.x(), 0.0f)
@@ -268,6 +283,7 @@ namespace
 
     double bulgeFromTangent(const QVector3D& startPoint, const QVector3D& tangentDirection, const QVector3D& endPoint)
     {
+        // 根据起点切向和终点反推 bulge，供多段线圆弧预览实时续接。
         const QVector3D planarTangent = normalizedOrZero(QVector3D(tangentDirection.x(), tangentDirection.y(), 0.0f));
         const QVector3D chordVector = CadViewerUtils::flattenedToGroundPlane(endPoint) - CadViewerUtils::flattenedToGroundPlane(startPoint);
 
@@ -280,6 +296,7 @@ namespace
         const double crossValue = planarTangent.x() * chordVector.y() - planarTangent.y() * chordVector.x();
         const double alpha = std::atan2(crossValue, dotValue);
 
+        // 当切向与弦方向接近 180 度时会趋向无穷大，这里显式处理。
         if (std::abs(std::abs(alpha) - kPi) <= 1.0e-6)
         {
             return std::numeric_limits<double>::infinity();
@@ -299,6 +316,7 @@ namespace CadPreviewBuilder
     {
         std::vector<TransientPrimitive> primitives;
 
+        // 没有活动命令时不生成任何预览图元。
         if (!state.hasActiveCommand())
         {
             return primitives;
@@ -306,6 +324,7 @@ namespace CadPreviewBuilder
 
         if (state.editType == EditType::Move)
         {
+            // Move 命令预览由“整体平移后的实体”加“一条基点到目标点引导线”组成。
             if (selectedItem != nullptr
                 && state.moveSubMode == MoveEditSubMode::AwaitTargetPoint
                 && !state.commandPoints.isEmpty())
@@ -342,6 +361,7 @@ namespace CadPreviewBuilder
         {
         case DrawType::Point:
         {
+            // 点命令只显示一个跟随鼠标的预览点。
             if (state.pointSubMode == PointDrawSubMode::AwaitPosition)
             {
                 TransientPrimitive pointPreview;
@@ -356,6 +376,7 @@ namespace CadPreviewBuilder
         }
         case DrawType::Line:
         {
+            // 直线命令在起点确定后显示一条橡皮筋线段。
             if (state.lineSubMode == LineDrawSubMode::AwaitEndPoint && !state.commandPoints.isEmpty())
             {
                 TransientPrimitive linePreview;
@@ -372,6 +393,7 @@ namespace CadPreviewBuilder
         }
         case DrawType::Circle:
         {
+            // 圆命令同时显示半径引导线和圆轮廓预览。
             if (state.circleSubMode == CircleDrawSubMode::AwaitRadius && !state.commandPoints.isEmpty())
             {
                 const QVector3D center = state.commandPoints.front();
@@ -394,6 +416,7 @@ namespace CadPreviewBuilder
         }
         case DrawType::Arc:
         {
+            // 圆弧命令会随着子状态不同，分别显示半径线、起始半径线和弧线轮廓。
             if (state.arcSubMode == ArcDrawSubMode::AwaitRadius && !state.commandPoints.isEmpty())
             {
                 TransientPrimitive radiusLine;

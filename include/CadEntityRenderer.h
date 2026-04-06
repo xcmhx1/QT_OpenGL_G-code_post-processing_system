@@ -16,6 +16,8 @@ class CadSceneRenderCache;
 class CadEntityRenderer
 {
 public:
+    // 遍历场景中的所有图元，按缓存好的 GPU 资源逐个发起绘制。
+    // selectedEntityId 用于在绘制阶段直接叠加选中高亮效果。
     static void renderEntities
     (
         QOpenGLShaderProgram& shader,

@@ -11,6 +11,8 @@ class DrawStateMachine;
 
 namespace CadPreviewBuilder
 {
+    // 根据当前命令状态生成 transient 图元。
+    // 这些图元只参与预览渲染，不会写入文档模型。
     std::vector<TransientPrimitive> buildTransientPrimitives
     (
         const DrawStateMachine& state,
