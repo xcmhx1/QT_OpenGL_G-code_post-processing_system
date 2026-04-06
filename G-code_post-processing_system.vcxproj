@@ -158,7 +158,25 @@
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
     </ClCompile>
+    <ClCompile Include="src\CadCamera.cpp" />
+    <ClCompile Include="src\CadCameraMath.cpp" />
+    <ClCompile Include="src\CadCameraUtils.cpp" />
+    <ClCompile Include="src\CadCrosshairBuilder.cpp" />
+    <ClCompile Include="src\CadEntityPicker.cpp" />
+    <ClCompile Include="src\CadEntityRenderer.cpp" />
+    <ClCompile Include="src\CadGraphicsCoordinator.cpp" />
+    <ClCompile Include="src\CadOverlayRenderer.cpp" />
+    <ClCompile Include="src\CadPreviewBuilder.cpp" />
+    <ClCompile Include="src\CadReferenceRenderer.cpp" />
+    <ClCompile Include="src\CadSceneCoordinator.cpp" />
+    <ClCompile Include="src\CadSceneContext.cpp" />
+    <ClCompile Include="src\CadSceneRenderCache.cpp" />
+    <ClCompile Include="src\CadShaderManager.cpp" />
+    <ClCompile Include="src\CadViewInteractionController.cpp" />
+    <ClCompile Include="src\CadViewTransform.cpp" />
     <ClCompile Include="src\CadViewer.cpp" />
+    <ClCompile Include="src\CadViewerUtils.cpp" />
+    <ClCompile Include="src\CadOpenGLState.cpp" />
     <ClCompile Include="src\CadController.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
@@ -204,16 +222,36 @@
   <ItemGroup>
     <QtMoc Include="include\CadViewer.h" />
     <ClInclude Include="include\CadArcItem.h" />
+    <ClInclude Include="include\CadCamera.h" />
+    <ClInclude Include="include\CadCameraMath.h" />
+    <ClInclude Include="include\CadCameraUtils.h" />
     <ClInclude Include="include\CadCircleItem.h" />
     <ClInclude Include="include\CadCommandLineWidget.h" />
+    <ClInclude Include="include\CadCrosshairBuilder.h" />
     <ClInclude Include="include\CadEditer.h" />
+    <ClInclude Include="include\CadEntityPicker.h" />
+    <ClInclude Include="include\CadEntityRenderer.h" />
+    <ClInclude Include="include\CadGraphicsCoordinator.h" />
+    <ClInclude Include="include\CadInteractionConstants.h" />
     <ClInclude Include="include\CadEllipseItem.h" />
     <QtMoc Include="include\CadItem.h" />
     <ClInclude Include="include\CadLineItem.h" />
     <ClInclude Include="include\CadLWPolylineItem.h" />
+    <ClInclude Include="include\CadOverlayRenderer.h" />
     <ClInclude Include="include\CadPointItem.h" />
+    <ClInclude Include="include\CadPreviewBuilder.h" />
     <ClInclude Include="include\CadPolylineItem.h" />
+    <ClInclude Include="include\CadRenderTypes.h" />
+    <ClInclude Include="include\CadReferenceRenderer.h" />
+    <ClInclude Include="include\CadOpenGLState.h" />
+    <ClInclude Include="include\CadSceneCoordinator.h" />
+    <ClInclude Include="include\CadSceneContext.h" />
+    <ClInclude Include="include\CadSceneRenderCache.h" />
+    <ClInclude Include="include\CadShaderManager.h" />
     <ClInclude Include="include\CadStatusPaneWidget.h" />
+    <ClInclude Include="include\CadViewInteractionController.h" />
+    <ClInclude Include="include\CadViewTransform.h" />
+    <ClInclude Include="include\CadViewerUtils.h" />
     <QtMoc Include="include\CadDocument.h" />
     <ClInclude Include="include\CadController.h" />
     <ClInclude Include="include\DrawStateMachine.h" />

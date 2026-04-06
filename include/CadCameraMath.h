@@ -1,0 +1,25 @@
+#pragma once
+
+#include <QQuaternion>
+#include <QVector3D>
+
+namespace CadCameraMath
+{
+    QVector3D worldUp();
+    QVector3D worldDown();
+    QVector3D northUp();
+    QVector3D localForward();
+    QVector3D localRight();
+    QVector3D localUp();
+    QVector3D fallbackRight();
+    QVector3D normalizedOr(const QVector3D& vector, const QVector3D& fallback);
+    QQuaternion buildOrientationFromForward
+    (
+        const QVector3D& forward,
+        const QVector3D& preferredUp,
+        const QVector3D& fallbackUp
+    );
+    QQuaternion normalizedQuaternionOrIdentity(const QQuaternion& quaternion);
+    QQuaternion alignQuaternionHemisphere(const QQuaternion& previous, const QQuaternion& current);
+    bool violatesViewConstraint(const QQuaternion& orientation);
+}
