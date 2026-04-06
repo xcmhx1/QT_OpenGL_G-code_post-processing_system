@@ -14,6 +14,8 @@
 #include "CadViewTransform.h"
 
 #include <QDragEnterEvent>
+#include <QElapsedTimer>
+#include <QDebug>
 #include <QKeyEvent>
 #include <QMimeData>
 #include <QSurfaceFormat>
@@ -21,6 +23,12 @@
 
 #include <cmath>
 #include <vector>
+
+namespace
+{
+    constexpr bool kEnableViewerPerfLogging = false;
+    constexpr qint64 kSlowFrameThresholdMs = 16;
+}
 
 // 构造函数：
 // 配置 OpenGL 4.5 Core Profile，并启用鼠标跟踪与键盘焦点。
@@ -281,6 +289,13 @@ void CadViewer::resizeGL(int w, int h)
 // 4. 绘制网格、实体、坐标轴、轨道中心标记
 void CadViewer::paintGL()
 {
+    [[maybe_unused]] QElapsedTimer frameTimer;
+
+    if constexpr (kEnableViewerPerfLogging)
+    {
+        frameTimer.start();
+    }
+
     const int framebufferWidth = std::max(1, static_cast<int>(std::round(width() * devicePixelRatioF())));
     const int framebufferHeight = std::max(1, static_cast<int>(std::round(height() * devicePixelRatioF())));
 
@@ -296,11 +311,23 @@ void CadViewer::paintGL()
         rebuildAllBuffers();
     }
 
-    renderGrid();
-    renderEntities();
-    renderTransientPrimitives();
-    renderAxis();
-    renderOrbitMarker();
+    const QMatrix4x4 viewProjection = m_camera.viewProjectionMatrix(aspectRatio());
+
+    renderGrid(viewProjection);
+    renderEntities(viewProjection);
+    renderTransientPrimitives(viewProjection);
+    renderAxis(viewProjection);
+    renderOrbitMarker(viewProjection);
+
+    if constexpr (kEnableViewerPerfLogging)
+    {
+        const qint64 elapsedMs = frameTimer.elapsed();
+
+        if (elapsedMs >= kSlowFrameThresholdMs)
+        {
+            qDebug() << "CadViewer::paintGL slow frame:" << elapsedMs << "ms";
+        }
+    }
 }
 
 // 鼠标按下：
@@ -335,7 +362,12 @@ void CadViewer::mouseMoveEvent(QMouseEvent* event)
         QOpenGLWidget::mouseMoveEvent(event);
     }
 
-    updateHoveredWorldPosition(event->pos());
+    // 平移/轨道观察时优先保证视图响应，不在每次 move 上额外做坐标投影和状态栏刷新。
+    if (interactionMode() == ViewInteractionMode::Idle)
+    {
+        updateHoveredWorldPosition(event->pos());
+    }
+
     update();
 }
 
@@ -452,14 +484,14 @@ void CadViewer::rebuildAllBuffers()
 
 // 绘制背景网格。
 // 网格不参与深度测试，始终作为背景参考显示。
-void CadViewer::renderGrid()
+void CadViewer::renderGrid(const QMatrix4x4& viewProjection)
 {
     if (!m_graphicsCoordinator.isInitialized())
     {
         return;
     }
 
-    m_graphicsCoordinator.renderGrid(m_camera.viewProjectionMatrix(aspectRatio()));
+    m_graphicsCoordinator.renderGrid(viewProjection);
 }
 
 // 绘制三轴：
@@ -467,20 +499,20 @@ void CadViewer::renderGrid()
 // - Y 绿
 // - Z 蓝
 // 其中 Z 轴可根据 axesSwapped 状态切换实线/虚线。
-void CadViewer::renderAxis()
+void CadViewer::renderAxis(const QMatrix4x4& viewProjection)
 {
     if (!m_graphicsCoordinator.isInitialized())
     {
         return;
     }
 
-    m_graphicsCoordinator.renderAxis(m_camera.viewProjectionMatrix(aspectRatio()), m_camera.axesSwapped());
+    m_graphicsCoordinator.renderAxis(viewProjection, m_camera.axesSwapped());
 }
 
 // 绘制所有实体。
 // 当前实体数据默认已是世界坐标，因此直接用 VP 变换。
 // 若实体被选中，则使用高亮色和更大的点尺寸。
-void CadViewer::renderEntities()
+void CadViewer::renderEntities(const QMatrix4x4& viewProjection)
 {
     CadDocument* scene = m_sceneCoordinator.document();
 
@@ -492,7 +524,7 @@ void CadViewer::renderEntities()
     CadEntityRenderer::renderEntities
     (
         m_graphicsCoordinator.generalShader(),
-        m_camera.viewProjectionMatrix(aspectRatio()),
+        viewProjection,
         scene->m_entities,
         m_sceneCoordinator.renderCache(),
         m_selectedEntityId
@@ -501,7 +533,7 @@ void CadViewer::renderEntities()
 
 // 绘制轨道旋转中心标记。
 // 仅在“正在轨道旋转”且场景包围盒有效时显示。
-void CadViewer::renderOrbitMarker()
+void CadViewer::renderOrbitMarker(const QMatrix4x4& viewProjection)
 {
     if (!m_graphicsCoordinator.isInitialized())
     {
@@ -510,15 +542,21 @@ void CadViewer::renderOrbitMarker()
 
     m_graphicsCoordinator.renderOrbitMarker
     (
-        m_camera.viewProjectionMatrix(aspectRatio()),
+        viewProjection,
         m_sceneCoordinator.orbitCenter(),
         m_viewInteractionController.orbitMarkerVisible(m_sceneCoordinator.hasBounds())
     );
 }
 
-void CadViewer::renderTransientPrimitives()
+void CadViewer::renderTransientPrimitives(const QMatrix4x4& viewProjection)
 {
     if (!m_graphicsCoordinator.isInitialized())
+    {
+        return;
+    }
+
+    // 视图平移/轨道观察时暂停 overlay 与命令预览构建，优先保证拖拽流畅度。
+    if (interactionMode() != ViewInteractionMode::Idle)
     {
         return;
     }
@@ -546,7 +584,7 @@ void CadViewer::renderTransientPrimitives()
 
     m_graphicsCoordinator.renderTransientPrimitives
     (
-        m_camera.viewProjectionMatrix(aspectRatio()),
+        viewProjection,
         commandPrimitives,
         crosshairPrimitives
     );

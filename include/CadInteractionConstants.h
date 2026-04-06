@@ -5,5 +5,6 @@
 namespace CadInteractionConstants
 {
     constexpr float kPickBoxHalfSizePixels = 10.0f;
-    constexpr float kCrosshairHalfLengthWorld = 100000.0f;
+    // 十字线当前按世界坐标长度绘制，过大会让 overlay 在拖动时显得发涩。
+    constexpr float kCrosshairHalfLengthWorld = 5000.0f;
 }

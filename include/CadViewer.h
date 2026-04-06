@@ -124,15 +124,15 @@ private:
     void rebuildAllBuffers();
 
     // 绘制背景网格与坐标轴。
-    void renderGrid();
-    void renderAxis();
+    void renderGrid(const QMatrix4x4& viewProjection);
+    void renderAxis(const QMatrix4x4& viewProjection);
 
     // 绘制场景实体。
-    void renderEntities();
+    void renderEntities(const QMatrix4x4& viewProjection);
 
     // 绘制轨道旋转中心标记与 transient overlay。
-    void renderOrbitMarker();
-    void renderTransientPrimitives();
+    void renderOrbitMarker(const QMatrix4x4& viewProjection);
+    void renderTransientPrimitives(const QMatrix4x4& viewProjection);
 
     void handleDocumentSceneChanged();
     void updateHoveredWorldPosition(const QPoint& screenPos);

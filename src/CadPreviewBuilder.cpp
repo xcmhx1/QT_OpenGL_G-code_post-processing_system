@@ -15,6 +15,8 @@ namespace
 {
     constexpr float kPi = 3.14159265358979323846f;
     constexpr float kBasisEpsilon = 1.0e-8f;
+    constexpr int kPreviewCurveSegments = 48;
+    constexpr int kPreviewBulgeBaseSegments = 64;
 
     QVector3D projectPointToRadius(const QVector3D& center, const QVector3D& radiusPoint, const QVector3D& currentPoint)
     {
@@ -42,7 +44,7 @@ namespace
         return center + direction * radius;
     }
 
-    void appendCirclePreview(QVector<QVector3D>& vertices, const QVector3D& center, float radius, int segments = 96)
+    void appendCirclePreview(QVector<QVector3D>& vertices, const QVector3D& center, float radius, int segments = kPreviewCurveSegments)
     {
         // 用固定段数把圆预览离散为闭合折线。
         if (radius <= 1.0e-6f)
@@ -73,7 +75,7 @@ namespace
         const QVector3D& center,
         const QVector3D& startPoint,
         const QVector3D& endPoint,
-        int segments = 96
+        int segments = kPreviewCurveSegments
     )
     {
         // 圆弧预览沿起止角区间等角度采样。
@@ -116,7 +118,7 @@ namespace
         const QVector3D& center,
         const QVector3D& majorAxisPoint,
         const QVector3D& ratioPoint,
-        int segments = 96
+        int segments = kPreviewCurveSegments
     )
     {
         // 椭圆预览用“中心 + 长轴方向 + 短轴方向”的参数方程采样。
@@ -194,7 +196,7 @@ namespace
         const double radius = std::hypot(startPoint.x() - centerX, startPoint.y() - centerY);
         const double startAngle = std::atan2(startPoint.y() - centerY, startPoint.x() - centerX);
         const double sweepAngle = 4.0 * std::atan(bulge);
-        const int segments = std::max(4, static_cast<int>(std::ceil(std::abs(sweepAngle) / (2.0 * kPi) * 128.0)));
+        const int segments = std::max(4, static_cast<int>(std::ceil(std::abs(sweepAngle) / (2.0 * kPi) * kPreviewBulgeBaseSegments)));
 
         for (int i = 1; i <= segments; ++i)
         {

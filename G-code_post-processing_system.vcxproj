@@ -221,6 +221,7 @@
   </ItemGroup>
   <ItemGroup>
     <QtMoc Include="include\CadViewer.h" />
+    <ClInclude Include="G-code_p.863B5449\x64\Debug\qt\uic\ui_Gcode_postprocessing_system.h" />
     <ClInclude Include="include\CadArcItem.h" />
     <ClInclude Include="include\CadCamera.h" />
     <ClInclude Include="include\CadCameraMath.h" />
