@@ -7,7 +7,7 @@
 #include <QVector>
 #include <QVector3D>
 
-#include <include/libdxfrw/libdxfrw.h>
+#include <libdxfrw.h>
 
 // 几何数据
 struct GeometryData

@@ -1,9 +1,12 @@
 ﻿#pragma once
 
+// CadViewer 头文件
 // 声明 CadViewer 模块，对外暴露当前组件的核心类型、接口和协作边界。
 // CAD 主视图模块，负责 OpenGL 生命周期、输入接入、场景刷新和信号分发。
+
 #include <memory>
 
+// Qt 核心模块
 #include <QDragEnterEvent>
 #include <QDropEvent>
 #include <QKeyEvent>
@@ -14,6 +17,7 @@
 #include <QVector3D>
 #include <QWheelEvent>
 
+// CAD 模块内部依赖
 #include "CadCamera.h"
 #include "CadGraphicsCoordinator.h"
 #include "CadRenderTypes.h"
@@ -21,7 +25,7 @@
 #include "CadViewInteractionController.h"
 #include "CadController.h"
 
-///前向声明
+/// 前向声明
 // 图元类
 class CadItem;
 // 数据层类
@@ -33,142 +37,260 @@ class CadEditer;
 // - 管理相机和视图交互
 // - 管理实体 GPU 缓冲
 // - 提供简单拾取能力
+// 继承自 QOpenGLWidget 和 OpenGL 4.5 核心功能
 class CadViewer : public QOpenGLWidget, protected QOpenGLFunctions_4_5_Core
 {
-    Q_OBJECT
+    Q_OBJECT  // Qt 元对象系统宏，支持信号槽机制
 
 public:
+    // 构造函数，初始化 CAD 视图
     explicit CadViewer(QWidget* parent = nullptr);
+
+    // 析构函数，清理资源
     ~CadViewer() override;
 
-    // 设置当前显示文档/场景。
+    // 设置当前显示文档
     void setDocument(CadDocument* document);
+
+    // 设置当前编辑器
     void setEditer(CadEditer* editer);
 
-    // 视图适配整个场景。
+    // 视图适配整个场景，调整相机使整个场景可见
     void fitScene();
 
-    // 放大。
+    // 放大视图
+    // @param factor 缩放因子，默认为 1.4
     void zoomIn(float factor = 1.4f);
 
-    // 缩小。
+    // 缩小视图
+    // @param factor 缩放因子，默认为 1.4
     void zoomOut(float factor = 1.4f);
 
-    // 屏幕坐标转世界坐标。
-    // depth 为 NDC 深度，常用 -1 表示近平面，+1 表示远平面。
+    // 屏幕坐标转世界坐标
+    // @param screenPos 屏幕坐标点
+    // @param depth NDC 深度，常用 -1 表示近平面，+1 表示远平面
+    // @return 对应的世界坐标
     QVector3D screenToWorld(const QPoint& screenPos, float depth = 0.0f) const;
+
+    // 屏幕坐标转地面平面坐标
+    // @param screenPos 屏幕坐标点
+    // @return 对应的地面平面坐标
     QVector3D screenToGroundPlane(const QPoint& screenPos) const;
 
-    // 世界坐标投影到屏幕坐标。
+    // 世界坐标投影到屏幕坐标
+    // @param worldPos 世界坐标
+    // @return 对应的屏幕坐标
     QPoint worldToScreen(const QVector3D& worldPos) const;
 
-    // 供控制器调用的视图动作接口。
+    // 供控制器调用的视图动作接口
+
+    // 开始轨道旋转交互
     void beginOrbitInteraction();
+
+    // 开始平移交互
     void beginPanInteraction();
+
+    // 更新轨道旋转交互
+    // @param screenDelta 屏幕坐标增量
     void updateOrbitInteraction(const QPoint& screenDelta);
+
+    // 更新平移交互
+    // @param screenDelta 屏幕坐标增量
     void updatePanInteraction(const QPoint& screenDelta);
+
+    // 结束视图交互
     void endViewInteraction();
+
+    // 在屏幕位置选择实体
+    // @param screenPos 屏幕坐标点
     void selectEntityAt(const QPoint& screenPos);
+
+    // 在指定屏幕位置缩放
+    // @param screenPos 屏幕坐标点
+    // @param factor 缩放因子
     void zoomAtScreenPosition(const QPoint& screenPos, float factor);
+
+    // 重置到顶视图
     void resetToTopView();
+
+    // 适配场景视图
     void fitSceneView();
+
+    // 获取当前视图模式
     CameraViewMode viewMode() const;
+
+    // 获取当前交互模式
     ViewInteractionMode interactionMode() const;
+
+    // 是否应该忽略下一次轨道旋转增量
     bool shouldIgnoreNextOrbitDelta() const;
+
+    // 消耗忽略下一次轨道旋转增量的标志
     void consumeIgnoreNextOrbitDelta();
+
+    // 请求视图更新
     void requestViewUpdate();
+
+    // 获取当前选中的实体
     CadItem* selectedEntity() const;
+
+    // 追加命令消息
+    // @param message 消息内容
     void appendCommandMessage(const QString& message);
+
+    // 刷新命令提示
     void refreshCommandPrompt();
 
 signals:
+    // 鼠标悬停世界位置变化信号
+    // @param worldPos 新的世界坐标
     void hoveredWorldPositionChanged(const QVector3D& worldPos);
+
+    // 命令提示变化信号
+    // @param prompt 新的命令提示
     void commandPromptChanged(const QString& prompt);
+
+    // 命令消息追加信号
+    // @param message 追加的消息
     void commandMessageAppended(const QString& message);
+
+    // 文件拖放请求信号
+    // @param filePath 文件路径
     void fileDropRequested(const QString& filePath);
 
 protected:
-    // OpenGL 初始化。
+    // OpenGL 初始化，在窗口第一次显示时调用
     void initializeGL() override;
 
-    // 视口尺寸变化。
+    // 视口尺寸变化响应
+    // @param w 新宽度
+    // @param h 新高度
     void resizeGL(int w, int h) override;
 
-    // 主绘制入口。
+    // 主绘制入口，每帧调用
     void paintGL() override;
 
-    // 鼠标按下事件：
+    // 鼠标按下事件处理：
     // - 中键 + Shift：轨道旋转
     // - 中键：平移
     // - 左键：拾取实体
+    // @param event 鼠标事件
     void mousePressEvent(QMouseEvent* event) override;
 
-    // 鼠标移动事件。
+    // 鼠标移动事件处理
+    // @param event 鼠标事件
     void mouseMoveEvent(QMouseEvent* event) override;
 
+    // 鼠标离开事件处理
+    // @param event 离开事件
     void leaveEvent(QEvent* event) override;
 
-    // 鼠标释放事件。
+    // 鼠标释放事件处理
+    // @param event 鼠标事件
     void mouseReleaseEvent(QMouseEvent* event) override;
 
-    // 滚轮缩放事件。
+    // 滚轮缩放事件处理
+    // @param event 滚轮事件
     void wheelEvent(QWheelEvent* event) override;
 
-    // 键盘快捷键处理。
+    // 键盘快捷键处理
+    // @param event 键盘事件
     void keyPressEvent(QKeyEvent* event) override;
+
+    // 拖拽进入事件处理
+    // @param event 拖拽事件
     void dragEnterEvent(QDragEnterEvent* event) override;
+
+    // 拖放事件处理
+    // @param event 拖放事件
     void dropEvent(QDropEvent* event) override;
 
 private:
-    // 重建全部实体 GPU 缓冲。
+    // 重建全部实体 GPU 缓冲
     void rebuildAllBuffers();
 
-    // 绘制背景网格与坐标轴。
+    // 绘制背景网格
+    // @param viewProjection 视图投影矩阵
     void renderGrid(const QMatrix4x4& viewProjection);
+
+    // 绘制坐标轴
+    // @param viewProjection 视图投影矩阵
     void renderAxis(const QMatrix4x4& viewProjection);
 
-    // 绘制场景实体。
+    // 绘制场景实体
+    // @param viewProjection 视图投影矩阵
     void renderEntities(const QMatrix4x4& viewProjection);
 
-    // 绘制轨道旋转中心标记与 transient overlay。
+    // 绘制轨道旋转中心标记
+    // @param viewProjection 视图投影矩阵
     void renderOrbitMarker(const QMatrix4x4& viewProjection);
+
+    // 绘制临时覆盖图元
+    // @param viewProjection 视图投影矩阵
     void renderTransientPrimitives(const QMatrix4x4& viewProjection);
 
+    // 处理文档场景变化
     void handleDocumentSceneChanged();
+
+    // 更新悬停世界位置
+    // @param screenPos 屏幕坐标
     void updateHoveredWorldPosition(const QPoint& screenPos);
 
-    // 简单屏幕空间拾取，返回命中的实体 ID。
+    // 简单屏幕空间拾取，返回命中的实体 ID
+    // @param screenPos 屏幕坐标
+    // @return 命中的实体ID，0 表示未命中
     EntityId pickEntity(const QPoint& screenPos) const;
+
+    // 根据 ID 查找实体
+    // @param id 实体ID
+    // @return 实体指针，nullptr 表示未找到
     CadItem* findEntityById(EntityId id) const;
+
+    // 构建临时图元列表
+    // @return 临时图元列表
     std::vector<TransientPrimitive> buildTransientPrimitives() const;
 
-    // 当前视口宽高比。
+    // 获取当前视口宽高比
+    // @return 宽高比（宽度/高度）
     float aspectRatio() const;
 
-    // 1 个屏幕像素大致对应多少世界单位。
-    // 用于拖拽平移时把鼠标位移换算为世界位移。
+    // 计算像素到世界的缩放比例
+    // 1 个屏幕像素大致对应多少世界单位
+    // 用于拖拽平移时把鼠标位移换算为世界位移
+    // @return 缩放比例
     float pixelToWorldScale() const;
 
 private:
-    // 视图相机。
+    // 视图相机，管理观察变换
     OrbitalCamera m_camera;
 
-    // scene coordinator 负责文档绑定、场景边界和 GPU 缓冲协调。
+    // 场景协调器，负责文档绑定、场景边界和 GPU 缓冲协调
     CadSceneCoordinator m_sceneCoordinator;
 
-    // graphics coordinator 负责 OpenGL 初始化状态、shader 与各渲染器。
+    // 图形协调器，负责 OpenGL 初始化状态、shader 与各渲染器
     CadGraphicsCoordinator m_graphicsCoordinator;
 
-    // 当前视口尺寸。
+    // 当前视口宽度
     int m_viewportWidth = 1;
+
+    // 当前视口高度
     int m_viewportHeight = 1;
 
+    // 视图交互控制器，管理用户交互逻辑
     CadViewInteractionController m_viewInteractionController;
+
+    // 当前选中实体的 ID，0 表示无选中
     EntityId m_selectedEntityId = 0;
+
+    // 当前光标屏幕位置
     QPoint m_cursorScreenPos;
+
+    // 是否显示十字准线覆盖
     bool m_showCrosshairOverlay = false;
+
+    // 十字准线平面 Z 坐标
     float m_crosshairPlaneZ = 0.0f;
 
-    // 控制器负责接收 Viewer 输入并维护绘图状态。
+    // 控制器，负责接收 Viewer 输入并维护绘图状态
     CadController m_controller;
 };

@@ -229,9 +229,6 @@
     <ClCompile Include="src\CadBitmapVectorizer.cpp">
       <Filter>Source Files\Model</Filter>
     </ClCompile>
-    <ClCompile Include="include\CadItem.cpp">
-      <Filter>Source Files\Item</Filter>
-    </ClCompile>
     <ClCompile Include="src\CadArcItem.cpp">
       <Filter>Source Files\Item</Filter>
     </ClCompile>
@@ -312,6 +309,9 @@
     </ClCompile>
     <ClCompile Include="src\libdxfrw\intern\rscodec.cpp">
       <Filter>Source Files\Model\libdxfrw\intern</Filter>
+    </ClCompile>
+    <ClCompile Include="src\CadItem.cpp">
+      <Filter>Source Files\Item</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

@@ -133,12 +133,9 @@
     <QtMoc Include="include\Gcode_postprocessing_system.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="src\CadItem.cpp" />
     <ClCompile Include="src\pch.cpp">
       <PrecompiledHeader>Create</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
-    </ClCompile>
-    <ClCompile Include="include\CadItem.cpp">
-      <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
     </ClCompile>
     <ClCompile Include="src\CadArcItem.cpp">
