@@ -438,9 +438,6 @@
     <ClInclude Include="include\libdxfrw\libdxfrw.h">
       <Filter>Header Files\Model\libdxfrw</Filter>
     </ClInclude>
-    <ClInclude Include="G-code_p.863B5449\x64\Debug\qt\uic\ui_Gcode_postprocessing_system.h">
-      <Filter>Header Files\View</Filter>
-    </ClInclude>
     <ClInclude Include="include\libdxfrw\drw_objects.h">
       <Filter>Header Files\Model\libdxfrw</Filter>
     </ClInclude>

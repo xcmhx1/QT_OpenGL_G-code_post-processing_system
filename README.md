@@ -90,7 +90,7 @@ G-code_post-processing_system/
 |   |-- CadBitmapVectorizer.h               # 位图预处理与矢量化拟合
 |   |-- GProfile.h                          # G 代码 Profile 配置模型
 |   |-- GGenerator.h                        # G 代码生成器
-|   |-- CadItem.h / CadItem.cpp             # 图元基类
+|   |-- CadItem.h			               # 图元基类
 |   |-- CadLineItem.h                       # 直线图元
 |   |-- CadCircleItem.h                     # 圆图元
 |   |-- CadArcItem.h                        # 圆弧图元
@@ -133,6 +133,7 @@ G-code_post-processing_system/
 |   |-- CadBitmapVectorizer.cpp             # 位图预处理、轮廓提取、图元拟合
 |   |-- GProfile.cpp                        # G 代码 Profile 配置读写
 |   |-- GGenerator.cpp                      # 纯 2D G 代码生成
+|   |-- CadItem.cpp						  # 图元基类
 |   |-- Cad*Item.cpp                        # 各类图元几何离散与显示数据生成
 |   |-- CadGraphicsCoordinator.cpp          # 渲染协调实现
 |   |-- CadSceneCoordinator.cpp             # 场景协调实现
