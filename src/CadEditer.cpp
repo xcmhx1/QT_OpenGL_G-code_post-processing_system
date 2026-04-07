@@ -1,3 +1,4 @@
+﻿// CadEditer 实现文件
 // 实现 CadEditer 模块，对应头文件中声明的主要行为和协作流程。
 // 编辑器模块，负责绘图创建、实体修改以及 Undo/Redo 命令栈管理。
 #include "pch.h"
@@ -13,15 +14,22 @@
 
 namespace
 {
+    // 几何与角度计算使用的局部常量
     constexpr double kPi = 3.14159265358979323846;
     constexpr double kTwoPi = 6.28318530717958647692;
     constexpr double kGeometryEpsilon = 1.0e-9;
 
+    // 将任意点压回二维绘图平面
+    // @param point 输入三维点
+    // @return 压平后的点
     QVector3D flattenToDrawingPlane(const QVector3D& point)
     {
         return QVector3D(point.x(), point.y(), 0.0f);
     }
 
+    // 平移一个原生 DRW 坐标
+    // @param point 待修改坐标
+    // @param delta 平移量
     void translateCoord(DRW_Coord& point, const QVector3D& delta)
     {
         point.x += delta.x();
@@ -29,6 +37,9 @@ namespace
         point.z += delta.z();
     }
 
+    // 按实体类型平移原生 DXF 实体几何
+    // @param entity 待平移实体
+    // @param delta 平移量
     void translateEntity(DRW_Entity* entity, const QVector3D& delta)
     {
         if (entity == nullptr)
@@ -93,11 +104,18 @@ namespace
         }
     }
 
+    // 把 QColor 编码为 DXF true color 整数
+    // @param color 输入颜色
+    // @return 24 位 RGB 整数
     int colorToTrueColor(const QColor& color)
     {
         return (color.red() << 16) | (color.green() << 8) | color.blue();
     }
 
+    // 应用颜色到原生实体
+    // @param entity 待修改实体
+    // @param color 目标颜色
+    // @param colorIndex 可选 ACI 索引，小于 0 时写入 true color
     void applyEntityColor(DRW_Entity* entity, const QColor& color, int colorIndex)
     {
         if (entity == nullptr)
@@ -116,11 +134,13 @@ namespace
         entity->color24 = colorToTrueColor(color);
     }
 
+    // 由圆心和圆上一点计算半径
     double radiusFromPoints(const QVector3D& center, const QVector3D& point)
     {
         return (point - center).length();
     }
 
+    // 将任意拾取点投影到指定半径的圆上
     QVector3D projectToCircle(const QVector3D& center, const QVector3D& radiusPoint, const QVector3D& pickPoint)
     {
         const double radius = radiusFromPoints(center, radiusPoint);
@@ -146,6 +166,7 @@ namespace
         return center + direction * static_cast<float>(radius);
     }
 
+    // 安全归一化向量，退化时返回零向量
     QVector3D normalizedOrZero(const QVector3D& vector)
     {
         if (vector.lengthSquared() <= kGeometryEpsilon)
@@ -158,6 +179,7 @@ namespace
         return normalized;
     }
 
+    // 由起点、终点和 bulge 反推出圆弧圆心
     QVector3D bulgeArcCenter(const QVector3D& startPoint, const QVector3D& endPoint, double bulge, bool* valid = nullptr)
     {
         const QVector3D chord = endPoint - startPoint;
@@ -190,6 +212,7 @@ namespace
         return midpoint + leftNormal * static_cast<float>(centerOffset);
     }
 
+    // 计算当前多段线末段的切向，供圆弧续接使用
     QVector3D polylineEndTangent
     (
         const QVector<QVector3D>& points,
@@ -233,6 +256,7 @@ namespace
         return normalizedOrZero(tangent);
     }
 
+    // 根据起点切向和终点反推 bulge
     double bulgeFromTangent(const QVector3D& startPoint, const QVector3D& tangentDirection, const QVector3D& endPoint)
     {
         const QVector3D planarStartPoint = flattenToDrawingPlane(startPoint);
@@ -257,6 +281,7 @@ namespace
         return std::tan(alpha * 0.5);
     }
 
+    // 创建点实体
     std::unique_ptr<DRW_Entity> createPointEntity(const QVector3D& position, const QColor& color)
     {
         const QVector3D planarPosition = flattenToDrawingPlane(position);
@@ -268,6 +293,7 @@ namespace
         return entity;
     }
 
+    // 创建直线实体
     std::unique_ptr<DRW_Entity> createLineEntity(const QVector3D& startPoint, const QVector3D& endPoint, const QColor& color)
     {
         const QVector3D planarStartPoint = flattenToDrawingPlane(startPoint);
@@ -289,6 +315,7 @@ namespace
         return entity;
     }
 
+    // 创建圆实体
     std::unique_ptr<DRW_Entity> createCircleEntity(const QVector3D& center, const QVector3D& radiusPoint, const QColor& color)
     {
         const QVector3D planarCenter = flattenToDrawingPlane(center);
@@ -312,6 +339,7 @@ namespace
         return entity;
     }
 
+    // 创建圆弧实体
     std::unique_ptr<DRW_Entity> createArcEntity
     (
         const QVector3D& center,
@@ -355,6 +383,7 @@ namespace
         return entity;
     }
 
+    // 创建椭圆实体
     std::unique_ptr<DRW_Entity> createEllipseEntity
     (
         const QVector3D& center,
@@ -401,6 +430,7 @@ namespace
         return entity;
     }
 
+    // 创建多段线或轻量多段线实体
     std::unique_ptr<DRW_Entity> createPolylineEntity
     (
         const QVector<QVector3D>& points,
@@ -464,6 +494,8 @@ namespace
     }
 }
 
+// 添加实体命令：
+// 负责把新建原生实体与对应 CadItem 一起插入文档，并支持撤销恢复。
 class AddEntityCommand final : public CadEditer::EditCommand
 {
 public:
@@ -475,6 +507,7 @@ public:
 
     bool execute() override
     {
+        // 第一次执行时创建 CadItem，后续 redo 复用已保存对象
         if (m_document == nullptr || m_entity == nullptr)
         {
             return false;
@@ -496,6 +529,7 @@ public:
 
     bool undo() override
     {
+        // 撤销时把实体和图元从文档中整体取回，以便后续 redo 重新插入
         if (m_document == nullptr || m_itemPtr == nullptr)
         {
             return false;
@@ -515,12 +549,21 @@ public:
     }
 
 private:
+    // 目标文档
     CadDocument* m_document = nullptr;
+
+    // 待插入或撤销后保存的原生实体
     std::unique_ptr<DRW_Entity> m_entity;
+
+    // 与原生实体对应的图元对象
     std::unique_ptr<CadItem> m_item;
+
+    // 当前图元裸指针，用于与文档接口协作
     CadItem* m_itemPtr = nullptr;
 };
 
+// 删除实体命令：
+// 执行时从文档中摘出实体，撤销时再插回原位。
 class DeleteEntityCommand final : public CadEditer::EditCommand
 {
 public:
@@ -562,12 +605,21 @@ public:
     }
 
 private:
+    // 目标文档
     CadDocument* m_document = nullptr;
+
+    // 被删除后缓存的原生实体
     std::unique_ptr<DRW_Entity> m_entity;
+
+    // 被删除后缓存的图元对象
     std::unique_ptr<CadItem> m_item;
+
+    // 当前图元裸指针
     CadItem* m_itemPtr = nullptr;
 };
 
+// 移动实体命令：
+// 通过对原生实体做几何平移，再触发文档刷新来实现可撤销移动。
 class MoveEntityCommand final : public CadEditer::EditCommand
 {
 public:
@@ -589,6 +641,7 @@ public:
     }
 
 private:
+    // 应用一次平移增量；Undo 通过传入相反向量复用同一逻辑
     bool applyDelta(const QVector3D& delta)
     {
         if (m_document == nullptr || m_item == nullptr || !m_document->containsEntity(m_item))
@@ -601,11 +654,18 @@ private:
     }
 
 private:
+    // 目标文档
     CadDocument* m_document = nullptr;
+
+    // 目标实体
     CadItem* m_item = nullptr;
+
+    // 平移增量
     QVector3D m_delta;
 };
 
+// 修改颜色命令：
+// 记录新旧颜色信息，执行与撤销都通过刷新原生实体颜色完成。
 class ChangeColorCommand final : public CadEditer::EditCommand
 {
 public:
@@ -633,6 +693,7 @@ public:
     }
 
 private:
+    // 按颜色与索引应用颜色，自动决定 true color 或 ACI 方案
     bool apply(const QColor& color, int colorIndex)
     {
         return apply(color, colorIndex, colorIndex >= 0 ? -1 : colorToTrueColor(color));
@@ -661,16 +722,30 @@ private:
     }
 
 private:
+    // 目标文档
     CadDocument* m_document = nullptr;
+
+    // 目标实体
     CadItem* m_item = nullptr;
+
+    // 新颜色
     QColor m_newColor;
+
+    // 新颜色索引
     int m_newColorIndex = -1;
+
+    // 旧颜色索引
     int m_oldColorIndex = DRW::ColorByLayer;
+
+    // 旧 true color
     int m_oldTrueColor = -1;
 };
 
+// 析构编辑器对象
 CadEditer::~CadEditer() = default;
 
+// 绑定当前编辑目标文档
+// @param document 文档对象指针
 void CadEditer::setDocument(CadDocument* document)
 {
     if (m_document == document)
@@ -682,6 +757,7 @@ void CadEditer::setDocument(CadDocument* document)
     m_document = document;
 }
 
+// 清空 Undo / Redo 历史
 void CadEditer::clearHistory()
 {
     m_undoStack.clear();
@@ -689,23 +765,31 @@ void CadEditer::clearHistory()
     cancelTransientCommand();
 }
 
+// 取消当前 transient 编辑命令
 void CadEditer::cancelTransientCommand()
 {
     m_moveTarget = nullptr;
 }
 
+// 查询是否可以撤销
+// @return 如果撤销栈非空返回 true，否则返回 false
 bool CadEditer::canUndo() const
 {
     return !m_undoStack.empty();
 }
 
+// 查询是否可以重做
+// @return 如果重做栈非空返回 true，否则返回 false
 bool CadEditer::canRedo() const
 {
     return !m_redoStack.empty();
 }
 
+// 执行撤销
+// @return 如果撤销成功返回 true，否则返回 false
 bool CadEditer::undo()
 {
+    // 从 Undo 栈弹出命令，撤销成功后转移到 Redo 栈
     if (m_undoStack.empty())
     {
         return false;
@@ -723,8 +807,11 @@ bool CadEditer::undo()
     return true;
 }
 
+// 执行重做
+// @return 如果重做成功返回 true，否则返回 false
 bool CadEditer::redo()
 {
+    // 从 Redo 栈弹出命令，重做成功后重新压回 Undo 栈
     if (m_redoStack.empty())
     {
         return false;
@@ -742,6 +829,7 @@ bool CadEditer::redo()
     return true;
 }
 
+// 处理左键点击驱动的绘图或编辑逻辑
 bool CadEditer::handleLeftPress
 (
     const DrawStateMachine& previousState,
@@ -749,6 +837,7 @@ bool CadEditer::handleLeftPress
     const QVector3D& worldPos
 )
 {
+    // Move 编辑优先于绘图命令处理
     if (m_document == nullptr)
     {
         return false;
@@ -764,6 +853,7 @@ bool CadEditer::handleLeftPress
         return false;
     }
 
+    // 其它绘图命令按前一时刻的 drawType 分发，确保状态机切换前后语义一致
     switch (previousState.drawType)
     {
     case DrawType::Point:
@@ -787,6 +877,10 @@ bool CadEditer::handleLeftPress
     return false;
 }
 
+// 结束当前活动多段线命令
+// @param drawState 当前绘图状态机
+// @param closePolyline 是否闭合多段线
+// @return 如果成功生成实体返回 true，否则返回 false
 bool CadEditer::finishActivePolyline(DrawStateMachine& drawState, bool closePolyline)
 {
     if (m_document == nullptr)
@@ -819,6 +913,7 @@ bool CadEditer::finishActivePolyline(DrawStateMachine& drawState, bool closePoly
         return false;
     }
 
+    // 成功落库后清空暂存点列，并把状态机复位到等待第一点
     drawState.commandPoints.clear();
     drawState.commandBulges.clear();
 
@@ -836,6 +931,10 @@ bool CadEditer::finishActivePolyline(DrawStateMachine& drawState, bool closePoly
     return true;
 }
 
+// 开始移动编辑命令
+// @param drawState 当前绘图状态机
+// @param item 待移动实体
+// @return 如果命令成功进入活动状态返回 true，否则返回 false
 bool CadEditer::beginMove(DrawStateMachine& drawState, CadItem* item)
 {
     if (m_document == nullptr || item == nullptr || !m_document->containsEntity(item))
@@ -853,6 +952,9 @@ bool CadEditer::beginMove(DrawStateMachine& drawState, CadItem* item)
     return true;
 }
 
+// 删除指定实体
+// @param item 待删除实体
+// @return 如果删除成功返回 true，否则返回 false
 bool CadEditer::deleteEntity(CadItem* item)
 {
     if (m_document == nullptr || item == nullptr || !m_document->containsEntity(item))
@@ -868,6 +970,11 @@ bool CadEditer::deleteEntity(CadItem* item)
     return executeCommand(std::make_unique<DeleteEntityCommand>(m_document, item));
 }
 
+// 修改指定实体颜色
+// @param item 目标实体
+// @param color 新颜色
+// @param colorIndex 可选 ACI 颜色索引，小于 0 时使用 true color
+// @return 如果修改成功返回 true，否则返回 false
 bool CadEditer::changeEntityColor(CadItem* item, const QColor& color, int colorIndex)
 {
     if (m_document == nullptr || item == nullptr || !m_document->containsEntity(item) || !color.isValid())
@@ -878,8 +985,12 @@ bool CadEditer::changeEntityColor(CadItem* item, const QColor& color, int colorI
     return executeCommand(std::make_unique<ChangeColorCommand>(m_document, item, color, colorIndex));
 }
 
+// 执行命令并压入 Undo 栈
+// @param command 待执行的命令对象
+// @return 如果执行成功返回 true，否则返回 false
 bool CadEditer::executeCommand(std::unique_ptr<EditCommand> command)
 {
+    // 一旦产生新命令，Redo 栈就失效
     if (command == nullptr)
     {
         return false;
@@ -895,6 +1006,7 @@ bool CadEditer::executeCommand(std::unique_ptr<EditCommand> command)
     return true;
 }
 
+// 处理点绘制命令
 bool CadEditer::handlePointDrawing
 (
     const DrawStateMachine& previousState,
@@ -912,6 +1024,7 @@ bool CadEditer::handlePointDrawing
     return addEntity(createPointEntity(worldPos, previousState.drawingColor));
 }
 
+// 处理直线绘制命令
 bool CadEditer::handleLineDrawing
 (
     const DrawStateMachine& previousState,
@@ -921,6 +1034,7 @@ bool CadEditer::handleLineDrawing
 {
     if (previousState.lineSubMode == LineDrawSubMode::AwaitStartPoint)
     {
+        // 第一次点击只记录起点
         currentState.commandPoints = { worldPos };
         return true;
     }
@@ -934,6 +1048,7 @@ bool CadEditer::handleLineDrawing
             return false;
         }
 
+        // 成功创建一段线后，把终点作为下一段的起点，支持连续折线式输入
         currentState.commandPoints = { worldPos };
         currentState.lineSubMode = LineDrawSubMode::AwaitEndPoint;
         return true;
@@ -942,6 +1057,7 @@ bool CadEditer::handleLineDrawing
     return false;
 }
 
+// 处理圆绘制命令
 bool CadEditer::handleCircleDrawing
 (
     const DrawStateMachine& previousState,
@@ -972,6 +1088,7 @@ bool CadEditer::handleCircleDrawing
     return false;
 }
 
+// 处理圆弧绘制命令
 bool CadEditer::handleArcDrawing
 (
     const DrawStateMachine& previousState,
@@ -1023,6 +1140,7 @@ bool CadEditer::handleArcDrawing
             return false;
         }
 
+        // 圆弧绘制按“圆心 -> 半径 -> 起始角 -> 终止角”四步完成
         if (!addEntity
         (
             createArcEntity
@@ -1049,6 +1167,7 @@ bool CadEditer::handleArcDrawing
     return false;
 }
 
+// 处理椭圆绘制命令
 bool CadEditer::handleEllipseDrawing
 (
     const DrawStateMachine& previousState,
@@ -1109,6 +1228,7 @@ bool CadEditer::handleEllipseDrawing
     return false;
 }
 
+// 处理多段线/轻量多段线绘制命令
 bool CadEditer::handlePolylineDrawing
 (
     const DrawStateMachine& previousState,
@@ -1123,6 +1243,7 @@ bool CadEditer::handlePolylineDrawing
     if ((lightweight && previousState.lwPolylineSubMode == LWPolylineDrawSubMode::AwaitFirstPoint)
         || (!lightweight && previousState.polylineSubMode == PolylineDrawSubMode::AwaitFirstPoint))
     {
+        // 第一击只建立起始点，并切换到后续线段/圆弧段输入状态
         currentState.commandPoints = { planarPoint };
         currentState.commandBulges.clear();
 
@@ -1153,6 +1274,7 @@ bool CadEditer::handlePolylineDrawing
     if ((lightweight && previousState.lwPolylineSubMode == LWPolylineDrawSubMode::AwaitArcEndPoint)
         || (!lightweight && previousState.polylineSubMode == PolylineDrawSubMode::AwaitArcEndPoint))
     {
+        // 圆弧续接依赖上一段末切向，按切向与新终点实时反推 bulge
         const QVector3D tangentDirection = polylineEndTangent(currentState.commandPoints, currentState.commandBulges);
 
         if (tangentDirection.lengthSquared() <= kGeometryEpsilon)
@@ -1182,6 +1304,7 @@ bool CadEditer::handlePolylineDrawing
         return true;
     }
 
+    // 直线段直接以 bulge=0 追加
     currentState.commandBulges.append(0.0);
     currentState.commandPoints.append(planarPoint);
 
@@ -1197,6 +1320,7 @@ bool CadEditer::handlePolylineDrawing
     return true;
 }
 
+// 处理移动编辑命令
 bool CadEditer::handleMoveEditing
 (
     const DrawStateMachine& previousState,
@@ -1204,6 +1328,7 @@ bool CadEditer::handleMoveEditing
     const QVector3D& worldPos
 )
 {
+    // 目标失效时立刻退出 Move 模式，避免悬空编辑状态
     if (m_moveTarget == nullptr || m_document == nullptr || !m_document->containsEntity(m_moveTarget))
     {
         currentState.commandPoints.clear();
@@ -1215,12 +1340,14 @@ bool CadEditer::handleMoveEditing
 
     if (previousState.moveSubMode == MoveEditSubMode::AwaitBasePoint)
     {
+        // 第一次点击记录基点
         currentState.commandPoints = { worldPos };
         return true;
     }
 
     if (previousState.moveSubMode == MoveEditSubMode::AwaitTargetPoint && !currentState.commandPoints.isEmpty())
     {
+        // 第二次点击确定目标点，并以两点差值作为移动增量
         const QVector3D basePoint = currentState.commandPoints.front();
         const QVector3D delta = worldPos - basePoint;
 
@@ -1232,6 +1359,7 @@ bool CadEditer::handleMoveEditing
             }
         }
 
+        // 移动完成后清空编辑状态
         currentState.commandPoints.clear();
         currentState.editType = EditType::None;
         currentState.moveSubMode = MoveEditSubMode::Idle;
@@ -1242,6 +1370,9 @@ bool CadEditer::handleMoveEditing
     return false;
 }
 
+// 向文档追加新实体
+// @param entity 待追加的原生 DXF 实体
+// @return 如果追加成功返回 true，否则返回 false
 bool CadEditer::addEntity(std::unique_ptr<DRW_Entity> entity)
 {
     if (entity == nullptr)
