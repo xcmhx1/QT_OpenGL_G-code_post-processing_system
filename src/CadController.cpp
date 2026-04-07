@@ -1,22 +1,33 @@
+﻿// CadController 实现文件
 // 实现 CadController 模块，对应头文件中声明的主要行为和协作流程。
 // 输入控制模块，负责解释键盘、鼠标、滚轮事件并驱动绘图/编辑命令。
+
 #include "pch.h"
 
 #include "CadController.h"
 
+// Qt 核心模块
 #include <QColorDialog>
 
+// CAD 模块内部依赖
 #include "CadEditer.h"
 #include "CadItem.h"
 #include "CadViewer.h"
 
+// 匿名命名空间，存放局部辅助函数
 namespace
 {
+    // 将三维点投影到绘图平面（XY平面）
+    // @param point 三维点
+    // @return 投影到XY平面的点（Z坐标为0）
     QVector3D flattenToDrawingPlane(const QVector3D& point)
     {
         return QVector3D(point.x(), point.y(), 0.0f);
     }
 
+    // 将绘制类型转换为对应的中文名称
+    // @param drawType 绘制类型
+    // @return 对应的中文名称字符串
     QString drawTypeName(DrawType drawType)
     {
         switch (drawType)
@@ -41,38 +52,51 @@ namespace
     }
 }
 
+// 设置关联的视图对象
+// @param viewer CAD 视图对象指针
 void CadController::setViewer(CadViewer* viewer)
 {
     m_viewer = viewer;
 }
 
+// 设置关联的编辑器对象
+// @param editer CAD 编辑器对象指针
 void CadController::setEditer(CadEditer* editer)
 {
     m_editer = editer;
 }
 
+// 重置控制器状态
 void CadController::reset()
 {
+    // 如果有编辑器，取消其临时命令
     if (m_editer != nullptr)
     {
         m_editer->cancelTransientCommand();
     }
 
+    // 重置绘图状态机
     m_drawState.reset();
 
+    // 如果有视图，刷新命令提示
     if (m_viewer != nullptr)
     {
         m_viewer->refreshCommandPrompt();
     }
 }
 
+// 开始绘制指定类型的图元
+// @param drawType 绘制类型
+// @param color 图元颜色，默认为白色
 void CadController::beginDrawing(DrawType drawType, const QColor& color)
 {
+    // 如果有编辑器，取消其临时命令
     if (m_editer != nullptr)
     {
         m_editer->cancelTransientCommand();
     }
 
+    // 设置绘图状态
     m_drawState.isDrawing = true;
     m_drawState.drawType = drawType;
     m_drawState.drawingColor = color;
@@ -81,9 +105,13 @@ void CadController::beginDrawing(DrawType drawType, const QColor& color)
     m_drawState.commandBulges.clear();
     m_drawState.polylineArcMode = false;
     m_drawState.lwPolylineArcMode = false;
+
+    // 重置子模式
     resetSubModes();
+    // 准备图元子模式
     preparePrimitiveSubMode();
 
+    // 如果有视图，发送消息并刷新提示
     if (m_viewer != nullptr)
     {
         m_viewer->appendCommandMessage(QStringLiteral("已进入%1命令").arg(drawTypeName(drawType)));
@@ -91,15 +119,19 @@ void CadController::beginDrawing(DrawType drawType, const QColor& color)
     }
 }
 
+// 取消当前绘制操作
 void CadController::cancelDrawing()
 {
+    // 记录是否有活动命令
     const bool hadActiveCommand = m_drawState.hasActiveCommand();
 
+    // 如果有编辑器，取消其临时命令
     if (m_editer != nullptr)
     {
         m_editer->cancelTransientCommand();
     }
 
+    // 重置绘图状态
     m_drawState.isDrawing = false;
     m_drawState.drawType = DrawType::None;
     m_drawState.editType = EditType::None;
@@ -107,8 +139,11 @@ void CadController::cancelDrawing()
     m_drawState.commandBulges.clear();
     m_drawState.polylineArcMode = false;
     m_drawState.lwPolylineArcMode = false;
+
+    // 重置子模式
     resetSubModes();
 
+    // 如果有视图，发送取消消息并刷新提示
     if (m_viewer != nullptr)
     {
         if (hadActiveCommand)
@@ -120,6 +155,9 @@ void CadController::cancelDrawing()
     }
 }
 
+// 处理鼠标按下事件
+// @param event 鼠标事件
+// @return 如果事件被处理返回 true，否则返回 false
 bool CadController::handleMousePress(QMouseEvent* event)
 {
     if (m_viewer == nullptr)
@@ -127,8 +165,10 @@ bool CadController::handleMousePress(QMouseEvent* event)
         return false;
     }
 
+    // 获取当前世界坐标
     const QVector3D worldPos = currentWorldPos(event->pos());
 
+    // 更新绘图状态机中的鼠标信息
     m_drawState.pressScreenPos = event->pos();
     m_drawState.lastScreenPos = event->pos();
     m_drawState.currentScreenPos = event->pos();
@@ -138,27 +178,36 @@ bool CadController::handleMousePress(QMouseEvent* event)
     m_drawState.lastPos = m_drawState.currentPos;
     m_drawState.currentPos = worldPos;
 
+    // 处理中键按下：视图操作
     if (event->button() == Qt::MiddleButton)
     {
         if ((event->modifiers() & Qt::ShiftModifier) != 0)
         {
+            // 中键+Shift：开始轨道旋转
             m_viewer->beginOrbitInteraction();
         }
         else
         {
+            // 中键：开始平移
             m_viewer->beginPanInteraction();
         }
 
         return true;
     }
 
+    // 处理左键按下：选择或绘图
     if (event->button() == Qt::LeftButton)
     {
+        // 保存之前的状态用于比较
         const DrawStateMachine previousState = m_drawState;
+
+        // 处理命令状态下的左键按下
         handleLeftPressInCommand(worldPos);
 
+        // 尝试由编辑器处理左键按下事件
         if (m_editer != nullptr && m_editer->handleLeftPress(previousState, m_drawState, worldPos))
         {
+            // 如果编辑器处理了事件，根据状态变化发送相应消息
             if (m_viewer != nullptr)
             {
                 if (previousState.editType == EditType::Move && m_drawState.editType == EditType::None)
@@ -200,6 +249,7 @@ bool CadController::handleMousePress(QMouseEvent* event)
             return true;
         }
 
+        // 如果编辑器未处理，执行实体选择
         m_viewer->selectEntityAt(event->pos());
         m_viewer->refreshCommandPrompt();
         return true;
@@ -208,6 +258,9 @@ bool CadController::handleMousePress(QMouseEvent* event)
     return false;
 }
 
+// 处理鼠标移动事件
+// @param event 鼠标事件
+// @return 如果事件被处理返回 true，否则返回 false
 bool CadController::handleMouseMove(QMouseEvent* event)
 {
     if (m_viewer == nullptr)
@@ -215,8 +268,10 @@ bool CadController::handleMouseMove(QMouseEvent* event)
         return false;
     }
 
+    // 获取当前世界坐标
     const QVector3D worldPos = currentWorldPos(event->pos());
 
+    // 更新绘图状态机中的鼠标信息
     m_drawState.lastScreenPos = m_drawState.currentScreenPos;
     m_drawState.currentScreenPos = event->pos();
     m_drawState.pressedButtons = event->buttons();
@@ -224,14 +279,17 @@ bool CadController::handleMouseMove(QMouseEvent* event)
     m_drawState.lastPos = m_drawState.currentPos;
     m_drawState.currentPos = worldPos;
 
+    // 如果是轨道交互且需要忽略下一次增量，则消费此标志
     if (m_viewer->interactionMode() == ViewInteractionMode::Orbiting && m_viewer->shouldIgnoreNextOrbitDelta())
     {
         m_viewer->consumeIgnoreNextOrbitDelta();
         return true;
     }
 
+    // 计算鼠标移动增量
     const QPoint delta = m_drawState.currentScreenPos - m_drawState.lastScreenPos;
 
+    // 根据当前交互模式处理移动
     switch (m_viewer->interactionMode())
     {
     case ViewInteractionMode::Panning:
@@ -247,6 +305,9 @@ bool CadController::handleMouseMove(QMouseEvent* event)
     return false;
 }
 
+// 处理鼠标释放事件
+// @param event 鼠标事件
+// @return 如果事件被处理返回 true，否则返回 false
 bool CadController::handleMouseRelease(QMouseEvent* event)
 {
     if (m_viewer == nullptr)
@@ -254,12 +315,14 @@ bool CadController::handleMouseRelease(QMouseEvent* event)
         return false;
     }
 
+    // 更新绘图状态机中的鼠标信息
     m_drawState.lastScreenPos = m_drawState.currentScreenPos;
     m_drawState.currentScreenPos = event->pos();
     m_drawState.activeButton = event->button();
     m_drawState.pressedButtons = event->buttons();
     m_drawState.keyboardModifiers = event->modifiers();
 
+    // 处理中键释放：结束视图交互
     if (event->button() == Qt::MiddleButton)
     {
         m_viewer->endViewInteraction();
@@ -269,6 +332,9 @@ bool CadController::handleMouseRelease(QMouseEvent* event)
     return false;
 }
 
+// 处理滚轮事件
+// @param event 滚轮事件
+// @return 如果事件被处理返回 true，否则返回 false
 bool CadController::handleWheel(QWheelEvent* event)
 {
     if (m_viewer == nullptr)
@@ -276,22 +342,32 @@ bool CadController::handleWheel(QWheelEvent* event)
         return false;
     }
 
+    // 获取当前世界坐标
     const QVector3D worldPos = currentWorldPos(event->position().toPoint());
     m_drawState.currentPos = worldPos;
     m_drawState.keyboardModifiers = event->modifiers();
 
+    // 计算缩放因子
     const float factor = event->angleDelta().y() > 0 ? 1.1f : (1.0f / 1.1f);
+
+    // 在鼠标位置缩放
     m_viewer->zoomAtScreenPosition(event->position().toPoint(), factor);
     event->accept();
     return true;
 }
 
+// 处理键盘按下事件
+// @param event 键盘事件
+// @return 如果事件被处理返回 true，否则返回 false
 bool CadController::handleKeyPress(QKeyEvent* event)
 {
+    // 更新键盘修饰符
     m_drawState.keyboardModifiers = event->modifiers();
 
+    // 处理Ctrl组合键：撤销/重做
     if ((event->modifiers() & Qt::ControlModifier) != 0 && m_editer != nullptr)
     {
+        // Ctrl+Shift+Z 或 Ctrl+Y：重做
         if (event->key() == Qt::Key_Z && (event->modifiers() & Qt::ShiftModifier) != 0)
         {
             const bool handled = m_editer->redo();
@@ -305,6 +381,7 @@ bool CadController::handleKeyPress(QKeyEvent* event)
             return handled;
         }
 
+        // Ctrl+Z：撤销
         if (event->key() == Qt::Key_Z)
         {
             const bool handled = m_editer->undo();
@@ -318,6 +395,7 @@ bool CadController::handleKeyPress(QKeyEvent* event)
             return handled;
         }
 
+        // Ctrl+Y：重做
         if (event->key() == Qt::Key_Y)
         {
             const bool handled = m_editer->redo();
@@ -332,26 +410,31 @@ bool CadController::handleKeyPress(QKeyEvent* event)
         }
     }
 
+    // ESC键：取消当前操作
     if (event->key() == Qt::Key_Escape)
     {
         cancelDrawing();
         return true;
     }
 
+    // 在绘图状态下处理多段线相关按键
     if (m_drawState.isDrawing && m_editer != nullptr)
     {
+        // 多段线：A键切换到圆弧模式
         if ((m_drawState.drawType == DrawType::Polyline || m_drawState.drawType == DrawType::LWPolyline)
             && event->key() == Qt::Key_A)
         {
             return setPolylineInputMode(true);
         }
 
+        // 多段线：L键切换到直线模式
         if ((m_drawState.drawType == DrawType::Polyline || m_drawState.drawType == DrawType::LWPolyline)
             && event->key() == Qt::Key_L)
         {
             return setPolylineInputMode(false);
         }
 
+        // 多段线：Enter或空格键完成多段线（不闭合）
         if ((m_drawState.drawType == DrawType::Polyline || m_drawState.drawType == DrawType::LWPolyline)
             && (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter || event->key() == Qt::Key_Space))
         {
@@ -366,6 +449,7 @@ bool CadController::handleKeyPress(QKeyEvent* event)
             return handled;
         }
 
+        // 多段线：C键闭合多段线
         if ((m_drawState.drawType == DrawType::Polyline || m_drawState.drawType == DrawType::LWPolyline)
             && event->key() == Qt::Key_C)
         {
@@ -381,33 +465,35 @@ bool CadController::handleKeyPress(QKeyEvent* event)
         }
     }
 
+    // 在有活动命令时处理其他快捷键
     if (m_drawState.hasActiveCommand())
     {
         switch (event->key())
         {
-        case Qt::Key_F:
-        case Qt::Key_T:
-        case Qt::Key_Home:
-        case Qt::Key_Plus:
-        case Qt::Key_Equal:
-        case Qt::Key_Minus:
-        case Qt::Key_Underscore:
-        case Qt::Key_P:
-        case Qt::Key_L:
-        case Qt::Key_C:
-        case Qt::Key_A:
-        case Qt::Key_E:
-        case Qt::Key_Delete:
-        case Qt::Key_K:
-        case Qt::Key_M:
-        case Qt::Key_O:
-        case Qt::Key_W:
+        case Qt::Key_F:     // 适配视图
+        case Qt::Key_T:     // 顶视图
+        case Qt::Key_Home:  // 顶视图
+        case Qt::Key_Plus:  // 放大
+        case Qt::Key_Equal: // 放大
+        case Qt::Key_Minus: // 缩小
+        case Qt::Key_Underscore: // 缩小
+        case Qt::Key_P:     // 点
+        case Qt::Key_L:     // 直线
+        case Qt::Key_C:     // 圆
+        case Qt::Key_A:     // 圆弧
+        case Qt::Key_E:     // 椭圆
+        case Qt::Key_Delete:// 删除
+        case Qt::Key_K:     // 颜色
+        case Qt::Key_M:     // 移动
+        case Qt::Key_O:     // 多段线
+        case Qt::Key_W:     // 轻量多段线
             return true;
         default:
             break;
         }
     }
 
+    // Delete键：删除选中实体
     if (event->key() == Qt::Key_Delete && m_editer != nullptr && m_viewer != nullptr)
     {
         const bool handled = m_editer->deleteEntity(m_viewer->selectedEntity());
@@ -421,6 +507,7 @@ bool CadController::handleKeyPress(QKeyEvent* event)
         return handled;
     }
 
+    // M键：开始移动命令
     if (event->key() == Qt::Key_M && m_editer != nullptr && m_viewer != nullptr)
     {
         const bool handled = m_editer->beginMove(m_drawState, m_viewer->selectedEntity());
@@ -434,6 +521,7 @@ bool CadController::handleKeyPress(QKeyEvent* event)
         return handled;
     }
 
+    // K键：修改选中实体颜色
     if (event->key() == Qt::Key_K && m_editer != nullptr && m_viewer != nullptr)
     {
         CadItem* selectedItem = m_viewer->selectedEntity();
@@ -443,6 +531,7 @@ bool CadController::handleKeyPress(QKeyEvent* event)
             return true;
         }
 
+        // 打开颜色选择对话框
         const QColor color = QColorDialog::getColor
         (
             selectedItem->m_color,
@@ -466,58 +555,59 @@ bool CadController::handleKeyPress(QKeyEvent* event)
         return handled;
     }
 
+    // 处理其他功能键
     switch (event->key())
     {
-    case Qt::Key_F:
+    case Qt::Key_F:  // 适配视图
         if (m_viewer != nullptr)
         {
             m_viewer->fitSceneView();
             return true;
         }
         break;
-    case Qt::Key_T:
-    case Qt::Key_Home:
+    case Qt::Key_T:  // 顶视图
+    case Qt::Key_Home:  // 顶视图
         if (m_viewer != nullptr)
         {
             m_viewer->resetToTopView();
             return true;
         }
         break;
-    case Qt::Key_Plus:
-    case Qt::Key_Equal:
+    case Qt::Key_Plus:  // 放大
+    case Qt::Key_Equal:  // 放大
         if (m_viewer != nullptr)
         {
             m_viewer->zoomIn();
             return true;
         }
         break;
-    case Qt::Key_Minus:
-    case Qt::Key_Underscore:
+    case Qt::Key_Minus:  // 缩小
+    case Qt::Key_Underscore:  // 缩小
         if (m_viewer != nullptr)
         {
             m_viewer->zoomOut();
             return true;
         }
         break;
-    case Qt::Key_P:
+    case Qt::Key_P:  // 开始绘制点
         beginDrawing(DrawType::Point, m_drawState.drawingColor);
         return true;
-    case Qt::Key_L:
+    case Qt::Key_L:  // 开始绘制直线
         beginDrawing(DrawType::Line, m_drawState.drawingColor);
         return true;
-    case Qt::Key_C:
+    case Qt::Key_C:  // 开始绘制圆
         beginDrawing(DrawType::Circle, m_drawState.drawingColor);
         return true;
-    case Qt::Key_A:
+    case Qt::Key_A:  // 开始绘制圆弧
         beginDrawing(DrawType::Arc, m_drawState.drawingColor);
         return true;
-    case Qt::Key_E:
+    case Qt::Key_E:  // 开始绘制椭圆
         beginDrawing(DrawType::Ellipse, m_drawState.drawingColor);
         return true;
-    case Qt::Key_O:
+    case Qt::Key_O:  // 开始绘制多段线
         beginDrawing(DrawType::Polyline, m_drawState.drawingColor);
         return true;
-    case Qt::Key_W:
+    case Qt::Key_W:  // 开始绘制轻量多段线
         beginDrawing(DrawType::LWPolyline, m_drawState.drawingColor);
         return true;
     default:
@@ -527,18 +617,25 @@ bool CadController::handleKeyPress(QKeyEvent* event)
     return false;
 }
 
+// 获取绘图状态机（可修改）
+// @return 绘图状态机引用
 DrawStateMachine& CadController::drawState()
 {
     return m_drawState;
 }
 
+// 获取绘图状态机（只读）
+// @return 绘图状态机常量引用
 const DrawStateMachine& CadController::drawState() const
 {
     return m_drawState;
 }
 
+// 获取当前命令提示文本
+// @return 命令提示字符串
 QString CadController::currentPrompt() const
 {
+    // 编辑命令提示
     if (m_drawState.editType == EditType::Move)
     {
         switch (m_drawState.moveSubMode)
@@ -552,11 +649,13 @@ QString CadController::currentPrompt() const
         }
     }
 
+    // 无活动命令提示
     if (!m_drawState.isDrawing)
     {
         return QStringLiteral("无活动命令");
     }
 
+    // 根据当前绘制类型和子模式返回相应提示
     switch (m_drawState.drawType)
     {
     case DrawType::Point:
@@ -622,6 +721,8 @@ QString CadController::currentPrompt() const
     return QStringLiteral("无活动命令");
 }
 
+// 获取当前命令名称
+// @return 命令名称字符串
 QString CadController::currentCommandName() const
 {
     if (m_drawState.editType == EditType::Move)
@@ -632,6 +733,7 @@ QString CadController::currentCommandName() const
     return drawTypeName(m_drawState.drawType);
 }
 
+// 重置所有子模式
 void CadController::resetSubModes()
 {
     m_drawState.pointSubMode = PointDrawSubMode::Idle;
@@ -644,8 +746,10 @@ void CadController::resetSubModes()
     m_drawState.moveSubMode = MoveEditSubMode::Idle;
 }
 
+// 准备图元子模式（进入绘图状态）
 void CadController::preparePrimitiveSubMode()
 {
+    // 根据绘制类型设置相应的初始子模式
     switch (m_drawState.drawType)
     {
     case DrawType::Point:
@@ -674,16 +778,21 @@ void CadController::preparePrimitiveSubMode()
     }
 }
 
+// 处理命令状态下的鼠标左键按下
+// @param worldPos 世界坐标位置
 void CadController::handleLeftPressInCommand(const QVector3D& worldPos)
 {
+    // 如果没有活动命令，则返回
     if (!m_drawState.hasActiveCommand())
     {
         return;
     }
 
+    // 更新位置信息
     m_drawState.lastPos = worldPos;
     m_drawState.currentPos = worldPos;
 
+    // 处理移动编辑
     if (m_drawState.editType == EditType::Move)
     {
         if (m_drawState.moveSubMode == MoveEditSubMode::AwaitBasePoint)
@@ -698,6 +807,7 @@ void CadController::handleLeftPressInCommand(const QVector3D& worldPos)
         return;
     }
 
+    // 根据绘制类型处理左键按下
     switch (m_drawState.drawType)
     {
     case DrawType::Point:
@@ -775,12 +885,17 @@ void CadController::handleLeftPressInCommand(const QVector3D& worldPos)
     }
 }
 
+// 检查是否有多段线命令处于活动状态
+// @return 如果多段线命令活动则返回 true
 bool CadController::isPolylineCommandActive() const
 {
     return m_drawState.isDrawing
         && (m_drawState.drawType == DrawType::Polyline || m_drawState.drawType == DrawType::LWPolyline);
 }
 
+// 设置多段线输入模式
+// @param useArc 是否使用圆弧模式
+// @return 如果成功设置模式返回 true
 bool CadController::setPolylineInputMode(bool useArc)
 {
     if (!isPolylineCommandActive())
@@ -791,6 +906,7 @@ bool CadController::setPolylineInputMode(bool useArc)
     const bool lightweight = m_drawState.drawType == DrawType::LWPolyline;
     QVector<QVector3D>& commandPoints = m_drawState.commandPoints;
 
+    // 圆弧模式需要至少两个点（一段前置线段）
     if (useArc && commandPoints.size() < 2)
     {
         if (m_viewer != nullptr)
@@ -802,6 +918,7 @@ bool CadController::setPolylineInputMode(bool useArc)
         return true;
     }
 
+    // 根据多段线类型设置相应模式
     if (lightweight)
     {
         m_drawState.lwPolylineArcMode = useArc;
@@ -821,6 +938,7 @@ bool CadController::setPolylineInputMode(bool useArc)
         }
     }
 
+    // 发送模式切换消息
     if (m_viewer != nullptr)
     {
         m_viewer->appendCommandMessage(useArc ? QStringLiteral("已切换到圆弧段输入") : QStringLiteral("已切换到直线段输入"));
@@ -830,6 +948,9 @@ bool CadController::setPolylineInputMode(bool useArc)
     return true;
 }
 
+// 将屏幕坐标转换为当前世界坐标
+// @param screenPos 屏幕坐标
+// @return 对应的世界坐标
 QVector3D CadController::currentWorldPos(const QPoint& screenPos) const
 {
     if (m_viewer == nullptr)
@@ -837,6 +958,7 @@ QVector3D CadController::currentWorldPos(const QPoint& screenPos) const
         return QVector3D();
     }
 
+    // 在命令状态下使用地面平面坐标，否则使用屏幕到世界的标准转换
     if (m_drawState.hasActiveCommand())
     {
         return m_viewer->screenToGroundPlane(screenPos);
