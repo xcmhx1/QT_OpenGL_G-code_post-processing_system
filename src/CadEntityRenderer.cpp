@@ -1,3 +1,4 @@
+// CadEntityRenderer 实现文件
 // 实现 CadEntityRenderer 模块，对应头文件中声明的主要行为和协作流程。
 // 实体渲染模块，负责把缓存好的图元数据提交给 OpenGL 绘制。
 #include "pch.h"
@@ -13,6 +14,8 @@
 
 namespace
 {
+    // 获取当前 OpenGL 上下文导出的函数表
+    // @return 可用的 OpenGL 函数表指针，无上下文时返回 nullptr
     QOpenGLFunctions* currentFunctions()
     {
         // 绘制阶段总是依赖当前上下文导出的通用 OpenGL 函数表。
@@ -25,6 +28,12 @@ namespace
     }
 }
 
+// 绘制场景实体
+// @param shader 通用绘制 Shader
+// @param mvp 当前视图使用的模型视图投影矩阵
+// @param entities 场景实体列表
+// @param sceneRenderCache 实体对应的 GPU 缓冲缓存
+// @param selectedEntityId 当前选中的实体 ID
 void CadEntityRenderer::renderEntities
 (
     QOpenGLShaderProgram& shader,

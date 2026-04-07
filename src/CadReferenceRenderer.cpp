@@ -1,3 +1,4 @@
+// CadReferenceRenderer 实现文件
 // 实现 CadReferenceRenderer 模块，对应头文件中声明的主要行为和协作流程。
 // 参考图形渲染模块，负责网格、坐标轴和轨道中心等辅助元素绘制。
 #include "pch.h"
@@ -13,6 +14,8 @@
 
 namespace
 {
+    // 获取当前 OpenGL 上下文导出的函数表
+    // @return 可用的 OpenGL 函数表指针，无上下文时返回 nullptr
     QOpenGLFunctions* currentFunctions()
     {
         if (QOpenGLContext* context = QOpenGLContext::currentContext())
@@ -23,6 +26,7 @@ namespace
         return nullptr;
     }
 
+    // 绑定位置属性为三维浮点顶点输入
     void bindVec3VertexAttribute()
     {
         if (QOpenGLFunctions* functions = currentFunctions())
@@ -33,6 +37,7 @@ namespace
     }
 }
 
+// 初始化网格顶点缓冲
 void CadReferenceRenderer::initializeGridBuffer()
 {
     std::vector<QVector3D> vertices;
@@ -44,6 +49,7 @@ void CadReferenceRenderer::initializeGridBuffer()
 
     for (int i = -gridHalfCount; i <= gridHalfCount; ++i)
     {
+        // 每个 offset 同时生成一条纵向线和一条横向线
         const float offset = i * gridStep;
         vertices.emplace_back(offset, -gridExtent, 0.0f);
         vertices.emplace_back(offset, gridExtent, 0.0f);
@@ -66,6 +72,7 @@ void CadReferenceRenderer::initializeGridBuffer()
     m_gridVao.release();
 }
 
+// 初始化坐标轴顶点缓冲
 void CadReferenceRenderer::initializeAxisBuffer()
 {
     constexpr float axisLength = 300.0f;
@@ -78,6 +85,7 @@ void CadReferenceRenderer::initializeAxisBuffer()
     vertices.emplace_back(0.0f, 0.0f, 0.0f);
     vertices.emplace_back(axisLength, 0.0f, 0.0f);
 
+    // Y 轴
     vertices.emplace_back(0.0f, 0.0f, 0.0f);
     vertices.emplace_back(0.0f, axisLength, 0.0f);
 
@@ -90,6 +98,7 @@ void CadReferenceRenderer::initializeAxisBuffer()
 
     m_axisZDashedOffset = static_cast<int>(vertices.size());
 
+    // 交换视图轴时用虚线段模拟 Z 轴，便于区分前后关系
     for (float z = 0.0f; z < axisLength; z += dashLength + gapLength)
     {
         const float z0 = z;
@@ -114,6 +123,7 @@ void CadReferenceRenderer::initializeAxisBuffer()
     m_axisVao.release();
 }
 
+// 销毁参考图形相关 GPU 资源
 void CadReferenceRenderer::destroy()
 {
     m_gridVao.destroy();
@@ -122,6 +132,9 @@ void CadReferenceRenderer::destroy()
     m_axisVbo.destroy();
 }
 
+// 绘制背景网格
+// @param shader 通用绘制 Shader
+// @param mvp 当前视图使用的模型视图投影矩阵
 void CadReferenceRenderer::renderGrid(QOpenGLShaderProgram& shader, const QMatrix4x4& mvp)
 {
     if (m_gridVertexCount <= 0)
@@ -136,6 +149,7 @@ void CadReferenceRenderer::renderGrid(QOpenGLShaderProgram& shader, const QMatri
         return;
     }
 
+    // 网格仅作为背景参考，不参与深度写入，避免干扰实体显示
     shader.bind();
     shader.setUniformValue("uMvp", mvp);
     shader.setUniformValue("uColor", QVector3D(0.22f, 0.24f, 0.28f));
@@ -155,6 +169,10 @@ void CadReferenceRenderer::renderGrid(QOpenGLShaderProgram& shader, const QMatri
     shader.release();
 }
 
+// 绘制世界坐标轴
+// @param shader 通用绘制 Shader
+// @param mvp 当前视图使用的模型视图投影矩阵
+// @param axesSwapped 是否以虚线方式显示 Z 轴
 void CadReferenceRenderer::renderAxis(QOpenGLShaderProgram& shader, const QMatrix4x4& mvp, bool axesSwapped)
 {
     if (m_axisXyVertexCount <= 0 && m_axisZSolidVertexCount <= 0)
@@ -179,12 +197,15 @@ void CadReferenceRenderer::renderAxis(QOpenGLShaderProgram& shader, const QMatri
 
     m_axisVao.bind();
 
+    // X 轴红色
     shader.setUniformValue("uColor", QVector3D(0.95f, 0.30f, 0.25f));
     functions->glDrawArrays(GL_LINES, 0, 2);
 
+    // Y 轴绿色
     shader.setUniformValue("uColor", QVector3D(0.25f, 0.85f, 0.35f));
     functions->glDrawArrays(GL_LINES, 2, 2);
 
+    // Z 轴蓝色；交换轴时改为虚线以表达特殊视图状态
     shader.setUniformValue("uColor", QVector3D(0.30f, 0.55f, 0.95f));
 
     if (axesSwapped)
