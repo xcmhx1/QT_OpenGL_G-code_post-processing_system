@@ -1,3 +1,4 @@
+// CadViewerUtils 实现文件
 // 实现 CadViewerUtils 模块，对应头文件中声明的主要行为和协作流程。
 // Viewer 辅助模块，整理视图层复用的工具函数和辅助计算逻辑。
 #include "pch.h"
@@ -12,12 +13,16 @@
 
 namespace CadViewerUtils
 {
+    // 把对象地址稳定映射为实体 ID
+    // @param entity 实体对象指针
+    // @return 运行期实体 ID
     EntityId toEntityId(const CadItem* entity)
     {
         // 直接以对象地址作为运行期实体 ID，避免额外维护独立编号表。
         return static_cast<EntityId>(reinterpret_cast<quintptr>(entity));
     }
 
+    // 把世界坐标投影到屏幕像素坐标
     QPointF projectToScreen
     (
         const QVector3D& worldPos,
@@ -45,6 +50,7 @@ namespace CadViewerUtils
         );
     }
 
+    // 计算屏幕点到线段的最短距离平方
     float distanceToSegmentSquared(const QPointF& point, const QPointF& start, const QPointF& end)
     {
         const QPointF segment = end - start;
@@ -71,6 +77,9 @@ namespace CadViewerUtils
         return static_cast<float>(delta.x() * delta.x() + delta.y() * delta.y());
     }
 
+    // 根据图元类型选择 OpenGL primitive type
+    // @param entity 实体对象指针
+    // @return 对应的 OpenGL 图元类型
     GLenum primitiveTypeForEntity(const CadItem* entity)
     {
         // 空对象默认按折线处理，避免上层还要额外判空。
@@ -90,6 +99,9 @@ namespace CadViewerUtils
         }
     }
 
+    // 把任意三维点压回 Z=0 平面
+    // @param point 输入三维点
+    // @return 压平到地平面的点
     QVector3D flattenedToGroundPlane(const QVector3D& point)
     {
         // 当前二维绘图统一落在世界坐标 Z=0 平面。

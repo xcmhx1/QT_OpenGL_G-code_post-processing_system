@@ -1,3 +1,4 @@
+// CadViewTransform 实现文件
 // 实现 CadViewTransform 模块，对应头文件中声明的主要行为和协作流程。
 // 视图变换模块，负责屏幕坐标、世界坐标与相机参数之间的转换。
 #include "pch.h"
@@ -12,12 +13,17 @@
 
 namespace CadViewTransform
 {
+    // 统一计算视口宽高比
+    // @param viewportWidth 视口宽度
+    // @param viewportHeight 视口高度
+    // @return 安全宽高比
     float aspectRatio(int viewportWidth, int viewportHeight)
     {
         // 始终对高度做最小值保护，避免除零。
         return static_cast<float>(viewportWidth) / static_cast<float>(std::max(1, viewportHeight));
     }
 
+    // 从屏幕坐标反投影到世界坐标
     QVector3D screenToWorld
     (
         const OrbitalCamera& camera,
@@ -44,6 +50,7 @@ namespace CadViewTransform
         return world.toVector3DAffine();
     }
 
+    // 把屏幕点投影到 Z=0 地平面
     QVector3D screenToGroundPlane
     (
         const OrbitalCamera& camera,
@@ -68,6 +75,7 @@ namespace CadViewTransform
         return CadViewerUtils::flattenedToGroundPlane(nearPoint);
     }
 
+    // 把屏幕点投影到任意固定 Z 平面
     QVector3D screenToPlane
     (
         const OrbitalCamera& camera,
@@ -92,6 +100,7 @@ namespace CadViewTransform
         return QVector3D(nearPoint.x(), nearPoint.y(), planeZ);
     }
 
+    // 把世界坐标投影回屏幕像素坐标
     QPoint worldToScreen
     (
         const OrbitalCamera& camera,
@@ -110,6 +119,7 @@ namespace CadViewTransform
         ).toPoint();
     }
 
+    // 估算一个屏幕像素在世界空间中对应的长度
     float pixelToWorldScale(const OrbitalCamera& camera, int viewportHeight)
     {
         // 当前相机以 viewHeight 描述可见范围，除以像素高度即可得到每像素世界尺度。

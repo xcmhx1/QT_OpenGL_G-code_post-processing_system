@@ -1,3 +1,4 @@
+// CadCamera 实现文件
 // 实现 CadCamera 模块，对应头文件中声明的主要行为和协作流程。
 // 轨道相机模块，维护观察目标、缩放参数和视角切换等核心状态。
 #include "pch.h"
@@ -8,11 +9,15 @@
 
 #include <algorithm>
 
+// 获取相机眼点位置
+// @return 当前眼点世界坐标
 QVector3D OrbitalCamera::eyePosition() const
 {
     return target - forwardDirection() * distance;
 }
 
+// 获取相机前向方向
+// @return 归一化前向向量
 QVector3D OrbitalCamera::forwardDirection() const
 {
     return CadCameraMath::normalizedOr
@@ -22,6 +27,8 @@ QVector3D OrbitalCamera::forwardDirection() const
     );
 }
 
+// 获取相机右方向
+// @return 归一化右向量
 QVector3D OrbitalCamera::rightDirection() const
 {
     return CadCameraMath::normalizedOr
@@ -31,6 +38,8 @@ QVector3D OrbitalCamera::rightDirection() const
     );
 }
 
+// 获取相机上方向
+// @return 归一化上向量
 QVector3D OrbitalCamera::upDirection() const
 {
     return CadCameraMath::normalizedOr
@@ -40,6 +49,8 @@ QVector3D OrbitalCamera::upDirection() const
     );
 }
 
+// 构建视图矩阵
+// @return 当前相机的视图矩阵
 QMatrix4x4 OrbitalCamera::viewMatrix() const
 {
     QMatrix4x4 matrix;
@@ -47,6 +58,9 @@ QMatrix4x4 OrbitalCamera::viewMatrix() const
     return matrix;
 }
 
+// 构建正交投影矩阵
+// @param aspectRatio 当前视口宽高比
+// @return 当前相机的投影矩阵
 QMatrix4x4 OrbitalCamera::projectionMatrix(float aspectRatio) const
 {
     const float safeAspectRatio = std::max(0.001f, aspectRatio);
@@ -58,13 +72,20 @@ QMatrix4x4 OrbitalCamera::projectionMatrix(float aspectRatio) const
     return matrix;
 }
 
+// 构建视图投影矩阵
+// @param aspectRatio 当前视口宽高比
+// @return 视图矩阵与投影矩阵相乘结果
 QMatrix4x4 OrbitalCamera::viewProjectionMatrix(float aspectRatio) const
 {
     return projectionMatrix(aspectRatio) * viewMatrix();
 }
 
+// 执行轨道旋转
+// @param deltaAzimuth 方位角增量
+// @param deltaElevation 俯仰角增量
 void OrbitalCamera::orbit(float deltaAzimuth, float deltaElevation)
 {
+    // 旋转时分别尝试 yaw 和 pitch，并在每一步约束极角避免翻转
     const QQuaternion previousOrientation = CadCameraMath::normalizedQuaternionOrIdentity(orientation);
     QQuaternion candidateOrientation = previousOrientation;
 
@@ -103,11 +124,16 @@ void OrbitalCamera::orbit(float deltaAzimuth, float deltaElevation)
     updateAxesSwappedState();
 }
 
+// 执行平移
+// @param worldDx 沿相机右方向的世界位移
+// @param worldDy 沿相机上方向的世界位移
 void OrbitalCamera::pan(float worldDx, float worldDy)
 {
     target += rightDirection() * worldDx + upDirection() * worldDy;
 }
 
+// 按倍率缩放
+// @param factor 缩放倍率
 void OrbitalCamera::zoom(float factor)
 {
     if (factor <= 0.0f)
@@ -118,6 +144,9 @@ void OrbitalCamera::zoom(float factor)
     viewHeight = std::clamp(viewHeight / factor, kMinViewHeight, kMaxViewHeight);
 }
 
+// 以指定世界点为锚点缩放
+// @param factor 缩放倍率
+// @param worldAnchor 缩放锚点
 void OrbitalCamera::zoomAtPoint(float factor, const QVector3D& worldAnchor)
 {
     if (factor <= 0.0f)
@@ -125,6 +154,7 @@ void OrbitalCamera::zoomAtPoint(float factor, const QVector3D& worldAnchor)
         return;
     }
 
+    // 只缩放与相机平面平行的分量，保持锚点屏幕位置尽量稳定
     const QVector3D planeOffset = worldAnchor - target;
     const QVector3D forward = forwardDirection();
     const QVector3D anchorOnCameraPlane = planeOffset - QVector3D::dotProduct(planeOffset, forward) * forward;
@@ -134,6 +164,10 @@ void OrbitalCamera::zoomAtPoint(float factor, const QVector3D& worldAnchor)
     target += deltaTarget;
 }
 
+// 适配整个场景
+// @param sceneMin 场景包围盒最小点
+// @param sceneMax 场景包围盒最大点
+// @param aspectRatio 当前视口宽高比
 void OrbitalCamera::fitAll(const QVector3D& sceneMin, const QVector3D& sceneMax, float aspectRatio)
 {
     const QVector3D size = sceneMax - sceneMin;
@@ -148,9 +182,11 @@ void OrbitalCamera::fitAll(const QVector3D& sceneMin, const QVector3D& sceneMax,
     viewHeight = std::clamp(std::max(height, width / safeAspectRatio) * 1.2f, kMinViewHeight, kMaxViewHeight);
     distance = std::max({ width, height, depth, 100.0f }) * 2.0f;
 
+    // 当前项目以二维绘图为主，fit 后统一回到顶视图
     resetTo2DTopView();
 }
 
+// 重置为二维顶视图
 void OrbitalCamera::resetTo2DTopView()
 {
     orientation = CadCameraMath::buildOrientationFromForward
@@ -162,6 +198,7 @@ void OrbitalCamera::resetTo2DTopView()
     updateAxesSwappedState();
 }
 
+// 从二维顶视图进入三维视图模式
 void OrbitalCamera::enter3DFrom2D()
 {
     const QQuaternion topViewOrientation = CadCameraMath::buildOrientationFromForward
@@ -177,6 +214,7 @@ void OrbitalCamera::enter3DFrom2D()
     updateAxesSwappedState();
 }
 
+// 根据当前前向方向更新坐标轴交换状态
 void OrbitalCamera::updateAxesSwappedState()
 {
     m_axesSwapped = forwardDirection().z() > 0.0f;

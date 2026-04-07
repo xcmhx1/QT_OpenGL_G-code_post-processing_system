@@ -1,3 +1,4 @@
+// CadSceneRenderCache 实现文件
 // 实现 CadSceneRenderCache 模块，对应头文件中声明的主要行为和协作流程。
 // 场景渲染缓存模块，负责维护实体对应的 GPU 资源与缓存数据。
 #include "pch.h"
@@ -10,6 +11,8 @@
 #include <QOpenGLContext>
 #include <QOpenGLFunctions>
 
+// 为单个图元创建或刷新 GPU 缓冲
+// @param entity 待上传的实体对象
 void CadSceneRenderCache::uploadEntity(const CadItem* entity)
 {
     // 只有存在离散几何的图元才值得上传到 GPU。
@@ -34,6 +37,7 @@ void CadSceneRenderCache::uploadEntity(const CadItem* entity)
     );
 
     // 顶点数据直接按 QVector3D 连续布局写入 VBO。
+    // 创建并写入顶点缓冲后，再配置该实体专属的 VAO
     gpuBuffer.vbo.create();
     gpuBuffer.vbo.bind();
     gpuBuffer.vbo.allocate
@@ -59,6 +63,8 @@ void CadSceneRenderCache::uploadEntity(const CadItem* entity)
     gpuBuffer.vao.release();
 }
 
+// 删除指定实体对应的 GPU 资源
+// @param id 目标实体 ID
 void CadSceneRenderCache::removeEntityBuffer(EntityId id)
 {
     // 删除前先销毁底层 OpenGL 资源，再把缓存表项移除。
@@ -74,6 +80,8 @@ void CadSceneRenderCache::removeEntityBuffer(EntityId id)
     m_entityBuffers.erase(it);
 }
 
+// 按当前实体列表整体重建缓存
+// @param entities 当前场景实体列表
 void CadSceneRenderCache::rebuildAllBuffers(const std::vector<std::unique_ptr<CadItem>>& entities)
 {
     // 场景整体重建时先清空，再按当前实体列表逐个上传。
@@ -85,6 +93,7 @@ void CadSceneRenderCache::rebuildAllBuffers(const std::vector<std::unique_ptr<Ca
     }
 }
 
+// 清空全部 GPU 缓冲
 void CadSceneRenderCache::clearAllBuffers()
 {
     // 显式销毁 VAO/VBO，确保上下文仍有效时能及时释放 GPU 资源。
@@ -98,11 +107,15 @@ void CadSceneRenderCache::clearAllBuffers()
     m_entityBuffers.clear();
 }
 
+// 获取实体缓冲表
+// @return 只读实体缓冲映射表引用
 const std::unordered_map<EntityId, EntityGpuBuffer>& CadSceneRenderCache::entityBuffers() const
 {
     return m_entityBuffers;
 }
 
+// 获取实体缓冲表
+// @return 可修改的实体缓冲映射表引用
 std::unordered_map<EntityId, EntityGpuBuffer>& CadSceneRenderCache::entityBuffers()
 {
     return m_entityBuffers;
