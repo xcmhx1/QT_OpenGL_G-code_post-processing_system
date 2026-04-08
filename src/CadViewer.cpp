@@ -1,4 +1,4 @@
-#include "pch.h"
+﻿#include "pch.h"
 
 // CadViewer 实现文件
 // 实现 CadViewer 模块，对应头文件中声明的主要行为和协作流程。
@@ -88,7 +88,7 @@ CadViewer::CadViewer(QWidget* parent)
     // 设置焦点策略
     setFocusPolicy(Qt::StrongFocus);
     // 设置光标样式
-    setCursor(Qt::BlankCursor);
+    ensureBlankCursor();
 
     // 设置控制器与当前视图的关联
     m_controller.setViewer(this);
@@ -451,6 +451,7 @@ void CadViewer::paintGL()
 // @param event 鼠标事件
 void CadViewer::mousePressEvent(QMouseEvent* event)
 {
+    ensureBlankCursor();
     // 记录光标位置
     m_cursorScreenPos = event->pos();
     // 更新十字准线显示状态
@@ -475,6 +476,7 @@ void CadViewer::mousePressEvent(QMouseEvent* event)
 // @param event 鼠标事件
 void CadViewer::mouseMoveEvent(QMouseEvent* event)
 {
+    ensureBlankCursor();
     m_cursorScreenPos = event->pos();
     m_showCrosshairOverlay = rect().contains(event->pos());
 
@@ -501,10 +503,25 @@ void CadViewer::leaveEvent(QEvent* event)
     QOpenGLWidget::leaveEvent(event);
 }
 
+void CadViewer::enterEvent(QEnterEvent* event)
+{
+    ensureBlankCursor();
+    m_showCrosshairOverlay = true;
+    QOpenGLWidget::enterEvent(event);
+    update();
+}
+
+void CadViewer::focusInEvent(QFocusEvent* event)
+{
+    ensureBlankCursor();
+    QOpenGLWidget::focusInEvent(event);
+}
+
 // 鼠标释放中键后退出当前交互模式。
 // @param event 鼠标事件
 void CadViewer::mouseReleaseEvent(QMouseEvent* event)
 {
+    ensureBlankCursor();
     m_cursorScreenPos = event->pos();
     m_showCrosshairOverlay = rect().contains(event->pos());
 
@@ -526,6 +543,7 @@ void CadViewer::mouseReleaseEvent(QMouseEvent* event)
 // @param event 滚轮事件
 void CadViewer::wheelEvent(QWheelEvent* event)
 {
+    ensureBlankCursor();
     if (!m_controller.handleWheel(event))
     {
         QOpenGLWidget::wheelEvent(event);
@@ -541,6 +559,7 @@ void CadViewer::wheelEvent(QWheelEvent* event)
 // @param event 键盘事件
 void CadViewer::keyPressEvent(QKeyEvent* event)
 {
+    ensureBlankCursor();
     if (!m_controller.handleKeyPress(event))
     {
         QOpenGLWidget::keyPressEvent(event);
@@ -609,6 +628,14 @@ void CadViewer::dropEvent(QDropEvent* event)
 void CadViewer::rebuildAllBuffers()
 {
     m_sceneCoordinator.ensureGpuBuffersReady(m_graphicsCoordinator.isInitialized());
+}
+
+void CadViewer::ensureBlankCursor()
+{
+    if (cursor().shape() != Qt::BlankCursor)
+    {
+        setCursor(Qt::BlankCursor);
+    }
 }
 
 // 绘制背景网格。

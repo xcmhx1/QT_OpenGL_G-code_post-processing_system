@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 // CadViewer 头文件
 // 声明 CadViewer 模块，对外暴露当前组件的核心类型、接口和协作边界。
@@ -9,6 +9,8 @@
 // Qt 核心模块
 #include <QDragEnterEvent>
 #include <QDropEvent>
+#include <QEnterEvent>
+#include <QFocusEvent>
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QOpenGLFunctions_4_5_Core>
@@ -185,6 +187,12 @@ protected:
     // @param event 离开事件
     void leaveEvent(QEvent* event) override;
 
+    // 鼠标进入 Viewer 时重新隐藏系统光标
+    void enterEvent(QEnterEvent* event) override;
+
+    // 焦点回到 Viewer 时重新隐藏系统光标
+    void focusInEvent(QFocusEvent* event) override;
+
     // 鼠标释放事件处理
     // @param event 鼠标事件
     void mouseReleaseEvent(QMouseEvent* event) override;
@@ -208,6 +216,9 @@ protected:
 private:
     // 重建全部实体 GPU 缓冲
     void rebuildAllBuffers();
+
+    // 统一重新应用空白光标，避免菜单/焦点切换后系统光标回显
+    void ensureBlankCursor();
 
     // 绘制背景网格
     // @param viewProjection 视图投影矩阵
