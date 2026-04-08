@@ -951,7 +951,6 @@ std::vector<TransientPrimitive> CadViewer::buildProcessDirectionPrimitives() con
     const float pixelScale = std::max(pixelToWorldScale(), 1.0e-4f);
     const float shaftLength = pixelScale * 30.0f;
     const float wingLength = pixelScale * 12.0f;
-    const float anchorOffset = pixelScale * 5.0f;
 
     for (const std::unique_ptr<CadItem>& entity : scene->m_entities)
     {
@@ -974,7 +973,7 @@ std::vector<TransientPrimitive> CadViewer::buildProcessDirectionPrimitives() con
             continue;
         }
 
-        const QVector3D shaftStart = info.startPoint + info.direction * anchorOffset;
+        const QVector3D shaftStart = info.startPoint;
         const QVector3D shaftEnd = shaftStart + info.direction * shaftLength;
         const QVector3D wingBase = shaftEnd - info.direction * wingLength;
         const QVector3D wingOffset = perpendicular * (wingLength * 0.55f);

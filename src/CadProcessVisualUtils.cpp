@@ -22,19 +22,78 @@ namespace
         return vector;
     }
 
-    QVector3D ellipsePointAt(const DRW_Ellipse* ellipse, double parameter)
+    QVector3D leftPerpendicular(const QVector3D& vector)
     {
-        if (ellipse == nullptr)
+        return QVector3D(-vector.y(), vector.x(), 0.0f);
+    }
+
+    QVector3D bulgeArcCenter(const QVector3D& startPoint, const QVector3D& endPoint, double bulge, bool* valid = nullptr)
+    {
+        const QVector3D chord = endPoint - startPoint;
+        const double chordLength = chord.length();
+
+        if (valid != nullptr)
+        {
+            *valid = false;
+        }
+
+        if (chordLength <= kVisualEpsilon || std::abs(bulge) < 1.0e-8)
         {
             return QVector3D();
         }
 
-        const QVector3D center(ellipse->basePoint.x, ellipse->basePoint.y, ellipse->basePoint.z);
-        const QVector3D majorAxis(ellipse->secPoint.x, ellipse->secPoint.y, ellipse->secPoint.z);
+        const QVector3D midpoint = (startPoint + endPoint) * 0.5f;
+        const double centerOffset = chordLength * (1.0 / bulge - bulge) * 0.25;
+        const QVector3D leftNormal
+        (
+            static_cast<float>(-chord.y() / chordLength),
+            static_cast<float>(chord.x() / chordLength),
+            0.0f
+        );
+
+        if (valid != nullptr)
+        {
+            *valid = true;
+        }
+
+        return midpoint + leftNormal * static_cast<float>(centerOffset);
+    }
+
+    QVector3D bulgeSegmentTangentAtStart(const QVector3D& startPoint, const QVector3D& endPoint, double bulge)
+    {
+        if (std::abs(bulge) < 1.0e-8)
+        {
+            return normalizeOrZero(endPoint - startPoint);
+        }
+
+        bool valid = false;
+        const QVector3D center = bulgeArcCenter(startPoint, endPoint, bulge, &valid);
+
+        if (!valid)
+        {
+            return normalizeOrZero(endPoint - startPoint);
+        }
+
+        const QVector3D radiusVector = startPoint - center;
+        const QVector3D tangent = bulge > 0.0
+            ? leftPerpendicular(radiusVector)
+            : -leftPerpendicular(radiusVector);
+
+        return normalizeOrZero(tangent);
+    }
+
+    bool tryBuildEllipseAxes(const DRW_Ellipse* ellipse, QVector3D& majorAxis, QVector3D& minorAxis)
+    {
+        if (ellipse == nullptr)
+        {
+            return false;
+        }
+
+        majorAxis = QVector3D(ellipse->secPoint.x, ellipse->secPoint.y, ellipse->secPoint.z);
 
         if (majorAxis.lengthSquared() <= kVisualEpsilon || ellipse->ratio <= 0.0)
         {
-            return QVector3D();
+            return false;
         }
 
         QVector3D normal(ellipse->extPoint.x, ellipse->extPoint.y, ellipse->extPoint.z);
@@ -48,19 +107,214 @@ namespace
             normal.normalize();
         }
 
-        QVector3D minorAxis = QVector3D::crossProduct(normal, majorAxis);
+        minorAxis = QVector3D::crossProduct(normal, majorAxis);
 
         if (minorAxis.lengthSquared() <= kVisualEpsilon)
         {
-            return QVector3D();
+            return false;
         }
 
         minorAxis.normalize();
         minorAxis *= static_cast<float>(majorAxis.length() * ellipse->ratio);
+        return true;
+    }
+
+    QVector3D ellipsePointAt(const DRW_Ellipse* ellipse, double parameter)
+    {
+        if (ellipse == nullptr)
+        {
+            return QVector3D();
+        }
+
+        const QVector3D center(ellipse->basePoint.x, ellipse->basePoint.y, ellipse->basePoint.z);
+        QVector3D majorAxis;
+        QVector3D minorAxis;
+
+        if (!tryBuildEllipseAxes(ellipse, majorAxis, minorAxis))
+        {
+            return QVector3D();
+        }
 
         return center
             + majorAxis * static_cast<float>(std::cos(parameter))
             + minorAxis * static_cast<float>(std::sin(parameter));
+    }
+
+    QVector3D ellipseTangentAt(const DRW_Ellipse* ellipse, double parameter, bool reverseDirection)
+    {
+        QVector3D majorAxis;
+        QVector3D minorAxis;
+
+        if (!tryBuildEllipseAxes(ellipse, majorAxis, minorAxis))
+        {
+            return QVector3D();
+        }
+
+        QVector3D tangent
+        (
+            static_cast<float>(-std::sin(parameter)) * majorAxis
+            + static_cast<float>(std::cos(parameter)) * minorAxis
+        );
+
+        if (reverseDirection)
+        {
+            tangent = -tangent;
+        }
+
+        return normalizeOrZero(tangent);
+    }
+
+    QVector3D arcTangentAt(double angle, bool reverseDirection)
+    {
+        QVector3D tangent
+        (
+            static_cast<float>(-std::sin(angle)),
+            static_cast<float>(std::cos(angle)),
+            0.0f
+        );
+
+        if (reverseDirection)
+        {
+            tangent = -tangent;
+        }
+
+        return normalizeOrZero(tangent);
+    }
+
+    QVector3D polylineForwardStartTangent(const DRW_Polyline* polyline)
+    {
+        if (polyline == nullptr || polyline->vertlist.size() < 2)
+        {
+            return QVector3D();
+        }
+
+        for (size_t index = 0; index + 1 < polyline->vertlist.size(); ++index)
+        {
+            const auto& current = polyline->vertlist.at(index);
+            const auto& next = polyline->vertlist.at(index + 1);
+            const QVector3D startPoint(current->basePoint.x, current->basePoint.y, current->basePoint.z);
+            const QVector3D endPoint(next->basePoint.x, next->basePoint.y, next->basePoint.z);
+            const QVector3D tangent = bulgeSegmentTangentAtStart(startPoint, endPoint, current->bulge);
+
+            if (tangent.lengthSquared() > kVisualEpsilon)
+            {
+                return tangent;
+            }
+        }
+
+        if ((polyline->flags & 1) != 0)
+        {
+            const auto& current = polyline->vertlist.back();
+            const auto& next = polyline->vertlist.front();
+            const QVector3D startPoint(current->basePoint.x, current->basePoint.y, current->basePoint.z);
+            const QVector3D endPoint(next->basePoint.x, next->basePoint.y, next->basePoint.z);
+            return bulgeSegmentTangentAtStart(startPoint, endPoint, current->bulge);
+        }
+
+        return QVector3D();
+    }
+
+    QVector3D polylineReverseStartTangent(const DRW_Polyline* polyline)
+    {
+        if (polyline == nullptr || polyline->vertlist.size() < 2)
+        {
+            return QVector3D();
+        }
+
+        for (size_t index = polyline->vertlist.size() - 1; index > 0; --index)
+        {
+            const auto& current = polyline->vertlist.at(index);
+            const auto& next = polyline->vertlist.at(index - 1);
+            const QVector3D startPoint(current->basePoint.x, current->basePoint.y, current->basePoint.z);
+            const QVector3D endPoint(next->basePoint.x, next->basePoint.y, next->basePoint.z);
+            const QVector3D tangent = bulgeSegmentTangentAtStart(startPoint, endPoint, -next->bulge);
+
+            if (tangent.lengthSquared() > kVisualEpsilon)
+            {
+                return tangent;
+            }
+        }
+
+        if ((polyline->flags & 1) != 0)
+        {
+            const auto& current = polyline->vertlist.front();
+            const auto& next = polyline->vertlist.back();
+            const QVector3D startPoint(current->basePoint.x, current->basePoint.y, current->basePoint.z);
+            const QVector3D endPoint(next->basePoint.x, next->basePoint.y, next->basePoint.z);
+            return bulgeSegmentTangentAtStart(startPoint, endPoint, -next->bulge);
+        }
+
+        return QVector3D();
+    }
+
+    QVector3D lwPolylineForwardStartTangent(const DRW_LWPolyline* polyline)
+    {
+        if (polyline == nullptr || polyline->vertlist.size() < 2)
+        {
+            return QVector3D();
+        }
+
+        const float z = static_cast<float>(polyline->elevation);
+
+        for (size_t index = 0; index + 1 < polyline->vertlist.size(); ++index)
+        {
+            const auto& current = polyline->vertlist.at(index);
+            const auto& next = polyline->vertlist.at(index + 1);
+            const QVector3D startPoint(static_cast<float>(current->x), static_cast<float>(current->y), z);
+            const QVector3D endPoint(static_cast<float>(next->x), static_cast<float>(next->y), z);
+            const QVector3D tangent = bulgeSegmentTangentAtStart(startPoint, endPoint, current->bulge);
+
+            if (tangent.lengthSquared() > kVisualEpsilon)
+            {
+                return tangent;
+            }
+        }
+
+        if ((polyline->flags & 1) != 0)
+        {
+            const auto& current = polyline->vertlist.back();
+            const auto& next = polyline->vertlist.front();
+            const QVector3D startPoint(static_cast<float>(current->x), static_cast<float>(current->y), z);
+            const QVector3D endPoint(static_cast<float>(next->x), static_cast<float>(next->y), z);
+            return bulgeSegmentTangentAtStart(startPoint, endPoint, current->bulge);
+        }
+
+        return QVector3D();
+    }
+
+    QVector3D lwPolylineReverseStartTangent(const DRW_LWPolyline* polyline)
+    {
+        if (polyline == nullptr || polyline->vertlist.size() < 2)
+        {
+            return QVector3D();
+        }
+
+        const float z = static_cast<float>(polyline->elevation);
+
+        for (size_t index = polyline->vertlist.size() - 1; index > 0; --index)
+        {
+            const auto& current = polyline->vertlist.at(index);
+            const auto& next = polyline->vertlist.at(index - 1);
+            const QVector3D startPoint(static_cast<float>(current->x), static_cast<float>(current->y), z);
+            const QVector3D endPoint(static_cast<float>(next->x), static_cast<float>(next->y), z);
+            const QVector3D tangent = bulgeSegmentTangentAtStart(startPoint, endPoint, -next->bulge);
+
+            if (tangent.lengthSquared() > kVisualEpsilon)
+            {
+                return tangent;
+            }
+        }
+
+        if ((polyline->flags & 1) != 0)
+        {
+            const auto& current = polyline->vertlist.front();
+            const auto& next = polyline->vertlist.back();
+            const QVector3D startPoint(static_cast<float>(current->x), static_cast<float>(current->y), z);
+            const QVector3D endPoint(static_cast<float>(next->x), static_cast<float>(next->y), z);
+            return bulgeSegmentTangentAtStart(startPoint, endPoint, -next->bulge);
+        }
+
+        return QVector3D();
     }
 
     bool tryBuildGeometryAnchor(const CadItem* item, QVector3D& anchor)
@@ -137,6 +391,7 @@ CadProcessVisualInfo buildProcessVisualInfo(const CadItem* item)
         info.forwardStartPoint = QVector3D(line->basePoint.x, line->basePoint.y, line->basePoint.z);
         info.forwardEndPoint = QVector3D(line->secPoint.x, line->secPoint.y, line->secPoint.z);
         info.labelAnchor = (info.forwardStartPoint + info.forwardEndPoint) * 0.5f;
+        info.direction = normalizeOrZero(info.forwardEndPoint - info.forwardStartPoint);
         break;
     }
     case DRW::ETYPE::ARC:
@@ -156,6 +411,7 @@ CadProcessVisualInfo buildProcessVisualInfo(const CadItem* item)
             center.z()
         );
         info.labelAnchor = hasGeometryAnchor ? preferredAnchor : (info.forwardStartPoint + info.forwardEndPoint) * 0.5f;
+        info.direction = arcTangentAt(arc->staangle, false);
         break;
     }
     case DRW::ETYPE::CIRCLE:
@@ -175,6 +431,7 @@ CadProcessVisualInfo buildProcessVisualInfo(const CadItem* item)
             static_cast<float>(circle->basePoint.y),
             static_cast<float>(circle->basePoint.z)
         );
+        info.direction = QVector3D(0.0f, 1.0f, 0.0f);
         break;
     }
     case DRW::ETYPE::ELLIPSE:
@@ -202,6 +459,7 @@ CadProcessVisualInfo buildProcessVisualInfo(const CadItem* item)
         info.labelAnchor = info.closedPath
             ? QVector3D(ellipse->basePoint.x, ellipse->basePoint.y, ellipse->basePoint.z)
             : (hasGeometryAnchor ? preferredAnchor : (info.forwardStartPoint + info.forwardEndPoint) * 0.5f);
+        info.direction = ellipseTangentAt(ellipse, startParam, false);
         break;
     }
     case DRW::ETYPE::POLYLINE:
@@ -221,6 +479,7 @@ CadProcessVisualInfo buildProcessVisualInfo(const CadItem* item)
             ? info.forwardStartPoint
             : QVector3D(lastVertex->basePoint.x, lastVertex->basePoint.y, lastVertex->basePoint.z);
         info.labelAnchor = hasGeometryAnchor ? preferredAnchor : info.forwardStartPoint;
+        info.direction = polylineForwardStartTangent(polyline);
         break;
     }
     case DRW::ETYPE::LWPOLYLINE:
@@ -241,6 +500,7 @@ CadProcessVisualInfo buildProcessVisualInfo(const CadItem* item)
             ? info.forwardStartPoint
             : QVector3D(static_cast<float>(lastVertex->x), static_cast<float>(lastVertex->y), z);
         info.labelAnchor = hasGeometryAnchor ? preferredAnchor : info.forwardStartPoint;
+        info.direction = lwPolylineForwardStartTangent(polyline);
         break;
     }
     default:
@@ -249,16 +509,54 @@ CadProcessVisualInfo buildProcessVisualInfo(const CadItem* item)
 
     info.startPoint = info.isReverse ? info.forwardEndPoint : info.forwardStartPoint;
     info.endPoint = info.isReverse ? info.forwardStartPoint : info.forwardEndPoint;
-    info.direction = normalizeOrZero(item->m_processDirection);
+
+    if (info.isReverse)
+    {
+        switch (item->m_type)
+        {
+        case DRW::ETYPE::LINE:
+            info.direction = normalizeOrZero(info.endPoint - info.startPoint);
+            break;
+        case DRW::ETYPE::ARC:
+        {
+            const DRW_Arc* arc = static_cast<const DRW_Arc*>(item->m_nativeEntity);
+            info.direction = arcTangentAt(arc->endangle, true);
+            break;
+        }
+        case DRW::ETYPE::CIRCLE:
+            info.direction = QVector3D(0.0f, -1.0f, 0.0f);
+            break;
+        case DRW::ETYPE::ELLIPSE:
+        {
+            const DRW_Ellipse* ellipse = static_cast<const DRW_Ellipse*>(item->m_nativeEntity);
+            info.direction = ellipseTangentAt(ellipse, ellipse->endparam, true);
+            break;
+        }
+        case DRW::ETYPE::POLYLINE:
+        {
+            const DRW_Polyline* polyline = static_cast<const DRW_Polyline*>(item->m_nativeEntity);
+            info.direction = polylineReverseStartTangent(polyline);
+            break;
+        }
+        case DRW::ETYPE::LWPOLYLINE:
+        {
+            const DRW_LWPolyline* polyline = static_cast<const DRW_LWPolyline*>(item->m_nativeEntity);
+            info.direction = lwPolylineReverseStartTangent(polyline);
+            break;
+        }
+        default:
+            break;
+        }
+    }
 
     if (info.direction.lengthSquared() <= kVisualEpsilon)
     {
         info.direction = normalizeOrZero(info.endPoint - info.startPoint);
     }
 
-    if (item->m_type == DRW::ETYPE::CIRCLE && info.direction.lengthSquared() <= kVisualEpsilon)
+    if (info.direction.lengthSquared() <= kVisualEpsilon)
     {
-        info.direction = info.isReverse ? QVector3D(0.0f, -1.0f, 0.0f) : QVector3D(0.0f, 1.0f, 0.0f);
+        info.direction = normalizeOrZero(item->m_processDirection);
     }
 
     info.valid = true;
