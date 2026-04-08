@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "CadCommandLineWidget.h"
 #include "CadEditer.h"
@@ -25,6 +25,8 @@ private:
     bool importCadFile(const QString& filePath);
     bool importDxfFile(const QString& filePath);
     bool importBitmapFile(const QString& filePath);
+    bool exportGCode();
+    bool toggleSelectedEntityReverse();
 
 private:
     Ui::Gcode_postprocessing_systemClass* ui = nullptr;

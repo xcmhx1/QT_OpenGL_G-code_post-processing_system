@@ -1,4 +1,4 @@
-﻿// CadEditer 实现文件
+// CadEditer 实现文件
 // 实现 CadEditer 模块，对应头文件中声明的主要行为和协作流程。
 // 编辑器模块，负责绘图创建、实体修改以及 Undo/Redo 命令栈管理。
 #include "pch.h"
@@ -741,6 +741,54 @@ private:
     int m_oldTrueColor = -1;
 };
 
+// 切换反向加工命令：
+// 记录实体反向状态，在执行与撤销之间来回切换。
+class ToggleReverseCommand final : public CadEditer::EditCommand
+{
+public:
+    ToggleReverseCommand(CadDocument* document, CadItem* item)
+        : m_document(document)
+        , m_item(item)
+    {
+        if (m_item != nullptr)
+        {
+            m_originalReverse = m_item->m_isReverse;
+        }
+    }
+
+    bool execute() override
+    {
+        return apply(!m_originalReverse);
+    }
+
+    bool undo() override
+    {
+        return apply(m_originalReverse);
+    }
+
+private:
+    bool apply(bool isReverse)
+    {
+        if (m_document == nullptr || m_item == nullptr || !m_document->containsEntity(m_item))
+        {
+            return false;
+        }
+
+        m_item->m_isReverse = isReverse;
+        return m_document->refreshEntity(m_item);
+    }
+
+private:
+    // 目标文档
+    CadDocument* m_document = nullptr;
+
+    // 目标实体
+    CadItem* m_item = nullptr;
+
+    // 切换前的反向状态
+    bool m_originalReverse = false;
+};
+
 // 析构编辑器对象
 CadEditer::~CadEditer() = default;
 
@@ -983,6 +1031,19 @@ bool CadEditer::changeEntityColor(CadItem* item, const QColor& color, int colorI
     }
 
     return executeCommand(std::make_unique<ChangeColorCommand>(m_document, item, color, colorIndex));
+}
+
+// 切换指定实体的反向加工标记
+// @param item 目标实体
+// @return 如果切换成功返回 true，否则返回 false
+bool CadEditer::toggleEntityReverse(CadItem* item)
+{
+    if (m_document == nullptr || item == nullptr || !m_document->containsEntity(item))
+    {
+        return false;
+    }
+
+    return executeCommand(std::make_unique<ToggleReverseCommand>(m_document, item));
 }
 
 // 执行命令并压入 Undo 栈

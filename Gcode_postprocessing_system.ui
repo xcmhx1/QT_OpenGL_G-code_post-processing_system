@@ -30,10 +30,11 @@
     </rect>
    </property>
    <widget class="QMenu" name="menuFile">
-    <property name="title">
+   <property name="title">
      <string>文件</string>
     </property>
     <addaction name="action_File_Import_Dxf"/>
+    <addaction name="action_File_Import_Image"/>
     <addaction name="separator"/>
     <addaction name="action_File_Export_G"/>
    </widget>
@@ -75,6 +76,11 @@
   <action name="action_FileExport">
    <property name="text">
     <string>导出</string>
+   </property>
+  </action>
+  <action name="action_File_Import_Image">
+   <property name="text">
+    <string>导入图片</string>
    </property>
   </action>
   <action name="action_File_Export_G">

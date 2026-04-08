@@ -3,6 +3,8 @@
 #include "Gcode_postprocessing_system.h"
 #include "CadBitmapImportDialog.h"
 #include "CadBitmapVectorizer.h"
+#include "CadItem.h"
+#include "GGenerator.h"
 
 #include <QFileDialog>
 #include <QFileInfo>
@@ -93,6 +95,33 @@ Gcode_postprocessing_system::Gcode_postprocessing_system(QWidget* parent)
             importCadFile(filePath);
         }
     );
+
+    connect
+    (
+        ui->action_File_Import_Image,
+        &QAction::triggered,
+        this,
+        [this]()
+        {
+            const QString filePath = QFileDialog::getOpenFileName
+            (
+                this,
+                QStringLiteral("导入图片"),
+                QString(),
+                QStringLiteral("位图文件 (*.bmp *.png *.jpg *.jpeg)")
+            );
+
+            if (filePath.isEmpty())
+            {
+                return;
+            }
+
+            importBitmapFile(filePath);
+        }
+    );
+
+    connect(ui->action_File_Export_G, &QAction::triggered, this, [this]() { exportGCode(); });
+    connect(ui->action_Edit_ReversePeocess, &QAction::triggered, this, [this]() { toggleSelectedEntityReverse(); });
 }
 
 Gcode_postprocessing_system::~Gcode_postprocessing_system()
@@ -194,5 +223,60 @@ bool Gcode_postprocessing_system::importBitmapFile(const QString& filePath)
         5000
     );
 
+    return true;
+}
+
+bool Gcode_postprocessing_system::exportGCode()
+{
+    if (m_document.m_entities.empty())
+    {
+        QMessageBox::warning(this, QStringLiteral("导出失败"), QStringLiteral("当前文档为空，无法导出 G 代码。"));
+        return false;
+    }
+
+    GGenerator generator;
+    generator.setDocument(&m_document);
+
+    QString errorMessage;
+
+    if (!generator.generate(this, &errorMessage))
+    {
+        if (!errorMessage.isEmpty())
+        {
+            QMessageBox::warning(this, QStringLiteral("导出失败"), errorMessage);
+        }
+
+        return false;
+    }
+
+    ui->openGLWidget->appendCommandMessage(QStringLiteral("G 代码导出完成。"));
+    ui->openGLWidget->refreshCommandPrompt();
+    statusBar()->showMessage(QStringLiteral("G 代码导出完成"), 5000);
+    return true;
+}
+
+bool Gcode_postprocessing_system::toggleSelectedEntityReverse()
+{
+    CadItem* selectedItem = ui->openGLWidget->selectedEntity();
+
+    if (selectedItem == nullptr)
+    {
+        QMessageBox::warning(this, QStringLiteral("反向加工"), QStringLiteral("请先选择一个图元。"));
+        return false;
+    }
+
+    if (!m_editer.toggleEntityReverse(selectedItem))
+    {
+        QMessageBox::warning(this, QStringLiteral("反向加工"), QStringLiteral("当前图元的反向加工状态切换失败。"));
+        return false;
+    }
+
+    const QString reverseStateText = selectedItem->m_isReverse
+        ? QStringLiteral("反向")
+        : QStringLiteral("正向");
+
+    ui->openGLWidget->appendCommandMessage(QStringLiteral("当前选中图元加工方向已切换为%1。").arg(reverseStateText));
+    ui->openGLWidget->refreshCommandPrompt();
+    statusBar()->showMessage(QStringLiteral("加工方向已切换为%1").arg(reverseStateText), 5000);
     return true;
 }

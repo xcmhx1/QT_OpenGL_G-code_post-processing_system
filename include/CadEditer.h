@@ -83,6 +83,11 @@ public:
     // @return 如果修改成功返回 true，否则返回 false
     bool changeEntityColor(CadItem* item, const QColor& color, int colorIndex = -1);
 
+    // 切换指定实体的反向加工标记
+    // @param item 目标实体
+    // @return 如果切换成功返回 true，否则返回 false
+    bool toggleEntityReverse(CadItem* item);
+
     // 编辑命令抽象基类：
     // 封装一次可执行且可撤销的文档修改操作。
     class EditCommand
