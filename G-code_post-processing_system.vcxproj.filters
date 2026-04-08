@@ -247,6 +247,9 @@
     <ClCompile Include="src\CadPointItem.cpp">
       <Filter>Source Files\Item</Filter>
     </ClCompile>
+    <ClCompile Include="src\CadProcessVisualUtils.cpp">
+      <Filter>Source Files\Document</Filter>
+    </ClCompile>
     <ClCompile Include="src\CadPolylineItem.cpp">
       <Filter>Source Files\Item</Filter>
     </ClCompile>
@@ -341,6 +344,9 @@
     </ClInclude>
     <ClInclude Include="include\CadPreviewBuilder.h">
       <Filter>Header Files\View\Interaction</Filter>
+    </ClInclude>
+    <ClInclude Include="include\CadProcessVisualUtils.h">
+      <Filter>Header Files\Document</Filter>
     </ClInclude>
     <ClInclude Include="include\CadViewInteractionController.h">
       <Filter>Header Files\View\Interaction</Filter>

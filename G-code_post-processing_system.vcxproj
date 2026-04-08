@@ -162,6 +162,10 @@
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
     </ClCompile>
+    <ClCompile Include="src\CadProcessVisualUtils.cpp">
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+    </ClCompile>
     <ClCompile Include="src\CadPolylineItem.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
@@ -277,6 +281,7 @@
     <ClInclude Include="include\CadLWPolylineItem.h" />
     <ClInclude Include="include\CadOverlayRenderer.h" />
     <ClInclude Include="include\CadPointItem.h" />
+    <ClInclude Include="include\CadProcessVisualUtils.h" />
     <ClInclude Include="include\CadPreviewBuilder.h" />
     <ClInclude Include="include\CadPolylineItem.h" />
     <ClInclude Include="include\CadRenderTypes.h" />

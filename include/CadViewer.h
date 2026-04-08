@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 // CadViewer 头文件
 // 声明 CadViewer 模块，对外暴露当前组件的核心类型、接口和协作边界。
@@ -229,6 +229,9 @@ private:
     // @param viewProjection 视图投影矩阵
     void renderTransientPrimitives(const QMatrix4x4& viewProjection);
 
+    // 绘制加工顺序编号
+    void renderProcessOrderLabels();
+
     // 处理文档场景变化
     void handleDocumentSceneChanged();
 
@@ -249,6 +252,10 @@ private:
     // 构建临时图元列表
     // @return 临时图元列表
     std::vector<TransientPrimitive> buildTransientPrimitives() const;
+
+    // 构建加工方向箭头图元
+    // @return 加工方向 overlay 图元列表
+    std::vector<TransientPrimitive> buildProcessDirectionPrimitives() const;
 
     // 获取当前视口宽高比
     // @return 宽高比（宽度/高度）

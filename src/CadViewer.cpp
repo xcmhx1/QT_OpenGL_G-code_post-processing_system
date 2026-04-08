@@ -1,4 +1,4 @@
-﻿#include "pch.h"
+#include "pch.h"
 
 // CadViewer 实现文件
 // 实现 CadViewer 模块，对应头文件中声明的主要行为和协作流程。
@@ -13,6 +13,7 @@
 #include "CadEntityRenderer.h"
 #include "CadInteractionConstants.h"
 #include "CadItem.h"
+#include "CadProcessVisualUtils.h"
 #include "CadPreviewBuilder.h"
 #include "CadViewTransform.h"
 
@@ -20,8 +21,11 @@
 #include <QDragEnterEvent>
 #include <QElapsedTimer>
 #include <QDebug>
+#include <QFont>
+#include <QFontMetrics>
 #include <QKeyEvent>
 #include <QMimeData>
+#include <QPainter>
 #include <QSurfaceFormat>
 #include <QWheelEvent>
 
@@ -48,6 +52,18 @@ namespace
             || localFile.endsWith(QStringLiteral(".png"), Qt::CaseInsensitive)
             || localFile.endsWith(QStringLiteral(".jpg"), Qt::CaseInsensitive)
             || localFile.endsWith(QStringLiteral(".jpeg"), Qt::CaseInsensitive);
+    }
+
+    QVector3D buildPerpendicularDirection(const QVector3D& direction)
+    {
+        QVector3D perpendicular(-direction.y(), direction.x(), 0.0f);
+
+        if (!qFuzzyIsNull(perpendicular.lengthSquared()))
+        {
+            perpendicular.normalize();
+        }
+
+        return perpendicular;
     }
 }
 
@@ -414,6 +430,7 @@ void CadViewer::paintGL()
     renderTransientPrimitives(viewProjection);
     renderAxis(viewProjection);
     renderOrbitMarker(viewProjection);
+    renderProcessOrderLabels();
 
     // 性能日志记录
     if constexpr (kEnableViewerPerfLogging)
@@ -680,6 +697,7 @@ void CadViewer::renderTransientPrimitives(const QMatrix4x4& viewProjection)
         return;
     }
 
+    std::vector<TransientPrimitive> processPrimitives = buildProcessDirectionPrimitives();
     // 构建命令预览图元
     const std::vector<TransientPrimitive> commandPrimitives = buildTransientPrimitives();
     // 构建十字准线图元
@@ -699,7 +717,9 @@ void CadViewer::renderTransientPrimitives(const QMatrix4x4& viewProjection)
     );
 
     // 如果没有临时图元，则返回
-    if (commandPrimitives.empty() && crosshairPrimitives.empty())
+    processPrimitives.insert(processPrimitives.end(), commandPrimitives.begin(), commandPrimitives.end());
+
+    if (processPrimitives.empty() && crosshairPrimitives.empty())
     {
         return;
     }
@@ -708,9 +728,138 @@ void CadViewer::renderTransientPrimitives(const QMatrix4x4& viewProjection)
     m_graphicsCoordinator.renderTransientPrimitives
     (
         viewProjection,
-        commandPrimitives,
+        processPrimitives,
         crosshairPrimitives
     );
+}
+
+void CadViewer::renderProcessOrderLabels()
+{
+    CadDocument* scene = m_sceneCoordinator.document();
+
+    if (scene == nullptr || interactionMode() != ViewInteractionMode::Idle)
+    {
+        return;
+    }
+
+    struct ProcessOrderLabel
+    {
+        int order = -1;
+        bool selected = false;
+        QPoint center;
+        QString text;
+    };
+
+    std::vector<ProcessOrderLabel> labels;
+    labels.reserve(scene->m_entities.size());
+
+    const CadItem* selectedItem = selectedEntity();
+
+    for (const std::unique_ptr<CadItem>& entity : scene->m_entities)
+    {
+        if (entity == nullptr)
+        {
+            continue;
+        }
+
+        const CadProcessVisualInfo info = buildProcessVisualInfo(entity.get());
+
+        if (!info.valid || info.processOrder < 0)
+        {
+            continue;
+        }
+
+        const QPoint screenPoint = worldToScreen(info.labelAnchor);
+
+        if (screenPoint.x() < -24 || screenPoint.x() > width() + 24
+            || screenPoint.y() < -24 || screenPoint.y() > height() + 24)
+        {
+            continue;
+        }
+
+        ProcessOrderLabel label;
+        label.order = info.processOrder;
+        label.selected = entity.get() == selectedItem;
+        label.center = screenPoint;
+        label.text = QString::number(info.processOrder + 1);
+        labels.push_back(std::move(label));
+    }
+
+    if (labels.empty())
+    {
+        return;
+    }
+
+    std::sort
+    (
+        labels.begin(),
+        labels.end(),
+        [](const ProcessOrderLabel& left, const ProcessOrderLabel& right)
+        {
+            if (left.selected != right.selected)
+            {
+                return left.selected && !right.selected;
+            }
+
+            return left.order < right.order;
+        }
+    );
+
+    QPainter painter(this);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setRenderHint(QPainter::TextAntialiasing, true);
+
+    QFont labelFont = painter.font();
+    labelFont.setPointSize(9);
+    labelFont.setBold(true);
+    painter.setFont(labelFont);
+
+    const QFontMetrics metrics(labelFont);
+    std::vector<QRect> occupiedRects;
+    occupiedRects.reserve(labels.size());
+
+    for (const ProcessOrderLabel& label : labels)
+    {
+        const QRect textRect = metrics.boundingRect(label.text);
+        QRect bubbleRect
+        (
+            label.center.x() - textRect.width() / 2 - 7,
+            label.center.y() - textRect.height() / 2 - 4,
+            textRect.width() + 14,
+            textRect.height() + 8
+        );
+
+        if (!label.selected)
+        {
+            bool overlaps = false;
+
+            for (const QRect& occupiedRect : occupiedRects)
+            {
+                if (bubbleRect.adjusted(-2, -2, 2, 2).intersects(occupiedRect))
+                {
+                    overlaps = true;
+                    break;
+                }
+            }
+
+            if (overlaps)
+            {
+                continue;
+            }
+        }
+
+        occupiedRects.push_back(bubbleRect);
+
+        const QColor fillColor = label.selected ? QColor(255, 196, 64, 230) : QColor(24, 32, 40, 210);
+        const QColor borderColor = label.selected ? QColor(255, 240, 180) : QColor(110, 210, 255, 220);
+        const QColor textColor = label.selected ? QColor(34, 22, 0) : QColor(240, 248, 255);
+
+        painter.setPen(QPen(borderColor, 1.0));
+        painter.setBrush(fillColor);
+        painter.drawRoundedRect(bubbleRect, 6.0, 6.0);
+        painter.setPen(textColor);
+        painter.drawText(bubbleRect, Qt::AlignCenter, label.text);
+    }
 }
 
 // 处理文档场景变化
@@ -784,6 +933,81 @@ CadItem* CadViewer::findEntityById(EntityId id) const
 std::vector<TransientPrimitive> CadViewer::buildTransientPrimitives() const
 {
     return CadPreviewBuilder::buildTransientPrimitives(m_controller.drawState(), selectedEntity());
+}
+
+std::vector<TransientPrimitive> CadViewer::buildProcessDirectionPrimitives() const
+{
+    CadDocument* scene = m_sceneCoordinator.document();
+
+    if (scene == nullptr)
+    {
+        return {};
+    }
+
+    std::vector<TransientPrimitive> primitives;
+    primitives.reserve(scene->m_entities.size());
+
+    const CadItem* selectedItem = selectedEntity();
+    const float pixelScale = std::max(pixelToWorldScale(), 1.0e-4f);
+    const float shaftLength = pixelScale * 30.0f;
+    const float wingLength = pixelScale * 12.0f;
+    const float anchorOffset = pixelScale * 5.0f;
+
+    for (const std::unique_ptr<CadItem>& entity : scene->m_entities)
+    {
+        if (entity == nullptr)
+        {
+            continue;
+        }
+
+        const CadProcessVisualInfo info = buildProcessVisualInfo(entity.get());
+
+        if (!info.valid || info.direction.lengthSquared() <= 1.0e-6f)
+        {
+            continue;
+        }
+
+        const QVector3D perpendicular = buildPerpendicularDirection(info.direction);
+
+        if (perpendicular.lengthSquared() <= 1.0e-6f)
+        {
+            continue;
+        }
+
+        const QVector3D shaftStart = info.startPoint + info.direction * anchorOffset;
+        const QVector3D shaftEnd = shaftStart + info.direction * shaftLength;
+        const QVector3D wingBase = shaftEnd - info.direction * wingLength;
+        const QVector3D wingOffset = perpendicular * (wingLength * 0.55f);
+
+        TransientPrimitive primitive;
+        primitive.primitiveType = GL_LINES;
+        primitive.vertices =
+        {
+            shaftStart,
+            shaftEnd,
+            shaftEnd,
+            wingBase + wingOffset,
+            shaftEnd,
+            wingBase - wingOffset
+        };
+
+        if (entity.get() == selectedItem)
+        {
+            primitive.color = QVector3D(1.0f, 0.78f, 0.30f);
+        }
+        else if (info.processOrder >= 0)
+        {
+            primitive.color = info.isReverse ? QVector3D(1.0f, 0.42f, 0.28f) : QVector3D(0.12f, 0.92f, 0.72f);
+        }
+        else
+        {
+            primitive.color = info.isReverse ? QVector3D(0.82f, 0.34f, 0.26f) : QVector3D(0.34f, 0.78f, 0.58f);
+        }
+
+        primitives.push_back(std::move(primitive));
+    }
+
+    return primitives;
 }
 
 // 计算当前视口宽高比
