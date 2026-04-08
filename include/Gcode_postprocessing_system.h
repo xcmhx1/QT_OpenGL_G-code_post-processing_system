@@ -27,6 +27,7 @@ private:
     bool importBitmapFile(const QString& filePath);
     bool exportGCode();
     bool toggleSelectedEntityReverse();
+    bool sortEntitiesByCurrentDirection();
     bool assignSelectedEntityProcessOrder();
     bool smartSortEntities();
 

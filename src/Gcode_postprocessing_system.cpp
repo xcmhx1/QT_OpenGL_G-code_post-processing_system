@@ -344,7 +344,7 @@ Gcode_postprocessing_system::Gcode_postprocessing_system(QWidget* parent)
 
     connect(ui->action_File_Export_G, &QAction::triggered, this, [this]() { exportGCode(); });
     connect(ui->action_Edit_ReversePeocess, &QAction::triggered, this, [this]() { toggleSelectedEntityReverse(); });
-    connect(ui->action_Sort_Assign, &QAction::triggered, this, [this]() { assignSelectedEntityProcessOrder(); });
+    connect(ui->action_Sort_Assign, &QAction::triggered, this, [this]() { sortEntitiesByCurrentDirection(); });
     connect(ui->action_Sort_Smart, &QAction::triggered, this, [this]() { smartSortEntities(); });
 }
 
@@ -502,6 +502,117 @@ bool Gcode_postprocessing_system::toggleSelectedEntityReverse()
     ui->openGLWidget->appendCommandMessage(QStringLiteral("当前选中图元加工方向已切换为%1。").arg(reverseStateText));
     ui->openGLWidget->refreshCommandPrompt();
     statusBar()->showMessage(QStringLiteral("加工方向已切换为%1").arg(reverseStateText), 5000);
+    return true;
+}
+
+bool Gcode_postprocessing_system::sortEntitiesByCurrentDirection()
+{
+    if (m_document.m_entities.empty())
+    {
+        QMessageBox::warning(this, QStringLiteral("排序"), QStringLiteral("当前文档为空，无法执行排序。"));
+        return false;
+    }
+
+    std::vector<CadItem*> sortableItems;
+    std::vector<ItemTravelInfo> travelInfos;
+
+    for (const std::unique_ptr<CadItem>& entity : m_document.m_entities)
+    {
+        if (entity == nullptr)
+        {
+            continue;
+        }
+
+        const ItemTravelInfo info = buildItemTravelInfo(entity.get());
+
+        if (!info.valid)
+        {
+            continue;
+        }
+
+        sortableItems.push_back(entity.get());
+        travelInfos.push_back(info);
+    }
+
+    if (sortableItems.empty())
+    {
+        QMessageBox::warning(this, QStringLiteral("排序"), QStringLiteral("当前文档中没有可参与 G 代码排序的图元。"));
+        return false;
+    }
+
+    std::vector<CadItem*> orderedItems;
+    std::vector<int> processOrders;
+    std::vector<bool> reverseStates;
+    std::vector<bool> visited(sortableItems.size(), false);
+
+    orderedItems.reserve(sortableItems.size());
+    processOrders.reserve(sortableItems.size());
+    reverseStates.reserve(sortableItems.size());
+
+    int currentIndex = -1;
+    QVector3D currentEndPoint;
+
+    for (size_t order = 0; order < sortableItems.size(); ++order)
+    {
+        int bestIndex = -1;
+        double bestDistance = std::numeric_limits<double>::max();
+        QVector3D bestStartPoint;
+        QVector3D bestEndPoint;
+
+        for (size_t index = 0; index < sortableItems.size(); ++index)
+        {
+            if (visited[index])
+            {
+                continue;
+            }
+
+            const CadItem* item = sortableItems[index];
+            const ItemTravelInfo& info = travelInfos[index];
+            const QVector3D candidateStart = item->m_isReverse ? info.forwardEnd : info.forwardStart;
+            const QVector3D candidateEnd = item->m_isReverse ? info.forwardStart : info.forwardEnd;
+            const double distance = currentIndex < 0
+                ? 0.0
+                : static_cast<double>((candidateStart - currentEndPoint).lengthSquared());
+
+            const bool shouldReplace = bestIndex < 0
+                || (currentIndex < 0 && isPointLexicographicallyLess(candidateStart, bestStartPoint))
+                || (currentIndex >= 0 && distance < bestDistance - kSortEpsilon)
+                || (currentIndex >= 0 && std::abs(distance - bestDistance) <= kSortEpsilon && isPointLexicographicallyLess(candidateStart, bestStartPoint));
+
+            if (!shouldReplace)
+            {
+                continue;
+            }
+
+            bestIndex = static_cast<int>(index);
+            bestDistance = distance;
+            bestStartPoint = candidateStart;
+            bestEndPoint = candidateEnd;
+        }
+
+        if (bestIndex < 0)
+        {
+            QMessageBox::warning(this, QStringLiteral("排序"), QStringLiteral("排序过程中出现无效图元，排序已中止。"));
+            return false;
+        }
+
+        visited[static_cast<size_t>(bestIndex)] = true;
+        orderedItems.push_back(sortableItems[static_cast<size_t>(bestIndex)]);
+        processOrders.push_back(static_cast<int>(order));
+        reverseStates.push_back(sortableItems[static_cast<size_t>(bestIndex)]->m_isReverse);
+        currentIndex = bestIndex;
+        currentEndPoint = bestEndPoint;
+    }
+
+    if (!m_editer.applyEntityProcessStates(orderedItems, processOrders, reverseStates))
+    {
+        QMessageBox::warning(this, QStringLiteral("排序"), QStringLiteral("排序结果写入失败。"));
+        return false;
+    }
+
+    ui->openGLWidget->appendCommandMessage(QStringLiteral("排序完成，共更新 %1 个图元的加工顺序，已保留当前加工方向设置。").arg(orderedItems.size()));
+    ui->openGLWidget->refreshCommandPrompt();
+    statusBar()->showMessage(QStringLiteral("排序完成，共更新 %1 个图元").arg(orderedItems.size()), 5000);
     return true;
 }
 

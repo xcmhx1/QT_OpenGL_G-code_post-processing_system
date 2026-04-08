@@ -97,7 +97,7 @@
   </action>
   <action name="action_Sort_Assign">
    <property name="text">
-    <string>排序</string>
+    <string>排序（保留方向）</string>
    </property>
   </action>
   <action name="action_Sort_Smart">

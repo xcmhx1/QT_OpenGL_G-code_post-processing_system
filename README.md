@@ -2,7 +2,7 @@
 
 [G/M 代码参考](./technical_file/G-M_Code.md)
 
-本项目是一个基于 Qt 6 Widgets、OpenGL 4.5 Core Profile、Visual Studio 2026 的 Windows 桌面 CAD / G-code 后处理程序。当前代码主线已经具备 CAD 文件导入、位图矢量化导入、二维图元显示、基础交互、简单绘图与编辑命令，并新增了纯 `2D` 激光加工 G 代码生成后端与 JSON Profile 配置能力；不过导出菜单和参数配置界面尚未接线，`3D` 生成模式也还未实现。
+本项目是一个基于 Qt 6 Widgets、OpenGL 4.5 Core Profile、Visual Studio 2026 的 Windows 桌面 CAD / G-code 后处理程序。当前代码主线已经具备 CAD 文件导入、位图矢量化导入、二维图元显示、基础交互、简单绘图与编辑命令，并新增了纯 `2D` 激光加工 G 代码生成后端与 JSON Profile 配置能力；主窗口已接通导入图片、导出 G 代码、反向加工、排序（保留方向）与智能排序菜单动作，不过 `3D` 生成模式和独立参数配置界面仍未实现。
 
 ## 项目现状
 
@@ -20,11 +20,13 @@
 - 提供 transient 预览、十字光标叠加、选中高亮
 - 提供 `GProfile` JSON 配置读写，支持文件头尾、实体类型头尾、实体颜色头尾三类配置
 - 提供 `GGenerator` 纯 `2D` G 代码生成后端，支持 `Line`、`Arc`、`Circle`、`Ellipse`、`Polyline`、`LWPolyline`
+- 已接通主窗口“导入文件”“导入图片”“导出G代码”“反向加工”“排序（保留方向）”“智能排序”菜单动作
+- 提供基于 `CadItem::m_processOrder` 和 `CadItem::m_isReverse` 的加工顺序与方向控制
 
 当前未完成或未接线：
 
-- `Gcode_postprocessing_system.ui` 中的“导出 G 代码”“反向加工”等菜单项当前仍没有业务绑定
 - `GGenerator` 当前仅实现纯 `2D` 生成，`3D` 模式入口已预留但未实现
+- `GProfile` 目前仍以代码内默认 Profile 为主，独立参数配置界面尚未实现
 - [src/CadDocument.cpp](D:/projects/visual_studio_2026/G-code_post-processing_system/src/CadDocument.cpp) 中 `CadDocument::saveDxfDocument()` 与 `CadDocument::eportDxfDocument()` 仍为空实现
 - 仓库没有独立自动化测试工程，验证仍以手工构建和手工交互检查为主
 
@@ -221,6 +223,7 @@ CadDocument                                (Model)
 - 负责 UI 初始化与窗口装配
 - 创建命令栏、状态栏并插入中心布局
 - 统一处理文件导入分发
+- 接通导入图片、导出 G 代码、反向加工、排序相关菜单动作
 - 持有 `CadDocument` 与 `CadEditer`
 
 `CadViewer`
@@ -241,6 +244,7 @@ CadDocument                                (Model)
 
 - 根据状态机创建新实体
 - 执行删除、移动、改色
+- 执行反向加工切换、加工顺序写入和批量排序状态提交
 - 维护 Undo / Redo 命令栈
 - 将模型修改统一提交给 `CadDocument`
 
@@ -315,6 +319,13 @@ CadDocument                                (Model)
    `Ellipse -> 离散为 G01`
 5. 生成器在导出时弹出文件保存对话框并输出 `.nc/.gcode/.txt`
 
+### 排序与方向控制
+
+1. 用户可先通过“反向加工”修改当前选中图元的加工方向
+2. “排序（保留方向）”会在保留当前 `m_isReverse` 的前提下，仅重新计算 `m_processOrder`
+3. “智能排序”会同时优化加工顺序，并在需要时自动调整部分图元的 `m_isReverse`
+4. 两类排序结果都会写回 `CadItem::m_processOrder`，并纳入 Undo / Redo
+
 ## 使用说明
 
 ### 支持导入的文件类型
@@ -376,6 +387,15 @@ CadDocument                                (Model)
 - `Ctrl + Y`：重做
 - `Ctrl + Shift + Z`：重做
 
+### 菜单动作
+
+- 文件 -> `导入文件`：导入 `.dxf` / `.dwg` / 位图文件
+- 文件 -> `导入图片`：直接进入位图导入对话框
+- 文件 -> `导出G代码`：导出当前文档的纯 `2D` G 代码
+- 编辑 -> `反向加工`：切换当前选中图元的加工方向
+- 排序 -> `排序（保留方向）`：保留当前方向设置，仅重排加工顺序
+- 排序 -> `智能排序`：同时优化加工顺序与图元方向
+
 ### G 代码生成说明
 
 当前后处理后端已经具备以下能力：
@@ -388,7 +408,6 @@ CadDocument                                (Model)
 
 当前限制：
 
-- 尚未绑定到主窗口菜单动作
 - `Point` 当前不会输出加工轨迹
 - `Ellipse` 当前通过折线离散输出，不使用专门椭圆插补指令
 - `3D` 生成模式尚未实现
@@ -423,9 +442,10 @@ CadDocument                                (Model)
 3. 导入一张简单黑白位图，验证预处理预览、矢量化结果和图层参数是否符合预期
 4. 验证平移、缩放、顶视图、轨道观察、拾取是否正常
 5. 验证绘图命令、移动、删除、改色、Undo / Redo 是否正常
-6. 载入一份 `GProfile` 配置并验证 JSON 读写是否正常
-7. 调用 `GGenerator` 导出一份纯 `2D` G 代码，检查头尾、类型配置、颜色配置和圆弧方向是否符合预期
-8. 验证命令栏提示、状态栏坐标、拖拽导入是否正常
+6. 验证“反向加工”“排序（保留方向）”“智能排序”是否符合预期，并检查 Undo / Redo 是否正常
+7. 载入一份 `GProfile` 配置并验证 JSON 读写是否正常
+8. 通过主窗口“导出G代码”导出一份纯 `2D` G 代码，检查头尾、类型配置、颜色配置和圆弧方向是否符合预期
+9. 验证命令栏提示、状态栏坐标、拖拽导入是否正常
 
 ## 已知注意事项
 
@@ -433,7 +453,7 @@ CadDocument                                (Model)
 - 新建图元强制落在 `Z=0` 平面
 - 位图导入依赖 OpenCV 运行时 DLL 拷贝到输出目录
 - `GGenerator` 当前仅实现纯 `2D` 输出，`3D` 模式未完成
-- `GGenerator` 目前还是后端能力，尚未和主窗口导出菜单绑定
+- “排序（保留方向）”当前尊重用户已设置的加工方向，不承担手动点选排序职责；手动排序接口代码已保留但暂未暴露到 UI
 - `Ellipse` 当前按折线离散导出，精度取决于固定采样密度
 - 第三方 `libdxfrw` 目录不应轻易修改
 - 工程里仍存在部分历史遗留命名，修改构建配置前需要先核对 `.ui`、`.vcxproj` 与当前源码是否一致
