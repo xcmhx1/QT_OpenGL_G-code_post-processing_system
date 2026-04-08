@@ -267,6 +267,7 @@
   <ItemGroup>
     <QtMoc Include="include\CadViewer.h" />
     <ClInclude Include="include\CadArcItem.h" />
+    <ClInclude Include="include\AppTheme.h" />
     <ClInclude Include="include\CadCamera.h" />
     <ClInclude Include="include\CadCameraMath.h" />
     <ClInclude Include="include\CadCameraUtils.h" />

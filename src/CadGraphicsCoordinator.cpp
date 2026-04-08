@@ -5,6 +5,11 @@
 
 #include "CadGraphicsCoordinator.h"
 
+void CadGraphicsCoordinator::setTheme(const AppThemeColors& theme)
+{
+    m_referenceRenderer.setTheme(theme);
+}
+
 // 初始化渲染子系统
 void CadGraphicsCoordinator::initialize()
 {

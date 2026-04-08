@@ -1,5 +1,6 @@
 #pragma once
 
+#include "AppTheme.h"
 #include "CadCommandLineWidget.h"
 #include "CadEditer.h"
 #include "CadDocument.h"
@@ -14,6 +15,8 @@ QT_BEGIN_NAMESPACE
 namespace Ui { class Gcode_postprocessing_systemClass; }
 QT_END_NAMESPACE
 
+class QAction;
+
 class Gcode_postprocessing_system : public QMainWindow
 {
     Q_OBJECT
@@ -23,6 +26,10 @@ public:
     ~Gcode_postprocessing_system();
 
 private:
+    void initializeThemeMenu();
+    void applyTheme(AppThemeMode mode);
+    AppThemeMode loadThemeMode() const;
+    void saveThemeMode(AppThemeMode mode) const;
     void initializeToolPanel();
     void syncToolPanelState();
     void applyDefaultDrawingProperties();
@@ -43,9 +50,12 @@ private:
     CadCommandLineWidget* m_commandLineWidget = nullptr;
     CadStatusPaneWidget* m_statusPaneWidget = nullptr;
     CadToolPanelWidget* m_toolPanelWidget = nullptr;
+    QAction* m_lightThemeAction = nullptr;
+    QAction* m_darkThemeAction = nullptr;
     CadEditer m_editer;
     CadDocument m_document;
     QString m_currentLayerName = QStringLiteral("0");
     QColor m_currentColor = QColor(Qt::white);
     int m_currentColorIndex = 256;
+    AppThemeMode m_themeMode = AppThemeMode::Light;
 };

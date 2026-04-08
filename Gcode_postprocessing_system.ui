@@ -53,7 +53,7 @@
    </widget>
    <widget class="QMenu" name="menuSet">
     <property name="title">
-     <string>设置</string>
+     <string>用户设置</string>
     </property>
    </widget>
    <addaction name="menuFile"/>

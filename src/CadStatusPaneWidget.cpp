@@ -56,21 +56,7 @@ CadStatusPaneWidget::CadStatusPaneWidget(QWidget* parent)
     layout->addWidget(polarReservedLabel);
     layout->addStretch(1);
 
-    setStyleSheet
-    (
-        "#CadStatusPaneWidget {"
-        "background-color: rgb(40, 44, 49);"
-        "border-top: 1px solid rgb(62, 68, 76);"
-        "}"
-        "#CoordinateBlock {"
-        "background-color: rgb(30, 33, 37);"
-        "border: 1px solid rgb(78, 84, 92);"
-        "border-radius: 4px;"
-        "}"
-        "#CadStatusPaneWidget QLabel {"
-        "color: rgb(232, 236, 240);"
-        "}"
-    );
+    setTheme(buildAppThemeColors(AppThemeMode::Light));
 
     setWorldPosition(QVector3D());
 }
@@ -83,5 +69,32 @@ void CadStatusPaneWidget::setWorldPosition(const QVector3D& worldPos)
         .arg(worldPos.x(), 0, 'f', 3)
         .arg(worldPos.y(), 0, 'f', 3)
         .arg(worldPos.z(), 0, 'f', 3)
+    );
+}
+
+void CadStatusPaneWidget::setTheme(const AppThemeColors& theme)
+{
+    setStyleSheet
+    (
+        QStringLiteral
+        (
+            "#CadStatusPaneWidget {"
+            "background-color: %1;"
+            "border-top: 1px solid %2;"
+            "}"
+            "#CoordinateBlock {"
+            "background-color: %3;"
+            "border: 1px solid %4;"
+            "border-radius: 4px;"
+            "}"
+            "#CadStatusPaneWidget QLabel {"
+            "color: %5;"
+            "}"
+        )
+        .arg(theme.panelBackground.name())
+        .arg(theme.borderColor.name())
+        .arg(theme.surfaceBackground.name())
+        .arg(theme.borderStrongColor.name())
+        .arg(theme.textPrimaryColor.name())
     );
 }

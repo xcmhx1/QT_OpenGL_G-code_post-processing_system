@@ -7,11 +7,17 @@
 #include "CadProcessVisualUtils.h"
 #include "GGenerator.h"
 
+#include <QActionGroup>
+#include <QApplication>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QMap>
 #include <QMessageBox>
+#include <QMenu>
+#include <QMenuBar>
+#include <QSettings>
 #include <QStatusBar>
+#include <QStyleFactory>
 #include <QToolBar>
 #include <QVBoxLayout>
 
@@ -250,8 +256,10 @@ Gcode_postprocessing_system::Gcode_postprocessing_system(QWidget* parent)
     connect(ui->action_Sort_Assign, &QAction::triggered, this, [this]() { sortEntitiesByCurrentDirection(); });
     connect(ui->action_Sort_Smart, &QAction::triggered, this, [this]() { smartSortEntities(); });
 
+    initializeThemeMenu();
     initializeToolPanel();
     applyDefaultDrawingProperties();
+    applyTheme(loadThemeMode());
     syncToolPanelState();
 }
 
@@ -675,6 +683,100 @@ bool Gcode_postprocessing_system::smartSortEntities()
     return true;
 }
 
+void Gcode_postprocessing_system::initializeThemeMenu()
+{
+    ui->menuSet->setTitle(QStringLiteral("用户设置"));
+
+    QMenu* themeMenu = ui->menuSet->addMenu(QStringLiteral("主题"));
+    QActionGroup* themeActionGroup = new QActionGroup(this);
+    themeActionGroup->setExclusive(true);
+
+    m_lightThemeAction = themeMenu->addAction(QStringLiteral("浅色模式"));
+    m_lightThemeAction->setCheckable(true);
+    themeActionGroup->addAction(m_lightThemeAction);
+
+    m_darkThemeAction = themeMenu->addAction(QStringLiteral("深色模式"));
+    m_darkThemeAction->setCheckable(true);
+    themeActionGroup->addAction(m_darkThemeAction);
+
+    connect(m_lightThemeAction, &QAction::triggered, this, [this]() { applyTheme(AppThemeMode::Light); });
+    connect(m_darkThemeAction, &QAction::triggered, this, [this]() { applyTheme(AppThemeMode::Dark); });
+}
+
+void Gcode_postprocessing_system::applyTheme(AppThemeMode mode)
+{
+    m_themeMode = mode;
+    const AppThemeColors theme = buildAppThemeColors(mode);
+
+    qApp->setStyle(QStyleFactory::create(QStringLiteral("Fusion")));
+    qApp->setPalette(theme.palette);
+
+    setStyleSheet
+    (
+        QStringLiteral
+        (
+            "QMainWindow { background-color: %1; color: %2; }"
+            "QWidget#centralWidget { background-color: %1; }"
+            "QMenuBar { background-color: %3; color: %2; border-bottom: 1px solid %4; }"
+            "QMenuBar::item { background: transparent; padding: 4px 10px; }"
+            "QMenuBar::item:selected { background: %5; }"
+            "QToolBar { background-color: %3; border: none; border-bottom: 1px solid %4; spacing: 0px; }"
+            "QStatusBar { background-color: %3; color: %2; border-top: 1px solid %4; }"
+            "QStatusBar::item { border: none; }"
+        )
+        .arg(theme.windowBackground.name())
+        .arg(theme.textPrimaryColor.name())
+        .arg(theme.panelBackground.name())
+        .arg(theme.borderColor.name())
+        .arg(theme.hoverBackgroundColor.name())
+    );
+
+    if (m_commandLineWidget != nullptr)
+    {
+        m_commandLineWidget->setTheme(theme);
+    }
+
+    if (m_statusPaneWidget != nullptr)
+    {
+        m_statusPaneWidget->setTheme(theme);
+    }
+
+    if (m_toolPanelWidget != nullptr)
+    {
+        m_toolPanelWidget->setTheme(theme);
+    }
+
+    if (ui->openGLWidget != nullptr)
+    {
+        ui->openGLWidget->setTheme(theme);
+    }
+
+    if (m_lightThemeAction != nullptr)
+    {
+        m_lightThemeAction->setChecked(mode == AppThemeMode::Light);
+    }
+
+    if (m_darkThemeAction != nullptr)
+    {
+        m_darkThemeAction->setChecked(mode == AppThemeMode::Dark);
+    }
+
+    saveThemeMode(mode);
+}
+
+AppThemeMode Gcode_postprocessing_system::loadThemeMode() const
+{
+    QSettings settings(QStringLiteral("GCodePostProcessingSystem"), QStringLiteral("GCodePostProcessingSystem"));
+    const QString themeValue = settings.value(QStringLiteral("ui/themeMode"), QStringLiteral("light")).toString().trimmed().toLower();
+    return themeValue == QStringLiteral("dark") ? AppThemeMode::Dark : AppThemeMode::Light;
+}
+
+void Gcode_postprocessing_system::saveThemeMode(AppThemeMode mode) const
+{
+    QSettings settings(QStringLiteral("GCodePostProcessingSystem"), QStringLiteral("GCodePostProcessingSystem"));
+    settings.setValue(QStringLiteral("ui/themeMode"), mode == AppThemeMode::Dark ? QStringLiteral("dark") : QStringLiteral("light"));
+}
+
 void Gcode_postprocessing_system::initializeToolPanel()
 {
     m_toolPanelWidget = new CadToolPanelWidget(this);
@@ -808,7 +910,12 @@ void Gcode_postprocessing_system::syncToolPanelState()
         m_toolPanelWidget->setLayerStatusText(QStringLiteral("当前选中图元图层"));
         m_toolPanelWidget->setPropertyStatusText(QStringLiteral("当前选中图元特性"));
         m_toolPanelWidget->setActiveLayerName(entityLayerName(selectedItem));
-        m_toolPanelWidget->setActiveColorState(entityDisplayColor(m_document, selectedItem), entityColorIndex(selectedItem));
+        m_toolPanelWidget->setActiveColorState
+        (
+            entityDisplayColor(m_document, selectedItem),
+            entityColorIndex(selectedItem),
+            m_document.layerColor(entityLayerName(selectedItem), QColor(Qt::white))
+        );
         return;
     }
 
@@ -830,7 +937,12 @@ void Gcode_postprocessing_system::syncToolPanelState()
     m_toolPanelWidget->setLayerStatusText(QStringLiteral("当前默认绘图图层"));
     m_toolPanelWidget->setPropertyStatusText(QStringLiteral("当前默认绘图特性"));
     m_toolPanelWidget->setActiveLayerName(m_currentLayerName);
-    m_toolPanelWidget->setActiveColorState(m_currentColor, m_currentColorIndex);
+    m_toolPanelWidget->setActiveColorState
+    (
+        m_currentColor,
+        m_currentColorIndex,
+        m_document.layerColor(m_currentLayerName, QColor(Qt::white))
+    );
 }
 
 void Gcode_postprocessing_system::applyDefaultDrawingProperties()

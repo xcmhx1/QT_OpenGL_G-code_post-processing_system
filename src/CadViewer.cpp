@@ -92,6 +92,7 @@ CadViewer::CadViewer(QWidget* parent)
 
     // 设置控制器与当前视图的关联
     m_controller.setViewer(this);
+    m_graphicsCoordinator.setTheme(m_theme);
 }
 
 // 析构时释放 OpenGL 资源。
@@ -146,6 +147,13 @@ void CadViewer::setDefaultDrawingProperties(const QString& layerName, const QCol
 {
     m_controller.setDefaultDrawingProperties(layerName, color, colorIndex);
     refreshCommandPrompt();
+}
+
+void CadViewer::setTheme(const AppThemeColors& theme)
+{
+    m_theme = theme;
+    m_graphicsCoordinator.setTheme(theme);
+    update();
 }
 
 void CadViewer::startDrawing(DrawType drawType)
@@ -392,6 +400,7 @@ void CadViewer::initializeGL()
     initializeOpenGLFunctions();
 
     // 初始化图形协调器
+    m_graphicsCoordinator.setTheme(m_theme);
     m_graphicsCoordinator.initialize();
     // 重建所有缓冲
     rebuildAllBuffers();
@@ -429,6 +438,14 @@ void CadViewer::paintGL()
     // 计算帧缓冲尺寸（考虑设备像素比）
     const int framebufferWidth = std::max(1, static_cast<int>(std::round(width() * devicePixelRatioF())));
     const int framebufferHeight = std::max(1, static_cast<int>(std::round(height() * devicePixelRatioF())));
+
+    glClearColor
+    (
+        m_theme.viewerBackgroundColor.redF(),
+        m_theme.viewerBackgroundColor.greenF(),
+        m_theme.viewerBackgroundColor.blueF(),
+        1.0f
+    );
 
     // 准备帧
     m_graphicsCoordinator.prepareFrame(framebufferWidth, framebufferHeight);
@@ -711,7 +728,8 @@ void CadViewer::renderEntities(const QMatrix4x4& viewProjection)
         viewProjection,
         scene->m_entities,
         m_sceneCoordinator.renderCache(),
-        m_selectedEntityId
+        m_selectedEntityId,
+        m_theme
     );
 }
 
@@ -901,9 +919,9 @@ void CadViewer::renderProcessOrderLabels()
 
         occupiedRects.push_back(bubbleRect);
 
-        const QColor fillColor = label.selected ? QColor(255, 196, 64, 230) : QColor(24, 32, 40, 210);
-        const QColor borderColor = label.selected ? QColor(255, 240, 180) : QColor(110, 210, 255, 220);
-        const QColor textColor = label.selected ? QColor(34, 22, 0) : QColor(240, 248, 255);
+        const QColor fillColor = label.selected ? m_theme.selectedProcessLabelFillColor : m_theme.processLabelFillColor;
+        const QColor borderColor = label.selected ? m_theme.selectedProcessLabelBorderColor : m_theme.processLabelBorderColor;
+        const QColor textColor = label.selected ? m_theme.selectedProcessLabelTextColor : m_theme.processLabelTextColor;
 
         painter.setPen(QPen(borderColor, 1.0));
         painter.setBrush(fillColor);

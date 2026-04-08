@@ -35,6 +35,16 @@ namespace
             functions->glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(QVector3D), nullptr);
         }
     }
+
+    QVector3D toVector3D(const QColor& color)
+    {
+        return QVector3D(color.redF(), color.greenF(), color.blueF());
+    }
+}
+
+void CadReferenceRenderer::setTheme(const AppThemeColors& theme)
+{
+    m_gridColor = toVector3D(theme.viewerGridColor);
 }
 
 // 初始化网格顶点缓冲
@@ -152,7 +162,7 @@ void CadReferenceRenderer::renderGrid(QOpenGLShaderProgram& shader, const QMatri
     // 网格仅作为背景参考，不参与深度写入，避免干扰实体显示
     shader.bind();
     shader.setUniformValue("uMvp", mvp);
-    shader.setUniformValue("uColor", QVector3D(0.22f, 0.24f, 0.28f));
+    shader.setUniformValue("uColor", m_gridColor);
     shader.setUniformValue("uPointSize", 1.0f);
     shader.setUniformValue("uRoundPoint", 0);
 

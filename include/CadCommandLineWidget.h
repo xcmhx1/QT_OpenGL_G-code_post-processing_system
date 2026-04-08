@@ -2,6 +2,8 @@
 // 命令栏模块，负责命令提示、最新消息和历史记录的界面展示。
 #pragma once
 
+#include "AppTheme.h"
+
 #include <QLabel>
 #include <QPlainTextEdit>
 #include <QPointer>
@@ -16,6 +18,7 @@ public:
 
     void setPrompt(const QString& prompt);
     void appendMessage(const QString& message);
+    void setTheme(const AppThemeColors& theme);
 
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;

@@ -56,23 +56,7 @@ CadCommandLineWidget::CadCommandLineWidget(QWidget* parent)
     layout->addWidget(m_promptLabel);
     layout->addWidget(m_historyEdit);
 
-    setStyleSheet
-    (
-        "#CadCommandLineWidget {"
-        "background-color: rgb(33, 36, 40);"
-        "border-top: 1px solid rgb(58, 64, 72);"
-        "border-bottom: 1px solid rgb(58, 64, 72);"
-        "}"
-        "#CadCommandLineWidget QLabel {"
-        "color: rgb(235, 238, 242);"
-        "}"
-        "#CadCommandLineWidget QPlainTextEdit {"
-        "background-color: rgb(25, 28, 32);"
-        "color: rgb(235, 238, 242);"
-        "border: 1px solid rgb(66, 72, 80);"
-        "padding: 4px;"
-        "}"
-    );
+    setTheme(buildAppThemeColors(AppThemeMode::Light));
 
     refreshSummary();
     refreshHistory();
@@ -196,4 +180,37 @@ int CadCommandLineWidget::expandedHeight() const
 {
     const int lineHeight = m_historyEdit->fontMetrics().lineSpacing();
     return lineHeight * 4 + 42;
+}
+
+void CadCommandLineWidget::setTheme(const AppThemeColors& theme)
+{
+    setStyleSheet
+    (
+        QStringLiteral
+        (
+            "#CadCommandLineWidget {"
+            "background-color: %1;"
+            "border-top: 1px solid %2;"
+            "border-bottom: 1px solid %2;"
+            "}"
+            "#CadCommandLineWidget QLabel {"
+            "color: %3;"
+            "}"
+            "#CadCommandLineWidget QPlainTextEdit {"
+            "background-color: %4;"
+            "color: %3;"
+            "border: 1px solid %5;"
+            "padding: 4px;"
+            "selection-background-color: %6;"
+            "selection-color: %7;"
+            "}"
+        )
+        .arg(theme.panelBackground.name())
+        .arg(theme.borderColor.name())
+        .arg(theme.textPrimaryColor.name())
+        .arg(theme.surfaceBackground.name())
+        .arg(theme.borderStrongColor.name())
+        .arg(theme.accentColor.name())
+        .arg(theme.accentTextColor.name())
+    );
 }

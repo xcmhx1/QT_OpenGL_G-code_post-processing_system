@@ -9,6 +9,7 @@
 #include <QMatrix4x4>
 #include <QOpenGLShaderProgram>
 
+#include "AppTheme.h"
 #include "CadRenderTypes.h"
 
 class CadItem;
@@ -31,6 +32,7 @@ public:
         const QMatrix4x4& mvp,
         const std::vector<std::unique_ptr<CadItem>>& entities,
         CadSceneRenderCache& sceneRenderCache,
-        EntityId selectedEntityId
+        EntityId selectedEntityId,
+        const AppThemeColors& theme
     );
 };

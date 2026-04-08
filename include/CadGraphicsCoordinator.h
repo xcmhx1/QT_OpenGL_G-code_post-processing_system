@@ -18,6 +18,8 @@
 class CadGraphicsCoordinator
 {
 public:
+    void setTheme(const AppThemeColors& theme);
+
     // 初始化渲染子系统
     // 依次建立默认 OpenGL 状态、通用 Shader，以及参考图形与 Overlay 所需的 GPU 资源
     void initialize();

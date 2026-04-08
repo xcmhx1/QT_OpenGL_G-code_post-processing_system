@@ -21,6 +21,7 @@
 
 // CAD 模块内部依赖
 #include "CadCamera.h"
+#include "AppTheme.h"
 #include "CadGraphicsCoordinator.h"
 #include "CadRenderTypes.h"
 #include "CadSceneCoordinator.h"
@@ -59,6 +60,9 @@ public:
 
     // 设置默认绘图属性。
     void setDefaultDrawingProperties(const QString& layerName, const QColor& color, int colorIndex);
+
+    // 设置 Viewer 主题。
+    void setTheme(const AppThemeColors& theme);
 
     // 开始绘制指定类型图元。
     void startDrawing(DrawType drawType);
@@ -326,4 +330,7 @@ private:
 
     // 控制器，负责接收 Viewer 输入并维护绘图状态
     CadController m_controller;
+
+    // 当前主题颜色
+    AppThemeColors m_theme = buildAppThemeColors(AppThemeMode::Light);
 };

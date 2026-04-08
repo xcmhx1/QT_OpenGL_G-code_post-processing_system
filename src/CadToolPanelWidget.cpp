@@ -11,6 +11,7 @@
 #include <QLabel>
 #include <QLayout>
 #include <QMenu>
+#include <QAction>
 #include <QPainter>
 #include <QPainterPath>
 #include <QSizePolicy>
@@ -36,14 +37,19 @@ namespace
         comboBox->addItem(text, colorIndex);
     }
 
-    QIcon buildRibbonIcon(DrawType drawType)
+    QString cssRgb(const QColor& color)
+    {
+        return QStringLiteral("rgb(%1, %2, %3)").arg(color.red()).arg(color.green()).arg(color.blue());
+    }
+
+    QIcon buildRibbonIcon(DrawType drawType, const QColor& strokeColor)
     {
         QPixmap pixmap(kRibbonIconSize, kRibbonIconSize);
         pixmap.fill(Qt::transparent);
 
         QPainter painter(&pixmap);
         painter.setRenderHint(QPainter::Antialiasing, true);
-        QPen pen(QColor(58, 92, 138));
+        QPen pen(strokeColor);
         pen.setWidthF(1.5);
         pen.setCapStyle(Qt::RoundCap);
         pen.setJoinStyle(Qt::RoundJoin);
@@ -53,7 +59,7 @@ namespace
         switch (drawType)
         {
         case DrawType::Point:
-            painter.setBrush(QColor(58, 92, 138));
+            painter.setBrush(strokeColor);
             painter.drawEllipse(QPointF(9.0, 9.0), 2.1, 2.1);
             break;
         case DrawType::Line:
@@ -85,7 +91,7 @@ namespace
             polylinePath.lineTo(11.0, 9.5);
             polylinePath.lineTo(15.0, 4.5);
             painter.drawPath(polylinePath);
-            painter.setBrush(QColor(58, 92, 138));
+            painter.setBrush(strokeColor);
             painter.drawEllipse(QPointF(3.0, 12.5), 1.2, 1.2);
             painter.drawEllipse(QPointF(7.0, 5.5), 1.2, 1.2);
             painter.drawEllipse(QPointF(11.0, 9.5), 1.2, 1.2);
@@ -99,14 +105,14 @@ namespace
         return QIcon(pixmap);
     }
 
-    QIcon buildMoveIcon()
+    QIcon buildMoveIcon(const QColor& strokeColor)
     {
         QPixmap pixmap(kRibbonIconSize, kRibbonIconSize);
         pixmap.fill(Qt::transparent);
 
         QPainter painter(&pixmap);
         painter.setRenderHint(QPainter::Antialiasing, true);
-        QPen pen(QColor(58, 92, 138));
+        QPen pen(strokeColor);
         pen.setWidthF(1.4);
         pen.setCapStyle(Qt::RoundCap);
         pen.setJoinStyle(Qt::RoundJoin);
@@ -165,6 +171,7 @@ CadToolPanelWidget::CadToolPanelWidget(QWidget* parent)
 {
     setObjectName(QStringLiteral("cadToolPanelRoot"));
     buildUi();
+    applyTheme();
 }
 
 void CadToolPanelWidget::setLayerNames(const QStringList& layerNames, const QMap<QString, QColor>& layerColors)
@@ -219,10 +226,10 @@ void CadToolPanelWidget::setActiveLayerName(const QString& layerName)
     m_updatingUi = false;
 }
 
-void CadToolPanelWidget::setActiveColorState(const QColor& color, int colorIndex)
+void CadToolPanelWidget::setActiveColorState(const QColor& color, int colorIndex, const QColor& byLayerColor)
 {
     m_updatingUi = true;
-    updateColorComboIcons(color);
+    updateColorComboIcons(color, byLayerColor);
     setComboCurrentByData(m_colorComboBox, colorIndex);
     m_updatingUi = false;
 }
@@ -232,17 +239,23 @@ void CadToolPanelWidget::setMoveEnabled(bool enabled)
     m_moveButton->setEnabled(enabled);
 }
 
+void CadToolPanelWidget::setTheme(const AppThemeColors& theme)
+{
+    m_theme = theme;
+    applyTheme();
+}
+
 void CadToolPanelWidget::buildUi()
 {
-    QMenu* drawMoreMenu = new QMenu(this);
-    QAction* pointAction = drawMoreMenu->addAction(buildRibbonIcon(DrawType::Point), QStringLiteral("点"));
-    connect(pointAction, &QAction::triggered, this, [this]() { emit drawRequested(DrawType::Point); });
+    m_drawMoreMenu = new QMenu(this);
+    m_drawPointAction = m_drawMoreMenu->addAction(QStringLiteral("点"));
+    connect(m_drawPointAction, &QAction::triggered, this, [this]() { emit drawRequested(DrawType::Point); });
 
     QHBoxLayout* rootLayout = new QHBoxLayout(this);
     rootLayout->setContentsMargins(0, 0, 0, 0);
     rootLayout->setSpacing(0);
 
-    rootLayout->addWidget(buildPanelFrame(QStringLiteral("绘图"), buildDrawPanel(), -1, drawMoreMenu), 0, Qt::AlignLeft | Qt::AlignTop);
+    rootLayout->addWidget(buildPanelFrame(QStringLiteral("绘图"), buildDrawPanel(), -1, m_drawMoreMenu), 0, Qt::AlignLeft | Qt::AlignTop);
     rootLayout->addWidget(buildDivider(), 0, Qt::AlignLeft | Qt::AlignVCenter);
     rootLayout->addWidget(buildPanelFrame(QStringLiteral("修改"), buildModifyPanel()), 0, Qt::AlignLeft | Qt::AlignTop);
     rootLayout->addWidget(buildDivider(), 0, Qt::AlignLeft | Qt::AlignVCenter);
@@ -250,14 +263,18 @@ void CadToolPanelWidget::buildUi()
     rootLayout->addWidget(buildDivider(), 0, Qt::AlignLeft | Qt::AlignVCenter);
     rootLayout->addWidget(buildPanelFrame(QStringLiteral("特性"), buildPropertyPanel(), 226), 0, Qt::AlignLeft | Qt::AlignTop);
     rootLayout->addStretch(1);
+}
 
+void CadToolPanelWidget::applyTheme()
+{
     setStyleSheet
     (
         QStringLiteral
         (
             "#cadToolPanelRoot { background: transparent; }"
+            "QLabel { color: %1; }"
             "QLabel[panelTitle=\"true\"] {"
-            " color: rgb(86, 92, 102);"
+            " color: %2;"
             " font-size: 11px;"
             " padding-bottom: 1px;"
             "}"
@@ -265,31 +282,125 @@ void CadToolPanelWidget::buildUi()
             " border: none;"
             " padding: 0px;"
             " margin: 0px;"
-            " color: rgb(118, 124, 132);"
+            " color: %2;"
             " background: transparent;"
             "}"
             "QToolButton[panelLauncher=\"true\"]:hover {"
-            " background: rgb(240, 242, 245);"
-            " color: rgb(82, 88, 96);"
+            " background: %3;"
+            " color: %1;"
             "}"
             "QToolButton[ribbonButton=\"true\"] {"
             " border: 1px solid transparent;"
             " border-radius: 2px;"
             " padding: 2px 3px 2px 3px;"
             " background: transparent;"
-            " color: rgb(48, 54, 61);"
+            " color: %1;"
             " font-size: 9px;"
             "}"
             "QToolButton[ribbonButton=\"true\"]:hover {"
-            " border-color: rgb(206, 212, 219);"
-            " background: rgb(247, 249, 251);"
+            " border-color: %4;"
+            " background: %5;"
             "}"
             "QToolButton[ribbonButton=\"true\"]:pressed {"
-            " border-color: rgb(174, 183, 193);"
-            " background: rgb(236, 240, 244);"
+            " border-color: %6;"
+            " background: %3;"
+            "}"
+            "QComboBox {"
+            " background-color: %7;"
+            " color: %1;"
+            " border: 1px solid %4;"
+            " border-radius: 2px;"
+            " padding: 1px 22px 1px 6px;"
+            "}"
+            "QComboBox:hover {"
+            " border-color: %6;"
+            "}"
+            "QComboBox::drop-down {"
+            " subcontrol-origin: padding;"
+            " subcontrol-position: top right;"
+            " width: 18px;"
+            " border: none;"
+            " background: transparent;"
+            "}"
+            "QComboBox QAbstractItemView {"
+            " background-color: %7;"
+            " color: %1;"
+            " border: 1px solid %4;"
+            " selection-background-color: %8;"
+            " selection-color: %9;"
             "}"
         )
+        .arg(cssRgb(m_theme.textPrimaryColor))
+        .arg(cssRgb(m_theme.textSecondaryColor))
+        .arg(cssRgb(m_theme.pressedBackgroundColor))
+        .arg(cssRgb(m_theme.borderColor))
+        .arg(cssRgb(m_theme.hoverBackgroundColor))
+        .arg(cssRgb(m_theme.borderStrongColor))
+        .arg(cssRgb(m_theme.surfaceBackground))
+        .arg(cssRgb(m_theme.accentColor))
+        .arg(cssRgb(m_theme.accentTextColor))
     );
+
+    for (QFrame* divider : m_dividers)
+    {
+        if (divider != nullptr)
+        {
+            divider->setStyleSheet(QStringLiteral("background-color: %1;").arg(cssRgb(m_theme.borderColor)));
+        }
+    }
+
+    for (QToolButton* button : m_drawButtons)
+    {
+        if (button == nullptr)
+        {
+            continue;
+        }
+
+        button->setIcon(buildRibbonIcon(static_cast<DrawType>(button->property("drawTypeId").toInt()), m_theme.accentColor));
+    }
+
+    if (m_moveButton != nullptr)
+    {
+        m_moveButton->setIcon(buildMoveIcon(m_theme.accentColor));
+    }
+
+    if (m_drawPointAction != nullptr)
+    {
+        m_drawPointAction->setIcon(buildRibbonIcon(DrawType::Point, m_theme.accentColor));
+    }
+
+    if (m_drawMoreMenu != nullptr)
+    {
+        m_drawMoreMenu->setStyleSheet
+        (
+            QStringLiteral
+            (
+                "QMenu {"
+                " background-color: %1;"
+                " color: %2;"
+                " border: 1px solid %3;"
+                " padding: 4px 0px;"
+                "}"
+                "QMenu::item {"
+                " padding: 5px 20px 5px 24px;"
+                "}"
+                "QMenu::item:selected {"
+                " background-color: %4;"
+                " color: %5;"
+                "}"
+                "QMenu::separator {"
+                " height: 1px;"
+                " margin: 4px 8px;"
+                " background: %3;"
+                "}"
+            )
+            .arg(cssRgb(m_theme.surfaceBackground))
+            .arg(cssRgb(m_theme.textPrimaryColor))
+            .arg(cssRgb(m_theme.borderColor))
+            .arg(cssRgb(m_theme.accentColor))
+            .arg(cssRgb(m_theme.accentTextColor))
+        );
+    }
 }
 
 QWidget* CadToolPanelWidget::buildPanelFrame(const QString& title, QWidget* contentWidget, int preferredWidth, QMenu* launcherMenu)
@@ -357,13 +468,13 @@ QWidget* CadToolPanelWidget::buildPanelFrame(const QString& title, QWidget* cont
     return panel;
 }
 
-QWidget* CadToolPanelWidget::buildDivider() const
+QWidget* CadToolPanelWidget::buildDivider()
 {
     QFrame* divider = new QFrame();
-    divider->setStyleSheet(QStringLiteral("background-color: rgb(214, 217, 222);"));
     divider->setFixedWidth(1);
     divider->setFixedHeight(kDividerHeight);
     divider->setFrameShape(QFrame::NoFrame);
+    m_dividers.push_back(divider);
     return divider;
 }
 
@@ -397,7 +508,7 @@ QWidget* CadToolPanelWidget::buildModifyPanel()
     m_moveButton = new QToolButton(panel);
     m_moveButton->setProperty("ribbonButton", true);
     m_moveButton->setText(QStringLiteral("移动"));
-    m_moveButton->setIcon(buildMoveIcon());
+    m_moveButton->setIcon(buildMoveIcon(m_theme.accentColor));
     m_moveButton->setIconSize(QSize(kRibbonIconSize, kRibbonIconSize));
     m_moveButton->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
     m_moveButton->setFixedSize(56, kRibbonButtonHeight);
@@ -539,14 +650,16 @@ void CadToolPanelWidget::addDrawButton(QWidget* parent, const QString& text, Dra
 
     QToolButton* button = new QToolButton(parent);
     button->setProperty("ribbonButton", true);
+    button->setProperty("drawTypeId", static_cast<int>(drawType));
     button->setText(text);
-    button->setIcon(buildRibbonIcon(drawType));
+    button->setIcon(buildRibbonIcon(drawType, m_theme.accentColor));
     button->setIconSize(QSize(kRibbonIconSize, kRibbonIconSize));
     button->setFixedSize(kRibbonButtonWidth, kRibbonButtonHeight);
     button->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
     button->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
     connect(button, &QToolButton::clicked, this, [this, drawType]() { emit drawRequested(drawType); });
     layout->addWidget(button, row, column);
+    m_drawButtons.push_back(button);
 }
 
 void CadToolPanelWidget::commitLayerChange(QComboBox* comboBox)
@@ -585,7 +698,7 @@ void CadToolPanelWidget::updateLayerComboIcons()
     applyIcons(m_propertyLayerComboBox);
 }
 
-void CadToolPanelWidget::updateColorComboIcons(const QColor& activeColor)
+void CadToolPanelWidget::updateColorComboIcons(const QColor& activeColor, const QColor& byLayerColor)
 {
     if (m_colorComboBox == nullptr)
     {
@@ -598,7 +711,7 @@ void CadToolPanelWidget::updateColorComboIcons(const QColor& activeColor)
         QColor color;
     } colorSpecs[] =
     {
-        { kColorByLayer, activeColor.isValid() ? activeColor : QColor(Qt::white) },
+        { kColorByLayer, byLayerColor.isValid() ? byLayerColor : QColor(Qt::white) },
         { 1, QColor(255, 0, 0) },
         { 2, QColor(255, 255, 0) },
         { 3, QColor(0, 255, 0) },

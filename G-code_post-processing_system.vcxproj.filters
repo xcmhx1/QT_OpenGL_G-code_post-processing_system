@@ -327,6 +327,9 @@
     <ClInclude Include="include\pch.h">
       <Filter>Header Files\Application</Filter>
     </ClInclude>
+    <ClInclude Include="include\AppTheme.h">
+      <Filter>Header Files\Application</Filter>
+    </ClInclude>
     <ClInclude Include="include\CadBitmapImportDialog.h">
       <Filter>Header Files\Application</Filter>
     </ClInclude>

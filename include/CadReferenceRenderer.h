@@ -3,6 +3,8 @@
 // 参考图形渲染模块，负责网格、坐标轴和轨道中心等辅助元素绘制。
 #pragma once
 
+#include "AppTheme.h"
+
 #include <QMatrix4x4>
 #include <QOpenGLBuffer>
 #include <QOpenGLShaderProgram>
@@ -11,6 +13,8 @@
 class CadReferenceRenderer
 {
 public:
+    void setTheme(const AppThemeColors& theme);
+
     // 初始化网格顶点缓冲
     void initializeGridBuffer();
 
@@ -32,6 +36,8 @@ public:
     void renderAxis(QOpenGLShaderProgram& shader, const QMatrix4x4& mvp, bool axesSwapped);
 
 private:
+    QVector3D m_gridColor = QVector3D(0.82f, 0.83f, 0.86f);
+
     // 网格顶点缓冲
     QOpenGLBuffer m_gridVbo{ QOpenGLBuffer::VertexBuffer };
 
