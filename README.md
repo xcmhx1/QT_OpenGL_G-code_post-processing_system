@@ -2,7 +2,7 @@
 
 [G/M 代码参考](./technical_file/G-M_Code.md)
 
-本项目是一个基于 Qt 6 Widgets、OpenGL 4.5 Core Profile、Visual Studio 2026 的 Windows 桌面 CAD / G-code 后处理程序。当前代码主线已经具备 CAD 文件导入、位图矢量化导入、二维图元显示、基础交互、简单绘图与编辑命令，并新增了纯 `2D` 激光加工 G 代码生成后端与 JSON Profile 配置能力；主窗口已接通导入图片、导出 G 代码、反向加工、排序（保留方向）与智能排序菜单动作，不过 `3D` 生成模式和独立参数配置界面仍未实现。
+本项目是一个基于 Qt 6 Widgets、OpenGL 4.5 Core Profile、Visual Studio 2026 的 Windows 桌面 CAD / G-code 后处理程序。当前代码主线已经具备 CAD 文件导入、位图矢量化导入、二维图元显示、基础交互、简单绘图与编辑命令，并新增了纯 `2D` 激光加工 G 代码生成后端与 JSON Profile 配置能力；主窗口已接通导入图片、导出 G 代码、反向加工、排序（保留方向）与智能排序菜单动作，Viewer 层也已支持加工方向箭头与加工顺序编号显示，不过 `3D` 生成模式和独立参数配置界面仍未实现。
 
 ## 项目现状
 
@@ -18,6 +18,7 @@
 - 提供点、线、圆、圆弧、椭圆、多段线、轻量多段线的交互式绘制
 - 提供删除、移动、改色、Undo / Redo
 - 提供 transient 预览、十字光标叠加、选中高亮
+- Viewer 已支持加工方向箭头与加工顺序编号显示，并与排序 / 导出共用同一套加工路径语义
 - 提供 `GProfile` JSON 配置读写，支持文件头尾、实体类型头尾、实体颜色头尾三类配置
 - 提供 `GGenerator` 纯 `2D` G 代码生成后端，支持 `Line`、`Arc`、`Circle`、`Ellipse`、`Polyline`、`LWPolyline`
 - 已接通主窗口“导入文件”“导入图片”“导出G代码”“反向加工”“排序（保留方向）”“智能排序”菜单动作
@@ -100,6 +101,7 @@ G-code_post-processing_system/
 |   |-- CadPointItem.h                      # 点图元
 |   |-- CadPolylineItem.h                   # 多段线图元
 |   |-- CadLWPolylineItem.h                 # 轻量多段线图元
+|   |-- CadProcessVisualUtils.h             # 加工方向/顺序显示共用语义工具
 |   |-- CadCommandLineWidget.h              # 命令栏组件
 |   |-- CadStatusPaneWidget.h               # 状态栏组件
 |   |-- CadGraphicsCoordinator.h            # 渲染协调层
@@ -136,6 +138,7 @@ G-code_post-processing_system/
 |   |-- GProfile.cpp                        # G 代码 Profile 配置读写
 |   |-- GGenerator.cpp                      # 纯 2D G 代码生成
 |   |-- CadItem.cpp						  # 图元基类
+|   |-- CadProcessVisualUtils.cpp           # 加工方向/顺序显示共用语义实现
 |   |-- Cad*Item.cpp                        # 各类图元几何离散与显示数据生成
 |   |-- CadGraphicsCoordinator.cpp          # 渲染协调实现
 |   |-- CadSceneCoordinator.cpp             # 场景协调实现
@@ -232,6 +235,7 @@ CadDocument                                (Model)
 - 管理相机、场景刷新、坐标转换
 - 将键鼠事件转交 `CadController`
 - 消费 `CadDocument` 数据并驱动渲染
+- 负责加工方向箭头 overlay 与加工顺序屏幕编号显示
 
 `CadController` + `DrawStateMachine`
 
@@ -276,6 +280,11 @@ CadDocument                                (Model)
 - `CadEntityRenderer` 负责实体绘制
 - `CadEntityPicker` 负责屏幕空间拾取
 - `CadPreviewBuilder` / `CadCrosshairBuilder` 负责 transient 预览
+
+`CadProcessVisualUtils`
+
+- 负责统一计算图元的加工起点、终点、方向与编号锚点
+- 供 Viewer 的加工辅助显示、主窗口排序逻辑与后续导出语义复用
 
 ## 核心流程
 
@@ -325,6 +334,7 @@ CadDocument                                (Model)
 2. “排序（保留方向）”会在保留当前 `m_isReverse` 的前提下，仅重新计算 `m_processOrder`
 3. “智能排序”会同时优化加工顺序，并在需要时自动调整部分图元的 `m_isReverse`
 4. 两类排序结果都会写回 `CadItem::m_processOrder`，并纳入 Undo / Redo
+5. Viewer 会同步显示加工方向箭头与加工顺序编号，便于直接核对排序结果
 
 ## 使用说明
 
@@ -359,6 +369,13 @@ CadDocument                                (Model)
 - `Shift + 中键拖动`：轨道旋转
 - 左键：拾取图元
 - 滚轮：以鼠标附近为锚点缩放
+
+加工辅助显示补充：
+
+- Viewer 会为可参与加工的图元绘制方向箭头
+- 已设置 `m_processOrder` 的图元会显示屏幕空间编号气泡，编号从 `1` 开始
+- 当前默认配色中，绿色表示正向加工，红色表示反向加工，黄色表示当前选中图元
+- 平移或轨道观察过程中会临时暂停加工辅助显示，以优先保证交互流畅度
 
 ### 绘图命令
 
@@ -395,6 +412,11 @@ CadDocument                                (Model)
 - 编辑 -> `反向加工`：切换当前选中图元的加工方向
 - 排序 -> `排序（保留方向）`：保留当前方向设置，仅重排加工顺序
 - 排序 -> `智能排序`：同时优化加工顺序与图元方向
+
+说明：
+
+- 执行“反向加工”或两类排序后，Viewer 中的方向箭头和顺序编号会立即刷新
+- 顺序编号、箭头方向与 G 代码导出当前共用同一套加工路径语义
 
 ### G 代码生成说明
 
@@ -442,7 +464,7 @@ CadDocument                                (Model)
 3. 导入一张简单黑白位图，验证预处理预览、矢量化结果和图层参数是否符合预期
 4. 验证平移、缩放、顶视图、轨道观察、拾取是否正常
 5. 验证绘图命令、移动、删除、改色、Undo / Redo 是否正常
-6. 验证“反向加工”“排序（保留方向）”“智能排序”是否符合预期，并检查 Undo / Redo 是否正常
+6. 验证“反向加工”“排序（保留方向）”“智能排序”是否符合预期，并检查 Viewer 中方向箭头、顺序编号与 Undo / Redo 是否同步正常
 7. 载入一份 `GProfile` 配置并验证 JSON 读写是否正常
 8. 通过主窗口“导出G代码”导出一份纯 `2D` G 代码，检查头尾、类型配置、颜色配置和圆弧方向是否符合预期
 9. 验证命令栏提示、状态栏坐标、拖拽导入是否正常
@@ -454,6 +476,7 @@ CadDocument                                (Model)
 - 位图导入依赖 OpenCV 运行时 DLL 拷贝到输出目录
 - `GGenerator` 当前仅实现纯 `2D` 输出，`3D` 模式未完成
 - “排序（保留方向）”当前尊重用户已设置的加工方向，不承担手动点选排序职责；手动排序接口代码已保留但暂未暴露到 UI
+- 加工方向箭头当前按世界坐标中的二维方向绘制，编号气泡会在屏幕空间做简单避让，但密集图元场景下仍可能出现局部遮挡
 - `Ellipse` 当前按折线离散导出，精度取决于固定采样密度
 - 第三方 `libdxfrw` 目录不应轻易修改
 - 工程里仍存在部分历史遗留命名，修改构建配置前需要先核对 `.ui`、`.vcxproj` 与当前源码是否一致
