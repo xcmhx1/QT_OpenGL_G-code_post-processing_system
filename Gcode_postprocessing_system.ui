@@ -48,6 +48,8 @@
     <property name="title">
      <string>排序</string>
     </property>
+    <addaction name="action_Sort_Assign"/>
+    <addaction name="action_Sort_Smart"/>
    </widget>
    <widget class="QMenu" name="menuSet">
     <property name="title">
@@ -91,6 +93,16 @@
   <action name="action_Edit_ReversePeocess">
    <property name="text">
     <string>反向加工</string>
+   </property>
+  </action>
+  <action name="action_Sort_Assign">
+   <property name="text">
+    <string>排序</string>
+   </property>
+  </action>
+  <action name="action_Sort_Smart">
+   <property name="text">
+    <string>智能排序</string>
    </property>
   </action>
  </widget>

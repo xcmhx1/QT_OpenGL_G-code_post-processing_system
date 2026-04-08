@@ -88,6 +88,24 @@ public:
     // @return 如果切换成功返回 true，否则返回 false
     bool toggleEntityReverse(CadItem* item);
 
+    // 设置指定实体的加工顺序
+    // @param item 目标实体
+    // @param processOrder 新的加工顺序
+    // @return 如果设置成功返回 true，否则返回 false
+    bool setEntityProcessOrder(CadItem* item, int processOrder);
+
+    // 批量更新实体的加工顺序与反向加工状态
+    // @param items 目标实体数组
+    // @param processOrders 对应的加工顺序数组
+    // @param reverseStates 对应的反向状态数组
+    // @return 如果批量更新成功返回 true，否则返回 false
+    bool applyEntityProcessStates
+    (
+        const std::vector<CadItem*>& items,
+        const std::vector<int>& processOrders,
+        const std::vector<bool>& reverseStates
+    );
+
     // 编辑命令抽象基类：
     // 封装一次可执行且可撤销的文档修改操作。
     class EditCommand

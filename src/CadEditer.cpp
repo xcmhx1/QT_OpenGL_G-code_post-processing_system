@@ -789,6 +789,72 @@ private:
     bool m_originalReverse = false;
 };
 
+// 批量更新加工状态命令：
+// 用于一次性提交加工顺序和反向加工状态，支持撤销与重做。
+class UpdateProcessStatesCommand final : public CadEditer::EditCommand
+{
+public:
+    struct ItemProcessState
+    {
+        CadItem* item = nullptr;
+        int oldProcessOrder = -1;
+        int newProcessOrder = -1;
+        bool oldReverse = false;
+        bool newReverse = false;
+    };
+
+public:
+    UpdateProcessStatesCommand(CadDocument* document, std::vector<ItemProcessState> states)
+        : m_document(document)
+        , m_states(std::move(states))
+    {
+    }
+
+    bool execute() override
+    {
+        return apply(true);
+    }
+
+    bool undo() override
+    {
+        return apply(false);
+    }
+
+private:
+    bool apply(bool useNewState)
+    {
+        if (m_document == nullptr || m_states.empty())
+        {
+            return false;
+        }
+
+        for (const ItemProcessState& state : m_states)
+        {
+            if (state.item == nullptr || !m_document->containsEntity(state.item))
+            {
+                return false;
+            }
+        }
+
+        for (const ItemProcessState& state : m_states)
+        {
+            state.item->m_processOrder = useNewState ? state.newProcessOrder : state.oldProcessOrder;
+            state.item->m_isReverse = useNewState ? state.newReverse : state.oldReverse;
+            state.item->buildProcessDirection();
+        }
+
+        m_document->notifySceneChanged();
+        return true;
+    }
+
+private:
+    // 目标文档
+    CadDocument* m_document = nullptr;
+
+    // 变更前后状态集合
+    std::vector<ItemProcessState> m_states;
+};
+
 // 析构编辑器对象
 CadEditer::~CadEditer() = default;
 
@@ -1044,6 +1110,75 @@ bool CadEditer::toggleEntityReverse(CadItem* item)
     }
 
     return executeCommand(std::make_unique<ToggleReverseCommand>(m_document, item));
+}
+
+// 设置指定实体的加工顺序
+// @param item 目标实体
+// @param processOrder 新的加工顺序
+// @return 如果设置成功返回 true，否则返回 false
+bool CadEditer::setEntityProcessOrder(CadItem* item, int processOrder)
+{
+    if (m_document == nullptr || item == nullptr || !m_document->containsEntity(item) || processOrder < 0)
+    {
+        return false;
+    }
+
+    std::vector<UpdateProcessStatesCommand::ItemProcessState> states;
+    states.push_back
+    ({
+        item,
+        item->m_processOrder,
+        processOrder,
+        item->m_isReverse,
+        item->m_isReverse
+    });
+
+    return executeCommand(std::make_unique<UpdateProcessStatesCommand>(m_document, std::move(states)));
+}
+
+// 批量更新实体的加工顺序与反向加工状态
+// @param items 目标实体数组
+// @param processOrders 对应的加工顺序数组
+// @param reverseStates 对应的反向状态数组
+// @return 如果批量更新成功返回 true，否则返回 false
+bool CadEditer::applyEntityProcessStates
+(
+    const std::vector<CadItem*>& items,
+    const std::vector<int>& processOrders,
+    const std::vector<bool>& reverseStates
+)
+{
+    if (m_document == nullptr
+        || items.empty()
+        || items.size() != processOrders.size()
+        || items.size() != reverseStates.size())
+    {
+        return false;
+    }
+
+    std::vector<UpdateProcessStatesCommand::ItemProcessState> states;
+    states.reserve(items.size());
+
+    for (size_t index = 0; index < items.size(); ++index)
+    {
+        CadItem* item = items[index];
+
+        if (item == nullptr || !m_document->containsEntity(item) || processOrders[index] < 0)
+        {
+            return false;
+        }
+
+        states.push_back
+        ({
+            item,
+            item->m_processOrder,
+            processOrders[index],
+            item->m_isReverse,
+            reverseStates[index]
+        });
+    }
+
+    return executeCommand(std::make_unique<UpdateProcessStatesCommand>(m_document, std::move(states)));
 }
 
 // 执行命令并压入 Undo 栈

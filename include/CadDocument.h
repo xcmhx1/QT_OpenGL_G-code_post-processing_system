@@ -45,6 +45,9 @@ public:
     // 当底层实体数据变更后，重建图元几何并通知视图刷新
     bool refreshEntity(CadItem* item);
 
+    // 当仅有图元元数据变更时，通知场景刷新
+    void notifySceneChanged();
+
     // 查询图元是否仍属于当前文档
     bool containsEntity(const CadItem* item) const;
 

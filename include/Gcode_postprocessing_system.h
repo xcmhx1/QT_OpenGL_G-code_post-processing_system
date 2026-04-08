@@ -27,6 +27,8 @@ private:
     bool importBitmapFile(const QString& filePath);
     bool exportGCode();
     bool toggleSelectedEntityReverse();
+    bool assignSelectedEntityProcessOrder();
+    bool smartSortEntities();
 
 private:
     Ui::Gcode_postprocessing_systemClass* ui = nullptr;
