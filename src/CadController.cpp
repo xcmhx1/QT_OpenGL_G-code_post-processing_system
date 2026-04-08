@@ -1,4 +1,4 @@
-﻿// CadController 实现文件
+// CadController 实现文件
 // 实现 CadController 模块，对应头文件中声明的主要行为和协作流程。
 // 输入控制模块，负责解释键盘、鼠标、滚轮事件并驱动绘图/编辑命令。
 
@@ -85,6 +85,13 @@ void CadController::reset()
     }
 }
 
+void CadController::setDefaultDrawingProperties(const QString& layerName, const QColor& color, int colorIndex)
+{
+    m_drawState.drawingLayerName = layerName.trimmed().isEmpty() ? QStringLiteral("0") : layerName.trimmed();
+    m_drawState.drawingColor = color.isValid() ? color : QColor(Qt::white);
+    m_drawState.drawingColorIndex = colorIndex;
+}
+
 // 开始绘制指定类型的图元
 // @param drawType 绘制类型
 // @param color 图元颜色，默认为白色
@@ -117,6 +124,24 @@ void CadController::beginDrawing(DrawType drawType, const QColor& color)
         m_viewer->appendCommandMessage(QStringLiteral("已进入%1命令").arg(drawTypeName(drawType)));
         m_viewer->refreshCommandPrompt();
     }
+}
+
+bool CadController::beginMoveSelected()
+{
+    if (m_editer == nullptr || m_viewer == nullptr)
+    {
+        return false;
+    }
+
+    const bool handled = m_editer->beginMove(m_drawState, m_viewer->selectedEntity());
+
+    if (handled)
+    {
+        m_viewer->appendCommandMessage(QStringLiteral("已进入移动命令"));
+        m_viewer->refreshCommandPrompt();
+    }
+
+    return handled;
 }
 
 // 取消当前绘制操作
@@ -510,15 +535,7 @@ bool CadController::handleKeyPress(QKeyEvent* event)
     // M键：开始移动命令
     if (event->key() == Qt::Key_M && m_editer != nullptr && m_viewer != nullptr)
     {
-        const bool handled = m_editer->beginMove(m_drawState, m_viewer->selectedEntity());
-
-        if (handled)
-        {
-            m_viewer->appendCommandMessage(QStringLiteral("已进入移动命令"));
-            m_viewer->refreshCommandPrompt();
-        }
-
-        return handled;
+        return beginMoveSelected();
     }
 
     // K键：修改选中实体颜色

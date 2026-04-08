@@ -282,19 +282,33 @@ namespace
     }
 
     // 创建点实体
-    std::unique_ptr<DRW_Entity> createPointEntity(const QVector3D& position, const QColor& color)
+    std::unique_ptr<DRW_Entity> createPointEntity
+    (
+        const QVector3D& position,
+        const QString& layerName,
+        const QColor& color,
+        int colorIndex
+    )
     {
         const QVector3D planarPosition = flattenToDrawingPlane(position);
         auto entity = std::make_unique<DRW_Point>();
         entity->basePoint.x = planarPosition.x();
         entity->basePoint.y = planarPosition.y();
         entity->basePoint.z = 0.0;
-        applyEntityColor(entity.get(), color, -1);
+        entity->layer = layerName.trimmed().isEmpty() ? "0" : layerName.toUtf8().constData();
+        applyEntityColor(entity.get(), color, colorIndex);
         return entity;
     }
 
     // 创建直线实体
-    std::unique_ptr<DRW_Entity> createLineEntity(const QVector3D& startPoint, const QVector3D& endPoint, const QColor& color)
+    std::unique_ptr<DRW_Entity> createLineEntity
+    (
+        const QVector3D& startPoint,
+        const QVector3D& endPoint,
+        const QString& layerName,
+        const QColor& color,
+        int colorIndex
+    )
     {
         const QVector3D planarStartPoint = flattenToDrawingPlane(startPoint);
         const QVector3D planarEndPoint = flattenToDrawingPlane(endPoint);
@@ -311,12 +325,20 @@ namespace
         entity->secPoint.x = planarEndPoint.x();
         entity->secPoint.y = planarEndPoint.y();
         entity->secPoint.z = 0.0;
-        applyEntityColor(entity.get(), color, -1);
+        entity->layer = layerName.trimmed().isEmpty() ? "0" : layerName.toUtf8().constData();
+        applyEntityColor(entity.get(), color, colorIndex);
         return entity;
     }
 
     // 创建圆实体
-    std::unique_ptr<DRW_Entity> createCircleEntity(const QVector3D& center, const QVector3D& radiusPoint, const QColor& color)
+    std::unique_ptr<DRW_Entity> createCircleEntity
+    (
+        const QVector3D& center,
+        const QVector3D& radiusPoint,
+        const QString& layerName,
+        const QColor& color,
+        int colorIndex
+    )
     {
         const QVector3D planarCenter = flattenToDrawingPlane(center);
         const QVector3D planarRadiusPoint = flattenToDrawingPlane(radiusPoint);
@@ -335,7 +357,8 @@ namespace
         entity->extPoint.x = 0.0;
         entity->extPoint.y = 0.0;
         entity->extPoint.z = 1.0;
-        applyEntityColor(entity.get(), color, -1);
+        entity->layer = layerName.trimmed().isEmpty() ? "0" : layerName.toUtf8().constData();
+        applyEntityColor(entity.get(), color, colorIndex);
         return entity;
     }
 
@@ -346,7 +369,9 @@ namespace
         const QVector3D& radiusPoint,
         const QVector3D& startAnglePoint,
         const QVector3D& endAnglePoint,
-        const QColor& color
+        const QString& layerName,
+        const QColor& color,
+        int colorIndex
     )
     {
         const QVector3D planarCenter = flattenToDrawingPlane(center);
@@ -379,7 +404,8 @@ namespace
             entity->endangle = entity->staangle + kTwoPi;
         }
 
-        applyEntityColor(entity.get(), color, -1);
+        entity->layer = layerName.trimmed().isEmpty() ? "0" : layerName.toUtf8().constData();
+        applyEntityColor(entity.get(), color, colorIndex);
         return entity;
     }
 
@@ -389,7 +415,9 @@ namespace
         const QVector3D& center,
         const QVector3D& majorAxisPoint,
         const QVector3D& ratioPoint,
-        const QColor& color
+        const QString& layerName,
+        const QColor& color,
+        int colorIndex
     )
     {
         const QVector3D planarCenter = flattenToDrawingPlane(center);
@@ -426,7 +454,8 @@ namespace
         entity->extPoint.x = 0.0;
         entity->extPoint.y = 0.0;
         entity->extPoint.z = 1.0;
-        applyEntityColor(entity.get(), color, -1);
+        entity->layer = layerName.trimmed().isEmpty() ? "0" : layerName.toUtf8().constData();
+        applyEntityColor(entity.get(), color, colorIndex);
         return entity;
     }
 
@@ -435,7 +464,9 @@ namespace
     (
         const QVector<QVector3D>& points,
         const QVector<double>& bulges,
+        const QString& layerName,
         const QColor& color,
+        int colorIndex,
         bool closePolyline,
         bool lightweight
     )
@@ -466,7 +497,8 @@ namespace
             }
 
             entity->vertexnum = static_cast<int>(entity->vertlist.size());
-            applyEntityColor(entity.get(), color, -1);
+            entity->layer = layerName.trimmed().isEmpty() ? "0" : layerName.toUtf8().constData();
+            applyEntityColor(entity.get(), color, colorIndex);
             return entity;
         }
 
@@ -489,7 +521,8 @@ namespace
         }
 
         entity->vertexcount = static_cast<int>(entity->vertlist.size());
-        applyEntityColor(entity.get(), color, -1);
+        entity->layer = layerName.trimmed().isEmpty() ? "0" : layerName.toUtf8().constData();
+        applyEntityColor(entity.get(), color, colorIndex);
         return entity;
     }
 }
@@ -739,6 +772,51 @@ private:
 
     // 旧 true color
     int m_oldTrueColor = -1;
+};
+
+class ChangeLayerCommand final : public CadEditer::EditCommand
+{
+public:
+    ChangeLayerCommand(CadDocument* document, CadItem* item, const QString& layerName)
+        : m_document(document)
+        , m_item(item)
+        , m_newLayerName(layerName.trimmed().isEmpty() ? QStringLiteral("0") : layerName.trimmed())
+    {
+        if (m_item != nullptr && m_item->m_nativeEntity != nullptr)
+        {
+            m_oldLayerName = QString::fromUtf8(m_item->m_nativeEntity->layer.c_str());
+        }
+    }
+
+    bool execute() override
+    {
+        return apply(m_newLayerName);
+    }
+
+    bool undo() override
+    {
+        return apply(m_oldLayerName);
+    }
+
+private:
+    bool apply(const QString& layerName)
+    {
+        if (m_document == nullptr || m_item == nullptr || m_item->m_nativeEntity == nullptr || !m_document->containsEntity(m_item))
+        {
+            return false;
+        }
+
+        const QString normalizedLayerName = layerName.trimmed().isEmpty() ? QStringLiteral("0") : layerName.trimmed();
+        m_document->ensureLayerExists(normalizedLayerName);
+        m_item->m_nativeEntity->layer = normalizedLayerName.toUtf8().constData();
+        return m_document->refreshEntity(m_item);
+    }
+
+private:
+    CadDocument* m_document = nullptr;
+    CadItem* m_item = nullptr;
+    QString m_oldLayerName = QStringLiteral("0");
+    QString m_newLayerName = QStringLiteral("0");
 };
 
 // 切换反向加工命令：
@@ -1017,7 +1095,9 @@ bool CadEditer::finishActivePolyline(DrawStateMachine& drawState, bool closePoly
     (
         drawState.commandPoints,
         drawState.commandBulges,
+        drawState.drawingLayerName,
         drawState.drawingColor,
+        drawState.drawingColorIndex,
         closePolyline,
         lightweight
     );
@@ -1097,6 +1177,17 @@ bool CadEditer::changeEntityColor(CadItem* item, const QColor& color, int colorI
     }
 
     return executeCommand(std::make_unique<ChangeColorCommand>(m_document, item, color, colorIndex));
+}
+
+bool CadEditer::changeEntityLayer(CadItem* item, const QString& layerName)
+{
+    if (m_document == nullptr || item == nullptr || !m_document->containsEntity(item))
+    {
+        return false;
+    }
+
+    const QString normalizedLayerName = layerName.trimmed().isEmpty() ? QStringLiteral("0") : layerName.trimmed();
+    return executeCommand(std::make_unique<ChangeLayerCommand>(m_document, item, normalizedLayerName));
 }
 
 // 切换指定实体的反向加工标记
@@ -1217,7 +1308,16 @@ bool CadEditer::handlePointDrawing
         return false;
     }
 
-    return addEntity(createPointEntity(worldPos, previousState.drawingColor));
+    return addEntity
+    (
+        createPointEntity
+        (
+            worldPos,
+            previousState.drawingLayerName,
+            previousState.drawingColor,
+            previousState.drawingColorIndex
+        )
+    );
 }
 
 // 处理直线绘制命令
@@ -1239,7 +1339,17 @@ bool CadEditer::handleLineDrawing
     {
         const QVector3D startPoint = currentState.commandPoints.front();
 
-        if (!addEntity(createLineEntity(startPoint, worldPos, previousState.drawingColor)))
+        if (!addEntity
+        (
+            createLineEntity
+            (
+                startPoint,
+                worldPos,
+                previousState.drawingLayerName,
+                previousState.drawingColor,
+                previousState.drawingColorIndex
+            )
+        ))
         {
             return false;
         }
@@ -1271,7 +1381,17 @@ bool CadEditer::handleCircleDrawing
     {
         const QVector3D center = currentState.commandPoints.front();
 
-        if (!addEntity(createCircleEntity(center, worldPos, previousState.drawingColor)))
+        if (!addEntity
+        (
+            createCircleEntity
+            (
+                center,
+                worldPos,
+                previousState.drawingLayerName,
+                previousState.drawingColor,
+                previousState.drawingColorIndex
+            )
+        ))
         {
             return false;
         }
@@ -1345,7 +1465,9 @@ bool CadEditer::handleArcDrawing
                 currentState.commandPoints[1],
                 currentState.commandPoints[2],
                 worldPos,
-                previousState.drawingColor
+                previousState.drawingLayerName,
+                previousState.drawingColor,
+                previousState.drawingColorIndex
             )
         ))
         {
@@ -1406,7 +1528,9 @@ bool CadEditer::handleEllipseDrawing
                 currentState.commandPoints[0],
                 currentState.commandPoints[1],
                 worldPos,
-                previousState.drawingColor
+                previousState.drawingLayerName,
+                previousState.drawingColor,
+                previousState.drawingColorIndex
             )
         ))
         {

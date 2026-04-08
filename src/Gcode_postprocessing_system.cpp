@@ -11,6 +11,7 @@
 #include <QFileInfo>
 #include <QMessageBox>
 #include <QStatusBar>
+#include <QToolBar>
 #include <QVBoxLayout>
 
 #include <algorithm>
@@ -21,6 +22,92 @@
 namespace
 {
     constexpr double kSortEpsilon = 1.0e-9;
+    constexpr int kColorByLayer = 256;
+
+    QColor colorFromAci(int colorIndex)
+    {
+        static const QRgb aciStandardColors[] =
+        {
+            qRgb(0, 0, 0),
+            qRgb(255, 0, 0),
+            qRgb(255, 255, 0),
+            qRgb(0, 255, 0),
+            qRgb(0, 255, 255),
+            qRgb(0, 0, 255),
+            qRgb(255, 0, 255),
+            qRgb(255, 255, 255),
+            qRgb(128, 128, 128),
+            qRgb(192, 192, 192)
+        };
+
+        if (colorIndex >= 1 && colorIndex <= 9)
+        {
+            return QColor(aciStandardColors[colorIndex]);
+        }
+
+        if (colorIndex == 0)
+        {
+            return QColor(Qt::white);
+        }
+
+        return QColor();
+    }
+
+    QColor colorFromTrueColor(int color24)
+    {
+        if (color24 < 0)
+        {
+            return QColor();
+        }
+
+        return QColor((color24 >> 16) & 0xFF, (color24 >> 8) & 0xFF, color24 & 0xFF);
+    }
+
+    QString entityLayerName(const CadItem* item)
+    {
+        if (item == nullptr || item->m_nativeEntity == nullptr)
+        {
+            return QStringLiteral("0");
+        }
+
+        const QString layerName = QString::fromUtf8(item->m_nativeEntity->layer.c_str()).trimmed();
+        return layerName.isEmpty() ? QStringLiteral("0") : layerName;
+    }
+
+    int entityColorIndex(const CadItem* item)
+    {
+        if (item == nullptr || item->m_nativeEntity == nullptr)
+        {
+            return kColorByLayer;
+        }
+
+        return item->m_nativeEntity->color24 != -1
+            ? -1
+            : item->m_nativeEntity->color;
+    }
+
+    QColor entityDisplayColor(const CadDocument& document, const CadItem* item)
+    {
+        if (item == nullptr || item->m_nativeEntity == nullptr)
+        {
+            return QColor(Qt::white);
+        }
+
+        const QColor trueColor = colorFromTrueColor(item->m_nativeEntity->color24);
+
+        if (trueColor.isValid())
+        {
+            return trueColor;
+        }
+
+        if (item->m_nativeEntity->color == kColorByLayer)
+        {
+            return document.layerColor(entityLayerName(item), item->m_color);
+        }
+
+        const QColor aciColor = colorFromAci(item->m_nativeEntity->color);
+        return aciColor.isValid() ? aciColor : item->m_color;
+    }
 
     bool hasSuffix(const QString& filePath, std::initializer_list<const char*> suffixes)
     {
@@ -161,6 +248,10 @@ Gcode_postprocessing_system::Gcode_postprocessing_system(QWidget* parent)
     connect(ui->action_Edit_ReversePeocess, &QAction::triggered, this, [this]() { toggleSelectedEntityReverse(); });
     connect(ui->action_Sort_Assign, &QAction::triggered, this, [this]() { sortEntitiesByCurrentDirection(); });
     connect(ui->action_Sort_Smart, &QAction::triggered, this, [this]() { smartSortEntities(); });
+
+    initializeToolPanel();
+    applyDefaultDrawingProperties();
+    syncToolPanelState();
 }
 
 Gcode_postprocessing_system::~Gcode_postprocessing_system()
@@ -203,6 +294,7 @@ bool Gcode_postprocessing_system::importDxfFile(const QString& filePath)
         QMessageBox::warning(this, QStringLiteral("导入结果"), QStringLiteral("文件已读取，但未生成可显示的 CAD 图元。"));
     }
 
+    syncToolPanelState();
     return true;
 }
 
@@ -262,6 +354,7 @@ bool Gcode_postprocessing_system::importBitmapFile(const QString& filePath)
         5000
     );
 
+    syncToolPanelState();
     return true;
 }
 
@@ -579,4 +672,192 @@ bool Gcode_postprocessing_system::smartSortEntities()
     ui->openGLWidget->refreshCommandPrompt();
     statusBar()->showMessage(QStringLiteral("智能排序完成，共更新 %1 个图元").arg(orderedItems.size()), 5000);
     return true;
+}
+
+void Gcode_postprocessing_system::initializeToolPanel()
+{
+    m_toolPanelWidget = new CadToolPanelWidget(this);
+    ui->mainToolBar->setMovable(false);
+    ui->mainToolBar->setFloatable(false);
+    ui->mainToolBar->addWidget(m_toolPanelWidget);
+
+    connect(&m_document, &CadDocument::sceneChanged, this, [this]() { syncToolPanelState(); });
+    connect(ui->openGLWidget, &CadViewer::selectedEntityChanged, this, [this](CadItem*) { syncToolPanelState(); });
+
+    connect
+    (
+        m_toolPanelWidget,
+        &CadToolPanelWidget::drawRequested,
+        this,
+        [this](DrawType drawType)
+        {
+            applyDefaultDrawingProperties();
+            ui->openGLWidget->startDrawing(drawType);
+        }
+    );
+
+    connect
+    (
+        m_toolPanelWidget,
+        &CadToolPanelWidget::moveRequested,
+        this,
+        [this]()
+        {
+            if (!ui->openGLWidget->startMoveSelected())
+            {
+                statusBar()->showMessage(QStringLiteral("请先选择一个图元再执行移动"), 3000);
+            }
+        }
+    );
+
+    connect
+    (
+        m_toolPanelWidget,
+        &CadToolPanelWidget::layerChangeRequested,
+        this,
+        [this](const QString& layerName)
+        {
+            const QString normalizedLayerName = layerName.trimmed().isEmpty() ? QStringLiteral("0") : layerName.trimmed();
+            CadItem* selectedItem = ui->openGLWidget->selectedEntity();
+
+            if (selectedItem != nullptr)
+            {
+                if (m_editer.changeEntityLayer(selectedItem, normalizedLayerName))
+                {
+                    statusBar()->showMessage(QStringLiteral("图层已更新为 %1").arg(normalizedLayerName), 3000);
+                }
+
+                return;
+            }
+
+            m_currentLayerName = normalizedLayerName;
+
+            if (m_document.ensureLayerExists(m_currentLayerName))
+            {
+                m_document.notifySceneChanged();
+            }
+
+            applyDefaultDrawingProperties();
+            syncToolPanelState();
+        }
+    );
+
+    connect
+    (
+        m_toolPanelWidget,
+        &CadToolPanelWidget::colorChangeRequested,
+        this,
+        [this](int colorIndex)
+        {
+            CadItem* selectedItem = ui->openGLWidget->selectedEntity();
+
+            if (selectedItem != nullptr)
+            {
+                const QColor targetColor = colorIndex == kColorByLayer
+                    ? m_document.layerColor(entityLayerName(selectedItem), entityDisplayColor(m_document, selectedItem))
+                    : (colorIndex < 0 ? entityDisplayColor(m_document, selectedItem) : colorFromAci(colorIndex));
+
+                if (m_editer.changeEntityColor(selectedItem, targetColor, colorIndex))
+                {
+                    statusBar()->showMessage(QStringLiteral("图元颜色已更新"), 3000);
+                }
+
+                return;
+            }
+
+            m_currentColorIndex = colorIndex;
+
+            if (colorIndex == kColorByLayer)
+            {
+                m_currentColor = m_document.layerColor(m_currentLayerName, QColor(Qt::white));
+            }
+            else if (colorIndex >= 0)
+            {
+                m_currentColor = colorFromAci(colorIndex);
+            }
+
+            applyDefaultDrawingProperties();
+            syncToolPanelState();
+        }
+    );
+}
+
+void Gcode_postprocessing_system::syncToolPanelState()
+{
+    if (m_toolPanelWidget == nullptr)
+    {
+        return;
+    }
+
+    const QStringList layerNames = m_document.layerNames();
+    m_toolPanelWidget->setLayerNames(layerNames);
+
+    CadItem* selectedItem = ui->openGLWidget->selectedEntity();
+
+    if (selectedItem != nullptr)
+    {
+        m_toolPanelWidget->setMoveEnabled(true);
+        m_toolPanelWidget->setLayerStatusText(QStringLiteral("当前选中图元图层"));
+        m_toolPanelWidget->setPropertyStatusText(QStringLiteral("当前选中图元特性"));
+        m_toolPanelWidget->setActiveLayerName(entityLayerName(selectedItem));
+        m_toolPanelWidget->setActiveColorState(entityDisplayColor(m_document, selectedItem), entityColorIndex(selectedItem));
+        return;
+    }
+
+    if (m_currentLayerName.trimmed().isEmpty())
+    {
+        m_currentLayerName = layerNames.isEmpty() ? QStringLiteral("0") : layerNames.front();
+    }
+
+    if (m_currentColorIndex == kColorByLayer)
+    {
+        m_currentColor = m_document.layerColor(m_currentLayerName, QColor(Qt::white));
+    }
+    else if (m_currentColorIndex >= 0)
+    {
+        m_currentColor = colorFromAci(m_currentColorIndex);
+    }
+
+    m_toolPanelWidget->setMoveEnabled(false);
+    m_toolPanelWidget->setLayerStatusText(QStringLiteral("当前默认绘图图层"));
+    m_toolPanelWidget->setPropertyStatusText(QStringLiteral("当前默认绘图特性"));
+    m_toolPanelWidget->setActiveLayerName(m_currentLayerName);
+    m_toolPanelWidget->setActiveColorState(m_currentColor, m_currentColorIndex);
+}
+
+void Gcode_postprocessing_system::applyDefaultDrawingProperties()
+{
+    if (m_currentLayerName.trimmed().isEmpty())
+    {
+        m_currentLayerName = QStringLiteral("0");
+    }
+
+    if (m_currentColorIndex == kColorByLayer)
+    {
+        m_currentColor = m_document.layerColor(m_currentLayerName, QColor(Qt::white));
+    }
+    else if (m_currentColorIndex >= 0)
+    {
+        m_currentColor = colorFromAci(m_currentColorIndex);
+    }
+
+    ui->openGLWidget->setDefaultDrawingProperties(m_currentLayerName, m_currentColor, m_currentColorIndex);
+}
+
+QString Gcode_postprocessing_system::activeLayerName() const
+{
+    CadItem* selectedItem = ui->openGLWidget->selectedEntity();
+    return selectedItem != nullptr ? entityLayerName(selectedItem) : m_currentLayerName;
+}
+
+QColor Gcode_postprocessing_system::activeColor() const
+{
+    CadItem* selectedItem = ui->openGLWidget->selectedEntity();
+    return selectedItem != nullptr ? entityDisplayColor(m_document, selectedItem) : m_currentColor;
+}
+
+int Gcode_postprocessing_system::activeColorIndex() const
+{
+    CadItem* selectedItem = ui->openGLWidget->selectedEntity();
+    return selectedItem != nullptr ? entityColorIndex(selectedItem) : m_currentColorIndex;
 }

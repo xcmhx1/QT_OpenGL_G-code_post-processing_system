@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include <QColor>
 #include <QPoint>
@@ -115,6 +115,10 @@ public:
     DrawType drawType = DrawType::None;
     // 当前绘图的颜色，默认为白色
     QColor drawingColor = QColor(255, 255, 255);
+    // 当前绘图默认图层名。
+    QString drawingLayerName = QStringLiteral("0");
+    // 当前绘图默认颜色索引；256 表示 ByLayer，-1 表示 true color。
+    int drawingColorIndex = 256;
 
     // 当前编辑命令类型
     EditType editType = EditType::None;

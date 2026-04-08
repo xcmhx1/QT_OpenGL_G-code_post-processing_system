@@ -83,6 +83,12 @@ public:
     // @return 如果修改成功返回 true，否则返回 false
     bool changeEntityColor(CadItem* item, const QColor& color, int colorIndex = -1);
 
+    // 修改指定实体图层。
+    // @param item 目标实体
+    // @param layerName 新图层名
+    // @return 如果修改成功返回 true，否则返回 false
+    bool changeEntityLayer(CadItem* item, const QString& layerName);
+
     // 切换指定实体的反向加工标记
     // @param item 目标实体
     // @return 如果切换成功返回 true，否则返回 false

@@ -1,4 +1,4 @@
-﻿#include "pch.h" // 假设这是预编译头文件，如果不是，请根据实际情况移除或修改
+#include "pch.h" // 假设这是预编译头文件，如果不是，请根据实际情况移除或修改
 
 #include "DrawStateMachine.h" // 包含 DrawStateMachine 的头文件
 
@@ -9,10 +9,16 @@ DrawStateMachine DrawStateMachine::s_instance;
 // 实现 reset 方法，将所有成员变量重置为它们的默认值
 void DrawStateMachine::reset()
 {
+    const QColor preservedDrawingColor = drawingColor;
+    const QString preservedLayerName = drawingLayerName;
+    const int preservedColorIndex = drawingColorIndex;
+
     // 重置基本状态
     isDrawing = false;
     drawType = DrawType::None; 
-    drawingColor = QColor(255, 255, 255); 
+    drawingColor = preservedDrawingColor.isValid() ? preservedDrawingColor : QColor(255, 255, 255);
+    drawingLayerName = preservedLayerName.trimmed().isEmpty() ? QStringLiteral("0") : preservedLayerName;
+    drawingColorIndex = preservedColorIndex;
     editType = EditType::None;
     moveSubMode = MoveEditSubMode::Idle;
     commandPoints.clear();

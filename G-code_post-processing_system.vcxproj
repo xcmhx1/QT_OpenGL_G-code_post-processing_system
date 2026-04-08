@@ -131,6 +131,7 @@
   </ItemGroup>
   <ItemGroup>
     <QtMoc Include="include\Gcode_postprocessing_system.h" />
+    <QtMoc Include="include\CadToolPanelWidget.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\CadItem.cpp" />
@@ -183,6 +184,10 @@
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
     </ClCompile>
     <ClCompile Include="src\CadStatusPaneWidget.cpp">
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+    </ClCompile>
+    <ClCompile Include="src\CadToolPanelWidget.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
     </ClCompile>

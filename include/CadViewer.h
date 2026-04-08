@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 // CadViewer 头文件
 // 声明 CadViewer 模块，对外暴露当前组件的核心类型、接口和协作边界。
@@ -56,6 +56,15 @@ public:
 
     // 设置当前编辑器
     void setEditer(CadEditer* editer);
+
+    // 设置默认绘图属性。
+    void setDefaultDrawingProperties(const QString& layerName, const QColor& color, int colorIndex);
+
+    // 开始绘制指定类型图元。
+    void startDrawing(DrawType drawType);
+
+    // 对当前选中图元开始移动命令。
+    bool startMoveSelected();
 
     // 视图适配整个场景，调整相机使整个场景可见
     void fitScene();
@@ -156,6 +165,9 @@ signals:
     // @param message 追加的消息
     void commandMessageAppended(const QString& message);
 
+    // 当前选中图元变化信号。
+    void selectedEntityChanged(CadItem* item);
+
     // 文件拖放请求信号
     // @param filePath 文件路径
     void fileDropRequested(const QString& filePath);
@@ -249,6 +261,9 @@ private:
     // 更新悬停世界位置
     // @param screenPos 屏幕坐标
     void updateHoveredWorldPosition(const QPoint& screenPos);
+
+    // 更新当前选中实体并在变化时发出信号。
+    void setSelectedEntityId(EntityId entityId);
 
     // 简单屏幕空间拾取，返回命中的实体 ID
     // @param screenPos 屏幕坐标

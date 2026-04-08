@@ -1,4 +1,4 @@
-﻿#include "pch.h"
+#include "pch.h"
 
 // CadViewer 实现文件
 // 实现 CadViewer 模块，对应头文件中声明的主要行为和协作流程。
@@ -119,7 +119,7 @@ void CadViewer::setDocument(CadDocument* document)
     // 绑定文档到场景协调器
     m_sceneCoordinator.bindDocument(document, this, &CadViewer::handleDocumentSceneChanged);
     // 清除选中实体
-    m_selectedEntityId = 0;
+    setSelectedEntityId(0);
 
     // 如果图形协调器已初始化，则立即重建缓冲
     if (m_graphicsCoordinator.isInitialized())
@@ -140,6 +140,30 @@ void CadViewer::setDocument(CadDocument* document)
 void CadViewer::setEditer(CadEditer* editer)
 {
     m_controller.setEditer(editer);
+}
+
+void CadViewer::setDefaultDrawingProperties(const QString& layerName, const QColor& color, int colorIndex)
+{
+    m_controller.setDefaultDrawingProperties(layerName, color, colorIndex);
+    refreshCommandPrompt();
+}
+
+void CadViewer::startDrawing(DrawType drawType)
+{
+    m_controller.beginDrawing(drawType, m_controller.drawState().drawingColor);
+    update();
+}
+
+bool CadViewer::startMoveSelected()
+{
+    const bool handled = m_controller.beginMoveSelected();
+
+    if (handled)
+    {
+        update();
+    }
+
+    return handled;
 }
 
 // 适配整个场景，并回到 2D 平面视图。
@@ -210,7 +234,7 @@ void CadViewer::endViewInteraction()
 // @param screenPos 屏幕坐标点
 void CadViewer::selectEntityAt(const QPoint& screenPos)
 {
-    m_selectedEntityId = pickEntity(screenPos);
+    setSelectedEntityId(pickEntity(screenPos));
     update();
 }
 
@@ -900,7 +924,7 @@ void CadViewer::handleDocumentSceneChanged()
     // 如果选中的实体已不存在，则清除选中状态
     if (findEntityById(m_selectedEntityId) == nullptr)
     {
-        m_selectedEntityId = 0;
+        setSelectedEntityId(0);
     }
 
     // 如果图形协调器已初始化，则重建缓冲
@@ -919,6 +943,17 @@ void CadViewer::handleDocumentSceneChanged()
 void CadViewer::updateHoveredWorldPosition(const QPoint& screenPos)
 {
     emit hoveredWorldPositionChanged(screenToGroundPlane(screenPos));
+}
+
+void CadViewer::setSelectedEntityId(EntityId entityId)
+{
+    if (m_selectedEntityId == entityId)
+    {
+        return;
+    }
+
+    m_selectedEntityId = entityId;
+    emit selectedEntityChanged(selectedEntity());
 }
 
 // 屏幕空间拾取：

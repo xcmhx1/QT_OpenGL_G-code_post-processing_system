@@ -1,4 +1,4 @@
-﻿// CadController 头文件
+// CadController 头文件
 // 声明 CadController 模块，对外暴露当前组件的核心类型、接口和协作边界。
 // 输入控制模块，负责解释键盘、鼠标、滚轮事件并驱动绘图/编辑命令。
 
@@ -36,10 +36,16 @@ public:
     // 重置控制器状态
     void reset();
 
+    // 更新默认绘图属性。
+    void setDefaultDrawingProperties(const QString& layerName, const QColor& color, int colorIndex);
+
     // 开始绘制指定类型的图元
     // @param primitiveKind 绘制类型（如直线、圆等）
     // @param color 图元颜色，默认为白色
     void beginDrawing(DrawType primitiveKind, const QColor& color = QColor(255, 255, 255));
+
+    // 开始移动当前选中实体。
+    bool beginMoveSelected();
 
     // 取消当前绘制操作
     void cancelDrawing();

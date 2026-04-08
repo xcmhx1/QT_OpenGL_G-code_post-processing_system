@@ -15,6 +15,72 @@
 #include "dx_iface.h"
 
 #include <QDebug>
+#include <QSet>
+
+namespace
+{
+    QColor colorFromAci(int index)
+    {
+        static const QRgb aciStandardColors[] =
+        {
+            qRgb(0, 0, 0),
+            qRgb(255, 0, 0),
+            qRgb(255, 255, 0),
+            qRgb(0, 255, 0),
+            qRgb(0, 255, 255),
+            qRgb(0, 0, 255),
+            qRgb(255, 0, 255),
+            qRgb(255, 255, 255),
+            qRgb(128, 128, 128),
+            qRgb(192, 192, 192)
+        };
+
+        if (index >= 1 && index <= 9)
+        {
+            return QColor(aciStandardColors[index]);
+        }
+
+        if (index == 0)
+        {
+            return QColor(Qt::white);
+        }
+
+        return QColor();
+    }
+
+    QColor colorFromTrueColor(int color24)
+    {
+        if (color24 < 0)
+        {
+            return QColor();
+        }
+
+        return QColor((color24 >> 16) & 0xFF, (color24 >> 8) & 0xFF, color24 & 0xFF);
+    }
+
+    QColor resolveEntityDisplayColor(const CadDocument& document, const CadItem* item)
+    {
+        if (item == nullptr || item->m_nativeEntity == nullptr)
+        {
+            return QColor(Qt::white);
+        }
+
+        const QColor trueColor = colorFromTrueColor(item->m_nativeEntity->color24);
+
+        if (trueColor.isValid())
+        {
+            return trueColor;
+        }
+
+        if (item->m_nativeEntity->color == DRW::ColorByLayer)
+        {
+            return document.layerColor(QString::fromUtf8(item->m_nativeEntity->layer.c_str()), item->m_color);
+        }
+
+        const QColor indexColor = colorFromAci(item->m_nativeEntity->color);
+        return indexColor.isValid() ? indexColor : item->m_color;
+    }
+}
 
 std::unique_ptr<CadItem> CadDocument::createCadItemForEntity(DRW_Entity* entity)
 {
@@ -98,6 +164,7 @@ void CadDocument::clearAll()
     // 重新创建 dx_data 则会重置原始解析结果容器。
     m_entities.clear();
     m_data = std::make_unique<dx_data>();
+    ensureLayerExists(QStringLiteral("0"));
 }
 
 void CadDocument::init()
@@ -113,6 +180,7 @@ void CadDocument::init()
         if (std::unique_ptr<CadItem> item = createCadItemForEntity(entity))
         {
             // 只有成功适配的实体才会进入场景图元数组。
+            item->m_color = resolveEntityDisplayColor(*this, item.get());
             m_entities.push_back(std::move(item));
         }
     }
@@ -140,6 +208,8 @@ CadItem* CadDocument::appendEntity(std::unique_ptr<DRW_Entity> entity, std::uniq
     DRW_Entity* nativeEntity = entity.release();
     CadItem* rawItem = item.get();
 
+    ensureLayerExists(QString::fromUtf8(nativeEntity->layer.c_str()));
+    rawItem->m_color = resolveEntityDisplayColor(*this, rawItem);
     m_data->mBlock->ent.push_back(nativeEntity);
     m_entities.push_back(std::move(item));
 
@@ -170,6 +240,8 @@ int CadDocument::appendEntities(std::vector<std::unique_ptr<DRW_Entity>> entitie
             continue;
         }
 
+        ensureLayerExists(QString::fromUtf8(entity->layer.c_str()));
+        item->m_color = resolveEntityDisplayColor(*this, item.get());
         m_data->mBlock->ent.push_back(entity.release());
         m_entities.push_back(std::move(item));
         ++appendedCount;
@@ -235,7 +307,7 @@ bool CadDocument::refreshEntity(CadItem* item)
 
     item->buildGeometryDatay();
     item->buildProcessDirection();
-    item->m_color = item->buildColor();
+    item->m_color = resolveEntityDisplayColor(*this, item);
 
     emit sceneChanged();
     return true;
@@ -258,6 +330,107 @@ bool CadDocument::containsEntity(const CadItem* item) const
             return candidate.get() == item;
         }
     );
+}
+
+QStringList CadDocument::layerNames() const
+{
+    QStringList layers;
+    QSet<QString> seenLayers;
+
+    const auto appendLayerName =
+        [&layers, &seenLayers](const QString& layerName)
+        {
+            const QString normalizedLayerName = layerName.trimmed().isEmpty()
+                ? QStringLiteral("0")
+                : layerName.trimmed();
+
+            if (seenLayers.contains(normalizedLayerName))
+            {
+                return;
+            }
+
+            seenLayers.insert(normalizedLayerName);
+            layers.push_back(normalizedLayerName);
+        };
+
+    appendLayerName(QStringLiteral("0"));
+
+    if (m_data != nullptr)
+    {
+        for (const DRW_Layer& layer : m_data->layers)
+        {
+            appendLayerName(QString::fromUtf8(layer.name.c_str()));
+        }
+    }
+
+    for (const std::unique_ptr<CadItem>& entity : m_entities)
+    {
+        if (entity == nullptr || entity->m_nativeEntity == nullptr)
+        {
+            continue;
+        }
+
+        appendLayerName(QString::fromUtf8(entity->m_nativeEntity->layer.c_str()));
+    }
+
+    return layers;
+}
+
+bool CadDocument::ensureLayerExists(const QString& layerName)
+{
+    if (m_data == nullptr)
+    {
+        return false;
+    }
+
+    const QString normalizedLayerName = layerName.trimmed().isEmpty()
+        ? QStringLiteral("0")
+        : layerName.trimmed();
+
+    for (const DRW_Layer& layer : m_data->layers)
+    {
+        if (QString::fromUtf8(layer.name.c_str()).compare(normalizedLayerName, Qt::CaseSensitive) == 0)
+        {
+            return false;
+        }
+    }
+
+    DRW_Layer layer;
+    layer.name = normalizedLayerName.toUtf8().constData();
+    m_data->layers.push_back(layer);
+    return true;
+}
+
+QColor CadDocument::layerColor(const QString& layerName, const QColor& fallback) const
+{
+    if (m_data == nullptr)
+    {
+        return fallback;
+    }
+
+    const QString normalizedLayerName = layerName.trimmed().isEmpty()
+        ? QStringLiteral("0")
+        : layerName.trimmed();
+
+    for (const DRW_Layer& layer : m_data->layers)
+    {
+        if (QString::fromUtf8(layer.name.c_str()).compare(normalizedLayerName, Qt::CaseSensitive) != 0)
+        {
+            continue;
+        }
+
+        const QColor trueColor = colorFromTrueColor(layer.color24);
+
+        if (trueColor.isValid())
+        {
+            return trueColor;
+        }
+
+        const QColor indexColor = colorFromAci(layer.color);
+        return indexColor.isValid() ? indexColor : fallback;
+    }
+
+    return fallback;
 }
 
 

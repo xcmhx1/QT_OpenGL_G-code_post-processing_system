@@ -128,6 +128,9 @@
     <QtMoc Include="include\CadDocument.h">
       <Filter>Header Files\Document</Filter>
     </QtMoc>
+    <QtMoc Include="include\CadToolPanelWidget.h">
+      <Filter>Header Files\Application</Filter>
+    </QtMoc>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\pch.cpp">
@@ -150,6 +153,9 @@
     </ClCompile>
     <ClCompile Include="src\CadStatusPaneWidget.cpp">
       <Filter>Source Files\View</Filter>
+    </ClCompile>
+    <ClCompile Include="src\CadToolPanelWidget.cpp">
+      <Filter>Source Files\Application</Filter>
     </ClCompile>
     <ClCompile Include="src\CadController.cpp">
       <Filter>Source Files\View\Interaction</Filter>

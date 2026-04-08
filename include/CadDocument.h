@@ -4,9 +4,11 @@
 
 #include <memory>
 #include <QList>
-#include <vector>
+#include <QColor>
 #include <QObject>
+#include <QStringList>
 #include <utility>
+#include <vector>
 
 class CadItem;
 class DRW_Entity;
@@ -50,6 +52,15 @@ public:
 
     // 查询图元是否仍属于当前文档
     bool containsEntity(const CadItem* item) const;
+
+    // 获取当前文档已知的图层名列表。
+    QStringList layerNames() const;
+
+    // 确保图层表中存在指定图层。
+    bool ensureLayerExists(const QString& layerName);
+
+    // 查询指定图层的显示颜色。
+    QColor layerColor(const QString& layerName, const QColor& fallback = QColor(Qt::white)) const;
 
 signals:
     void sceneChanged();
