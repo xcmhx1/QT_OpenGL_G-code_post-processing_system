@@ -3,12 +3,13 @@
 #include "DrawStateMachine.h"
 
 #include <QColor>
+#include <QMap>
 #include <QStringList>
 #include <QWidget>
 
 class QComboBox;
-class QGroupBox;
 class QLabel;
+class QMenu;
 class QToolButton;
 
 class CadToolPanelWidget : public QWidget
@@ -18,7 +19,7 @@ class CadToolPanelWidget : public QWidget
 public:
     explicit CadToolPanelWidget(QWidget* parent = nullptr);
 
-    void setLayerNames(const QStringList& layerNames);
+    void setLayerNames(const QStringList& layerNames, const QMap<QString, QColor>& layerColors);
     void setLayerStatusText(const QString& text);
     void setPropertyStatusText(const QString& text);
     void setActiveLayerName(const QString& layerName);
@@ -33,14 +34,16 @@ signals:
 
 private:
     void buildUi();
-    QGroupBox* buildPanelFrame(const QString& title, QWidget* contentWidget, int preferredWidth);
+    QWidget* buildPanelFrame(const QString& title, QWidget* contentWidget, int preferredWidth = -1, QMenu* launcherMenu = nullptr);
+    QWidget* buildDivider() const;
     QWidget* buildDrawPanel();
     QWidget* buildModifyPanel();
     QWidget* buildLayerPanel();
     QWidget* buildPropertyPanel();
     void addDrawButton(QWidget* parent, const QString& text, DrawType drawType, int row, int column);
     void commitLayerChange(QComboBox* comboBox);
-    void updateColorSwatch(const QColor& color);
+    void updateLayerComboIcons();
+    void updateColorComboIcons(const QColor& activeColor);
     void setComboCurrentByData(QComboBox* comboBox, int value);
 
 private:
@@ -50,6 +53,6 @@ private:
     QComboBox* m_layerComboBox = nullptr;
     QComboBox* m_propertyLayerComboBox = nullptr;
     QComboBox* m_colorComboBox = nullptr;
-    QLabel* m_colorSwatchLabel = nullptr;
+    QMap<QString, QColor> m_layerColors;
     bool m_updatingUi = false;
 };

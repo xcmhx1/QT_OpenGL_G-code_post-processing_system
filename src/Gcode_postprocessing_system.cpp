@@ -9,6 +9,7 @@
 
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QMap>
 #include <QMessageBox>
 #include <QStatusBar>
 #include <QToolBar>
@@ -790,7 +791,14 @@ void Gcode_postprocessing_system::syncToolPanelState()
     }
 
     const QStringList layerNames = m_document.layerNames();
-    m_toolPanelWidget->setLayerNames(layerNames);
+    QMap<QString, QColor> layerColors;
+
+    for (const QString& layerName : layerNames)
+    {
+        layerColors.insert(layerName, m_document.layerColor(layerName, QColor(Qt::white)));
+    }
+
+    m_toolPanelWidget->setLayerNames(layerNames, layerColors);
 
     CadItem* selectedItem = ui->openGLWidget->selectedEntity();
 

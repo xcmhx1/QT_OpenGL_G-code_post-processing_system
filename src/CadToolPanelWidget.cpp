@@ -5,11 +5,14 @@
 #include <QComboBox>
 #include <QFormLayout>
 #include <QFrame>
-#include <QGroupBox>
 #include <QGridLayout>
 #include <QHBoxLayout>
+#include <QIcon>
 #include <QLabel>
-#include <QLineEdit>
+#include <QLayout>
+#include <QMenu>
+#include <QPainter>
+#include <QPainterPath>
 #include <QSizePolicy>
 #include <QToolButton>
 #include <QVBoxLayout>
@@ -18,23 +21,153 @@ namespace
 {
     constexpr int kColorByLayer = 256;
     constexpr int kColorTrueColor = -1;
-    constexpr int kPanelHeight = 108;
+    constexpr int kPanelHeight = 112;
     constexpr int kComboHeight = 24;
-    constexpr int kButtonHeight = 24;
+    constexpr int kRibbonButtonWidth = 58;
+    constexpr int kRibbonButtonHeight = 40;
+    constexpr int kFooterHeight = 18;
+    constexpr int kFooterReserveWidth = 16;
+    constexpr int kDividerHeight = 78;
+    constexpr int kLauncherSize = 12;
+    constexpr int kRibbonIconSize = 16;
 
     void addColorOption(QComboBox* comboBox, const QString& text, int colorIndex)
     {
         comboBox->addItem(text, colorIndex);
     }
+
+    QIcon buildRibbonIcon(DrawType drawType)
+    {
+        QPixmap pixmap(kRibbonIconSize, kRibbonIconSize);
+        pixmap.fill(Qt::transparent);
+
+        QPainter painter(&pixmap);
+        painter.setRenderHint(QPainter::Antialiasing, true);
+        QPen pen(QColor(58, 92, 138));
+        pen.setWidthF(1.5);
+        pen.setCapStyle(Qt::RoundCap);
+        pen.setJoinStyle(Qt::RoundJoin);
+        painter.setPen(pen);
+        painter.setBrush(Qt::NoBrush);
+
+        switch (drawType)
+        {
+        case DrawType::Point:
+            painter.setBrush(QColor(58, 92, 138));
+            painter.drawEllipse(QPointF(9.0, 9.0), 2.1, 2.1);
+            break;
+        case DrawType::Line:
+            painter.drawLine(QPointF(3.5, 13.5), QPointF(14.5, 4.5));
+            break;
+        case DrawType::Circle:
+            painter.drawEllipse(QRectF(3.5, 3.5, 11.0, 11.0));
+            break;
+        case DrawType::Arc:
+        {
+            painter.drawArc(QRectF(3.0, 3.0, 12.0, 12.0), 35 * 16, 235 * 16);
+            QPainterPath arrowHead;
+            arrowHead.moveTo(13.8, 5.4);
+            arrowHead.lineTo(14.9, 2.9);
+            arrowHead.lineTo(11.9, 3.7);
+            arrowHead.closeSubpath();
+            painter.fillPath(arrowHead, pen.color());
+            break;
+        }
+        case DrawType::Ellipse:
+            painter.drawEllipse(QRectF(2.5, 5.0, 13.0, 8.0));
+            break;
+        case DrawType::Polyline:
+        case DrawType::LWPolyline:
+        {
+            QPainterPath polylinePath;
+            polylinePath.moveTo(3.0, 12.5);
+            polylinePath.lineTo(7.0, 5.5);
+            polylinePath.lineTo(11.0, 9.5);
+            polylinePath.lineTo(15.0, 4.5);
+            painter.drawPath(polylinePath);
+            painter.setBrush(QColor(58, 92, 138));
+            painter.drawEllipse(QPointF(3.0, 12.5), 1.2, 1.2);
+            painter.drawEllipse(QPointF(7.0, 5.5), 1.2, 1.2);
+            painter.drawEllipse(QPointF(11.0, 9.5), 1.2, 1.2);
+            painter.drawEllipse(QPointF(15.0, 4.5), 1.2, 1.2);
+            break;
+        }
+        default:
+            break;
+        }
+
+        return QIcon(pixmap);
+    }
+
+    QIcon buildMoveIcon()
+    {
+        QPixmap pixmap(kRibbonIconSize, kRibbonIconSize);
+        pixmap.fill(Qt::transparent);
+
+        QPainter painter(&pixmap);
+        painter.setRenderHint(QPainter::Antialiasing, true);
+        QPen pen(QColor(58, 92, 138));
+        pen.setWidthF(1.4);
+        pen.setCapStyle(Qt::RoundCap);
+        pen.setJoinStyle(Qt::RoundJoin);
+        painter.setPen(pen);
+
+        painter.drawLine(QPointF(9.0, 3.0), QPointF(9.0, 15.0));
+        painter.drawLine(QPointF(3.0, 9.0), QPointF(15.0, 9.0));
+
+        QPainterPath arrowHead;
+        arrowHead.moveTo(9.0, 2.0);
+        arrowHead.lineTo(7.0, 4.5);
+        arrowHead.lineTo(11.0, 4.5);
+        arrowHead.closeSubpath();
+        painter.fillPath(arrowHead, pen.color());
+        arrowHead = QPainterPath();
+        arrowHead.moveTo(9.0, 16.0);
+        arrowHead.lineTo(7.0, 13.5);
+        arrowHead.lineTo(11.0, 13.5);
+        arrowHead.closeSubpath();
+        painter.fillPath(arrowHead, pen.color());
+        arrowHead = QPainterPath();
+        arrowHead.moveTo(2.0, 9.0);
+        arrowHead.lineTo(4.5, 7.0);
+        arrowHead.lineTo(4.5, 11.0);
+        arrowHead.closeSubpath();
+        painter.fillPath(arrowHead, pen.color());
+        arrowHead = QPainterPath();
+        arrowHead.moveTo(16.0, 9.0);
+        arrowHead.lineTo(13.5, 7.0);
+        arrowHead.lineTo(13.5, 11.0);
+        arrowHead.closeSubpath();
+        painter.fillPath(arrowHead, pen.color());
+
+        return QIcon(pixmap);
+    }
+
+    QIcon buildColorChipIcon(const QColor& color)
+    {
+        constexpr int kChipSize = 12;
+
+        QPixmap pixmap(kChipSize, kChipSize);
+        pixmap.fill(Qt::transparent);
+
+        QPainter painter(&pixmap);
+        painter.setRenderHint(QPainter::Antialiasing, true);
+        painter.setPen(QPen(QColor(132, 138, 145), 1.0));
+        painter.setBrush(color);
+        painter.drawRect(QRectF(1.0, 1.0, kChipSize - 2.0, kChipSize - 2.0));
+        return QIcon(pixmap);
+    }
+
 }
 
 CadToolPanelWidget::CadToolPanelWidget(QWidget* parent)
     : QWidget(parent)
 {
+    setObjectName(QStringLiteral("cadToolPanelRoot"));
     buildUi();
 }
 
-void CadToolPanelWidget::setLayerNames(const QStringList& layerNames)
+void CadToolPanelWidget::setLayerNames(const QStringList& layerNames, const QMap<QString, QColor>& layerColors)
 {
     const QString currentLayerName = m_layerComboBox->currentText().trimmed().isEmpty()
         ? QStringLiteral("0")
@@ -45,10 +178,12 @@ void CadToolPanelWidget::setLayerNames(const QStringList& layerNames)
         : m_propertyLayerComboBox->currentText().trimmed();
 
     m_updatingUi = true;
+    m_layerColors = layerColors;
     m_layerComboBox->clear();
     m_propertyLayerComboBox->clear();
     m_layerComboBox->addItems(layerNames);
     m_propertyLayerComboBox->addItems(layerNames);
+    updateLayerComboIcons();
     m_updatingUi = false;
 
     setActiveLayerName(!currentPropertyLayerName.isEmpty() ? currentPropertyLayerName : currentLayerName);
@@ -68,17 +203,28 @@ void CadToolPanelWidget::setActiveLayerName(const QString& layerName)
 {
     const QString normalizedLayerName = layerName.trimmed().isEmpty() ? QStringLiteral("0") : layerName.trimmed();
     m_updatingUi = true;
-    m_layerComboBox->setEditText(normalizedLayerName);
-    m_propertyLayerComboBox->setEditText(normalizedLayerName);
+    const int layerIndex = m_layerComboBox->findText(normalizedLayerName);
+    const int propertyLayerIndex = m_propertyLayerComboBox->findText(normalizedLayerName);
+
+    if (layerIndex >= 0)
+    {
+        m_layerComboBox->setCurrentIndex(layerIndex);
+    }
+
+    if (propertyLayerIndex >= 0)
+    {
+        m_propertyLayerComboBox->setCurrentIndex(propertyLayerIndex);
+    }
+
     m_updatingUi = false;
 }
 
 void CadToolPanelWidget::setActiveColorState(const QColor& color, int colorIndex)
 {
     m_updatingUi = true;
+    updateColorComboIcons(color);
     setComboCurrentByData(m_colorComboBox, colorIndex);
     m_updatingUi = false;
-    updateColorSwatch(color);
 }
 
 void CadToolPanelWidget::setMoveEnabled(bool enabled)
@@ -88,48 +234,155 @@ void CadToolPanelWidget::setMoveEnabled(bool enabled)
 
 void CadToolPanelWidget::buildUi()
 {
+    QMenu* drawMoreMenu = new QMenu(this);
+    QAction* pointAction = drawMoreMenu->addAction(buildRibbonIcon(DrawType::Point), QStringLiteral("点"));
+    connect(pointAction, &QAction::triggered, this, [this]() { emit drawRequested(DrawType::Point); });
+
     QHBoxLayout* rootLayout = new QHBoxLayout(this);
     rootLayout->setContentsMargins(0, 0, 0, 0);
-    rootLayout->setSpacing(6);
+    rootLayout->setSpacing(0);
 
-    rootLayout->addWidget(buildPanelFrame(QStringLiteral("绘图"), buildDrawPanel(), 344), 0, Qt::AlignLeft | Qt::AlignTop);
-    rootLayout->addWidget(buildPanelFrame(QStringLiteral("修改"), buildModifyPanel(), 96), 0, Qt::AlignLeft | Qt::AlignTop);
+    rootLayout->addWidget(buildPanelFrame(QStringLiteral("绘图"), buildDrawPanel(), -1, drawMoreMenu), 0, Qt::AlignLeft | Qt::AlignTop);
+    rootLayout->addWidget(buildDivider(), 0, Qt::AlignLeft | Qt::AlignVCenter);
+    rootLayout->addWidget(buildPanelFrame(QStringLiteral("修改"), buildModifyPanel()), 0, Qt::AlignLeft | Qt::AlignTop);
+    rootLayout->addWidget(buildDivider(), 0, Qt::AlignLeft | Qt::AlignVCenter);
     rootLayout->addWidget(buildPanelFrame(QStringLiteral("图层"), buildLayerPanel(), 176), 0, Qt::AlignLeft | Qt::AlignTop);
+    rootLayout->addWidget(buildDivider(), 0, Qt::AlignLeft | Qt::AlignVCenter);
     rootLayout->addWidget(buildPanelFrame(QStringLiteral("特性"), buildPropertyPanel(), 226), 0, Qt::AlignLeft | Qt::AlignTop);
     rootLayout->addStretch(1);
+
+    setStyleSheet
+    (
+        QStringLiteral
+        (
+            "#cadToolPanelRoot { background: transparent; }"
+            "QLabel[panelTitle=\"true\"] {"
+            " color: rgb(86, 92, 102);"
+            " font-size: 11px;"
+            " padding-bottom: 1px;"
+            "}"
+            "QToolButton[panelLauncher=\"true\"] {"
+            " border: none;"
+            " padding: 0px;"
+            " margin: 0px;"
+            " color: rgb(118, 124, 132);"
+            " background: transparent;"
+            "}"
+            "QToolButton[panelLauncher=\"true\"]:hover {"
+            " background: rgb(240, 242, 245);"
+            " color: rgb(82, 88, 96);"
+            "}"
+            "QToolButton[ribbonButton=\"true\"] {"
+            " border: 1px solid transparent;"
+            " border-radius: 2px;"
+            " padding: 2px 3px 2px 3px;"
+            " background: transparent;"
+            " color: rgb(48, 54, 61);"
+            " font-size: 9px;"
+            "}"
+            "QToolButton[ribbonButton=\"true\"]:hover {"
+            " border-color: rgb(206, 212, 219);"
+            " background: rgb(247, 249, 251);"
+            "}"
+            "QToolButton[ribbonButton=\"true\"]:pressed {"
+            " border-color: rgb(174, 183, 193);"
+            " background: rgb(236, 240, 244);"
+            "}"
+        )
+    );
 }
 
-QGroupBox* CadToolPanelWidget::buildPanelFrame(const QString& title, QWidget* contentWidget, int preferredWidth)
+QWidget* CadToolPanelWidget::buildPanelFrame(const QString& title, QWidget* contentWidget, int preferredWidth, QMenu* launcherMenu)
 {
-    QGroupBox* panel = new QGroupBox(title, this);
+    QWidget* panel = new QWidget(this);
     panel->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
-    panel->setMinimumWidth(preferredWidth);
-    panel->setMaximumWidth(preferredWidth);
     panel->setMinimumHeight(kPanelHeight);
     panel->setMaximumHeight(kPanelHeight);
 
     QVBoxLayout* layout = new QVBoxLayout(panel);
-    layout->setContentsMargins(6, 8, 6, 6);
-    layout->addWidget(contentWidget);
+    layout->setContentsMargins(6, 4, 6, 0);
+    layout->setSpacing(0);
+    layout->addWidget(contentWidget, 1);
+
+    QWidget* footerWidget = new QWidget(panel);
+    footerWidget->setFixedHeight(kFooterHeight);
+    QHBoxLayout* footerLayout = new QHBoxLayout(footerWidget);
+    footerLayout->setContentsMargins(0, 0, 0, 0);
+    footerLayout->setSpacing(0);
+
+    QWidget* titleCluster = new QWidget(footerWidget);
+    QHBoxLayout* titleClusterLayout = new QHBoxLayout(titleCluster);
+    titleClusterLayout->setContentsMargins(0, 0, 0, 0);
+    titleClusterLayout->setSpacing(1);
+
+    QLabel* titleLabel = new QLabel(title, titleCluster);
+    titleLabel->setAlignment(Qt::AlignHCenter | Qt::AlignBottom);
+    titleLabel->setProperty("panelTitle", true);
+    titleClusterLayout->addWidget(titleLabel, 0, Qt::AlignVCenter);
+
+    QToolButton* launcherButton = new QToolButton(titleCluster);
+    launcherButton->setProperty("panelLauncher", true);
+    launcherButton->setArrowType(Qt::DownArrow);
+    launcherButton->setAutoRaise(true);
+    launcherButton->setFixedSize(kLauncherSize, kLauncherSize);
+    launcherButton->setEnabled(launcherMenu != nullptr);
+
+    if (launcherMenu != nullptr)
+    {
+        launcherButton->setMenu(launcherMenu);
+        launcherButton->setPopupMode(QToolButton::InstantPopup);
+    }
+
+    titleClusterLayout->addWidget(launcherButton, 0, Qt::AlignVCenter);
+
+    footerLayout->addStretch(1);
+    footerLayout->addWidget(titleCluster, 0, Qt::AlignHCenter | Qt::AlignBottom);
+    footerLayout->addStretch(1);
+
+    layout->addWidget(footerWidget, 0, Qt::AlignBottom);
+
+    const int resolvedWidth = preferredWidth > 0
+        ? preferredWidth
+        : std::max(contentWidget->sizeHint().width(), titleCluster->sizeHint().width())
+            + layout->contentsMargins().left() + layout->contentsMargins().right();
+
+    panel->setMinimumWidth(resolvedWidth);
+    panel->setMaximumWidth(resolvedWidth);
+
+    if (launcherMenu != nullptr)
+    {
+        launcherMenu->setMinimumWidth(resolvedWidth);
+    }
+
     return panel;
+}
+
+QWidget* CadToolPanelWidget::buildDivider() const
+{
+    QFrame* divider = new QFrame();
+    divider->setStyleSheet(QStringLiteral("background-color: rgb(214, 217, 222);"));
+    divider->setFixedWidth(1);
+    divider->setFixedHeight(kDividerHeight);
+    divider->setFrameShape(QFrame::NoFrame);
+    return divider;
 }
 
 QWidget* CadToolPanelWidget::buildDrawPanel()
 {
     QWidget* panel = new QWidget(this);
     QGridLayout* layout = new QGridLayout(panel);
-    layout->setContentsMargins(2, 2, 2, 2);
-    layout->setHorizontalSpacing(4);
-    layout->setVerticalSpacing(4);
+    layout->setContentsMargins(1, 4, 1, 2);
+    layout->setHorizontalSpacing(3);
+    layout->setVerticalSpacing(3);
+    layout->setSizeConstraint(QLayout::SetFixedSize);
 
-    addDrawButton(panel, QStringLiteral("点"), DrawType::Point, 0, 0);
-    addDrawButton(panel, QStringLiteral("直线"), DrawType::Line, 0, 1);
-    addDrawButton(panel, QStringLiteral("圆"), DrawType::Circle, 0, 2);
-    addDrawButton(panel, QStringLiteral("圆弧"), DrawType::Arc, 0, 3);
+    addDrawButton(panel, QStringLiteral("直线"), DrawType::Line, 0, 0);
+    addDrawButton(panel, QStringLiteral("圆"), DrawType::Circle, 0, 1);
+    addDrawButton(panel, QStringLiteral("圆弧"), DrawType::Arc, 0, 2);
     addDrawButton(panel, QStringLiteral("椭圆"), DrawType::Ellipse, 1, 0);
     addDrawButton(panel, QStringLiteral("多段线"), DrawType::Polyline, 1, 1);
-    addDrawButton(panel, QStringLiteral("轻量多段线"), DrawType::LWPolyline, 1, 2);
-    layout->setColumnStretch(4, 1);
+    addDrawButton(panel, QStringLiteral("轻量线"), DrawType::LWPolyline, 1, 2);
+    layout->setAlignment(Qt::AlignLeft | Qt::AlignTop);
     return panel;
 }
 
@@ -137,17 +390,22 @@ QWidget* CadToolPanelWidget::buildModifyPanel()
 {
     QWidget* panel = new QWidget(this);
     QHBoxLayout* layout = new QHBoxLayout(panel);
-    layout->setContentsMargins(2, 2, 2, 2);
+    layout->setContentsMargins(1, 4, 1, 2);
+    layout->setSpacing(0);
+    layout->setSizeConstraint(QLayout::SetFixedSize);
 
     m_moveButton = new QToolButton(panel);
+    m_moveButton->setProperty("ribbonButton", true);
     m_moveButton->setText(QStringLiteral("移动"));
-    m_moveButton->setToolButtonStyle(Qt::ToolButtonTextOnly);
-    m_moveButton->setFixedSize(68, kButtonHeight);
+    m_moveButton->setIcon(buildMoveIcon());
+    m_moveButton->setIconSize(QSize(kRibbonIconSize, kRibbonIconSize));
+    m_moveButton->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
+    m_moveButton->setFixedSize(56, kRibbonButtonHeight);
     m_moveButton->setEnabled(false);
     connect(m_moveButton, &QToolButton::clicked, this, &CadToolPanelWidget::moveRequested);
 
     layout->addWidget(m_moveButton);
-    layout->addStretch(1);
+    layout->setAlignment(Qt::AlignLeft | Qt::AlignTop);
     return panel;
 }
 
@@ -155,17 +413,17 @@ QWidget* CadToolPanelWidget::buildLayerPanel()
 {
     QWidget* panel = new QWidget(this);
     QVBoxLayout* layout = new QVBoxLayout(panel);
-    layout->setContentsMargins(2, 2, 2, 2);
-    layout->setSpacing(4);
+    layout->setContentsMargins(2, 4, 2, 2);
+    layout->setSpacing(3);
 
     m_layerStatusLabel = new QLabel(QStringLiteral("当前默认绘图图层"), panel);
     m_layerStatusLabel->setWordWrap(false);
-    m_layerStatusLabel->setFixedHeight(18);
+    m_layerStatusLabel->setFixedHeight(16);
+    m_layerStatusLabel->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
     layout->addWidget(m_layerStatusLabel);
 
     m_layerComboBox = new QComboBox(panel);
-    m_layerComboBox->setEditable(true);
-    m_layerComboBox->setInsertPolicy(QComboBox::NoInsert);
+    m_layerComboBox->setEditable(false);
     m_layerComboBox->setFixedHeight(kComboHeight);
     layout->addWidget(m_layerComboBox);
     layout->addStretch(1);
@@ -181,17 +439,6 @@ QWidget* CadToolPanelWidget::buildLayerPanel()
         }
     );
 
-    connect
-    (
-        m_layerComboBox->lineEdit(),
-        &QLineEdit::editingFinished,
-        this,
-        [this]()
-        {
-            commitLayerChange(m_layerComboBox);
-        }
-    );
-
     return panel;
 }
 
@@ -199,26 +446,30 @@ QWidget* CadToolPanelWidget::buildPropertyPanel()
 {
     QWidget* panel = new QWidget(this);
     QVBoxLayout* layout = new QVBoxLayout(panel);
-    layout->setContentsMargins(2, 2, 2, 2);
-    layout->setSpacing(4);
+    layout->setContentsMargins(2, 4, 2, 2);
+    layout->setSpacing(3);
 
     m_propertyStatusLabel = new QLabel(QStringLiteral("当前默认绘图特性"), panel);
     m_propertyStatusLabel->setWordWrap(false);
-    m_propertyStatusLabel->setFixedHeight(18);
+    m_propertyStatusLabel->setFixedHeight(16);
+    m_propertyStatusLabel->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
     layout->addWidget(m_propertyStatusLabel);
 
-    QFormLayout* formLayout = new QFormLayout();
-    formLayout->setContentsMargins(0, 0, 0, 0);
-    formLayout->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
-    formLayout->setFormAlignment(Qt::AlignLeft | Qt::AlignTop);
-    formLayout->setHorizontalSpacing(4);
-    formLayout->setVerticalSpacing(4);
+    QWidget* layerRowWidget = new QWidget(panel);
+    QHBoxLayout* layerRowLayout = new QHBoxLayout(layerRowWidget);
+    layerRowLayout->setContentsMargins(0, 0, 0, 0);
+    layerRowLayout->setSpacing(4);
 
-    m_propertyLayerComboBox = new QComboBox(panel);
-    m_propertyLayerComboBox->setEditable(true);
-    m_propertyLayerComboBox->setInsertPolicy(QComboBox::NoInsert);
+    QLabel* layerLabel = new QLabel(QStringLiteral("图层"), layerRowWidget);
+    layerLabel->setFixedWidth(28);
+    layerRowLayout->addWidget(layerLabel, 0, Qt::AlignVCenter);
+
+    m_propertyLayerComboBox = new QComboBox(layerRowWidget);
+    m_propertyLayerComboBox->setEditable(false);
     m_propertyLayerComboBox->setFixedHeight(kComboHeight);
-    formLayout->addRow(QStringLiteral("图层"), m_propertyLayerComboBox);
+    layerRowLayout->addWidget(m_propertyLayerComboBox, 1);
+
+    layout->addWidget(layerRowWidget);
 
     connect
     (
@@ -231,21 +482,14 @@ QWidget* CadToolPanelWidget::buildPropertyPanel()
         }
     );
 
-    connect
-    (
-        m_propertyLayerComboBox->lineEdit(),
-        &QLineEdit::editingFinished,
-        this,
-        [this]()
-        {
-            commitLayerChange(m_propertyLayerComboBox);
-        }
-    );
-
     QWidget* colorRowWidget = new QWidget(panel);
     QHBoxLayout* colorRowLayout = new QHBoxLayout(colorRowWidget);
     colorRowLayout->setContentsMargins(0, 0, 0, 0);
     colorRowLayout->setSpacing(4);
+
+    QLabel* colorLabel = new QLabel(QStringLiteral("颜色"), colorRowWidget);
+    colorLabel->setFixedWidth(28);
+    colorRowLayout->addWidget(colorLabel, 0, Qt::AlignVCenter);
 
     m_colorComboBox = new QComboBox(colorRowWidget);
     addColorOption(m_colorComboBox, QStringLiteral("ByLayer"), kColorByLayer);
@@ -262,14 +506,7 @@ QWidget* CadToolPanelWidget::buildPropertyPanel()
     m_colorComboBox->setFixedHeight(kComboHeight);
     colorRowLayout->addWidget(m_colorComboBox, 1);
 
-    m_colorSwatchLabel = new QLabel(colorRowWidget);
-    m_colorSwatchLabel->setFixedSize(18, 18);
-    m_colorSwatchLabel->setFrameShape(QFrame::Box);
-    m_colorSwatchLabel->setFrameShadow(QFrame::Plain);
-    colorRowLayout->addWidget(m_colorSwatchLabel, 0, Qt::AlignVCenter);
-
-    formLayout->addRow(QStringLiteral("颜色"), colorRowWidget);
-    layout->addLayout(formLayout);
+    layout->addWidget(colorRowWidget);
     layout->addStretch(1);
 
     connect
@@ -301,10 +538,13 @@ void CadToolPanelWidget::addDrawButton(QWidget* parent, const QString& text, Dra
     }
 
     QToolButton* button = new QToolButton(parent);
+    button->setProperty("ribbonButton", true);
     button->setText(text);
-    button->setFixedHeight(kButtonHeight);
-    button->setMinimumWidth(72);
-    button->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    button->setIcon(buildRibbonIcon(drawType));
+    button->setIconSize(QSize(kRibbonIconSize, kRibbonIconSize));
+    button->setFixedSize(kRibbonButtonWidth, kRibbonButtonHeight);
+    button->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
+    button->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
     connect(button, &QToolButton::clicked, this, [this, drawType]() { emit drawRequested(drawType); });
     layout->addWidget(button, row, column);
 }
@@ -323,16 +563,63 @@ void CadToolPanelWidget::commitLayerChange(QComboBox* comboBox)
     emit layerChangeRequested(layerName);
 }
 
-void CadToolPanelWidget::updateColorSwatch(const QColor& color)
+void CadToolPanelWidget::updateLayerComboIcons()
 {
-    const QColor swatchColor = color.isValid() ? color : QColor(Qt::white);
-    m_colorSwatchLabel->setStyleSheet
-    (
-        QStringLiteral("background-color: rgb(%1, %2, %3);")
-            .arg(swatchColor.red())
-            .arg(swatchColor.green())
-            .arg(swatchColor.blue())
-    );
+    const auto applyIcons =
+        [this](QComboBox* comboBox)
+        {
+            if (comboBox == nullptr)
+            {
+                return;
+            }
+
+            for (int index = 0; index < comboBox->count(); ++index)
+            {
+                const QString layerName = comboBox->itemText(index).trimmed();
+                const QColor color = m_layerColors.value(layerName, QColor(Qt::white));
+                comboBox->setItemIcon(index, buildColorChipIcon(color));
+            }
+        };
+
+    applyIcons(m_layerComboBox);
+    applyIcons(m_propertyLayerComboBox);
+}
+
+void CadToolPanelWidget::updateColorComboIcons(const QColor& activeColor)
+{
+    if (m_colorComboBox == nullptr)
+    {
+        return;
+    }
+
+    const struct
+    {
+        int colorIndex;
+        QColor color;
+    } colorSpecs[] =
+    {
+        { kColorByLayer, activeColor.isValid() ? activeColor : QColor(Qt::white) },
+        { 1, QColor(255, 0, 0) },
+        { 2, QColor(255, 255, 0) },
+        { 3, QColor(0, 255, 0) },
+        { 4, QColor(0, 255, 255) },
+        { 5, QColor(0, 0, 255) },
+        { 6, QColor(255, 0, 255) },
+        { 7, QColor(255, 255, 255) },
+        { 8, QColor(128, 128, 128) },
+        { 9, QColor(192, 192, 192) },
+        { kColorTrueColor, activeColor.isValid() ? activeColor : QColor(Qt::white) }
+    };
+
+    for (const auto& colorSpec : colorSpecs)
+    {
+        const int index = m_colorComboBox->findData(colorSpec.colorIndex);
+
+        if (index >= 0)
+        {
+            m_colorComboBox->setItemIcon(index, buildColorChipIcon(colorSpec.color));
+        }
+    }
 }
 
 void CadToolPanelWidget::setComboCurrentByData(QComboBox* comboBox, int value)

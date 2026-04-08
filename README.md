@@ -1,8 +1,8 @@
-# G-code Post Processing System
+﻿# G-code Post Processing System
 
 [G/M 代码参考](./technical_file/G-M_Code.md)
 
-本项目是一个基于 Qt 6 Widgets、OpenGL 4.5 Core Profile、Visual Studio 2026 的 Windows 桌面 CAD / G-code 后处理程序。当前代码主线已经具备 CAD 文件导入、位图矢量化导入、二维图元显示、基础交互、简单绘图与编辑命令，并新增了纯 `2D` 激光加工 G 代码生成后端与 JSON Profile 配置能力；主窗口已接通导入图片、导出 G 代码、反向加工、排序（保留方向）与智能排序菜单动作，Viewer 层也已支持加工方向箭头与加工顺序编号显示，不过 `3D` 生成模式和独立参数配置界面仍未实现。
+本项目是一个基于 Qt 6 Widgets、OpenGL 4.5 Core Profile、Visual Studio 2026 的 Windows 桌面 CAD / G-code 后处理程序。当前代码主线已经具备 CAD 文件导入、位图矢量化导入、二维图元显示、基础交互、简单绘图与编辑命令，并新增了纯 `2D` 激光加工 G 代码生成后端与 JSON Profile 配置能力；主窗口已接通导入图片、导出 G 代码、反向加工、排序（保留方向）与智能排序菜单动作，同时增加了仿 AutoCAD 风格的紧凑 Ribbon 工具面板，用于统一承载绘图、修改、图层与特性入口，Viewer 层也已支持加工方向箭头与加工顺序编号显示，不过 `3D` 生成模式和独立参数配置界面仍未实现。
 
 ## 项目现状
 
@@ -15,10 +15,14 @@
 - 支持平移、缩放、顶视图切换、轨道观察、屏幕拾取
 - 支持拖拽导入文件到视图区域
 - 提供命令提示栏、命令历史栏、底部坐标状态栏
+- 提供仿 AutoCAD 风格的 Ribbon 工具面板，包含“绘图”“修改”“图层”“特性”四个左对齐面板
 - 提供点、线、圆、圆弧、椭圆、多段线、轻量多段线的交互式绘制
-- 提供删除、移动、改色、Undo / Redo
+- 提供删除、移动、改色、改图层、Undo / Redo
 - 提供 transient 预览、十字光标叠加、选中高亮
 - Viewer 已支持加工方向箭头与加工顺序编号显示，并与排序 / 导出共用同一套加工路径语义
+- Ribbon“绘图”面板默认显示 6 种常用图元，隐藏项可通过标题旁下拉菜单继续进入
+- Ribbon“图层”与“特性”面板已支持在“默认绘图属性”和“当前选中图元属性”之间自动切换显示
+- 图层下拉项与颜色下拉项均以内嵌色块图标显示当前颜色语义
 - 提供 `GProfile` JSON 配置读写，支持文件头尾、实体类型头尾、实体颜色头尾三类配置
 - 提供 `GGenerator` 纯 `2D` G 代码生成后端，支持 `Line`、`Arc`、`Circle`、`Ellipse`、`Polyline`、`LWPolyline`
 - 已接通主窗口“导入文件”“导入图片”“导出G代码”“反向加工”“排序（保留方向）”“智能排序”菜单动作
@@ -104,6 +108,7 @@ G-code_post-processing_system/
 |   |-- CadProcessVisualUtils.h             # 加工方向/顺序显示共用语义工具
 |   |-- CadCommandLineWidget.h              # 命令栏组件
 |   |-- CadStatusPaneWidget.h               # 状态栏组件
+|   |-- CadToolPanelWidget.h                # Ribbon 工具面板组件
 |   |-- CadGraphicsCoordinator.h            # 渲染协调层
 |   |-- CadSceneCoordinator.h               # 场景协调层
 |   |-- CadSceneContext.h                   # 场景上下文
@@ -139,6 +144,7 @@ G-code_post-processing_system/
 |   |-- GGenerator.cpp                      # 纯 2D G 代码生成
 |   |-- CadItem.cpp						  # 图元基类
 |   |-- CadProcessVisualUtils.cpp           # 加工方向/顺序显示共用语义实现
+|   |-- CadToolPanelWidget.cpp              # Ribbon 工具面板实现
 |   |-- Cad*Item.cpp                        # 各类图元几何离散与显示数据生成
 |   |-- CadGraphicsCoordinator.cpp          # 渲染协调实现
 |   |-- CadSceneCoordinator.cpp             # 场景协调实现
@@ -171,7 +177,7 @@ G-code_post-processing_system/
 
 ## 总体架构
 
-项目当前按“主窗口 + Viewer + Controller + Editer + Document + 渲染协调层 + DXF Adapter + Bitmap Vectorizer + G-code Backend”的组合结构组织。相比早期版本，`CadViewer` 内部职责已经进一步拆分给 `CadSceneCoordinator`、`CadGraphicsCoordinator`、`CadEntityRenderer`、`CadEntityPicker` 等子模块。
+项目当前按“主窗口 + Ribbon 工具面板 + Viewer + Controller + Editer + Document + 渲染协调层 + DXF Adapter + Bitmap Vectorizer + G-code Backend”的组合结构组织。相比早期版本，`CadViewer` 内部职责已经进一步拆分给 `CadSceneCoordinator`、`CadGraphicsCoordinator`、`CadEntityRenderer`、`CadEntityPicker` 等子模块。
 
 ```text
 用户输入 / Qt 菜单 / 拖拽文件 / 键盘鼠标
@@ -181,6 +187,7 @@ Gcode_postprocessing_system                (窗口层 / 组装层)
         |
         +------> CadCommandLineWidget      (命令栏显示)
         +------> CadStatusPaneWidget       (坐标状态显示)
+        +------> CadToolPanelWidget        (Ribbon 工具面板)
         |
         +------> 导入分发
         |              |
@@ -225,9 +232,18 @@ CadDocument                                (Model)
 
 - 负责 UI 初始化与窗口装配
 - 创建命令栏、状态栏并插入中心布局
+- 创建 Ribbon 工具面板，并负责其与 Viewer / Document / Editer 的状态同步
 - 统一处理文件导入分发
 - 接通导入图片、导出 G 代码、反向加工、排序相关菜单动作
+- 维护默认绘图图层、默认绘图颜色以及工具面板显示状态
 - 持有 `CadDocument` 与 `CadEditer`
+
+`CadToolPanelWidget`
+
+- 负责提供仿 AutoCAD 风格的紧凑 Ribbon 面板 UI
+- 当前包含“绘图”“修改”“图层”“特性”四组工具
+- 负责展示绘图入口、移动命令、当前图层、当前颜色等面板控件
+- 通过信号把绘图、移动、改图层、改颜色请求回传给主窗口
 
 `CadViewer`
 
@@ -235,6 +251,7 @@ CadDocument                                (Model)
 - 管理相机、场景刷新、坐标转换
 - 将键鼠事件转交 `CadController`
 - 消费 `CadDocument` 数据并驱动渲染
+- 对外提供开始绘图、开始移动、设置默认绘图属性等薄封装接口
 - 负责加工方向箭头 overlay 与加工顺序屏幕编号显示
 
 `CadController` + `DrawStateMachine`
@@ -242,12 +259,13 @@ CadDocument                                (Model)
 - 解释鼠标、键盘、滚轮输入
 - 分流视图命令、绘图命令和编辑命令
 - 维护当前命令状态、控制点、提示文本
+- 保存默认绘图图层、默认绘图颜色索引等绘图状态
 - 处理多段线圆弧/直线输入切换
 
 `CadEditer`
 
 - 根据状态机创建新实体
-- 执行删除、移动、改色
+- 执行删除、移动、改色、改图层
 - 执行反向加工切换、加工顺序写入和批量排序状态提交
 - 维护 Undo / Redo 命令栈
 - 将模型修改统一提交给 `CadDocument`
@@ -257,6 +275,7 @@ CadDocument                                (Model)
 - 持有原始 `dx_data`
 - 持有场景中的 `CadItem` 容器
 - 把导入得到的 `DRW_Entity` 转换成内部图元
+- 维护图层表、图层颜色查询与缺失图层补建
 - 通过 `sceneChanged` 驱动视图刷新
 
 `CadBitmapImportDialog` + `CadBitmapVectorizer`
@@ -309,7 +328,7 @@ CadDocument                                (Model)
 
 ### 绘图与编辑
 
-1. 用户通过快捷键进入绘图或编辑命令
+1. 用户通过快捷键或 Ribbon 工具面板进入绘图或编辑命令
 2. `CadController` 更新 `DrawStateMachine`
 3. 鼠标位置被投影到 `Z=0` 绘图平面
 4. `CadEditer` 根据当前状态创建或修改 `DRW_Entity`
@@ -404,6 +423,21 @@ CadDocument                                (Model)
 - `Ctrl + Y`：重做
 - `Ctrl + Shift + Z`：重做
 
+### Ribbon 工具面板
+
+主窗口工具栏区域当前提供一组仿 AutoCAD 风格的紧凑 Ribbon 面板，默认左对齐排列：
+
+- `绘图`：默认显示 `直线`、`圆`、`圆弧`、`椭圆`、`多段线`、`轻量多段线` 六种常用图元；隐藏图元可通过标题旁下拉菜单进入
+- `修改`：当前提供 `移动`
+- `图层`：提供单一下拉框；闭合时显示当前图层，展开后列出全部图层，每项前面显示该图层颜色小方块
+- `特性`：当前提供图层与颜色两项；图层项显示所属图层，颜色项以色块图标 + 文字方式展示
+
+属性联动规则：
+
+- 未选中图元时，`图层` 与 `特性` 显示“默认绘图属性”，用于控制后续新建图元
+- 选中图元时，`图层` 与 `特性` 自动切换为显示该图元的真实属性
+- 修改图层或颜色时，主窗口会根据当前是否有选中图元，决定写回默认绘图状态或直接修改图元
+
 ### 菜单动作
 
 - 文件 -> `导入文件`：导入 `.dxf` / `.dwg` / 位图文件
@@ -463,16 +497,18 @@ CadDocument                                (Model)
 2. 导入一个包含点、线、圆、圆弧、椭圆、多段线的 DXF 文件
 3. 导入一张简单黑白位图，验证预处理预览、矢量化结果和图层参数是否符合预期
 4. 验证平移、缩放、顶视图、轨道观察、拾取是否正常
-5. 验证绘图命令、移动、删除、改色、Undo / Redo 是否正常
+5. 验证绘图命令、移动、删除、改色、改图层、Undo / Redo 是否正常
 6. 验证“反向加工”“排序（保留方向）”“智能排序”是否符合预期，并检查 Viewer 中方向箭头、顺序编号与 Undo / Redo 是否同步正常
 7. 载入一份 `GProfile` 配置并验证 JSON 读写是否正常
 8. 通过主窗口“导出G代码”导出一份纯 `2D` G 代码，检查头尾、类型配置、颜色配置和圆弧方向是否符合预期
-9. 验证命令栏提示、状态栏坐标、拖拽导入是否正常
+9. 验证 Ribbon 工具面板中的绘图、修改、图层、特性联动是否正常
+10. 验证命令栏提示、状态栏坐标、拖拽导入是否正常
 
 ## 已知注意事项
 
 - 当前内部仅完整支持 7 类 CAD 图元的可视化与编辑
 - 新建图元强制落在 `Z=0` 平面
+- Ribbon“绘图”面板当前只把常用图元直接显示，其余入口需通过标题旁下拉菜单进入
 - 位图导入依赖 OpenCV 运行时 DLL 拷贝到输出目录
 - `GGenerator` 当前仅实现纯 `2D` 输出，`3D` 模式未完成
 - “排序（保留方向）”当前尊重用户已设置的加工方向，不承担手动点选排序职责；手动排序接口代码已保留但暂未暴露到 UI
