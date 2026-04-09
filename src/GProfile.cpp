@@ -11,6 +11,7 @@ namespace
     constexpr const char* kProfileNameKey = "profileName";
     constexpr const char* kFileCodeKey = "fileCode";
     constexpr const char* kEntityTypeCodesKey = "entityTypeCodes";
+    constexpr const char* kLayerCodesKey = "layerCodes";
     constexpr const char* kEntityColorCodesKey = "entityColorCodes";
     constexpr const char* kHeaderKey = "header";
     constexpr const char* kFooterKey = "footer";
@@ -73,7 +74,7 @@ GProfile GProfile::createDefaultLaserProfile()
 
     profile.setEntityColorCode
     (
-        QStringLiteral("#FF0000"),
+        QStringLiteral("ACI:1"),
         {
             QStringLiteral("M03"),
             QStringLiteral("M05"),
@@ -127,6 +128,13 @@ GProfile GProfile::loadFromFile(const QString& filePath, QString* errorMessage)
         profile.m_entityTypeCodes.insert(normalizeEntityTypeKey(it.key()), GProfileCodeBlock::fromJson(it.value().toObject()));
     }
 
+    const QJsonObject layerObject = rootObject.value(kLayerCodesKey).toObject();
+
+    for (auto it = layerObject.begin(); it != layerObject.end(); ++it)
+    {
+        profile.m_layerCodes.insert(normalizeLayerKey(it.key()), GProfileCodeBlock::fromJson(it.value().toObject()));
+    }
+
     const QJsonObject entityColorObject = rootObject.value(kEntityColorCodesKey).toObject();
 
     for (auto it = entityColorObject.begin(); it != entityColorObject.end(); ++it)
@@ -156,6 +164,15 @@ bool GProfile::saveToFile(const QString& filePath, QString* errorMessage) const
     }
 
     rootObject.insert(kEntityTypeCodesKey, entityTypeObject);
+
+    QJsonObject layerObject;
+
+    for (auto it = m_layerCodes.cbegin(); it != m_layerCodes.cend(); ++it)
+    {
+        layerObject.insert(it.key(), it.value().toJson());
+    }
+
+    rootObject.insert(kLayerCodesKey, layerObject);
 
     QJsonObject entityColorObject;
 
@@ -205,6 +222,7 @@ void GProfile::clear()
     m_profileName.clear();
     m_fileCode = GProfileCodeBlock();
     m_entityTypeCodes.clear();
+    m_layerCodes.clear();
     m_entityColorCodes.clear();
 }
 
@@ -258,6 +276,38 @@ void GProfile::removeEntityTypeCode(const QString& entityType)
 const QMap<QString, GProfileCodeBlock>& GProfile::entityTypeCodes() const
 {
     return m_entityTypeCodes;
+}
+
+void GProfile::setLayerCode(const QString& layerName, const GProfileCodeBlock& codeBlock)
+{
+    const QString normalizedKey = normalizeLayerKey(layerName);
+
+    if (normalizedKey.isEmpty())
+    {
+        return;
+    }
+
+    m_layerCodes.insert(normalizedKey, codeBlock);
+}
+
+bool GProfile::containsLayerCode(const QString& layerName) const
+{
+    return m_layerCodes.contains(normalizeLayerKey(layerName));
+}
+
+GProfileCodeBlock GProfile::layerCode(const QString& layerName) const
+{
+    return m_layerCodes.value(normalizeLayerKey(layerName));
+}
+
+void GProfile::removeLayerCode(const QString& layerName)
+{
+    m_layerCodes.remove(normalizeLayerKey(layerName));
+}
+
+const QMap<QString, GProfileCodeBlock>& GProfile::layerCodes() const
+{
+    return m_layerCodes;
 }
 
 void GProfile::setEntityColorCode(const QString& colorKey, const GProfileCodeBlock& codeBlock)
@@ -317,6 +367,11 @@ QString GProfile::normalizeEntityTypeKey(const QString& entityType)
     return entityType.trimmed().toUpper();
 }
 
+QString GProfile::normalizeLayerKey(const QString& layerName)
+{
+    return layerName.trimmed();
+}
+
 QString GProfile::normalizeColorKey(const QString& colorKey)
 {
     QString normalizedKey = colorKey.trimmed().toUpper();
@@ -324,6 +379,40 @@ QString GProfile::normalizeColorKey(const QString& colorKey)
     if (normalizedKey.isEmpty())
     {
         return QString();
+    }
+
+    if (normalizedKey == QStringLiteral("BYLAYER") || normalizedKey == QStringLiteral("LAYER"))
+    {
+        return QStringLiteral("BYLAYER");
+    }
+
+    if (normalizedKey == QStringLiteral("BYBLOCK") || normalizedKey == QStringLiteral("BLOCK"))
+    {
+        return QStringLiteral("BYBLOCK");
+    }
+
+    if (normalizedKey.startsWith(QStringLiteral("ACI:"))
+        || normalizedKey.startsWith(QStringLiteral("ACI-"))
+        || normalizedKey.startsWith(QStringLiteral("ACI_")))
+    {
+        QString numberText = normalizedKey.mid(4).trimmed();
+
+        if (numberText.startsWith(':') || numberText.startsWith('-') || numberText.startsWith('_'))
+        {
+            numberText.remove(0, 1);
+        }
+
+        bool ok = false;
+        const int colorIndex = numberText.toInt(&ok);
+        return ok ? colorKeyFromAci(colorIndex) : QString();
+    }
+
+    bool pureNumberOk = false;
+    const int pureNumber = normalizedKey.toInt(&pureNumberOk);
+
+    if (pureNumberOk)
+    {
+        return colorKeyFromAci(pureNumber);
     }
 
     if (!normalizedKey.startsWith('#'))
@@ -342,4 +431,9 @@ QString GProfile::colorKeyFromColor(const QColor& color)
     }
 
     return color.name(QColor::HexRgb).toUpper();
+}
+
+QString GProfile::colorKeyFromAci(int colorIndex)
+{
+    return colorIndex >= 0 ? QStringLiteral("ACI:%1").arg(colorIndex) : QString();
 }

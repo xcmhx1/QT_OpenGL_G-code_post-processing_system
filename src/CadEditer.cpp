@@ -879,6 +879,10 @@ public:
         int newProcessOrder = -1;
         bool oldReverse = false;
         bool newReverse = false;
+        bool oldHasCustomStart = false;
+        bool newHasCustomStart = false;
+        double oldProcessStartParameter = 0.0;
+        double newProcessStartParameter = 0.0;
     };
 
 public:
@@ -918,6 +922,8 @@ private:
         {
             state.item->m_processOrder = useNewState ? state.newProcessOrder : state.oldProcessOrder;
             state.item->m_isReverse = useNewState ? state.newReverse : state.oldReverse;
+            state.item->m_hasCustomProcessStart = useNewState ? state.newHasCustomStart : state.oldHasCustomStart;
+            state.item->m_processStartParameter = useNewState ? state.newProcessStartParameter : state.oldProcessStartParameter;
             state.item->buildProcessDirection();
         }
 
@@ -1221,40 +1227,35 @@ bool CadEditer::setEntityProcessOrder(CadItem* item, int processOrder)
         item->m_processOrder,
         processOrder,
         item->m_isReverse,
-        item->m_isReverse
+        item->m_isReverse,
+        item->m_hasCustomProcessStart,
+        item->m_hasCustomProcessStart,
+        item->m_processStartParameter,
+        item->m_processStartParameter
     });
 
     return executeCommand(std::make_unique<UpdateProcessStatesCommand>(m_document, std::move(states)));
 }
 
-// 批量更新实体的加工顺序与反向加工状态
-// @param items 目标实体数组
-// @param processOrders 对应的加工顺序数组
-// @param reverseStates 对应的反向状态数组
+// 批量更新实体的加工顺序、反向加工状态与闭合图元起刀缝点
+// @param updates 目标实体的加工状态更新数组
 // @return 如果批量更新成功返回 true，否则返回 false
-bool CadEditer::applyEntityProcessStates
-(
-    const std::vector<CadItem*>& items,
-    const std::vector<int>& processOrders,
-    const std::vector<bool>& reverseStates
-)
+bool CadEditer::applyEntityProcessStates(const std::vector<ProcessStateUpdate>& updates)
 {
     if (m_document == nullptr
-        || items.empty()
-        || items.size() != processOrders.size()
-        || items.size() != reverseStates.size())
+        || updates.empty())
     {
         return false;
     }
 
     std::vector<UpdateProcessStatesCommand::ItemProcessState> states;
-    states.reserve(items.size());
+    states.reserve(updates.size());
 
-    for (size_t index = 0; index < items.size(); ++index)
+    for (const ProcessStateUpdate& update : updates)
     {
-        CadItem* item = items[index];
+        CadItem* item = update.item;
 
-        if (item == nullptr || !m_document->containsEntity(item) || processOrders[index] < 0)
+        if (item == nullptr || !m_document->containsEntity(item) || update.processOrder < 0)
         {
             return false;
         }
@@ -1263,9 +1264,13 @@ bool CadEditer::applyEntityProcessStates
         ({
             item,
             item->m_processOrder,
-            processOrders[index],
+            update.processOrder,
             item->m_isReverse,
-            reverseStates[index]
+            update.isReverse,
+            item->m_hasCustomProcessStart,
+            update.hasCustomStart,
+            item->m_processStartParameter,
+            update.processStartParameter
         });
     }
 

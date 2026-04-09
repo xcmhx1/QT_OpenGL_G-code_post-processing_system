@@ -54,6 +54,10 @@ public:
     int m_processOrder = -1;
     // 标记当前图元是否采用反向加工方向。
     bool m_isReverse = false;
+    // 标记当前图元是否显式指定了闭合路径的起刀缝点参数。
+    bool m_hasCustomProcessStart = false;
+    // 闭合路径的起刀缝点参数；圆使用弧度，完整椭圆使用参数方程角。
+    double m_processStartParameter = 0.0;
     // 记录当前图元是否处于选中状态。
     bool m_isSelected = false;
     // 渲染层直接消费的离散几何缓存。

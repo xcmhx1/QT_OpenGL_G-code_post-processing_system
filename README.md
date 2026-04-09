@@ -2,7 +2,7 @@
 
 [G/M 代码参考](./technical_file/G-M_Code.md)
 
-本项目是一个基于 Qt 6 Widgets、OpenGL 4.5 Core Profile、Visual Studio 2026 的 Windows 桌面 CAD / G-code 后处理程序。当前代码主线已经具备 CAD 文件导入、位图矢量化导入、二维图元显示、基础交互、简单绘图与编辑命令，并新增了纯 `2D` 激光加工 G 代码生成后端与 JSON Profile 配置能力；主窗口已接通导入图片、导出 G 代码、反向加工、排序（保留方向）与智能排序菜单动作，同时增加了仿 AutoCAD 风格的紧凑 Ribbon 工具面板，用于统一承载绘图、修改、图层与特性入口，并提供显式的浅色 / 深色主题切换，Viewer 层也已支持加工方向箭头与加工顺序编号显示，不过 `3D` 生成模式和独立参数配置界面仍未实现。
+本项目是一个基于 Qt 6 Widgets、OpenGL 4.5 Core Profile、Visual Studio 2026 的 Windows 桌面 CAD / G-code 后处理程序。当前代码主线已经具备 CAD 文件导入、位图矢量化导入、二维图元显示、基础交互、简单绘图与编辑命令，并新增了纯 `2D` 激光加工 G 代码生成后端与 JSON Profile 配置能力；主窗口已接通导入图片、导出 G 代码、反向加工、排序（保留方向）与智能排序菜单动作，同时增加了仿 AutoCAD 风格的紧凑 Ribbon 工具面板，用于统一承载绘图、修改、图层与特性入口，并提供显式的浅色 / 深色主题切换。当前“用户设置”菜单下也已接通 `G代码配置` 对话框，可按文件级、实体类型、图层规则、颜色规则四个层级定制导出行为，其中颜色规则已切换为以 AutoCAD 基础索引颜色为主的配置模型；Viewer 层也已支持加工方向箭头与加工顺序编号显示，不过 `3D` 生成模式仍未实现。
 
 ## 项目现状
 
@@ -26,7 +26,9 @@
 - 图层下拉项与颜色下拉项均以内嵌色块图标显示当前颜色语义
 - 浅色主题下会对 Viewer 中低对比度线色做显示补偿，避免白色或近白色图元贴近背景后难以辨认
 - `特性 -> 颜色` 中 `ByLayer` 色块固定显示所属图层颜色，不再错误跟随图元自定义颜色
-- 提供 `GProfile` JSON 配置读写，支持文件头尾、实体类型头尾、实体颜色头尾三类配置
+- 提供 `GProfile` JSON 配置读写，支持文件级、实体类型、图层规则、颜色规则四类配置
+- 提供 `用户设置 -> G代码配置...` 对话框，并已纳入当前浅色 / 深色主题
+- 颜色规则默认内置 `BYLAYER`、`BYBLOCK` 与 AutoCAD 基础 `ACI:1` 至 `ACI:9` 索引颜色项，同时兼容真彩色扩展
 - 提供 `GGenerator` 纯 `2D` G 代码生成后端，支持 `Line`、`Arc`、`Circle`、`Ellipse`、`Polyline`、`LWPolyline`
 - 已接通主窗口“导入文件”“导入图片”“导出G代码”“反向加工”“排序（保留方向）”“智能排序”菜单动作
 - 提供基于 `CadItem::m_processOrder` 和 `CadItem::m_isReverse` 的加工顺序与方向控制
@@ -34,7 +36,6 @@
 当前未完成或未接线：
 
 - `GGenerator` 当前仅实现纯 `2D` 生成，`3D` 模式入口已预留但未实现
-- `GProfile` 目前仍以代码内默认 Profile 为主，独立参数配置界面尚未实现
 - [src/CadDocument.cpp](D:/projects/visual_studio_2026/G-code_post-processing_system/src/CadDocument.cpp) 中 `CadDocument::saveDxfDocument()` 与 `CadDocument::eportDxfDocument()` 仍为空实现
 - 仓库没有独立自动化测试工程，验证仍以手工构建和手工交互检查为主
 
@@ -100,6 +101,7 @@ G-code_post-processing_system/
 |   |-- CadBitmapImportDialog.h             # 位图导入参数对话框
 |   |-- CadBitmapVectorizer.h               # 位图预处理与矢量化拟合
 |   |-- GProfile.h                          # G 代码 Profile 配置模型
+|   |-- GProfileDialog.h                    # G 代码 Profile 配置对话框
 |   |-- GGenerator.h                        # G 代码生成器
 |   |-- CadItem.h			               # 图元基类
 |   |-- CadLineItem.h                       # 直线图元
@@ -145,6 +147,7 @@ G-code_post-processing_system/
 |   |-- CadBitmapImportDialog.cpp           # 位图导入配置与预览
 |   |-- CadBitmapVectorizer.cpp             # 位图预处理、轮廓提取、图元拟合
 |   |-- GProfile.cpp                        # G 代码 Profile 配置读写
+|   |-- GProfileDialog.cpp                  # G 代码 Profile 配置对话框实现
 |   |-- GGenerator.cpp                      # 纯 2D G 代码生成
 |   |-- CadItem.cpp						  # 图元基类
 |   |-- CadProcessVisualUtils.cpp           # 加工方向/顺序显示共用语义实现
@@ -295,7 +298,9 @@ CadDocument                                (Model)
 `GProfile` + `GGenerator`
 
 - `GProfile` 负责读取、保存 JSON 格式的 G 代码配置
-- 当前配置范围包括文件头尾、实体类型头尾、实体颜色头尾
+- 当前配置范围包括文件级、实体类型、图层规则、颜色规则
+- 颜色规则优先使用 `BYLAYER`、`BYBLOCK` 与 `ACI:n` 索引键，也兼容旧的真彩色 `#RRGGBB` 键
+- `GProfileDialog` 负责提供用户侧可编辑配置界面，并显式跟随应用浅色 / 深色主题
 - `GGenerator` 直接解析现有 `CadItem` 子类和原始 `DRW_Entity` 参数生成 G 代码
 - 当前仅实现纯 `2D` 激光加工输出，`3D` 模式暂未实现
 
@@ -345,14 +350,15 @@ CadDocument                                (Model)
 ### G 代码生成
 
 1. `GGenerator` 绑定当前 `CadDocument`
-2. 生成时通过 `GProfile` 读取文件头尾、实体类型头尾、实体颜色头尾配置
-3. `GGenerator` 直接解析 `CadItem` 对应的原始实体参数
+2. 生成时通过 `GProfile` 读取文件级、图层规则、颜色规则、实体类型配置
+3. `GGenerator` 直接解析 `CadItem` 对应的原始实体参数，包括图层名和颜色键
 4. 当前 `2D` 输出支持：
    `Line -> G01`
    `Arc/Circle -> G02/G03 + I/J`
    `Polyline/LWPolyline -> 直线段 + bulge 圆弧段`
    `Ellipse -> 离散为 G01`
-5. 生成器在导出时弹出文件保存对话框并输出 `.nc/.gcode/.txt`
+5. 导出时会按“文件级 -> 图层规则 -> 颜色规则 -> 实体类型”的顺序组合头尾代码块
+6. 生成器在导出时弹出文件保存对话框并输出 `.nc/.gcode/.txt`
 
 ### 排序与方向控制
 
@@ -451,6 +457,7 @@ CadDocument                                (Model)
 菜单栏当前提供 `用户设置 -> 主题 -> 浅色模式 / 深色模式`：
 
 - 主题切换会统一作用于菜单栏、工具栏、Ribbon 面板、Viewer、命令栏和底部状态栏
+- `用户设置 -> G代码配置...` 打开的 Profile 对话框也会显式跟随当前主题，而不依赖系统默认样式
 - 主题选择会通过 `QSettings` 持久化，下次启动时自动恢复上次选择
 - 浅色主题主要面向截图、文档和论文打印场景；深色主题主要面向日常长时间使用
 
@@ -470,6 +477,7 @@ CadDocument                                (Model)
 - 排序 -> `排序（保留方向）`：保留当前方向设置，仅重排加工顺序
 - 排序 -> `智能排序`：同时优化加工顺序与图元方向
 - 用户设置 -> `主题 -> 浅色模式 / 深色模式`：切换整套界面主题
+- 用户设置 -> `G代码配置...`：打开当前活动 Profile 配置对话框
 
 说明：
 
@@ -484,7 +492,23 @@ CadDocument                                (Model)
 - 支持 `Line`、`Arc`、`Circle`、`Ellipse`、`Polyline`、`LWPolyline`
 - 支持读取 `CadItem::m_processOrder` 作为导出顺序
 - 支持读取 `CadItem::m_isReverse` 作为反向加工标记
-- 支持按 `GProfile` 套用文件头尾、实体类型头尾、实体颜色头尾
+- 支持按 `GProfile` 套用文件级、图层规则、颜色规则、实体类型规则
+
+`G代码配置` 对话框当前支持：
+
+- 编辑 Profile 名称
+- 编辑文件级 `header / footer / comment`
+- 编辑实体类型级 `header / footer / comment`
+- 编辑图层级 `header / footer / comment`
+- 编辑颜色级 `header / footer / comment`
+- 导入 / 导出 JSON
+- 恢复默认配置
+
+颜色规则说明：
+
+- 默认内置 `BYLAYER`、`BYBLOCK`、`ACI:1` 到 `ACI:9`
+- 其中 `ACI:1` 到 `ACI:9` 对应基础 AutoCAD 索引颜色
+- 在此基础上仍可新增真彩色规则，用于特殊工艺场景
 
 当前限制：
 
@@ -524,11 +548,13 @@ CadDocument                                (Model)
 5. 验证绘图命令、移动、删除、改色、改图层、Undo / Redo 是否正常
 6. 验证“反向加工”“排序（保留方向）”“智能排序”是否符合预期，并检查 Viewer 中方向箭头、顺序编号与 Undo / Redo 是否同步正常
 7. 载入一份 `GProfile` 配置并验证 JSON 读写是否正常
-8. 通过主窗口“导出G代码”导出一份纯 `2D` G 代码，检查头尾、类型配置、颜色配置和圆弧方向是否符合预期
-9. 验证 Ribbon 工具面板中的绘图、修改、图层、特性联动是否正常
-10. 验证浅色 / 深色主题切换后，菜单栏、Ribbon 面板、Viewer、命令栏和状态栏都能正确刷新
-11. 在浅色主题下验证白色或近白色图层线条仍能清晰显示，并检查 `ByLayer` 色块是否始终对应真实图层颜色
-12. 验证命令栏提示、状态栏坐标、拖拽导入是否正常
+8. 打开“用户设置 -> G代码配置...”，验证浅色 / 深色模式下对话框控件、页签和列表显示是否正常
+9. 在 `G代码配置` 中验证文件级、实体类型、图层规则、颜色规则的编辑、导入导出与恢复默认是否正常
+10. 通过主窗口“导出G代码”导出一份纯 `2D` G 代码，检查头尾、图层配置、颜色配置、类型配置和圆弧方向是否符合预期
+11. 验证 Ribbon 工具面板中的绘图、修改、图层、特性联动是否正常
+12. 验证浅色 / 深色主题切换后，菜单栏、Ribbon 面板、Viewer、命令栏、状态栏和 `G代码配置` 对话框都能正确刷新
+13. 在浅色主题下验证白色或近白色图层线条仍能清晰显示，并检查 `ByLayer` 色块是否始终对应真实图层颜色
+14. 验证命令栏提示、状态栏坐标、拖拽导入是否正常
 
 ## 已知注意事项
 
@@ -536,6 +562,7 @@ CadDocument                                (Model)
 - 新建图元强制落在 `Z=0` 平面
 - Ribbon“绘图”面板当前只把常用图元直接显示，其余入口需通过标题旁下拉菜单进入
 - 浅色主题下 Viewer 会对低对比度线色做显示补偿；这是显示层行为，不会改写文档中的真实颜色数据
+- `GProfile` 颜色规则当前以基础索引颜色与真彩色键混合管理，后续如需扩展完整 AutoCAD ACI 颜色表，还需要继续补齐 UI 与预设
 - 位图导入依赖 OpenCV 运行时 DLL 拷贝到输出目录
 - `GGenerator` 当前仅实现纯 `2D` 输出，`3D` 模式未完成
 - “排序（保留方向）”当前尊重用户已设置的加工方向，不承担手动点选排序职责；手动排序接口代码已保留但暂未暴露到 UI

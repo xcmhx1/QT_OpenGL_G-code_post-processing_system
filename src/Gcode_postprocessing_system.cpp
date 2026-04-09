@@ -6,6 +6,7 @@
 #include "CadItem.h"
 #include "CadProcessVisualUtils.h"
 #include "GGenerator.h"
+#include "GProfileDialog.h"
 
 #include <QActionGroup>
 #include <QApplication>
@@ -29,7 +30,43 @@
 namespace
 {
     constexpr double kSortEpsilon = 1.0e-9;
+    constexpr double kPi = 3.14159265358979323846;
+    constexpr double kTwoPi = 6.28318530717958647692;
     constexpr int kColorByLayer = 256;
+    constexpr int kClosedEllipseSampleCount = 16;
+    constexpr double kNextDistanceWeight = 0.15;
+    constexpr double kDirectionPenaltyWeight = 0.35;
+    constexpr double kBacktrackPenaltyWeight = 1.2;
+    const QVector3D kSortOrigin(0.0f, 0.0f, 0.0f);
+
+    enum class SortStrategy
+    {
+        KeepDirection,
+        Smart
+    };
+
+    struct SortCandidate
+    {
+        int index = -1;
+        bool reverse = false;
+        bool hasCustomStart = false;
+        double processStartParameter = 0.0;
+        double priorityDistance = std::numeric_limits<double>::max();
+        double score = std::numeric_limits<double>::max();
+        QVector3D startPoint;
+        QVector3D endPoint;
+    };
+
+    struct ProcessPathOption
+    {
+        bool reverse = false;
+        bool hasCustomStart = false;
+        double processStartParameter = 0.0;
+        QVector3D startPoint;
+        QVector3D endPoint;
+        QVector3D startTangent;
+        QVector3D endTangent;
+    };
 
     QColor colorFromAci(int colorIndex)
     {
@@ -153,6 +190,999 @@ namespace
 
         return left.z() < right.z();
     }
+
+    double planarDistanceSquared(const QVector3D& left, const QVector3D& right)
+    {
+        const double dx = static_cast<double>(left.x()) - static_cast<double>(right.x());
+        const double dy = static_cast<double>(left.y()) - static_cast<double>(right.y());
+        return dx * dx + dy * dy;
+    }
+
+    QVector3D normalizeOrZero(QVector3D vector)
+    {
+        vector.setZ(0.0f);
+
+        if (vector.lengthSquared() <= kSortEpsilon)
+        {
+            return QVector3D();
+        }
+
+        vector.normalize();
+        return vector;
+    }
+
+    QVector3D leftPerpendicular(const QVector3D& vector)
+    {
+        return QVector3D(-vector.y(), vector.x(), 0.0f);
+    }
+
+    double normalizeAnglePositive(double angle)
+    {
+        double normalized = std::fmod(angle, kTwoPi);
+
+        if (normalized < 0.0)
+        {
+            normalized += kTwoPi;
+        }
+
+        return normalized;
+    }
+
+    bool isFullEllipsePath(const DRW_Ellipse* ellipse)
+    {
+        if (ellipse == nullptr)
+        {
+            return false;
+        }
+
+        const double span = ellipse->endparam - ellipse->staparam;
+        return std::abs(span) < 1.0e-10
+            || std::abs(std::abs(span) - kTwoPi) < 1.0e-10;
+    }
+
+    QVector3D bulgeArcCenter(const QVector3D& startPoint, const QVector3D& endPoint, double bulge, bool* valid = nullptr)
+    {
+        const QVector3D chord = endPoint - startPoint;
+        const double chordLength = chord.length();
+
+        if (valid != nullptr)
+        {
+            *valid = false;
+        }
+
+        if (chordLength <= kSortEpsilon || std::abs(bulge) < 1.0e-8)
+        {
+            return QVector3D();
+        }
+
+        const QVector3D midpoint = (startPoint + endPoint) * 0.5f;
+        const double centerOffset = chordLength * (1.0 / bulge - bulge) * 0.25;
+        const QVector3D leftNormal
+        (
+            static_cast<float>(-chord.y() / chordLength),
+            static_cast<float>(chord.x() / chordLength),
+            0.0f
+        );
+
+        if (valid != nullptr)
+        {
+            *valid = true;
+        }
+
+        return midpoint + leftNormal * static_cast<float>(centerOffset);
+    }
+
+    QVector3D bulgeSegmentTangentAtStart(const QVector3D& startPoint, const QVector3D& endPoint, double bulge)
+    {
+        if (std::abs(bulge) < 1.0e-8)
+        {
+            return normalizeOrZero(endPoint - startPoint);
+        }
+
+        bool valid = false;
+        const QVector3D center = bulgeArcCenter(startPoint, endPoint, bulge, &valid);
+
+        if (!valid)
+        {
+            return normalizeOrZero(endPoint - startPoint);
+        }
+
+        const QVector3D radiusVector = startPoint - center;
+        const QVector3D tangent = bulge > 0.0
+            ? leftPerpendicular(radiusVector)
+            : -leftPerpendicular(radiusVector);
+
+        return normalizeOrZero(tangent);
+    }
+
+    QVector3D bulgeSegmentTangentAtEnd(const QVector3D& startPoint, const QVector3D& endPoint, double bulge)
+    {
+        if (std::abs(bulge) < 1.0e-8)
+        {
+            return normalizeOrZero(endPoint - startPoint);
+        }
+
+        bool valid = false;
+        const QVector3D center = bulgeArcCenter(startPoint, endPoint, bulge, &valid);
+
+        if (!valid)
+        {
+            return normalizeOrZero(endPoint - startPoint);
+        }
+
+        const QVector3D radiusVector = endPoint - center;
+        const QVector3D tangent = bulge > 0.0
+            ? leftPerpendicular(radiusVector)
+            : -leftPerpendicular(radiusVector);
+
+        return normalizeOrZero(tangent);
+    }
+
+    bool tryBuildEllipseAxes(const DRW_Ellipse* ellipse, QVector3D& majorAxis, QVector3D& minorAxis)
+    {
+        if (ellipse == nullptr)
+        {
+            return false;
+        }
+
+        majorAxis = QVector3D(ellipse->secPoint.x, ellipse->secPoint.y, ellipse->secPoint.z);
+
+        if (majorAxis.lengthSquared() <= kSortEpsilon || ellipse->ratio <= 0.0)
+        {
+            return false;
+        }
+
+        QVector3D normal(ellipse->extPoint.x, ellipse->extPoint.y, ellipse->extPoint.z);
+
+        if (normal.lengthSquared() <= kSortEpsilon)
+        {
+            normal = QVector3D(0.0f, 0.0f, 1.0f);
+        }
+        else
+        {
+            normal.normalize();
+        }
+
+        minorAxis = QVector3D::crossProduct(normal, majorAxis);
+
+        if (minorAxis.lengthSquared() <= kSortEpsilon)
+        {
+            return false;
+        }
+
+        minorAxis.normalize();
+        minorAxis *= static_cast<float>(majorAxis.length() * ellipse->ratio);
+        return true;
+    }
+
+    QVector3D ellipsePointAt(const DRW_Ellipse* ellipse, double parameter)
+    {
+        if (ellipse == nullptr)
+        {
+            return QVector3D();
+        }
+
+        const QVector3D center(ellipse->basePoint.x, ellipse->basePoint.y, ellipse->basePoint.z);
+        QVector3D majorAxis;
+        QVector3D minorAxis;
+
+        if (!tryBuildEllipseAxes(ellipse, majorAxis, minorAxis))
+        {
+            return QVector3D();
+        }
+
+        return center
+            + majorAxis * static_cast<float>(std::cos(parameter))
+            + minorAxis * static_cast<float>(std::sin(parameter));
+    }
+
+    QVector3D ellipseTangentAt(const DRW_Ellipse* ellipse, double parameter, bool reverseDirection)
+    {
+        QVector3D majorAxis;
+        QVector3D minorAxis;
+
+        if (!tryBuildEllipseAxes(ellipse, majorAxis, minorAxis))
+        {
+            return QVector3D();
+        }
+
+        QVector3D tangent
+        (
+            static_cast<float>(-std::sin(parameter)) * majorAxis
+            + static_cast<float>(std::cos(parameter)) * minorAxis
+        );
+
+        if (reverseDirection)
+        {
+            tangent = -tangent;
+        }
+
+        return normalizeOrZero(tangent);
+    }
+
+    QVector3D arcTangentAt(double angle, bool reverseDirection)
+    {
+        QVector3D tangent
+        (
+            static_cast<float>(-std::sin(angle)),
+            static_cast<float>(std::cos(angle)),
+            0.0f
+        );
+
+        if (reverseDirection)
+        {
+            tangent = -tangent;
+        }
+
+        return normalizeOrZero(tangent);
+    }
+
+    QVector3D polylineForwardStartTangent(const DRW_Polyline* polyline)
+    {
+        if (polyline == nullptr || polyline->vertlist.size() < 2)
+        {
+            return QVector3D();
+        }
+
+        for (size_t index = 0; index + 1 < polyline->vertlist.size(); ++index)
+        {
+            const auto& current = polyline->vertlist.at(index);
+            const auto& next = polyline->vertlist.at(index + 1);
+            const QVector3D startPoint(current->basePoint.x, current->basePoint.y, current->basePoint.z);
+            const QVector3D endPoint(next->basePoint.x, next->basePoint.y, next->basePoint.z);
+            const QVector3D tangent = bulgeSegmentTangentAtStart(startPoint, endPoint, current->bulge);
+
+            if (tangent.lengthSquared() > kSortEpsilon)
+            {
+                return tangent;
+            }
+        }
+
+        if ((polyline->flags & 1) != 0)
+        {
+            const auto& current = polyline->vertlist.back();
+            const auto& next = polyline->vertlist.front();
+            const QVector3D startPoint(current->basePoint.x, current->basePoint.y, current->basePoint.z);
+            const QVector3D endPoint(next->basePoint.x, next->basePoint.y, next->basePoint.z);
+            return bulgeSegmentTangentAtStart(startPoint, endPoint, current->bulge);
+        }
+
+        return QVector3D();
+    }
+
+    QVector3D polylineForwardStartTangentAt(const DRW_Polyline* polyline, size_t startIndex)
+    {
+        if (polyline == nullptr || polyline->vertlist.size() < 2)
+        {
+            return QVector3D();
+        }
+
+        const size_t count = polyline->vertlist.size();
+        const size_t nextIndex = (startIndex + 1) % count;
+
+        if (nextIndex == startIndex)
+        {
+            return QVector3D();
+        }
+
+        const auto& current = polyline->vertlist.at(startIndex);
+        const auto& next = polyline->vertlist.at(nextIndex);
+        const QVector3D startPoint(current->basePoint.x, current->basePoint.y, current->basePoint.z);
+        const QVector3D endPoint(next->basePoint.x, next->basePoint.y, next->basePoint.z);
+        return bulgeSegmentTangentAtStart(startPoint, endPoint, current->bulge);
+    }
+
+    QVector3D polylineForwardEndTangentAt(const DRW_Polyline* polyline, size_t startIndex)
+    {
+        if (polyline == nullptr || polyline->vertlist.size() < 2)
+        {
+            return QVector3D();
+        }
+
+        const size_t count = polyline->vertlist.size();
+        const size_t previousIndex = (startIndex + count - 1) % count;
+        const auto& previous = polyline->vertlist.at(previousIndex);
+        const auto& current = polyline->vertlist.at(startIndex);
+        const QVector3D startPoint(previous->basePoint.x, previous->basePoint.y, previous->basePoint.z);
+        const QVector3D endPoint(current->basePoint.x, current->basePoint.y, current->basePoint.z);
+        return bulgeSegmentTangentAtEnd(startPoint, endPoint, previous->bulge);
+    }
+
+    QVector3D polylineReverseStartTangent(const DRW_Polyline* polyline)
+    {
+        if (polyline == nullptr || polyline->vertlist.size() < 2)
+        {
+            return QVector3D();
+        }
+
+        for (size_t index = polyline->vertlist.size() - 1; index > 0; --index)
+        {
+            const auto& current = polyline->vertlist.at(index);
+            const auto& next = polyline->vertlist.at(index - 1);
+            const QVector3D startPoint(current->basePoint.x, current->basePoint.y, current->basePoint.z);
+            const QVector3D endPoint(next->basePoint.x, next->basePoint.y, next->basePoint.z);
+            const QVector3D tangent = bulgeSegmentTangentAtStart(startPoint, endPoint, -next->bulge);
+
+            if (tangent.lengthSquared() > kSortEpsilon)
+            {
+                return tangent;
+            }
+        }
+
+        if ((polyline->flags & 1) != 0)
+        {
+            const auto& current = polyline->vertlist.front();
+            const auto& next = polyline->vertlist.back();
+            const QVector3D startPoint(current->basePoint.x, current->basePoint.y, current->basePoint.z);
+            const QVector3D endPoint(next->basePoint.x, next->basePoint.y, next->basePoint.z);
+            return bulgeSegmentTangentAtStart(startPoint, endPoint, -next->bulge);
+        }
+
+        return QVector3D();
+    }
+
+    QVector3D polylineReverseStartTangentAt(const DRW_Polyline* polyline, size_t startIndex)
+    {
+        return -polylineForwardEndTangentAt(polyline, startIndex);
+    }
+
+    QVector3D polylineReverseEndTangentAt(const DRW_Polyline* polyline, size_t startIndex)
+    {
+        return -polylineForwardStartTangentAt(polyline, startIndex);
+    }
+
+    QVector3D lwPolylineForwardStartTangent(const DRW_LWPolyline* polyline)
+    {
+        if (polyline == nullptr || polyline->vertlist.size() < 2)
+        {
+            return QVector3D();
+        }
+
+        const float z = static_cast<float>(polyline->elevation);
+
+        for (size_t index = 0; index + 1 < polyline->vertlist.size(); ++index)
+        {
+            const auto& current = polyline->vertlist.at(index);
+            const auto& next = polyline->vertlist.at(index + 1);
+            const QVector3D startPoint(static_cast<float>(current->x), static_cast<float>(current->y), z);
+            const QVector3D endPoint(static_cast<float>(next->x), static_cast<float>(next->y), z);
+            const QVector3D tangent = bulgeSegmentTangentAtStart(startPoint, endPoint, current->bulge);
+
+            if (tangent.lengthSquared() > kSortEpsilon)
+            {
+                return tangent;
+            }
+        }
+
+        if ((polyline->flags & 1) != 0)
+        {
+            const auto& current = polyline->vertlist.back();
+            const auto& next = polyline->vertlist.front();
+            const QVector3D startPoint(static_cast<float>(current->x), static_cast<float>(current->y), z);
+            const QVector3D endPoint(static_cast<float>(next->x), static_cast<float>(next->y), z);
+            return bulgeSegmentTangentAtStart(startPoint, endPoint, current->bulge);
+        }
+
+        return QVector3D();
+    }
+
+    QVector3D lwPolylineForwardStartTangentAt(const DRW_LWPolyline* polyline, size_t startIndex)
+    {
+        if (polyline == nullptr || polyline->vertlist.size() < 2)
+        {
+            return QVector3D();
+        }
+
+        const size_t count = polyline->vertlist.size();
+        const size_t nextIndex = (startIndex + 1) % count;
+        const float z = static_cast<float>(polyline->elevation);
+        const auto& current = polyline->vertlist.at(startIndex);
+        const auto& next = polyline->vertlist.at(nextIndex);
+        const QVector3D startPoint(static_cast<float>(current->x), static_cast<float>(current->y), z);
+        const QVector3D endPoint(static_cast<float>(next->x), static_cast<float>(next->y), z);
+        return bulgeSegmentTangentAtStart(startPoint, endPoint, current->bulge);
+    }
+
+    QVector3D lwPolylineForwardEndTangentAt(const DRW_LWPolyline* polyline, size_t startIndex)
+    {
+        if (polyline == nullptr || polyline->vertlist.size() < 2)
+        {
+            return QVector3D();
+        }
+
+        const size_t count = polyline->vertlist.size();
+        const size_t previousIndex = (startIndex + count - 1) % count;
+        const float z = static_cast<float>(polyline->elevation);
+        const auto& previous = polyline->vertlist.at(previousIndex);
+        const auto& current = polyline->vertlist.at(startIndex);
+        const QVector3D startPoint(static_cast<float>(previous->x), static_cast<float>(previous->y), z);
+        const QVector3D endPoint(static_cast<float>(current->x), static_cast<float>(current->y), z);
+        return bulgeSegmentTangentAtEnd(startPoint, endPoint, previous->bulge);
+    }
+
+    QVector3D lwPolylineReverseStartTangent(const DRW_LWPolyline* polyline)
+    {
+        if (polyline == nullptr || polyline->vertlist.size() < 2)
+        {
+            return QVector3D();
+        }
+
+        const float z = static_cast<float>(polyline->elevation);
+
+        for (size_t index = polyline->vertlist.size() - 1; index > 0; --index)
+        {
+            const auto& current = polyline->vertlist.at(index);
+            const auto& next = polyline->vertlist.at(index - 1);
+            const QVector3D startPoint(static_cast<float>(current->x), static_cast<float>(current->y), z);
+            const QVector3D endPoint(static_cast<float>(next->x), static_cast<float>(next->y), z);
+            const QVector3D tangent = bulgeSegmentTangentAtStart(startPoint, endPoint, -next->bulge);
+
+            if (tangent.lengthSquared() > kSortEpsilon)
+            {
+                return tangent;
+            }
+        }
+
+        if ((polyline->flags & 1) != 0)
+        {
+            const auto& current = polyline->vertlist.front();
+            const auto& next = polyline->vertlist.back();
+            const QVector3D startPoint(static_cast<float>(current->x), static_cast<float>(current->y), z);
+            const QVector3D endPoint(static_cast<float>(next->x), static_cast<float>(next->y), z);
+            return bulgeSegmentTangentAtStart(startPoint, endPoint, -next->bulge);
+        }
+
+        return QVector3D();
+    }
+
+    QVector3D lwPolylineReverseStartTangentAt(const DRW_LWPolyline* polyline, size_t startIndex)
+    {
+        return -lwPolylineForwardEndTangentAt(polyline, startIndex);
+    }
+
+    QVector3D lwPolylineReverseEndTangentAt(const DRW_LWPolyline* polyline, size_t startIndex)
+    {
+        return -lwPolylineForwardStartTangentAt(polyline, startIndex);
+    }
+
+    size_t effectiveClosedPolylineStartIndex(const CadItem* item, size_t vertexCount)
+    {
+        if (vertexCount == 0)
+        {
+            return 0;
+        }
+
+        if (item != nullptr && item->m_hasCustomProcessStart)
+        {
+            const int rawIndex = static_cast<int>(std::llround(item->m_processStartParameter));
+            const int normalized = ((rawIndex % static_cast<int>(vertexCount)) + static_cast<int>(vertexCount)) % static_cast<int>(vertexCount);
+            return static_cast<size_t>(normalized);
+        }
+
+        return 0;
+    }
+
+    QVector3D computeSweepDirection(const std::vector<CadItem*>& sortableItems)
+    {
+        bool hasAnchor = false;
+        QVector3D minPoint;
+        QVector3D maxPoint;
+
+        for (CadItem* item : sortableItems)
+        {
+            const CadProcessVisualInfo info = buildProcessVisualInfo(item);
+
+            if (!info.valid)
+            {
+                continue;
+            }
+
+            if (!hasAnchor)
+            {
+                minPoint = info.labelAnchor;
+                maxPoint = info.labelAnchor;
+                hasAnchor = true;
+                continue;
+            }
+
+            minPoint.setX(std::min(minPoint.x(), info.labelAnchor.x()));
+            minPoint.setY(std::min(minPoint.y(), info.labelAnchor.y()));
+            maxPoint.setX(std::max(maxPoint.x(), info.labelAnchor.x()));
+            maxPoint.setY(std::max(maxPoint.y(), info.labelAnchor.y()));
+        }
+
+        if (!hasAnchor)
+        {
+            return normalizeOrZero(QVector3D(1.0f, 1.0f, 0.0f));
+        }
+
+        const QVector3D diagonal(maxPoint.x() - minPoint.x(), maxPoint.y() - minPoint.y(), 0.0f);
+        const QVector3D normalized = normalizeOrZero(diagonal);
+        return normalized.lengthSquared() > kSortEpsilon
+            ? normalized
+            : normalizeOrZero(QVector3D(1.0f, 1.0f, 0.0f));
+    }
+
+    double movementContinuityPenalty(const QVector3D& moveVector, const QVector3D& tangentVector)
+    {
+        const QVector3D normalizedMove = normalizeOrZero(moveVector);
+        const QVector3D normalizedTangent = normalizeOrZero(tangentVector);
+
+        if (normalizedMove.lengthSquared() <= kSortEpsilon || normalizedTangent.lengthSquared() <= kSortEpsilon)
+        {
+            return 0.0;
+        }
+
+        const double alignment = std::clamp(static_cast<double>(QVector3D::dotProduct(normalizedMove, normalizedTangent)), -1.0, 1.0);
+        return 1.0 - alignment;
+    }
+
+    std::vector<ProcessPathOption> buildPathOptionsForItem(const CadItem* item, SortStrategy strategy)
+    {
+        std::vector<ProcessPathOption> options;
+
+        if (item == nullptr || item->m_nativeEntity == nullptr)
+        {
+            return options;
+        }
+
+        switch (item->m_type)
+        {
+        case DRW::ETYPE::LINE:
+        {
+            const DRW_Line* line = static_cast<const DRW_Line*>(item->m_nativeEntity);
+            const QVector3D forwardStart(line->basePoint.x, line->basePoint.y, line->basePoint.z);
+            const QVector3D forwardEnd(line->secPoint.x, line->secPoint.y, line->secPoint.z);
+            const QVector3D forwardTangent = normalizeOrZero(forwardEnd - forwardStart);
+            const std::initializer_list<bool> reverseOptions = strategy == SortStrategy::Smart
+                ? std::initializer_list<bool>{ false, true }
+                : std::initializer_list<bool>{ item->m_isReverse };
+
+            for (const bool reverse : reverseOptions)
+            {
+                ProcessPathOption option;
+                option.reverse = reverse;
+                option.startPoint = reverse ? forwardEnd : forwardStart;
+                option.endPoint = reverse ? forwardStart : forwardEnd;
+                option.startTangent = reverse ? -forwardTangent : forwardTangent;
+                option.endTangent = option.startTangent;
+                options.push_back(option);
+            }
+
+            break;
+        }
+        case DRW::ETYPE::ARC:
+        {
+            const DRW_Arc* arc = static_cast<const DRW_Arc*>(item->m_nativeEntity);
+            const QVector3D center(arc->basePoint.x, arc->basePoint.y, arc->basePoint.z);
+            const auto pointAtAngle =
+                [&center, arc](double angle)
+                {
+                    return QVector3D
+                    (
+                        static_cast<float>(center.x() + std::cos(angle) * arc->radious),
+                        static_cast<float>(center.y() + std::sin(angle) * arc->radious),
+                        center.z()
+                    );
+                };
+            const std::initializer_list<bool> reverseOptions = strategy == SortStrategy::Smart
+                ? std::initializer_list<bool>{ false, true }
+                : std::initializer_list<bool>{ item->m_isReverse };
+
+            for (const bool reverse : reverseOptions)
+            {
+                ProcessPathOption option;
+                option.reverse = reverse;
+                option.startPoint = reverse ? pointAtAngle(arc->endangle) : pointAtAngle(arc->staangle);
+                option.endPoint = reverse ? pointAtAngle(arc->staangle) : pointAtAngle(arc->endangle);
+                option.startTangent = reverse ? arcTangentAt(arc->endangle, true) : arcTangentAt(arc->staangle, false);
+                option.endTangent = reverse ? arcTangentAt(arc->staangle, true) : arcTangentAt(arc->endangle, false);
+                options.push_back(option);
+            }
+
+            break;
+        }
+        case DRW::ETYPE::CIRCLE:
+        {
+            const DRW_Circle* circle = static_cast<const DRW_Circle*>(item->m_nativeEntity);
+            const QVector3D center(circle->basePoint.x, circle->basePoint.y, circle->basePoint.z);
+            const std::initializer_list<bool> reverseOptions = strategy == SortStrategy::Smart
+                ? std::initializer_list<bool>{ false, true }
+                : std::initializer_list<bool>{ item->m_isReverse };
+            const double startParameter = strategy == SortStrategy::Smart
+                ? kPi * 0.5
+                : (item->m_hasCustomProcessStart ? item->m_processStartParameter : kPi * 0.5);
+
+            for (const bool reverse : reverseOptions)
+            {
+                ProcessPathOption option;
+                option.reverse = reverse;
+                option.hasCustomStart = false;
+                option.processStartParameter = startParameter;
+                option.startPoint = QVector3D
+                (
+                    static_cast<float>(center.x() + std::cos(startParameter) * circle->radious),
+                    static_cast<float>(center.y() + std::sin(startParameter) * circle->radious),
+                    center.z()
+                );
+                option.endPoint = option.startPoint;
+                option.startTangent = arcTangentAt(startParameter, reverse);
+                option.endTangent = option.startTangent;
+                options.push_back(option);
+            }
+
+            break;
+        }
+        case DRW::ETYPE::ELLIPSE:
+        {
+            const DRW_Ellipse* ellipse = static_cast<const DRW_Ellipse*>(item->m_nativeEntity);
+            const bool isClosed = isFullEllipsePath(ellipse);
+
+            if (isClosed && strategy == SortStrategy::Smart)
+            {
+                for (int sampleIndex = 0; sampleIndex < kClosedEllipseSampleCount; ++sampleIndex)
+                {
+                    const double parameter = kTwoPi * static_cast<double>(sampleIndex) / static_cast<double>(kClosedEllipseSampleCount);
+
+                    for (const bool reverse : { false, true })
+                    {
+                        ProcessPathOption option;
+                        option.reverse = reverse;
+                        option.hasCustomStart = true;
+                        option.processStartParameter = parameter;
+                        option.startPoint = ellipsePointAt(ellipse, parameter);
+                        option.endPoint = option.startPoint;
+                        option.startTangent = ellipseTangentAt(ellipse, parameter, reverse);
+                        option.endTangent = option.startTangent;
+                        options.push_back(option);
+                    }
+                }
+            }
+            else
+            {
+                const std::initializer_list<bool> reverseOptions = strategy == SortStrategy::Smart
+                    ? std::initializer_list<bool>{ false, true }
+                    : std::initializer_list<bool>{ item->m_isReverse };
+
+                double startParam = ellipse->staparam;
+                double endParam = ellipse->endparam;
+                bool hasCustomStart = false;
+
+                if (isClosed)
+                {
+                    hasCustomStart = item->m_hasCustomProcessStart;
+                    startParam = item->m_hasCustomProcessStart ? item->m_processStartParameter : ellipse->staparam;
+                    endParam = startParam;
+                }
+                else
+                {
+                    while (endParam <= startParam)
+                    {
+                        endParam += kTwoPi;
+                    }
+                }
+
+                for (const bool reverse : reverseOptions)
+                {
+                    ProcessPathOption option;
+                    option.reverse = reverse;
+                    option.hasCustomStart = hasCustomStart;
+                    option.processStartParameter = startParam;
+                    option.startPoint = reverse ? ellipsePointAt(ellipse, endParam) : ellipsePointAt(ellipse, startParam);
+                    option.endPoint = reverse ? ellipsePointAt(ellipse, startParam) : ellipsePointAt(ellipse, endParam);
+                    option.startTangent = reverse ? ellipseTangentAt(ellipse, endParam, true) : ellipseTangentAt(ellipse, startParam, false);
+                    option.endTangent = reverse ? ellipseTangentAt(ellipse, startParam, true) : ellipseTangentAt(ellipse, endParam, false);
+                    options.push_back(option);
+                }
+            }
+
+            break;
+        }
+        case DRW::ETYPE::POLYLINE:
+        {
+            const DRW_Polyline* polyline = static_cast<const DRW_Polyline*>(item->m_nativeEntity);
+
+            if (polyline->vertlist.empty())
+            {
+                break;
+            }
+
+            const bool isClosed = (polyline->flags & 1) != 0;
+
+            if (isClosed && strategy == SortStrategy::Smart)
+            {
+                const size_t count = polyline->vertlist.size();
+
+                for (size_t startIndex = 0; startIndex < count; ++startIndex)
+                {
+                    const auto& seamVertex = polyline->vertlist.at(startIndex);
+                    const QVector3D seamPoint(seamVertex->basePoint.x, seamVertex->basePoint.y, seamVertex->basePoint.z);
+
+                    for (const bool reverse : { false, true })
+                    {
+                        ProcessPathOption option;
+                        option.reverse = reverse;
+                        option.hasCustomStart = true;
+                        option.processStartParameter = static_cast<double>(startIndex);
+                        option.startPoint = seamPoint;
+                        option.endPoint = seamPoint;
+                        option.startTangent = reverse
+                            ? polylineReverseStartTangentAt(polyline, startIndex)
+                            : polylineForwardStartTangentAt(polyline, startIndex);
+                        option.endTangent = reverse
+                            ? polylineReverseEndTangentAt(polyline, startIndex)
+                            : polylineForwardEndTangentAt(polyline, startIndex);
+                        options.push_back(option);
+                    }
+                }
+            }
+            else
+            {
+                const auto& firstVertex = polyline->vertlist.front();
+                const auto& lastVertex = polyline->vertlist.back();
+                const size_t seamIndex = isClosed
+                    ? effectiveClosedPolylineStartIndex(item, polyline->vertlist.size())
+                    : 0;
+                const QVector3D forwardStart = isClosed
+                    ? QVector3D(polyline->vertlist.at(seamIndex)->basePoint.x, polyline->vertlist.at(seamIndex)->basePoint.y, polyline->vertlist.at(seamIndex)->basePoint.z)
+                    : QVector3D(firstVertex->basePoint.x, firstVertex->basePoint.y, firstVertex->basePoint.z);
+                const QVector3D forwardEnd = isClosed
+                    ? forwardStart
+                    : QVector3D(lastVertex->basePoint.x, lastVertex->basePoint.y, lastVertex->basePoint.z);
+                const QVector3D forwardStartTangent = isClosed
+                    ? polylineForwardStartTangentAt(polyline, seamIndex)
+                    : polylineForwardStartTangent(polyline);
+                const QVector3D reverseStartTangent = isClosed
+                    ? polylineReverseStartTangentAt(polyline, seamIndex)
+                    : polylineReverseStartTangent(polyline);
+                const QVector3D forwardEndTangent = isClosed
+                    ? polylineForwardEndTangentAt(polyline, seamIndex)
+                    : -reverseStartTangent;
+                const QVector3D reverseEndTangent = isClosed
+                    ? polylineReverseEndTangentAt(polyline, seamIndex)
+                    : -forwardStartTangent;
+                const std::initializer_list<bool> reverseOptions = strategy == SortStrategy::Smart
+                    ? std::initializer_list<bool>{ false, true }
+                    : std::initializer_list<bool>{ item->m_isReverse };
+
+                for (const bool reverse : reverseOptions)
+                {
+                    ProcessPathOption option;
+                    option.reverse = reverse;
+                    option.hasCustomStart = isClosed && item->m_hasCustomProcessStart;
+                    option.processStartParameter = isClosed ? static_cast<double>(seamIndex) : 0.0;
+                    option.startPoint = reverse ? forwardEnd : forwardStart;
+                    option.endPoint = reverse ? forwardStart : forwardEnd;
+                    option.startTangent = reverse ? reverseStartTangent : forwardStartTangent;
+                    option.endTangent = reverse ? reverseEndTangent : forwardEndTangent;
+                    options.push_back(option);
+                }
+            }
+
+            break;
+        }
+        case DRW::ETYPE::LWPOLYLINE:
+        {
+            const DRW_LWPolyline* polyline = static_cast<const DRW_LWPolyline*>(item->m_nativeEntity);
+
+            if (polyline->vertlist.empty())
+            {
+                break;
+            }
+
+            const bool isClosed = (polyline->flags & 1) != 0;
+
+            if (isClosed && strategy == SortStrategy::Smart)
+            {
+                const size_t count = polyline->vertlist.size();
+                const float z = static_cast<float>(polyline->elevation);
+
+                for (size_t startIndex = 0; startIndex < count; ++startIndex)
+                {
+                    const auto& seamVertex = polyline->vertlist.at(startIndex);
+                    const QVector3D seamPoint(static_cast<float>(seamVertex->x), static_cast<float>(seamVertex->y), z);
+
+                    for (const bool reverse : { false, true })
+                    {
+                        ProcessPathOption option;
+                        option.reverse = reverse;
+                        option.hasCustomStart = true;
+                        option.processStartParameter = static_cast<double>(startIndex);
+                        option.startPoint = seamPoint;
+                        option.endPoint = seamPoint;
+                        option.startTangent = reverse
+                            ? lwPolylineReverseStartTangentAt(polyline, startIndex)
+                            : lwPolylineForwardStartTangentAt(polyline, startIndex);
+                        option.endTangent = reverse
+                            ? lwPolylineReverseEndTangentAt(polyline, startIndex)
+                            : lwPolylineForwardEndTangentAt(polyline, startIndex);
+                        options.push_back(option);
+                    }
+                }
+            }
+            else
+            {
+                const auto& firstVertex = polyline->vertlist.front();
+                const auto& lastVertex = polyline->vertlist.back();
+                const float z = static_cast<float>(polyline->elevation);
+                const size_t seamIndex = isClosed
+                    ? effectiveClosedPolylineStartIndex(item, polyline->vertlist.size())
+                    : 0;
+                const QVector3D forwardStart = isClosed
+                    ? QVector3D(static_cast<float>(polyline->vertlist.at(seamIndex)->x), static_cast<float>(polyline->vertlist.at(seamIndex)->y), z)
+                    : QVector3D(static_cast<float>(firstVertex->x), static_cast<float>(firstVertex->y), z);
+                const QVector3D forwardEnd = isClosed
+                    ? forwardStart
+                    : QVector3D(static_cast<float>(lastVertex->x), static_cast<float>(lastVertex->y), z);
+                const QVector3D forwardStartTangent = isClosed
+                    ? lwPolylineForwardStartTangentAt(polyline, seamIndex)
+                    : lwPolylineForwardStartTangent(polyline);
+                const QVector3D reverseStartTangent = isClosed
+                    ? lwPolylineReverseStartTangentAt(polyline, seamIndex)
+                    : lwPolylineReverseStartTangent(polyline);
+                const QVector3D forwardEndTangent = isClosed
+                    ? lwPolylineForwardEndTangentAt(polyline, seamIndex)
+                    : -reverseStartTangent;
+                const QVector3D reverseEndTangent = isClosed
+                    ? lwPolylineReverseEndTangentAt(polyline, seamIndex)
+                    : -forwardStartTangent;
+                const std::initializer_list<bool> reverseOptions = strategy == SortStrategy::Smart
+                    ? std::initializer_list<bool>{ false, true }
+                    : std::initializer_list<bool>{ item->m_isReverse };
+
+                for (const bool reverse : reverseOptions)
+                {
+                    ProcessPathOption option;
+                    option.reverse = reverse;
+                    option.hasCustomStart = isClosed && item->m_hasCustomProcessStart;
+                    option.processStartParameter = isClosed ? static_cast<double>(seamIndex) : 0.0;
+                    option.startPoint = reverse ? forwardEnd : forwardStart;
+                    option.endPoint = reverse ? forwardStart : forwardEnd;
+                    option.startTangent = reverse ? reverseStartTangent : forwardStartTangent;
+                    option.endTangent = reverse ? reverseEndTangent : forwardEndTangent;
+                    options.push_back(option);
+                }
+            }
+
+            break;
+        }
+        default:
+            break;
+        }
+
+        return options;
+    }
+
+    bool tryFindNearestNextStartPoint
+    (
+        const std::vector<CadItem*>& sortableItems,
+        const std::vector<bool>& visited,
+        SortStrategy strategy,
+        size_t currentIndex,
+        const QVector3D& currentEndPoint,
+        QVector3D& nextStartPoint
+    )
+    {
+        int bestIndex = -1;
+        double bestDistance = std::numeric_limits<double>::max();
+        QVector3D bestStartPoint;
+
+        for (size_t index = 0; index < sortableItems.size(); ++index)
+        {
+            if (index == currentIndex || visited[index])
+            {
+                continue;
+            }
+
+            const std::vector<ProcessPathOption> options = buildPathOptionsForItem(sortableItems[index], strategy);
+
+            for (const ProcessPathOption& option : options)
+            {
+                const double distance = std::sqrt(planarDistanceSquared(option.startPoint, currentEndPoint));
+                const bool shouldReplace = bestIndex < 0
+                    || distance < bestDistance - kSortEpsilon
+                    || (std::abs(distance - bestDistance) <= kSortEpsilon
+                        && isPointLexicographicallyLess(option.startPoint, bestStartPoint));
+
+                if (!shouldReplace)
+                {
+                    continue;
+                }
+
+                bestIndex = static_cast<int>(index);
+                bestDistance = distance;
+                bestStartPoint = option.startPoint;
+            }
+        }
+
+        if (bestIndex < 0)
+        {
+            return false;
+        }
+
+        nextStartPoint = bestStartPoint;
+        return true;
+    }
+
+    SortCandidate chooseNext2DSortCandidate
+    (
+        const std::vector<CadItem*>& sortableItems,
+        const std::vector<bool>& visited,
+        SortStrategy strategy,
+        bool hasCurrentEndPoint,
+        const QVector3D& currentEndPoint,
+        const QVector3D& sweepDirection
+    )
+    {
+        SortCandidate bestCandidate;
+        const QVector3D referencePoint = hasCurrentEndPoint ? currentEndPoint : kSortOrigin;
+        const QVector3D normalizedSweepDirection = normalizeOrZero(sweepDirection);
+        const double referenceProgress = static_cast<double>(QVector3D::dotProduct(referencePoint, normalizedSweepDirection));
+
+        for (size_t index = 0; index < sortableItems.size(); ++index)
+        {
+            if (visited[index])
+            {
+                continue;
+            }
+
+            const std::vector<ProcessPathOption> options = buildPathOptionsForItem(sortableItems[index], strategy);
+
+            for (const ProcessPathOption& option : options)
+            {
+                const double entryDistance = std::sqrt(planarDistanceSquared(option.startPoint, referencePoint));
+                QVector3D nextStartPoint;
+                const bool hasNextStartPoint = tryFindNearestNextStartPoint
+                (
+                    sortableItems,
+                    visited,
+                    strategy,
+                    index,
+                    option.endPoint,
+                    nextStartPoint
+                );
+                const double nextDistance = hasNextStartPoint
+                    ? std::sqrt(planarDistanceSquared(nextStartPoint, option.endPoint))
+                    : 0.0;
+                const double candidateProgress = static_cast<double>(QVector3D::dotProduct(option.startPoint, normalizedSweepDirection));
+                const double backtrackDistance = hasCurrentEndPoint && normalizedSweepDirection.lengthSquared() > kSortEpsilon
+                    ? std::max(0.0, referenceProgress - candidateProgress)
+                    : 0.0;
+                const double continuityPenalty =
+                    movementContinuityPenalty(option.startPoint - referencePoint, option.startTangent)
+                    + (hasNextStartPoint ? movementContinuityPenalty(nextStartPoint - option.endPoint, option.endTangent) : 0.0);
+                const double continuityScale = std::max(1.0, 0.5 * (entryDistance + nextDistance));
+                const double optionScore = entryDistance
+                    + nextDistance * kNextDistanceWeight
+                    + backtrackDistance * kBacktrackPenaltyWeight
+                    + continuityScale * kDirectionPenaltyWeight * continuityPenalty;
+
+                const bool shouldReplace = bestCandidate.index < 0
+                    || optionScore < bestCandidate.score - kSortEpsilon
+                    || (std::abs(optionScore - bestCandidate.score) <= kSortEpsilon
+                        && (entryDistance < bestCandidate.priorityDistance - kSortEpsilon
+                            || (std::abs(entryDistance - bestCandidate.priorityDistance) <= kSortEpsilon
+                                && isPointLexicographicallyLess(option.startPoint, bestCandidate.startPoint))));
+
+                if (!shouldReplace)
+                {
+                    continue;
+                }
+
+                bestCandidate.index = static_cast<int>(index);
+                bestCandidate.reverse = option.reverse;
+                bestCandidate.hasCustomStart = option.hasCustomStart;
+                bestCandidate.processStartParameter = option.processStartParameter;
+                bestCandidate.priorityDistance = entryDistance;
+                bestCandidate.score = optionScore;
+                bestCandidate.startPoint = option.startPoint;
+                bestCandidate.endPoint = option.endPoint;
+            }
+        }
+
+        return bestCandidate;
+    }
+
     int nextProcessOrder(const CadDocument& document)
     {
         int maxOrder = -1;
@@ -253,8 +1283,10 @@ Gcode_postprocessing_system::Gcode_postprocessing_system(QWidget* parent)
 
     connect(ui->action_File_Export_G, &QAction::triggered, this, [this]() { exportGCode(); });
     connect(ui->action_Edit_ReversePeocess, &QAction::triggered, this, [this]() { toggleSelectedEntityReverse(); });
-    connect(ui->action_Sort_Assign, &QAction::triggered, this, [this]() { sortEntitiesByCurrentDirection(); });
-    connect(ui->action_Sort_Smart, &QAction::triggered, this, [this]() { smartSortEntities(); });
+    connect(ui->action_Sort_2D_Assign, &QAction::triggered, this, [this]() { sortEntitiesByCurrentDirection(); });
+    connect(ui->action_Sort_2D_Smart, &QAction::triggered, this, [this]() { smartSortEntities(); });
+    connect(ui->action_Sort_3D_Assign, &QAction::triggered, this, [this]() { sortEntitiesByCurrentDirection3D(); });
+    connect(ui->action_Sort_3D_Smart, &QAction::triggered, this, [this]() { smartSortEntities3D(); });
 
     initializeThemeMenu();
     initializeToolPanel();
@@ -377,6 +1409,7 @@ bool Gcode_postprocessing_system::exportGCode()
 
     GGenerator generator;
     generator.setDocument(&m_document);
+    generator.setProfile(&m_activeProfile);
 
     QString errorMessage;
 
@@ -426,12 +1459,11 @@ bool Gcode_postprocessing_system::sortEntitiesByCurrentDirection()
 {
     if (m_document.m_entities.empty())
     {
-        QMessageBox::warning(this, QStringLiteral("排序"), QStringLiteral("当前文档为空，无法执行排序。"));
+        QMessageBox::warning(this, QStringLiteral("2D排序"), QStringLiteral("当前文档为空，无法执行排序。"));
         return false;
     }
 
     std::vector<CadItem*> sortableItems;
-    std::vector<CadProcessVisualInfo> visualInfos;
 
     for (const std::unique_ptr<CadItem>& entity : m_document.m_entities)
     {
@@ -448,87 +1480,66 @@ bool Gcode_postprocessing_system::sortEntitiesByCurrentDirection()
         }
 
         sortableItems.push_back(entity.get());
-        visualInfos.push_back(info);
     }
 
     if (sortableItems.empty())
     {
-        QMessageBox::warning(this, QStringLiteral("排序"), QStringLiteral("当前文档中没有可参与 G 代码排序的图元。"));
+        QMessageBox::warning(this, QStringLiteral("2D排序"), QStringLiteral("当前文档中没有可参与 G 代码排序的图元。"));
         return false;
     }
 
-    std::vector<CadItem*> orderedItems;
-    std::vector<int> processOrders;
-    std::vector<bool> reverseStates;
+    const QVector3D sweepDirection = computeSweepDirection(sortableItems);
+    std::vector<CadEditer::ProcessStateUpdate> processUpdates;
     std::vector<bool> visited(sortableItems.size(), false);
 
-    orderedItems.reserve(sortableItems.size());
-    processOrders.reserve(sortableItems.size());
-    reverseStates.reserve(sortableItems.size());
+    processUpdates.reserve(sortableItems.size());
 
-    int currentIndex = -1;
+    bool hasCurrentEndPoint = false;
     QVector3D currentEndPoint;
 
     for (size_t order = 0; order < sortableItems.size(); ++order)
     {
-        int bestIndex = -1;
-        double bestDistance = std::numeric_limits<double>::max();
-        QVector3D bestStartPoint;
-        QVector3D bestEndPoint;
+        const SortCandidate bestCandidate = chooseNext2DSortCandidate
+        (
+            sortableItems,
+            visited,
+            SortStrategy::KeepDirection,
+            hasCurrentEndPoint,
+            currentEndPoint,
+            sweepDirection
+        );
 
-        for (size_t index = 0; index < sortableItems.size(); ++index)
+        if (bestCandidate.index < 0)
         {
-            if (visited[index])
-            {
-                continue;
-            }
-
-            const CadProcessVisualInfo& info = visualInfos[index];
-            const QVector3D candidateStart = info.startPoint;
-            const QVector3D candidateEnd = info.endPoint;
-            const double distance = currentIndex < 0
-                ? 0.0
-                : static_cast<double>((candidateStart - currentEndPoint).lengthSquared());
-
-            const bool shouldReplace = bestIndex < 0
-                || (currentIndex < 0 && isPointLexicographicallyLess(candidateStart, bestStartPoint))
-                || (currentIndex >= 0 && distance < bestDistance - kSortEpsilon)
-                || (currentIndex >= 0 && std::abs(distance - bestDistance) <= kSortEpsilon && isPointLexicographicallyLess(candidateStart, bestStartPoint));
-
-            if (!shouldReplace)
-            {
-                continue;
-            }
-
-            bestIndex = static_cast<int>(index);
-            bestDistance = distance;
-            bestStartPoint = candidateStart;
-            bestEndPoint = candidateEnd;
-        }
-
-        if (bestIndex < 0)
-        {
-            QMessageBox::warning(this, QStringLiteral("排序"), QStringLiteral("排序过程中出现无效图元，排序已中止。"));
+            QMessageBox::warning(this, QStringLiteral("2D排序"), QStringLiteral("排序过程中出现无效图元，排序已中止。"));
             return false;
         }
 
-        visited[static_cast<size_t>(bestIndex)] = true;
-        orderedItems.push_back(sortableItems[static_cast<size_t>(bestIndex)]);
-        processOrders.push_back(static_cast<int>(order));
-        reverseStates.push_back(sortableItems[static_cast<size_t>(bestIndex)]->m_isReverse);
-        currentIndex = bestIndex;
-        currentEndPoint = bestEndPoint;
+        visited[static_cast<size_t>(bestCandidate.index)] = true;
+        processUpdates.push_back
+        ({
+            sortableItems[static_cast<size_t>(bestCandidate.index)],
+            static_cast<int>(order),
+            sortableItems[static_cast<size_t>(bestCandidate.index)]->m_isReverse,
+            sortableItems[static_cast<size_t>(bestCandidate.index)]->m_hasCustomProcessStart,
+            sortableItems[static_cast<size_t>(bestCandidate.index)]->m_processStartParameter
+        });
+        hasCurrentEndPoint = true;
+        currentEndPoint = bestCandidate.endPoint;
     }
 
-    if (!m_editer.applyEntityProcessStates(orderedItems, processOrders, reverseStates))
+    if (!m_editer.applyEntityProcessStates(processUpdates))
     {
-        QMessageBox::warning(this, QStringLiteral("排序"), QStringLiteral("排序结果写入失败。"));
+        QMessageBox::warning(this, QStringLiteral("2D排序"), QStringLiteral("排序结果写入失败。"));
         return false;
     }
 
-    ui->openGLWidget->appendCommandMessage(QStringLiteral("排序完成，共更新 %1 个图元的加工顺序，已保留当前加工方向设置。").arg(orderedItems.size()));
+    ui->openGLWidget->appendCommandMessage
+    (
+        QStringLiteral("2D排序完成，共更新 %1 个图元的加工顺序，首件已按最接近原点的当前起点选取，并保留当前加工方向设置。").arg(processUpdates.size())
+    );
     ui->openGLWidget->refreshCommandPrompt();
-    statusBar()->showMessage(QStringLiteral("排序完成，共更新 %1 个图元").arg(orderedItems.size()), 5000);
+    statusBar()->showMessage(QStringLiteral("2D排序完成，共更新 %1 个图元").arg(processUpdates.size()), 5000);
     return true;
 }
 
@@ -566,12 +1577,11 @@ bool Gcode_postprocessing_system::smartSortEntities()
 {
     if (m_document.m_entities.empty())
     {
-        QMessageBox::warning(this, QStringLiteral("智能排序"), QStringLiteral("当前文档为空，无法执行智能排序。"));
+        QMessageBox::warning(this, QStringLiteral("2D智能排序"), QStringLiteral("当前文档为空，无法执行智能排序。"));
         return false;
     }
 
     std::vector<CadItem*> sortableItems;
-    std::vector<CadProcessVisualInfo> visualInfos;
 
     for (const std::unique_ptr<CadItem>& entity : m_document.m_entities)
     {
@@ -588,99 +1598,89 @@ bool Gcode_postprocessing_system::smartSortEntities()
         }
 
         sortableItems.push_back(entity.get());
-        visualInfos.push_back(info);
     }
 
     if (sortableItems.empty())
     {
-        QMessageBox::warning(this, QStringLiteral("智能排序"), QStringLiteral("当前文档中没有可参与 G 代码排序的图元。"));
+        QMessageBox::warning(this, QStringLiteral("2D智能排序"), QStringLiteral("当前文档中没有可参与 G 代码排序的图元。"));
         return false;
     }
 
-    std::vector<CadItem*> orderedItems;
-    std::vector<int> processOrders;
-    std::vector<bool> reverseStates;
+    const QVector3D sweepDirection = computeSweepDirection(sortableItems);
+    std::vector<CadEditer::ProcessStateUpdate> processUpdates;
     std::vector<bool> visited(sortableItems.size(), false);
 
-    orderedItems.reserve(sortableItems.size());
-    processOrders.reserve(sortableItems.size());
-    reverseStates.reserve(sortableItems.size());
+    processUpdates.reserve(sortableItems.size());
 
-    int currentIndex = -1;
-    bool currentReverse = false;
+    bool hasCurrentEndPoint = false;
     QVector3D currentEndPoint;
 
     for (size_t order = 0; order < sortableItems.size(); ++order)
     {
-        int bestIndex = -1;
-        bool bestReverse = false;
-        double bestDistance = std::numeric_limits<double>::max();
-        QVector3D bestStartPoint;
-        QVector3D bestEndPoint;
+        const SortCandidate bestCandidate = chooseNext2DSortCandidate
+        (
+            sortableItems,
+            visited,
+            SortStrategy::Smart,
+            hasCurrentEndPoint,
+            currentEndPoint,
+            sweepDirection
+        );
 
-        for (size_t index = 0; index < sortableItems.size(); ++index)
+        if (bestCandidate.index < 0)
         {
-            if (visited[index])
-            {
-                continue;
-            }
-
-            const CadProcessVisualInfo& info = visualInfos[index];
-            const QVector3D forwardStart = info.forwardStartPoint;
-            const QVector3D forwardEnd = info.forwardEndPoint;
-
-            for (bool reverse : { false, true })
-            {
-                const QVector3D candidateStart = reverse ? forwardEnd : forwardStart;
-                const QVector3D candidateEnd = reverse ? forwardStart : forwardEnd;
-                const double distance = currentIndex < 0
-                    ? 0.0
-                    : static_cast<double>((candidateStart - currentEndPoint).lengthSquared());
-
-                const bool shouldReplace = bestIndex < 0
-                    || (currentIndex < 0 && isPointLexicographicallyLess(candidateStart, bestStartPoint))
-                    || (currentIndex >= 0 && distance < bestDistance - kSortEpsilon)
-                    || (currentIndex >= 0 && std::abs(distance - bestDistance) <= kSortEpsilon && isPointLexicographicallyLess(candidateStart, bestStartPoint));
-
-                if (!shouldReplace)
-                {
-                    continue;
-                }
-
-                bestIndex = static_cast<int>(index);
-                bestReverse = reverse;
-                bestDistance = distance;
-                bestStartPoint = candidateStart;
-                bestEndPoint = candidateEnd;
-            }
-        }
-
-        if (bestIndex < 0)
-        {
-            QMessageBox::warning(this, QStringLiteral("智能排序"), QStringLiteral("智能排序过程中出现无效图元，排序已中止。"));
+            QMessageBox::warning(this, QStringLiteral("2D智能排序"), QStringLiteral("智能排序过程中出现无效图元，排序已中止。"));
             return false;
         }
 
-        visited[static_cast<size_t>(bestIndex)] = true;
-        orderedItems.push_back(sortableItems[static_cast<size_t>(bestIndex)]);
-        processOrders.push_back(static_cast<int>(order));
-        reverseStates.push_back(bestReverse);
-        currentIndex = bestIndex;
-        currentReverse = bestReverse;
-        currentEndPoint = bestEndPoint;
-        Q_UNUSED(currentReverse);
+        visited[static_cast<size_t>(bestCandidate.index)] = true;
+        processUpdates.push_back
+        ({
+            sortableItems[static_cast<size_t>(bestCandidate.index)],
+            static_cast<int>(order),
+            bestCandidate.reverse,
+            bestCandidate.hasCustomStart,
+            bestCandidate.processStartParameter
+        });
+        hasCurrentEndPoint = true;
+        currentEndPoint = bestCandidate.endPoint;
     }
 
-    if (!m_editer.applyEntityProcessStates(orderedItems, processOrders, reverseStates))
+    if (!m_editer.applyEntityProcessStates(processUpdates))
     {
-        QMessageBox::warning(this, QStringLiteral("智能排序"), QStringLiteral("智能排序结果写入失败。"));
+        QMessageBox::warning(this, QStringLiteral("2D智能排序"), QStringLiteral("智能排序结果写入失败。"));
         return false;
     }
 
-    ui->openGLWidget->appendCommandMessage(QStringLiteral("智能排序完成，共更新 %1 个图元的加工顺序。").arg(orderedItems.size()));
+    ui->openGLWidget->appendCommandMessage
+    (
+        QStringLiteral("2D智能排序完成，共更新 %1 个图元的加工顺序，并已对闭合图元的方向/起刀缝点做连续性优化。").arg(processUpdates.size())
+    );
     ui->openGLWidget->refreshCommandPrompt();
-    statusBar()->showMessage(QStringLiteral("智能排序完成，共更新 %1 个图元").arg(orderedItems.size()), 5000);
+    statusBar()->showMessage(QStringLiteral("2D智能排序完成，共更新 %1 个图元").arg(processUpdates.size()), 5000);
     return true;
+}
+
+bool Gcode_postprocessing_system::sortEntitiesByCurrentDirection3D()
+{
+    QMessageBox::information
+    (
+        this,
+        QStringLiteral("3D排序"),
+        QStringLiteral("3D 排序入口已分类预留，当前版本仅完善了纯 2D 排序逻辑，3D 排序（保留方向）暂未实现。")
+    );
+    return false;
+}
+
+bool Gcode_postprocessing_system::smartSortEntities3D()
+{
+    QMessageBox::information
+    (
+        this,
+        QStringLiteral("3D智能排序"),
+        QStringLiteral("3D 排序入口已分类预留，当前版本仅完善了纯 2D 智能排序逻辑，3D 智能排序暂未实现。")
+    );
+    return false;
 }
 
 void Gcode_postprocessing_system::initializeThemeMenu()
@@ -701,6 +1701,42 @@ void Gcode_postprocessing_system::initializeThemeMenu()
 
     connect(m_lightThemeAction, &QAction::triggered, this, [this]() { applyTheme(AppThemeMode::Light); });
     connect(m_darkThemeAction, &QAction::triggered, this, [this]() { applyTheme(AppThemeMode::Dark); });
+
+    ui->menuSet->addSeparator();
+    m_profileSettingsAction = ui->menuSet->addAction(QStringLiteral("G代码配置..."));
+    connect(m_profileSettingsAction, &QAction::triggered, this, [this]() { openProfileSettingsDialog(); });
+}
+
+void Gcode_postprocessing_system::openProfileSettingsDialog()
+{
+    QMap<QString, QColor> layerColors;
+
+    for (const QString& layerName : m_document.layerNames())
+    {
+        layerColors.insert(layerName, m_document.layerColor(layerName, QColor(Qt::white)));
+    }
+
+    GProfileDialog dialog
+    (
+        m_activeProfile,
+        m_document.layerNames(),
+        layerColors,
+        buildAppThemeColors(m_themeMode),
+        this
+    );
+
+    if (dialog.exec() != QDialog::Accepted)
+    {
+        return;
+    }
+
+    m_activeProfile = dialog.profile();
+
+    const QString profileName = m_activeProfile.profileName().trimmed().isEmpty()
+        ? QStringLiteral("未命名配置")
+        : m_activeProfile.profileName().trimmed();
+
+    statusBar()->showMessage(QStringLiteral("当前 G 代码配置已更新为: %1").arg(profileName), 4000);
 }
 
 void Gcode_postprocessing_system::applyTheme(AppThemeMode mode)

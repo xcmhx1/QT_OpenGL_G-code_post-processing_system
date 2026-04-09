@@ -21,6 +21,15 @@ class DrawStateMachine;
 class CadEditer
 {
 public:
+    struct ProcessStateUpdate
+    {
+        CadItem* item = nullptr;
+        int processOrder = -1;
+        bool isReverse = false;
+        bool hasCustomStart = false;
+        double processStartParameter = 0.0;
+    };
+
     CadEditer() = default;
 
     // 析构编辑器对象
@@ -100,17 +109,10 @@ public:
     // @return 如果设置成功返回 true，否则返回 false
     bool setEntityProcessOrder(CadItem* item, int processOrder);
 
-    // 批量更新实体的加工顺序与反向加工状态
-    // @param items 目标实体数组
-    // @param processOrders 对应的加工顺序数组
-    // @param reverseStates 对应的反向状态数组
+    // 批量更新实体的加工顺序、反向状态与闭合路径起刀缝点
+    // @param updates 目标实体的加工状态更新数组
     // @return 如果批量更新成功返回 true，否则返回 false
-    bool applyEntityProcessStates
-    (
-        const std::vector<CadItem*>& items,
-        const std::vector<int>& processOrders,
-        const std::vector<bool>& reverseStates
-    );
+    bool applyEntityProcessStates(const std::vector<ProcessStateUpdate>& updates);
 
     // 编辑命令抽象基类：
     // 封装一次可执行且可撤销的文档修改操作。

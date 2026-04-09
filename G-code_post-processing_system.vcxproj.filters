@@ -151,6 +151,9 @@
     <ClCompile Include="src\CadCommandLineWidget.cpp">
       <Filter>Source Files\View</Filter>
     </ClCompile>
+    <ClCompile Include="src\GProfileDialog.cpp">
+      <Filter>Source Files\Application</Filter>
+    </ClCompile>
     <ClCompile Include="src\CadStatusPaneWidget.cpp">
       <Filter>Source Files\View</Filter>
     </ClCompile>
@@ -331,6 +334,9 @@
       <Filter>Header Files\Application</Filter>
     </ClInclude>
     <ClInclude Include="include\CadBitmapImportDialog.h">
+      <Filter>Header Files\Application</Filter>
+    </ClInclude>
+    <ClInclude Include="include\GProfileDialog.h">
       <Filter>Header Files\Application</Filter>
     </ClInclude>
     <ClInclude Include="include\CadCommandLineWidget.h">

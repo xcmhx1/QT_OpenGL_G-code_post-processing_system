@@ -46,10 +46,15 @@ namespace
         normalizedText.replace("\r\n", "\n");
         normalizedText.replace('\r', '\n');
 
-        const QStringList lines = normalizedText.split('\n');
+        const QStringList lines = normalizedText.split('\n', Qt::KeepEmptyParts);
 
         for (const QString& line : lines)
         {
+            if (line.trimmed().isEmpty())
+            {
+                continue;
+            }
+
             stream << line << "\r\n";
         }
     }
@@ -80,6 +85,46 @@ namespace
         default:
             return QString();
         }
+    }
+
+    QString entityLayerKey(const CadItem* item)
+    {
+        if (item == nullptr || item->m_nativeEntity == nullptr)
+        {
+            return QString();
+        }
+
+        return GProfile::normalizeLayerKey(QString::fromUtf8(item->m_nativeEntity->layer.c_str()));
+    }
+
+    QString entityColorKey(const CadItem* item)
+    {
+        if (item == nullptr || item->m_nativeEntity == nullptr)
+        {
+            return QString();
+        }
+
+        if (item->m_nativeEntity->color24 >= 0)
+        {
+            return GProfile::colorKeyFromColor(QColor::fromRgb
+            (
+                (item->m_nativeEntity->color24 >> 16) & 0xFF,
+                (item->m_nativeEntity->color24 >> 8) & 0xFF,
+                item->m_nativeEntity->color24 & 0xFF
+            ));
+        }
+
+        if (item->m_nativeEntity->color == DRW::ColorByLayer)
+        {
+            return QStringLiteral("BYLAYER");
+        }
+
+        if (item->m_nativeEntity->color == DRW::ColorByBlock)
+        {
+            return QStringLiteral("BYBLOCK");
+        }
+
+        return GProfile::colorKeyFromAci(item->m_nativeEntity->color);
     }
 
     QVector3D ellipsePointAt(const DRW_Ellipse* ellipse, double parameter)
@@ -132,6 +177,67 @@ namespace
             + minorAxis * static_cast<float>(std::sin(parameter));
     }
 
+    double normalizeAnglePositive(double angle)
+    {
+        double normalized = std::fmod(angle, kTwoPi);
+
+        if (normalized < 0.0)
+        {
+            normalized += kTwoPi;
+        }
+
+        return normalized;
+    }
+
+    bool isFullEllipsePath(const DRW_Ellipse* ellipse)
+    {
+        if (ellipse == nullptr)
+        {
+            return false;
+        }
+
+        const double span = ellipse->endparam - ellipse->staparam;
+        return std::abs(span) < 1.0e-10
+            || std::abs(std::abs(span) - kTwoPi) < 1.0e-10;
+    }
+
+    double effectiveCircleStartParameter(const CadCircleItem* item)
+    {
+        if (item != nullptr && item->m_hasCustomProcessStart)
+        {
+            return normalizeAnglePositive(item->m_processStartParameter);
+        }
+
+        return kPi * 0.5;
+    }
+
+    double effectiveClosedEllipseStartParameter(const CadEllipseItem* item)
+    {
+        if (item != nullptr && item->m_hasCustomProcessStart)
+        {
+            return item->m_processStartParameter;
+        }
+
+        return (item != nullptr && item->m_data != nullptr) ? item->m_data->staparam : 0.0;
+    }
+
+    size_t effectiveClosedPolylineStartIndex(const CadItem* item, size_t vertexCount)
+    {
+        if (vertexCount == 0)
+        {
+            return 0;
+        }
+
+        if (item != nullptr && item->m_hasCustomProcessStart)
+        {
+            const int rawIndex = static_cast<int>(std::llround(item->m_processStartParameter));
+            const int normalized = ((rawIndex % static_cast<int>(vertexCount)) + static_cast<int>(vertexCount)) % static_cast<int>(vertexCount);
+            return static_cast<size_t>(normalized);
+        }
+
+        return 0;
+    }
+
     QVector<QVector3D> buildEllipsePolyline(const CadEllipseItem* item)
     {
         QVector<QVector3D> points;
@@ -144,8 +250,9 @@ namespace
         double startParam = item->m_data->staparam;
         double endParam = item->m_data->endparam;
 
-        if (std::abs(endParam - startParam) < 1.0e-10 || std::abs(std::abs(endParam - startParam) - kTwoPi) < 1.0e-10)
+        if (isFullEllipsePath(item->m_data))
         {
+            startParam = effectiveClosedEllipseStartParameter(item);
             endParam = startParam + kTwoPi;
         }
 
@@ -325,10 +432,11 @@ namespace
         }
 
         const QVector3D center(item->m_data->basePoint.x, item->m_data->basePoint.y, item->m_data->basePoint.z);
+        const double startParameter = effectiveCircleStartParameter(item);
         const QVector3D startPoint
         (
-            static_cast<float>(center.x() + item->m_data->radious),
-            center.y(),
+            static_cast<float>(center.x() + std::cos(startParameter) * item->m_data->radious),
+            static_cast<float>(center.y() + std::sin(startParameter) * item->m_data->radious),
             center.z()
         );
 
@@ -395,13 +503,53 @@ namespace
         };
 
         const int vertexCount = static_cast<int>(item->m_data->vertlist.size());
-        const QVector3D startPoint = item->m_isReverse
-            ? toVertex(item->m_data->vertlist.back())
-            : toVertex(item->m_data->vertlist.front());
+        const size_t startIndex = isClosed
+            ? effectiveClosedPolylineStartIndex(item, static_cast<size_t>(vertexCount))
+            : 0;
+        const QVector3D startPoint = isClosed
+            ? toVertex(item->m_data->vertlist.at(startIndex))
+            : (item->m_isReverse
+                ? toVertex(item->m_data->vertlist.back())
+                : toVertex(item->m_data->vertlist.front()));
 
         writeRapidMove(stream, startPoint);
 
-        if (item->m_isReverse)
+        if (isClosed)
+        {
+            if (item->m_isReverse)
+            {
+                for (int step = 0; step < vertexCount; ++step)
+                {
+                    const int currentIndex = (static_cast<int>(startIndex) - step + vertexCount) % vertexCount;
+                    const int previousIndex = (currentIndex - 1 + vertexCount) % vertexCount;
+
+                    writeBulgeSegment
+                    (
+                        stream,
+                        toVertex(item->m_data->vertlist.at(currentIndex)),
+                        toVertex(item->m_data->vertlist.at(previousIndex)),
+                        -item->m_data->vertlist.at(previousIndex)->bulge
+                    );
+                }
+            }
+            else
+            {
+                for (int step = 0; step < vertexCount; ++step)
+                {
+                    const int currentIndex = (static_cast<int>(startIndex) + step) % vertexCount;
+                    const int nextIndex = (currentIndex + 1) % vertexCount;
+
+                    writeBulgeSegment
+                    (
+                        stream,
+                        toVertex(item->m_data->vertlist.at(currentIndex)),
+                        toVertex(item->m_data->vertlist.at(nextIndex)),
+                        item->m_data->vertlist.at(currentIndex)->bulge
+                    );
+                }
+            }
+        }
+        else if (item->m_isReverse)
         {
             for (int index = vertexCount - 1; index > 0; --index)
             {
@@ -411,17 +559,6 @@ namespace
                     toVertex(item->m_data->vertlist.at(index)),
                     toVertex(item->m_data->vertlist.at(index - 1)),
                     -item->m_data->vertlist.at(index - 1)->bulge
-                );
-            }
-
-            if (isClosed)
-            {
-                writeBulgeSegment
-                (
-                    stream,
-                    toVertex(item->m_data->vertlist.front()),
-                    toVertex(item->m_data->vertlist.back()),
-                    -item->m_data->vertlist.back()->bulge
                 );
             }
         }
@@ -435,17 +572,6 @@ namespace
                     toVertex(item->m_data->vertlist.at(index)),
                     toVertex(item->m_data->vertlist.at(index + 1)),
                     item->m_data->vertlist.at(index)->bulge
-                );
-            }
-
-            if (isClosed)
-            {
-                writeBulgeSegment
-                (
-                    stream,
-                    toVertex(item->m_data->vertlist.back()),
-                    toVertex(item->m_data->vertlist.front()),
-                    item->m_data->vertlist.back()->bulge
                 );
             }
         }
@@ -468,13 +594,53 @@ namespace
         };
 
         const int vertexCount = static_cast<int>(item->m_data->vertlist.size());
-        const QVector3D startPoint = item->m_isReverse
-            ? toVertex(item->m_data->vertlist.back())
-            : toVertex(item->m_data->vertlist.front());
+        const size_t startIndex = isClosed
+            ? effectiveClosedPolylineStartIndex(item, static_cast<size_t>(vertexCount))
+            : 0;
+        const QVector3D startPoint = isClosed
+            ? toVertex(item->m_data->vertlist.at(startIndex))
+            : (item->m_isReverse
+                ? toVertex(item->m_data->vertlist.back())
+                : toVertex(item->m_data->vertlist.front()));
 
         writeRapidMove(stream, startPoint);
 
-        if (item->m_isReverse)
+        if (isClosed)
+        {
+            if (item->m_isReverse)
+            {
+                for (int step = 0; step < vertexCount; ++step)
+                {
+                    const int currentIndex = (static_cast<int>(startIndex) - step + vertexCount) % vertexCount;
+                    const int previousIndex = (currentIndex - 1 + vertexCount) % vertexCount;
+
+                    writeBulgeSegment
+                    (
+                        stream,
+                        toVertex(item->m_data->vertlist.at(currentIndex)),
+                        toVertex(item->m_data->vertlist.at(previousIndex)),
+                        -item->m_data->vertlist.at(previousIndex)->bulge
+                    );
+                }
+            }
+            else
+            {
+                for (int step = 0; step < vertexCount; ++step)
+                {
+                    const int currentIndex = (static_cast<int>(startIndex) + step) % vertexCount;
+                    const int nextIndex = (currentIndex + 1) % vertexCount;
+
+                    writeBulgeSegment
+                    (
+                        stream,
+                        toVertex(item->m_data->vertlist.at(currentIndex)),
+                        toVertex(item->m_data->vertlist.at(nextIndex)),
+                        item->m_data->vertlist.at(currentIndex)->bulge
+                    );
+                }
+            }
+        }
+        else if (item->m_isReverse)
         {
             for (int index = vertexCount - 1; index > 0; --index)
             {
@@ -484,17 +650,6 @@ namespace
                     toVertex(item->m_data->vertlist.at(index)),
                     toVertex(item->m_data->vertlist.at(index - 1)),
                     -item->m_data->vertlist.at(index - 1)->bulge
-                );
-            }
-
-            if (isClosed)
-            {
-                writeBulgeSegment
-                (
-                    stream,
-                    toVertex(item->m_data->vertlist.front()),
-                    toVertex(item->m_data->vertlist.back()),
-                    -item->m_data->vertlist.back()->bulge
                 );
             }
         }
@@ -508,17 +663,6 @@ namespace
                     toVertex(item->m_data->vertlist.at(index)),
                     toVertex(item->m_data->vertlist.at(index + 1)),
                     item->m_data->vertlist.at(index)->bulge
-                );
-            }
-
-            if (isClosed)
-            {
-                writeBulgeSegment
-                (
-                    stream,
-                    toVertex(item->m_data->vertlist.back()),
-                    toVertex(item->m_data->vertlist.front()),
-                    item->m_data->vertlist.back()->bulge
                 );
             }
         }
@@ -680,8 +824,11 @@ bool GGenerator::generateToFile(const QString& filePath, QString* errorMessage) 
         }
 
         const QString typeKey = entityTypeKey(item);
+        const QString layerKey = entityLayerKey(item);
+        const QString colorKey = entityColorKey(item);
         const GProfileCodeBlock typeCode = m_profile->entityTypeCode(typeKey);
-        const GProfileCodeBlock colorCode = m_profile->entityColorCode(item->m_color);
+        const GProfileCodeBlock layerCode = m_profile->layerCode(layerKey);
+        const GProfileCodeBlock colorCode = m_profile->entityColorCode(colorKey);
 
         QString geometryText;
         QTextStream geometryStream(&geometryText);
@@ -694,11 +841,13 @@ bool GGenerator::generateToFile(const QString& filePath, QString* errorMessage) 
 
         if (!geometryText.isEmpty())
         {
+            writeTextBlock(stream, layerCode.header);
             writeTextBlock(stream, colorCode.header);
             writeTextBlock(stream, typeCode.header);
             stream << geometryText;
             writeTextBlock(stream, typeCode.footer);
             writeTextBlock(stream, colorCode.footer);
+            writeTextBlock(stream, layerCode.footer);
         }
     }
 

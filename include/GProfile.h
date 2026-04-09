@@ -39,6 +39,12 @@ public:
     void removeEntityTypeCode(const QString& entityType);
     const QMap<QString, GProfileCodeBlock>& entityTypeCodes() const;
 
+    void setLayerCode(const QString& layerName, const GProfileCodeBlock& codeBlock);
+    bool containsLayerCode(const QString& layerName) const;
+    GProfileCodeBlock layerCode(const QString& layerName) const;
+    void removeLayerCode(const QString& layerName);
+    const QMap<QString, GProfileCodeBlock>& layerCodes() const;
+
     void setEntityColorCode(const QString& colorKey, const GProfileCodeBlock& codeBlock);
     void setEntityColorCode(const QColor& color, const GProfileCodeBlock& codeBlock);
     bool containsEntityColorCode(const QString& colorKey) const;
@@ -50,12 +56,15 @@ public:
     const QMap<QString, GProfileCodeBlock>& entityColorCodes() const;
 
     static QString normalizeEntityTypeKey(const QString& entityType);
+    static QString normalizeLayerKey(const QString& layerName);
     static QString normalizeColorKey(const QString& colorKey);
     static QString colorKeyFromColor(const QColor& color);
+    static QString colorKeyFromAci(int colorIndex);
 
 private:
     QString m_profileName;
     GProfileCodeBlock m_fileCode;
     QMap<QString, GProfileCodeBlock> m_entityTypeCodes;
+    QMap<QString, GProfileCodeBlock> m_layerCodes;
     QMap<QString, GProfileCodeBlock> m_entityColorCodes;
 };

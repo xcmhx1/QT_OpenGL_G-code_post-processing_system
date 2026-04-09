@@ -6,6 +6,7 @@
 #include "CadDocument.h"
 #include "CadStatusPaneWidget.h"
 #include "CadToolPanelWidget.h"
+#include "GProfile.h"
 
 #include <QtWidgets/QMainWindow>
 
@@ -27,6 +28,7 @@ public:
 
 private:
     void initializeThemeMenu();
+    void openProfileSettingsDialog();
     void applyTheme(AppThemeMode mode);
     AppThemeMode loadThemeMode() const;
     void saveThemeMode(AppThemeMode mode) const;
@@ -44,6 +46,8 @@ private:
     bool sortEntitiesByCurrentDirection();
     bool assignSelectedEntityProcessOrder();
     bool smartSortEntities();
+    bool sortEntitiesByCurrentDirection3D();
+    bool smartSortEntities3D();
 
 private:
     Ui::Gcode_postprocessing_systemClass* ui = nullptr;
@@ -52,8 +56,10 @@ private:
     CadToolPanelWidget* m_toolPanelWidget = nullptr;
     QAction* m_lightThemeAction = nullptr;
     QAction* m_darkThemeAction = nullptr;
+    QAction* m_profileSettingsAction = nullptr;
     CadEditer m_editer;
     CadDocument m_document;
+    GProfile m_activeProfile = GProfile::createDefaultLaserProfile();
     QString m_currentLayerName = QStringLiteral("0");
     QColor m_currentColor = QColor(Qt::white);
     int m_currentColorIndex = 256;

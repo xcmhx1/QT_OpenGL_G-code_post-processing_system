@@ -48,8 +48,22 @@
     <property name="title">
      <string>排序</string>
     </property>
-    <addaction name="action_Sort_Assign"/>
-    <addaction name="action_Sort_Smart"/>
+    <widget class="QMenu" name="menuSort2D">
+     <property name="title">
+      <string>2D</string>
+     </property>
+     <addaction name="action_Sort_2D_Assign"/>
+     <addaction name="action_Sort_2D_Smart"/>
+    </widget>
+    <widget class="QMenu" name="menuSort3D">
+     <property name="title">
+      <string>3D</string>
+     </property>
+     <addaction name="action_Sort_3D_Assign"/>
+     <addaction name="action_Sort_3D_Smart"/>
+    </widget>
+    <addaction name="menuSort2D"/>
+    <addaction name="menuSort3D"/>
    </widget>
    <widget class="QMenu" name="menuSet">
     <property name="title">
@@ -95,12 +109,22 @@
     <string>反向加工</string>
    </property>
   </action>
-  <action name="action_Sort_Assign">
+  <action name="action_Sort_2D_Assign">
    <property name="text">
     <string>排序（保留方向）</string>
    </property>
   </action>
-  <action name="action_Sort_Smart">
+  <action name="action_Sort_2D_Smart">
+   <property name="text">
+    <string>智能排序</string>
+   </property>
+  </action>
+  <action name="action_Sort_3D_Assign">
+   <property name="text">
+    <string>排序（保留方向）</string>
+   </property>
+  </action>
+  <action name="action_Sort_3D_Smart">
    <property name="text">
     <string>智能排序</string>
    </property>

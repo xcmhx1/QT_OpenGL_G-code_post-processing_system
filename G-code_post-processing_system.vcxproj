@@ -175,6 +175,10 @@
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
     </ClCompile>
+    <ClCompile Include="src\GProfileDialog.cpp">
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+    </ClCompile>
     <ClCompile Include="src\CadBitmapImportDialog.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
@@ -275,6 +279,7 @@
     <ClInclude Include="include\CadCommandLineWidget.h" />
     <ClInclude Include="include\CadCrosshairBuilder.h" />
     <ClInclude Include="include\CadBitmapImportDialog.h" />
+    <ClInclude Include="include\GProfileDialog.h" />
     <ClInclude Include="include\CadBitmapVectorizer.h" />
     <ClInclude Include="include\CadEditer.h" />
     <ClInclude Include="include\CadEntityPicker.h" />
