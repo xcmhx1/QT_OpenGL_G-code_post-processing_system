@@ -104,6 +104,236 @@ namespace
         }
     }
 
+    QVector3D rotatePlanarPoint(const QVector3D& point, const QVector3D& basePoint, double radians)
+    {
+        const QVector3D planarPoint(point.x(), point.y(), point.z());
+        const QVector3D planarBasePoint(basePoint.x(), basePoint.y(), basePoint.z());
+        const double cosineValue = std::cos(radians);
+        const double sineValue = std::sin(radians);
+        const double dx = planarPoint.x() - planarBasePoint.x();
+        const double dy = planarPoint.y() - planarBasePoint.y();
+
+        return QVector3D
+        (
+            static_cast<float>(planarBasePoint.x() + dx * cosineValue - dy * sineValue),
+            static_cast<float>(planarBasePoint.y() + dx * sineValue + dy * cosineValue),
+            point.z()
+        );
+    }
+
+    QVector3D scalePlanarPoint(const QVector3D& point, const QVector3D& basePoint, double scaleFactor)
+    {
+        const QVector3D planarPoint(point.x(), point.y(), point.z());
+        const QVector3D planarBasePoint(basePoint.x(), basePoint.y(), basePoint.z());
+        const QVector3D delta = planarPoint - planarBasePoint;
+        return QVector3D
+        (
+            planarBasePoint.x() + delta.x() * static_cast<float>(scaleFactor),
+            planarBasePoint.y() + delta.y() * static_cast<float>(scaleFactor),
+            point.z()
+        );
+    }
+
+    void rotateCoordAround(DRW_Coord& point, const QVector3D& basePoint, double radians)
+    {
+        const QVector3D rotatedPoint = rotatePlanarPoint(QVector3D(point.x, point.y, point.z), basePoint, radians);
+        point.x = rotatedPoint.x();
+        point.y = rotatedPoint.y();
+        point.z = rotatedPoint.z();
+    }
+
+    void scaleCoordAround(DRW_Coord& point, const QVector3D& basePoint, double scaleFactor)
+    {
+        const QVector3D scaledPoint = scalePlanarPoint(QVector3D(point.x, point.y, point.z), basePoint, scaleFactor);
+        point.x = scaledPoint.x();
+        point.y = scaledPoint.y();
+        point.z = scaledPoint.z();
+    }
+
+    void rotateEntity(DRW_Entity* entity, const QVector3D& basePoint, double angleDegrees)
+    {
+        if (entity == nullptr)
+        {
+            return;
+        }
+
+        const double radians = angleDegrees * kPi / 180.0;
+
+        switch (entity->eType)
+        {
+        case DRW::ETYPE::POINT:
+            rotateCoordAround(static_cast<DRW_Point*>(entity)->basePoint, basePoint, radians);
+            break;
+        case DRW::ETYPE::LINE:
+        {
+            DRW_Line* line = static_cast<DRW_Line*>(entity);
+            rotateCoordAround(line->basePoint, basePoint, radians);
+            rotateCoordAround(line->secPoint, basePoint, radians);
+            break;
+        }
+        case DRW::ETYPE::CIRCLE:
+            rotateCoordAround(static_cast<DRW_Circle*>(entity)->basePoint, basePoint, radians);
+            break;
+        case DRW::ETYPE::ARC:
+        {
+            DRW_Arc* arc = static_cast<DRW_Arc*>(entity);
+            rotateCoordAround(arc->basePoint, basePoint, radians);
+            const double angleOffset = radians;
+            arc->staangle += angleOffset;
+            arc->endangle += angleOffset;
+            break;
+        }
+        case DRW::ETYPE::ELLIPSE:
+        {
+            DRW_Ellipse* ellipse = static_cast<DRW_Ellipse*>(entity);
+            rotateCoordAround(ellipse->basePoint, basePoint, radians);
+            const QVector3D rotatedMajorAxis = rotatePlanarPoint
+            (
+                QVector3D(ellipse->secPoint.x, ellipse->secPoint.y, ellipse->secPoint.z),
+                QVector3D(0.0f, 0.0f, 0.0f),
+                radians
+            );
+            ellipse->secPoint.x = rotatedMajorAxis.x();
+            ellipse->secPoint.y = rotatedMajorAxis.y();
+            ellipse->secPoint.z = rotatedMajorAxis.z();
+            break;
+        }
+        case DRW::ETYPE::LWPOLYLINE:
+        {
+            DRW_LWPolyline* polyline = static_cast<DRW_LWPolyline*>(entity);
+
+            for (const std::shared_ptr<DRW_Vertex2D>& vertex : polyline->vertlist)
+            {
+                const QVector3D rotatedVertex = rotatePlanarPoint
+                (
+                    QVector3D(vertex->x, vertex->y, polyline->elevation),
+                    basePoint,
+                    radians
+                );
+                vertex->x = rotatedVertex.x();
+                vertex->y = rotatedVertex.y();
+            }
+            break;
+        }
+        case DRW::ETYPE::POLYLINE:
+        {
+            DRW_Polyline* polyline = static_cast<DRW_Polyline*>(entity);
+            rotateCoordAround(polyline->basePoint, basePoint, radians);
+
+            for (const std::shared_ptr<DRW_Vertex>& vertex : polyline->vertlist)
+            {
+                rotateCoordAround(vertex->basePoint, basePoint, radians);
+            }
+            break;
+        }
+        default:
+            break;
+        }
+    }
+
+    void scaleEntity(DRW_Entity* entity, const QVector3D& basePoint, double scaleFactor)
+    {
+        if (entity == nullptr)
+        {
+            return;
+        }
+
+        switch (entity->eType)
+        {
+        case DRW::ETYPE::POINT:
+            scaleCoordAround(static_cast<DRW_Point*>(entity)->basePoint, basePoint, scaleFactor);
+            break;
+        case DRW::ETYPE::LINE:
+        {
+            DRW_Line* line = static_cast<DRW_Line*>(entity);
+            scaleCoordAround(line->basePoint, basePoint, scaleFactor);
+            scaleCoordAround(line->secPoint, basePoint, scaleFactor);
+            break;
+        }
+        case DRW::ETYPE::CIRCLE:
+        {
+            DRW_Circle* circle = static_cast<DRW_Circle*>(entity);
+            scaleCoordAround(circle->basePoint, basePoint, scaleFactor);
+            circle->radious *= scaleFactor;
+            break;
+        }
+        case DRW::ETYPE::ARC:
+        {
+            DRW_Arc* arc = static_cast<DRW_Arc*>(entity);
+            scaleCoordAround(arc->basePoint, basePoint, scaleFactor);
+            arc->radious *= scaleFactor;
+            break;
+        }
+        case DRW::ETYPE::ELLIPSE:
+        {
+            DRW_Ellipse* ellipse = static_cast<DRW_Ellipse*>(entity);
+            scaleCoordAround(ellipse->basePoint, basePoint, scaleFactor);
+            ellipse->secPoint.x *= scaleFactor;
+            ellipse->secPoint.y *= scaleFactor;
+            ellipse->secPoint.z *= scaleFactor;
+            break;
+        }
+        case DRW::ETYPE::LWPOLYLINE:
+        {
+            DRW_LWPolyline* polyline = static_cast<DRW_LWPolyline*>(entity);
+
+            for (const std::shared_ptr<DRW_Vertex2D>& vertex : polyline->vertlist)
+            {
+                const QVector3D scaledVertex = scalePlanarPoint
+                (
+                    QVector3D(vertex->x, vertex->y, polyline->elevation),
+                    basePoint,
+                    scaleFactor
+                );
+                vertex->x = scaledVertex.x();
+                vertex->y = scaledVertex.y();
+            }
+            break;
+        }
+        case DRW::ETYPE::POLYLINE:
+        {
+            DRW_Polyline* polyline = static_cast<DRW_Polyline*>(entity);
+            scaleCoordAround(polyline->basePoint, basePoint, scaleFactor);
+
+            for (const std::shared_ptr<DRW_Vertex>& vertex : polyline->vertlist)
+            {
+                scaleCoordAround(vertex->basePoint, basePoint, scaleFactor);
+            }
+            break;
+        }
+        default:
+            break;
+        }
+    }
+
+    std::unique_ptr<DRW_Entity> cloneEntity(const DRW_Entity* entity)
+    {
+        if (entity == nullptr)
+        {
+            return nullptr;
+        }
+
+        switch (entity->eType)
+        {
+        case DRW::ETYPE::POINT:
+            return std::make_unique<DRW_Point>(*static_cast<const DRW_Point*>(entity));
+        case DRW::ETYPE::LINE:
+            return std::make_unique<DRW_Line>(*static_cast<const DRW_Line*>(entity));
+        case DRW::ETYPE::CIRCLE:
+            return std::make_unique<DRW_Circle>(*static_cast<const DRW_Circle*>(entity));
+        case DRW::ETYPE::ARC:
+            return std::make_unique<DRW_Arc>(*static_cast<const DRW_Arc*>(entity));
+        case DRW::ETYPE::ELLIPSE:
+            return std::make_unique<DRW_Ellipse>(*static_cast<const DRW_Ellipse*>(entity));
+        case DRW::ETYPE::LWPOLYLINE:
+            return std::make_unique<DRW_LWPolyline>(*static_cast<const DRW_LWPolyline*>(entity));
+        case DRW::ETYPE::POLYLINE:
+            return std::make_unique<DRW_Polyline>(*static_cast<const DRW_Polyline*>(entity));
+        default:
+            return nullptr;
+        }
+    }
+
     // 把 QColor 编码为 DXF true color 整数
     // @param color 输入颜色
     // @return 24 位 RGB 整数
@@ -697,6 +927,287 @@ private:
     QVector3D m_delta;
 };
 
+class CopyEntityCommand final : public CadEditer::EditCommand
+{
+public:
+    CopyEntityCommand(CadDocument* document, CadItem* sourceItem, const QVector3D& delta)
+        : m_document(document)
+        , m_sourceItem(sourceItem)
+        , m_delta(delta)
+    {
+    }
+
+    bool execute() override
+    {
+        if (m_document == nullptr || m_sourceItem == nullptr)
+        {
+            return false;
+        }
+
+        if (m_entity == nullptr)
+        {
+            m_entity = cloneEntity(m_sourceItem->m_nativeEntity);
+
+            if (m_entity == nullptr)
+            {
+                return false;
+            }
+
+            translateEntity(m_entity.get(), m_delta);
+        }
+
+        if (m_item == nullptr)
+        {
+            m_item = CadDocument::createCadItemForEntity(m_entity.get());
+        }
+
+        if (m_item == nullptr)
+        {
+            return false;
+        }
+
+        m_itemPtr = m_item.get();
+        return m_document->appendEntity(std::move(m_entity), std::move(m_item)) != nullptr;
+    }
+
+    bool undo() override
+    {
+        if (m_document == nullptr || m_itemPtr == nullptr)
+        {
+            return false;
+        }
+
+        auto [entity, item] = m_document->takeEntity(m_itemPtr);
+
+        if (entity == nullptr || item == nullptr)
+        {
+            return false;
+        }
+
+        m_entity = std::move(entity);
+        m_item = std::move(item);
+        m_itemPtr = m_item.get();
+        return true;
+    }
+
+private:
+    CadDocument* m_document = nullptr;
+    CadItem* m_sourceItem = nullptr;
+    QVector3D m_delta;
+    std::unique_ptr<DRW_Entity> m_entity;
+    std::unique_ptr<CadItem> m_item;
+    CadItem* m_itemPtr = nullptr;
+};
+
+class RotateEntityCommand final : public CadEditer::EditCommand
+{
+public:
+    RotateEntityCommand(CadDocument* document, CadItem* item, const QVector3D& basePoint, double angleDegrees)
+        : m_document(document)
+        , m_item(item)
+        , m_basePoint(basePoint)
+        , m_angleDegrees(angleDegrees)
+    {
+    }
+
+    bool execute() override
+    {
+        return apply(m_angleDegrees);
+    }
+
+    bool undo() override
+    {
+        return apply(-m_angleDegrees);
+    }
+
+private:
+    bool apply(double angleDegrees)
+    {
+        if (m_document == nullptr || m_item == nullptr || !m_document->containsEntity(m_item))
+        {
+            return false;
+        }
+
+        rotateEntity(m_item->m_nativeEntity, m_basePoint, angleDegrees);
+        return m_document->refreshEntity(m_item);
+    }
+
+private:
+    CadDocument* m_document = nullptr;
+    CadItem* m_item = nullptr;
+    QVector3D m_basePoint;
+    double m_angleDegrees = 0.0;
+};
+
+class ScaleEntityCommand final : public CadEditer::EditCommand
+{
+public:
+    ScaleEntityCommand(CadDocument* document, CadItem* item, const QVector3D& basePoint, double scaleFactor)
+        : m_document(document)
+        , m_item(item)
+        , m_basePoint(basePoint)
+        , m_scaleFactor(scaleFactor)
+    {
+    }
+
+    bool execute() override
+    {
+        return apply(m_scaleFactor);
+    }
+
+    bool undo() override
+    {
+        if (std::abs(m_scaleFactor) <= kGeometryEpsilon)
+        {
+            return false;
+        }
+
+        return apply(1.0 / m_scaleFactor);
+    }
+
+private:
+    bool apply(double scaleFactor)
+    {
+        if (m_document == nullptr || m_item == nullptr || !m_document->containsEntity(m_item) || scaleFactor <= kGeometryEpsilon)
+        {
+            return false;
+        }
+
+        scaleEntity(m_item->m_nativeEntity, m_basePoint, scaleFactor);
+        return m_document->refreshEntity(m_item);
+    }
+
+private:
+    CadDocument* m_document = nullptr;
+    CadItem* m_item = nullptr;
+    QVector3D m_basePoint;
+    double m_scaleFactor = 1.0;
+};
+
+class ArrayEntityCommand final : public CadEditer::EditCommand
+{
+public:
+    ArrayEntityCommand
+    (
+        CadDocument* document,
+        CadItem* sourceItem,
+        int rowCount,
+        int columnCount,
+        const QVector3D& rowOffset,
+        const QVector3D& columnOffset
+    )
+        : m_document(document)
+        , m_sourceItem(sourceItem)
+        , m_rowCount(rowCount)
+        , m_columnCount(columnCount)
+        , m_rowOffset(rowOffset)
+        , m_columnOffset(columnOffset)
+    {
+    }
+
+    bool execute() override
+    {
+        if (m_document == nullptr || m_sourceItem == nullptr || m_rowCount < 1 || m_columnCount < 1)
+        {
+            return false;
+        }
+
+        if (m_entities.empty())
+        {
+            for (int row = 0; row < m_rowCount; ++row)
+            {
+                for (int column = 0; column < m_columnCount; ++column)
+                {
+                    if (row == 0 && column == 0)
+                    {
+                        continue;
+                    }
+
+                    std::unique_ptr<DRW_Entity> entity = cloneEntity(m_sourceItem->m_nativeEntity);
+
+                    if (entity == nullptr)
+                    {
+                        return false;
+                    }
+
+                    const QVector3D delta = m_rowOffset * static_cast<float>(row) + m_columnOffset * static_cast<float>(column);
+                    translateEntity(entity.get(), delta);
+                    m_entities.push_back(std::move(entity));
+                    m_items.push_back(nullptr);
+                    m_itemPtrs.push_back(nullptr);
+                }
+            }
+        }
+
+        for (int index = 0; index < static_cast<int>(m_entities.size()); ++index)
+        {
+            if (m_entities[index] == nullptr)
+            {
+                return false;
+            }
+
+            if (m_items[index] == nullptr)
+            {
+                m_items[index] = CadDocument::createCadItemForEntity(m_entities[index].get());
+            }
+
+            if (m_items[index] == nullptr)
+            {
+                return false;
+            }
+
+            m_itemPtrs[index] = m_items[index].get();
+
+            if (m_document->appendEntity(std::move(m_entities[index]), std::move(m_items[index])) == nullptr)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    bool undo() override
+    {
+        if (m_document == nullptr)
+        {
+            return false;
+        }
+
+        for (int index = static_cast<int>(m_itemPtrs.size()) - 1; index >= 0; --index)
+        {
+            if (m_itemPtrs[index] == nullptr)
+            {
+                return false;
+            }
+
+            auto [entity, item] = m_document->takeEntity(m_itemPtrs[index]);
+
+            if (entity == nullptr || item == nullptr)
+            {
+                return false;
+            }
+
+            m_entities[index] = std::move(entity);
+            m_items[index] = std::move(item);
+            m_itemPtrs[index] = m_items[index].get();
+        }
+
+        return true;
+    }
+
+private:
+    CadDocument* m_document = nullptr;
+    CadItem* m_sourceItem = nullptr;
+    int m_rowCount = 1;
+    int m_columnCount = 1;
+    QVector3D m_rowOffset;
+    QVector3D m_columnOffset;
+    std::vector<std::unique_ptr<DRW_Entity>> m_entities;
+    std::vector<std::unique_ptr<CadItem>> m_items;
+    std::vector<CadItem*> m_itemPtrs;
+};
+
 // 修改颜色命令：
 // 记录新旧颜色信息，执行与撤销都通过刷新原生实体颜色完成。
 class ChangeColorCommand final : public CadEditer::EditCommand
@@ -1168,6 +1679,59 @@ bool CadEditer::deleteEntity(CadItem* item)
     }
 
     return executeCommand(std::make_unique<DeleteEntityCommand>(m_document, item));
+}
+
+bool CadEditer::copyEntity(CadItem* item, const QVector3D& delta)
+{
+    if (m_document == nullptr || item == nullptr || !m_document->containsEntity(item))
+    {
+        return false;
+    }
+
+    if (delta.lengthSquared() <= kGeometryEpsilon)
+    {
+        return false;
+    }
+
+    return executeCommand(std::make_unique<CopyEntityCommand>(m_document, item, delta));
+}
+
+bool CadEditer::rotateEntity(CadItem* item, const QVector3D& basePoint, double angleDegrees)
+{
+    if (m_document == nullptr || item == nullptr || !m_document->containsEntity(item) || std::abs(angleDegrees) <= kGeometryEpsilon)
+    {
+        return false;
+    }
+
+    return executeCommand(std::make_unique<RotateEntityCommand>(m_document, item, basePoint, angleDegrees));
+}
+
+bool CadEditer::scaleEntity(CadItem* item, const QVector3D& basePoint, double scaleFactor)
+{
+    if (m_document == nullptr || item == nullptr || !m_document->containsEntity(item) || scaleFactor <= kGeometryEpsilon)
+    {
+        return false;
+    }
+
+    return executeCommand(std::make_unique<ScaleEntityCommand>(m_document, item, basePoint, scaleFactor));
+}
+
+bool CadEditer::arrayEntity(CadItem* item, int rowCount, int columnCount, const QVector3D& rowOffset, const QVector3D& columnOffset)
+{
+    if (m_document == nullptr || item == nullptr || !m_document->containsEntity(item))
+    {
+        return false;
+    }
+
+    if (rowCount < 1 || columnCount < 1 || (rowCount == 1 && columnCount == 1))
+    {
+        return false;
+    }
+
+    return executeCommand
+    (
+        std::make_unique<ArrayEntityCommand>(m_document, item, rowCount, columnCount, rowOffset, columnOffset)
+    );
 }
 
 // 修改指定实体颜色

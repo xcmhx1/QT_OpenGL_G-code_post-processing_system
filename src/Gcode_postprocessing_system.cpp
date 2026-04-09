@@ -12,6 +12,7 @@
 #include <QApplication>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QInputDialog>
 #include <QMap>
 #include <QMessageBox>
 #include <QMenu>
@@ -117,6 +118,34 @@ namespace
         }
 
         return QColor((color24 >> 16) & 0xFF, (color24 >> 8) & 0xFF, color24 & 0xFF);
+    }
+
+    QVector3D geometryBoundsCenter(const CadItem* item)
+    {
+        if (item == nullptr || item->m_geometry.vertices.isEmpty())
+        {
+            return QVector3D();
+        }
+
+        QVector3D minPoint = item->m_geometry.vertices.front();
+        QVector3D maxPoint = item->m_geometry.vertices.front();
+
+        for (const QVector3D& point : item->m_geometry.vertices)
+        {
+            minPoint.setX(std::min(minPoint.x(), point.x()));
+            minPoint.setY(std::min(minPoint.y(), point.y()));
+            minPoint.setZ(std::min(minPoint.z(), point.z()));
+            maxPoint.setX(std::max(maxPoint.x(), point.x()));
+            maxPoint.setY(std::max(maxPoint.y(), point.y()));
+            maxPoint.setZ(std::max(maxPoint.z(), point.z()));
+        }
+
+        return QVector3D
+        (
+            (minPoint.x() + maxPoint.x()) * 0.5f,
+            (minPoint.y() + maxPoint.y()) * 0.5f,
+            (minPoint.z() + maxPoint.z()) * 0.5f
+        );
     }
 
     QString entityLayerName(const CadItem* item)
@@ -1908,6 +1937,274 @@ bool Gcode_postprocessing_system::toggleSelectedEntityReverse()
     return true;
 }
 
+bool Gcode_postprocessing_system::deleteSelectedEntity()
+{
+    CadItem* selectedItem = ui->openGLWidget->selectedEntity();
+
+    if (selectedItem == nullptr)
+    {
+        QMessageBox::warning(this, QStringLiteral("删除图元"), QStringLiteral("请先选择一个图元。"));
+        return false;
+    }
+
+    if (!m_editer.deleteEntity(selectedItem))
+    {
+        QMessageBox::warning(this, QStringLiteral("删除图元"), QStringLiteral("当前选中图元删除失败。"));
+        return false;
+    }
+
+    ui->openGLWidget->appendCommandMessage(QStringLiteral("已删除选中图元。"));
+    statusBar()->showMessage(QStringLiteral("选中图元已删除"), 4000);
+    return true;
+}
+
+bool Gcode_postprocessing_system::copySelectedEntity()
+{
+    CadItem* selectedItem = ui->openGLWidget->selectedEntity();
+
+    if (selectedItem == nullptr)
+    {
+        QMessageBox::warning(this, QStringLiteral("复制图元"), QStringLiteral("请先选择一个图元。"));
+        return false;
+    }
+
+    bool ok = false;
+    const double deltaX = QInputDialog::getDouble
+    (
+        this,
+        QStringLiteral("复制图元"),
+        QStringLiteral("请输入 X 偏移量:"),
+        10.0,
+        -1000000.0,
+        1000000.0,
+        3,
+        &ok
+    );
+
+    if (!ok)
+    {
+        return false;
+    }
+
+    const double deltaY = QInputDialog::getDouble
+    (
+        this,
+        QStringLiteral("复制图元"),
+        QStringLiteral("请输入 Y 偏移量:"),
+        10.0,
+        -1000000.0,
+        1000000.0,
+        3,
+        &ok
+    );
+
+    if (!ok)
+    {
+        return false;
+    }
+
+    if (!m_editer.copyEntity(selectedItem, QVector3D(deltaX, deltaY, 0.0f)))
+    {
+        QMessageBox::warning(this, QStringLiteral("复制图元"), QStringLiteral("当前选中图元复制失败。"));
+        return false;
+    }
+
+    ui->openGLWidget->appendCommandMessage(QStringLiteral("已复制选中图元，偏移量为 (%1, %2)。").arg(deltaX).arg(deltaY));
+    statusBar()->showMessage(QStringLiteral("图元复制完成"), 4000);
+    return true;
+}
+
+bool Gcode_postprocessing_system::rotateSelectedEntity()
+{
+    CadItem* selectedItem = ui->openGLWidget->selectedEntity();
+
+    if (selectedItem == nullptr)
+    {
+        QMessageBox::warning(this, QStringLiteral("旋转图元"), QStringLiteral("请先选择一个图元。"));
+        return false;
+    }
+
+    bool ok = false;
+    const double angleDegrees = QInputDialog::getDouble
+    (
+        this,
+        QStringLiteral("旋转图元"),
+        QStringLiteral("请输入旋转角度（度）:"),
+        90.0,
+        -3600.0,
+        3600.0,
+        3,
+        &ok
+    );
+
+    if (!ok)
+    {
+        return false;
+    }
+
+    const QVector3D basePoint = geometryBoundsCenter(selectedItem);
+
+    if (!m_editer.rotateEntity(selectedItem, basePoint, angleDegrees))
+    {
+        QMessageBox::warning(this, QStringLiteral("旋转图元"), QStringLiteral("当前选中图元旋转失败。"));
+        return false;
+    }
+
+    ui->openGLWidget->appendCommandMessage(QStringLiteral("已将选中图元绕中心旋转 %1 度。").arg(angleDegrees));
+    statusBar()->showMessage(QStringLiteral("图元旋转完成"), 4000);
+    return true;
+}
+
+bool Gcode_postprocessing_system::scaleSelectedEntity()
+{
+    CadItem* selectedItem = ui->openGLWidget->selectedEntity();
+
+    if (selectedItem == nullptr)
+    {
+        QMessageBox::warning(this, QStringLiteral("缩放图元"), QStringLiteral("请先选择一个图元。"));
+        return false;
+    }
+
+    bool ok = false;
+    const double scaleFactor = QInputDialog::getDouble
+    (
+        this,
+        QStringLiteral("缩放图元"),
+        QStringLiteral("请输入缩放倍率:"),
+        2.0,
+        0.001,
+        1000.0,
+        3,
+        &ok
+    );
+
+    if (!ok)
+    {
+        return false;
+    }
+
+    const QVector3D basePoint = geometryBoundsCenter(selectedItem);
+
+    if (!m_editer.scaleEntity(selectedItem, basePoint, scaleFactor))
+    {
+        QMessageBox::warning(this, QStringLiteral("缩放图元"), QStringLiteral("当前选中图元缩放失败。"));
+        return false;
+    }
+
+    ui->openGLWidget->appendCommandMessage(QStringLiteral("已将选中图元绕中心缩放为 %1 倍。").arg(scaleFactor));
+    statusBar()->showMessage(QStringLiteral("图元缩放完成"), 4000);
+    return true;
+}
+
+bool Gcode_postprocessing_system::arraySelectedEntity()
+{
+    CadItem* selectedItem = ui->openGLWidget->selectedEntity();
+
+    if (selectedItem == nullptr)
+    {
+        QMessageBox::warning(this, QStringLiteral("阵列图元"), QStringLiteral("请先选择一个图元。"));
+        return false;
+    }
+
+    bool ok = false;
+    const int rowCount = QInputDialog::getInt
+    (
+        this,
+        QStringLiteral("矩形阵列"),
+        QStringLiteral("请输入行数:"),
+        2,
+        1,
+        999,
+        1,
+        &ok
+    );
+
+    if (!ok)
+    {
+        return false;
+    }
+
+    const int columnCount = QInputDialog::getInt
+    (
+        this,
+        QStringLiteral("矩形阵列"),
+        QStringLiteral("请输入列数:"),
+        2,
+        1,
+        999,
+        1,
+        &ok
+    );
+
+    if (!ok)
+    {
+        return false;
+    }
+
+    if (rowCount == 1 && columnCount == 1)
+    {
+        QMessageBox::warning(this, QStringLiteral("矩形阵列"), QStringLiteral("行数和列数不能同时为 1。"));
+        return false;
+    }
+
+    const double rowSpacing = QInputDialog::getDouble
+    (
+        this,
+        QStringLiteral("矩形阵列"),
+        QStringLiteral("请输入行间距（Y 方向）:"),
+        10.0,
+        -1000000.0,
+        1000000.0,
+        3,
+        &ok
+    );
+
+    if (!ok)
+    {
+        return false;
+    }
+
+    const double columnSpacing = QInputDialog::getDouble
+    (
+        this,
+        QStringLiteral("矩形阵列"),
+        QStringLiteral("请输入列间距（X 方向）:"),
+        10.0,
+        -1000000.0,
+        1000000.0,
+        3,
+        &ok
+    );
+
+    if (!ok)
+    {
+        return false;
+    }
+
+    if
+    (
+        !m_editer.arrayEntity
+        (
+            selectedItem,
+            rowCount,
+            columnCount,
+            QVector3D(0.0f, static_cast<float>(rowSpacing), 0.0f),
+            QVector3D(static_cast<float>(columnSpacing), 0.0f, 0.0f)
+        )
+    )
+    {
+        QMessageBox::warning(this, QStringLiteral("矩形阵列"), QStringLiteral("当前选中图元阵列失败。"));
+        return false;
+    }
+
+    ui->openGLWidget->appendCommandMessage
+    (
+        QStringLiteral("已对选中图元执行 %1 x %2 矩形阵列。").arg(rowCount).arg(columnCount)
+    );
+    statusBar()->showMessage(QStringLiteral("矩形阵列完成"), 4000);
+    return true;
+}
+
 bool Gcode_postprocessing_system::sortEntitiesByCurrentDirection()
 {
     if (m_document.m_entities.empty())
@@ -2581,6 +2878,12 @@ void Gcode_postprocessing_system::initializeToolPanel()
         }
     );
 
+    connect(m_toolPanelWidget, &CadToolPanelWidget::deleteRequested, this, [this]() { deleteSelectedEntity(); });
+    connect(m_toolPanelWidget, &CadToolPanelWidget::copyRequested, this, [this]() { copySelectedEntity(); });
+    connect(m_toolPanelWidget, &CadToolPanelWidget::rotateRequested, this, [this]() { rotateSelectedEntity(); });
+    connect(m_toolPanelWidget, &CadToolPanelWidget::scaleRequested, this, [this]() { scaleSelectedEntity(); });
+    connect(m_toolPanelWidget, &CadToolPanelWidget::arrayRequested, this, [this]() { arraySelectedEntity(); });
+
     connect
     (
         m_toolPanelWidget,
@@ -2674,7 +2977,7 @@ void Gcode_postprocessing_system::syncToolPanelState()
 
     if (selectedItem != nullptr)
     {
-        m_toolPanelWidget->setMoveEnabled(true);
+        m_toolPanelWidget->setModifyActionsEnabled(true);
         m_toolPanelWidget->setLayerStatusText(QStringLiteral("当前选中图元图层"));
         m_toolPanelWidget->setPropertyStatusText(QStringLiteral("当前选中图元特性"));
         m_toolPanelWidget->setActiveLayerName(entityLayerName(selectedItem));
@@ -2701,7 +3004,7 @@ void Gcode_postprocessing_system::syncToolPanelState()
         m_currentColor = colorFromAci(m_currentColorIndex);
     }
 
-    m_toolPanelWidget->setMoveEnabled(false);
+    m_toolPanelWidget->setModifyActionsEnabled(false);
     m_toolPanelWidget->setLayerStatusText(QStringLiteral("当前默认绘图图层"));
     m_toolPanelWidget->setPropertyStatusText(QStringLiteral("当前默认绘图特性"));
     m_toolPanelWidget->setActiveLayerName(m_currentLayerName);

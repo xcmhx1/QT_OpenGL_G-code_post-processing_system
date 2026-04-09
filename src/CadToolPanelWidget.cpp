@@ -149,6 +149,114 @@ namespace
         return QIcon(pixmap);
     }
 
+    QIcon buildDeleteIcon(const QColor& strokeColor)
+    {
+        QPixmap pixmap(kRibbonIconSize, kRibbonIconSize);
+        pixmap.fill(Qt::transparent);
+
+        QPainter painter(&pixmap);
+        painter.setRenderHint(QPainter::Antialiasing, true);
+        QPen pen(strokeColor);
+        pen.setWidthF(1.4);
+        pen.setCapStyle(Qt::RoundCap);
+        pen.setJoinStyle(Qt::RoundJoin);
+        painter.setPen(pen);
+        painter.drawLine(QPointF(5.0, 5.0), QPointF(13.0, 13.0));
+        painter.drawLine(QPointF(13.0, 5.0), QPointF(5.0, 13.0));
+        painter.drawRect(QRectF(3.5, 3.5, 11.0, 11.0));
+        return QIcon(pixmap);
+    }
+
+    QIcon buildRotateIcon(const QColor& strokeColor)
+    {
+        QPixmap pixmap(kRibbonIconSize, kRibbonIconSize);
+        pixmap.fill(Qt::transparent);
+
+        QPainter painter(&pixmap);
+        painter.setRenderHint(QPainter::Antialiasing, true);
+        QPen pen(strokeColor);
+        pen.setWidthF(1.4);
+        pen.setCapStyle(Qt::RoundCap);
+        pen.setJoinStyle(Qt::RoundJoin);
+        painter.setPen(pen);
+        painter.drawArc(QRectF(3.0, 3.0, 10.0, 10.0), 35 * 16, 270 * 16);
+        painter.drawEllipse(QPointF(8.0, 8.0), 1.2, 1.2);
+
+        QPainterPath arrowHead;
+        arrowHead.moveTo(12.8, 4.5);
+        arrowHead.lineTo(14.8, 4.4);
+        arrowHead.lineTo(13.6, 6.2);
+        arrowHead.closeSubpath();
+        painter.fillPath(arrowHead, pen.color());
+        return QIcon(pixmap);
+    }
+
+    QIcon buildCopyIcon(const QColor& strokeColor)
+    {
+        QPixmap pixmap(kRibbonIconSize, kRibbonIconSize);
+        pixmap.fill(Qt::transparent);
+
+        QPainter painter(&pixmap);
+        painter.setRenderHint(QPainter::Antialiasing, true);
+        QPen pen(strokeColor);
+        pen.setWidthF(1.4);
+        pen.setCapStyle(Qt::RoundCap);
+        pen.setJoinStyle(Qt::RoundJoin);
+        painter.setPen(pen);
+        painter.drawRect(QRectF(3.0, 5.0, 7.0, 7.0));
+        painter.drawRect(QRectF(6.0, 2.0, 7.0, 7.0));
+        return QIcon(pixmap);
+    }
+
+    QIcon buildScaleIcon(const QColor& strokeColor)
+    {
+        QPixmap pixmap(kRibbonIconSize, kRibbonIconSize);
+        pixmap.fill(Qt::transparent);
+
+        QPainter painter(&pixmap);
+        painter.setRenderHint(QPainter::Antialiasing, true);
+        QPen pen(strokeColor);
+        pen.setWidthF(1.4);
+        pen.setCapStyle(Qt::RoundCap);
+        pen.setJoinStyle(Qt::RoundJoin);
+        painter.setPen(pen);
+        painter.drawRect(QRectF(4.0, 4.0, 5.0, 5.0));
+        painter.drawRect(QRectF(8.0, 8.0, 5.0, 5.0));
+        painter.drawLine(QPointF(9.5, 9.5), QPointF(14.5, 14.5));
+
+        QPainterPath arrowHead;
+        arrowHead.moveTo(14.8, 14.8);
+        arrowHead.lineTo(12.2, 14.3);
+        arrowHead.lineTo(14.3, 12.2);
+        arrowHead.closeSubpath();
+        painter.fillPath(arrowHead, pen.color());
+        return QIcon(pixmap);
+    }
+
+    QIcon buildArrayIcon(const QColor& strokeColor)
+    {
+        QPixmap pixmap(kRibbonIconSize, kRibbonIconSize);
+        pixmap.fill(Qt::transparent);
+
+        QPainter painter(&pixmap);
+        painter.setRenderHint(QPainter::Antialiasing, true);
+        QPen pen(strokeColor);
+        pen.setWidthF(1.2);
+        pen.setCapStyle(Qt::RoundCap);
+        pen.setJoinStyle(Qt::RoundJoin);
+        painter.setPen(pen);
+
+        for (int row = 0; row < 3; ++row)
+        {
+            for (int column = 0; column < 3; ++column)
+            {
+                painter.drawRect(QRectF(2.5 + column * 4.0, 2.5 + row * 4.0, 3.0, 3.0));
+            }
+        }
+
+        return QIcon(pixmap);
+    }
+
     QIcon buildColorChipIcon(const QColor& color)
     {
         constexpr int kChipSize = 12;
@@ -237,6 +345,39 @@ void CadToolPanelWidget::setActiveColorState(const QColor& color, int colorIndex
 void CadToolPanelWidget::setMoveEnabled(bool enabled)
 {
     m_moveButton->setEnabled(enabled);
+}
+
+void CadToolPanelWidget::setModifyActionsEnabled(bool enabled)
+{
+    if (m_moveButton != nullptr)
+    {
+        m_moveButton->setEnabled(enabled);
+    }
+
+    if (m_deleteButton != nullptr)
+    {
+        m_deleteButton->setEnabled(enabled);
+    }
+
+    if (m_rotateButton != nullptr)
+    {
+        m_rotateButton->setEnabled(enabled);
+    }
+
+    if (m_copyButton != nullptr)
+    {
+        m_copyButton->setEnabled(enabled);
+    }
+
+    if (m_scaleButton != nullptr)
+    {
+        m_scaleButton->setEnabled(enabled);
+    }
+
+    if (m_arrayButton != nullptr)
+    {
+        m_arrayButton->setEnabled(enabled);
+    }
 }
 
 void CadToolPanelWidget::setTheme(const AppThemeColors& theme)
@@ -362,6 +503,31 @@ void CadToolPanelWidget::applyTheme()
     if (m_moveButton != nullptr)
     {
         m_moveButton->setIcon(buildMoveIcon(m_theme.accentColor));
+    }
+
+    if (m_deleteButton != nullptr)
+    {
+        m_deleteButton->setIcon(buildDeleteIcon(m_theme.accentColor));
+    }
+
+    if (m_rotateButton != nullptr)
+    {
+        m_rotateButton->setIcon(buildRotateIcon(m_theme.accentColor));
+    }
+
+    if (m_copyButton != nullptr)
+    {
+        m_copyButton->setIcon(buildCopyIcon(m_theme.accentColor));
+    }
+
+    if (m_scaleButton != nullptr)
+    {
+        m_scaleButton->setIcon(buildScaleIcon(m_theme.accentColor));
+    }
+
+    if (m_arrayButton != nullptr)
+    {
+        m_arrayButton->setIcon(buildArrayIcon(m_theme.accentColor));
     }
 
     if (m_drawPointAction != nullptr)
@@ -500,9 +666,10 @@ QWidget* CadToolPanelWidget::buildDrawPanel()
 QWidget* CadToolPanelWidget::buildModifyPanel()
 {
     QWidget* panel = new QWidget(this);
-    QHBoxLayout* layout = new QHBoxLayout(panel);
+    QGridLayout* layout = new QGridLayout(panel);
     layout->setContentsMargins(1, 4, 1, 2);
-    layout->setSpacing(0);
+    layout->setHorizontalSpacing(3);
+    layout->setVerticalSpacing(3);
     layout->setSizeConstraint(QLayout::SetFixedSize);
 
     m_moveButton = new QToolButton(panel);
@@ -515,7 +682,62 @@ QWidget* CadToolPanelWidget::buildModifyPanel()
     m_moveButton->setEnabled(false);
     connect(m_moveButton, &QToolButton::clicked, this, &CadToolPanelWidget::moveRequested);
 
-    layout->addWidget(m_moveButton);
+    m_deleteButton = new QToolButton(panel);
+    m_deleteButton->setProperty("ribbonButton", true);
+    m_deleteButton->setText(QStringLiteral("删除"));
+    m_deleteButton->setIcon(buildDeleteIcon(m_theme.accentColor));
+    m_deleteButton->setIconSize(QSize(kRibbonIconSize, kRibbonIconSize));
+    m_deleteButton->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
+    m_deleteButton->setFixedSize(56, kRibbonButtonHeight);
+    m_deleteButton->setEnabled(false);
+    connect(m_deleteButton, &QToolButton::clicked, this, &CadToolPanelWidget::deleteRequested);
+
+    m_rotateButton = new QToolButton(panel);
+    m_rotateButton->setProperty("ribbonButton", true);
+    m_rotateButton->setText(QStringLiteral("旋转"));
+    m_rotateButton->setIcon(buildRotateIcon(m_theme.accentColor));
+    m_rotateButton->setIconSize(QSize(kRibbonIconSize, kRibbonIconSize));
+    m_rotateButton->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
+    m_rotateButton->setFixedSize(56, kRibbonButtonHeight);
+    m_rotateButton->setEnabled(false);
+    connect(m_rotateButton, &QToolButton::clicked, this, &CadToolPanelWidget::rotateRequested);
+
+    m_copyButton = new QToolButton(panel);
+    m_copyButton->setProperty("ribbonButton", true);
+    m_copyButton->setText(QStringLiteral("复制"));
+    m_copyButton->setIcon(buildCopyIcon(m_theme.accentColor));
+    m_copyButton->setIconSize(QSize(kRibbonIconSize, kRibbonIconSize));
+    m_copyButton->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
+    m_copyButton->setFixedSize(56, kRibbonButtonHeight);
+    m_copyButton->setEnabled(false);
+    connect(m_copyButton, &QToolButton::clicked, this, &CadToolPanelWidget::copyRequested);
+
+    m_scaleButton = new QToolButton(panel);
+    m_scaleButton->setProperty("ribbonButton", true);
+    m_scaleButton->setText(QStringLiteral("缩放"));
+    m_scaleButton->setIcon(buildScaleIcon(m_theme.accentColor));
+    m_scaleButton->setIconSize(QSize(kRibbonIconSize, kRibbonIconSize));
+    m_scaleButton->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
+    m_scaleButton->setFixedSize(56, kRibbonButtonHeight);
+    m_scaleButton->setEnabled(false);
+    connect(m_scaleButton, &QToolButton::clicked, this, &CadToolPanelWidget::scaleRequested);
+
+    m_arrayButton = new QToolButton(panel);
+    m_arrayButton->setProperty("ribbonButton", true);
+    m_arrayButton->setText(QStringLiteral("阵列"));
+    m_arrayButton->setIcon(buildArrayIcon(m_theme.accentColor));
+    m_arrayButton->setIconSize(QSize(kRibbonIconSize, kRibbonIconSize));
+    m_arrayButton->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
+    m_arrayButton->setFixedSize(56, kRibbonButtonHeight);
+    m_arrayButton->setEnabled(false);
+    connect(m_arrayButton, &QToolButton::clicked, this, &CadToolPanelWidget::arrayRequested);
+
+    layout->addWidget(m_moveButton, 0, 0);
+    layout->addWidget(m_deleteButton, 0, 1);
+    layout->addWidget(m_scaleButton, 0, 2);
+    layout->addWidget(m_rotateButton, 1, 0);
+    layout->addWidget(m_copyButton, 1, 1);
+    layout->addWidget(m_arrayButton, 1, 2);
     layout->setAlignment(Qt::AlignLeft | Qt::AlignTop);
     return panel;
 }

@@ -85,6 +85,18 @@ public:
     // @return 如果删除成功返回 true，否则返回 false
     bool deleteEntity(CadItem* item);
 
+    // 复制指定实体，并按偏移量生成一个副本
+    bool copyEntity(CadItem* item, const QVector3D& delta);
+
+    // 围绕基点旋转指定实体，角度单位为度
+    bool rotateEntity(CadItem* item, const QVector3D& basePoint, double angleDegrees);
+
+    // 围绕基点按统一倍率缩放指定实体
+    bool scaleEntity(CadItem* item, const QVector3D& basePoint, double scaleFactor);
+
+    // 对指定实体执行矩形阵列
+    bool arrayEntity(CadItem* item, int rowCount, int columnCount, const QVector3D& rowOffset, const QVector3D& columnOffset);
+
     // 修改指定实体颜色
     // @param item 目标实体
     // @param color 新颜色

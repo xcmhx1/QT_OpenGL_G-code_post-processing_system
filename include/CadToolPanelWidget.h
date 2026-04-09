@@ -29,11 +29,17 @@ public:
     void setActiveLayerName(const QString& layerName);
     void setActiveColorState(const QColor& color, int colorIndex, const QColor& byLayerColor);
     void setMoveEnabled(bool enabled);
+    void setModifyActionsEnabled(bool enabled);
     void setTheme(const AppThemeColors& theme);
 
 signals:
     void drawRequested(DrawType drawType);
     void moveRequested();
+    void deleteRequested();
+    void rotateRequested();
+    void copyRequested();
+    void scaleRequested();
+    void arrayRequested();
     void layerChangeRequested(const QString& layerName);
     void colorChangeRequested(int colorIndex);
 
@@ -54,6 +60,11 @@ private:
 
 private:
     QToolButton* m_moveButton = nullptr;
+    QToolButton* m_deleteButton = nullptr;
+    QToolButton* m_rotateButton = nullptr;
+    QToolButton* m_copyButton = nullptr;
+    QToolButton* m_scaleButton = nullptr;
+    QToolButton* m_arrayButton = nullptr;
     QLabel* m_layerStatusLabel = nullptr;
     QLabel* m_propertyStatusLabel = nullptr;
     QComboBox* m_layerComboBox = nullptr;
