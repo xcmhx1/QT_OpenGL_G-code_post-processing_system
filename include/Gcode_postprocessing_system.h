@@ -6,6 +6,7 @@
 #include "CadDocument.h"
 #include "CadStatusPaneWidget.h"
 #include "CadToolPanelWidget.h"
+#include "GGenerator.h"
 #include "GProfile.h"
 
 #include <QtWidgets/QMainWindow>
@@ -27,11 +28,22 @@ public:
     ~Gcode_postprocessing_system();
 
 private:
+    enum class GCodeGenerationPreference
+    {
+        Auto,
+        Force2D,
+        Force3D
+    };
+
+private:
     void initializeThemeMenu();
     void openProfileSettingsDialog();
     void applyTheme(AppThemeMode mode);
     AppThemeMode loadThemeMode() const;
     void saveThemeMode(AppThemeMode mode) const;
+    GCodeGenerationPreference loadGenerationPreference() const;
+    void saveGenerationPreference(GCodeGenerationPreference preference) const;
+    GGenerator::GenerationMode resolveGenerationMode() const;
     void initializeToolPanel();
     void syncToolPanelState();
     void applyDefaultDrawingProperties();
@@ -57,6 +69,9 @@ private:
     QAction* m_lightThemeAction = nullptr;
     QAction* m_darkThemeAction = nullptr;
     QAction* m_profileSettingsAction = nullptr;
+    QAction* m_generationModeAutoAction = nullptr;
+    QAction* m_generationMode2DAction = nullptr;
+    QAction* m_generationMode3DAction = nullptr;
     CadEditer m_editer;
     CadDocument m_document;
     GProfile m_activeProfile = GProfile::createDefaultLaserProfile();
@@ -64,4 +79,5 @@ private:
     QColor m_currentColor = QColor(Qt::white);
     int m_currentColorIndex = 256;
     AppThemeMode m_themeMode = AppThemeMode::Light;
+    GCodeGenerationPreference m_generationPreference = GCodeGenerationPreference::Auto;
 };

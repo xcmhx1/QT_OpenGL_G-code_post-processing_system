@@ -550,6 +550,7 @@ void GProfileDialog::applyProfile(const GProfile& profile)
 GProfile GProfileDialog::collectProfile() const
 {
     GProfile profile;
+    profile.setRotaryAxisConfig(m_profile.rotaryAxisConfig());
     profile.setProfileName(m_profileNameEdit->text().trimmed());
     profile.setFileCode
     (

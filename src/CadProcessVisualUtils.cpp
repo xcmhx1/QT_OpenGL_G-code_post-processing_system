@@ -143,6 +143,153 @@ namespace
         return true;
     }
 
+    QVector3D resolveNormal(const DRW_Coord& extPoint)
+    {
+        QVector3D normal(extPoint.x, extPoint.y, extPoint.z);
+
+        if (normal.lengthSquared() <= kVisualEpsilon)
+        {
+            return QVector3D(0.0f, 0.0f, 1.0f);
+        }
+
+        normal.normalize();
+        return normal;
+    }
+
+    void buildPlaneBasis(const QVector3D& normal, QVector3D& axisX, QVector3D& axisY)
+    {
+        if (std::abs(normal.x()) <= 1.0e-6f && std::abs(normal.y()) <= 1.0e-6f)
+        {
+            axisX = QVector3D(1.0f, 0.0f, 0.0f);
+            axisY = QVector3D::crossProduct(normal, axisX);
+
+            if (axisY.lengthSquared() <= kVisualEpsilon)
+            {
+                axisY = QVector3D(0.0f, 1.0f, 0.0f);
+            }
+            else
+            {
+                axisY.normalize();
+            }
+
+            return;
+        }
+
+        const QVector3D helper = std::abs(normal.z()) < 0.999f
+            ? QVector3D(0.0f, 0.0f, 1.0f)
+            : QVector3D(0.0f, 1.0f, 0.0f);
+
+        axisX = QVector3D::crossProduct(helper, normal);
+
+        if (axisX.lengthSquared() <= kVisualEpsilon)
+        {
+            axisX = QVector3D(1.0f, 0.0f, 0.0f);
+        }
+        else
+        {
+            axisX.normalize();
+        }
+
+        axisY = QVector3D::crossProduct(normal, axisX);
+
+        if (axisY.lengthSquared() <= kVisualEpsilon)
+        {
+            axisY = QVector3D(0.0f, 1.0f, 0.0f);
+        }
+        else
+        {
+            axisY.normalize();
+        }
+    }
+
+    QVector3D circlePointAt(const DRW_Circle* circle, double parameter)
+    {
+        if (circle == nullptr || circle->radious <= 0.0)
+        {
+            return QVector3D();
+        }
+
+        const QVector3D center(circle->basePoint.x, circle->basePoint.y, circle->basePoint.z);
+        const QVector3D normal = resolveNormal(circle->extPoint);
+        QVector3D axisX;
+        QVector3D axisY;
+        buildPlaneBasis(normal, axisX, axisY);
+
+        return center
+            + axisX * static_cast<float>(std::cos(parameter) * circle->radious)
+            + axisY * static_cast<float>(std::sin(parameter) * circle->radious);
+    }
+
+    QVector3D circleTangentAt(const DRW_Circle* circle, double parameter, bool reverseDirection)
+    {
+        if (circle == nullptr || circle->radious <= 0.0)
+        {
+            return QVector3D();
+        }
+
+        const QVector3D normal = resolveNormal(circle->extPoint);
+        QVector3D axisX;
+        QVector3D axisY;
+        buildPlaneBasis(normal, axisX, axisY);
+
+        QVector3D tangent
+        (
+            axisX * static_cast<float>(-std::sin(parameter))
+            + axisY * static_cast<float>(std::cos(parameter))
+        );
+
+        if (reverseDirection)
+        {
+            tangent = -tangent;
+        }
+
+        return normalizeOrZero(tangent);
+    }
+
+    QVector3D arcPointAt(const DRW_Arc* arc, double angle)
+    {
+        if (arc == nullptr || arc->radious <= 0.0)
+        {
+            return QVector3D();
+        }
+
+        const QVector3D center(arc->basePoint.x, arc->basePoint.y, arc->basePoint.z);
+        const QVector3D normal = resolveNormal(arc->extPoint);
+        QVector3D axisX;
+        QVector3D axisY;
+        buildPlaneBasis(normal, axisX, axisY);
+
+        return center
+            + axisX * static_cast<float>(std::cos(angle) * arc->radious)
+            + axisY * static_cast<float>(std::sin(angle) * arc->radious);
+    }
+
+    QVector3D arcTangentAt(const DRW_Arc* arc, double angle, bool reverseDirection)
+    {
+        if (arc == nullptr || arc->radious <= 0.0)
+        {
+            return QVector3D();
+        }
+
+        const QVector3D normal = resolveNormal(arc->extPoint);
+        QVector3D axisX;
+        QVector3D axisY;
+        buildPlaneBasis(normal, axisX, axisY);
+
+        QVector3D tangent
+        (
+            axisX * static_cast<float>(-std::sin(angle))
+            + axisY * static_cast<float>(std::cos(angle))
+        );
+
+        if (reverseDirection)
+        {
+            tangent = -tangent;
+        }
+
+        return normalizeOrZero(tangent);
+    }
+
     QVector3D ellipsePointAt(const DRW_Ellipse* ellipse, double parameter)
     {
         if (ellipse == nullptr)
@@ -222,23 +369,6 @@ namespace
         (
             static_cast<float>(-std::sin(parameter)) * majorAxis
             + static_cast<float>(std::cos(parameter)) * minorAxis
-        );
-
-        if (reverseDirection)
-        {
-            tangent = -tangent;
-        }
-
-        return normalizeOrZero(tangent);
-    }
-
-    QVector3D arcTangentAt(double angle, bool reverseDirection)
-    {
-        QVector3D tangent
-        (
-            static_cast<float>(-std::sin(angle)),
-            static_cast<float>(std::cos(angle)),
-            0.0f
         );
 
         if (reverseDirection)
@@ -558,38 +688,21 @@ CadProcessVisualInfo buildProcessVisualInfo(const CadItem* item)
     case DRW::ETYPE::ARC:
     {
         const DRW_Arc* arc = static_cast<const DRW_Arc*>(item->m_nativeEntity);
-        const QVector3D center(arc->basePoint.x, arc->basePoint.y, arc->basePoint.z);
-        info.forwardStartPoint = QVector3D
-        (
-            static_cast<float>(center.x() + std::cos(arc->staangle) * arc->radious),
-            static_cast<float>(center.y() + std::sin(arc->staangle) * arc->radious),
-            center.z()
-        );
-        info.forwardEndPoint = QVector3D
-        (
-            static_cast<float>(center.x() + std::cos(arc->endangle) * arc->radious),
-            static_cast<float>(center.y() + std::sin(arc->endangle) * arc->radious),
-            center.z()
-        );
+        info.forwardStartPoint = arcPointAt(arc, arc->staangle);
+        info.forwardEndPoint = arcPointAt(arc, arc->endangle);
         info.labelAnchor = hasGeometryAnchor ? preferredAnchor : (info.forwardStartPoint + info.forwardEndPoint) * 0.5f;
-        info.direction = arcTangentAt(arc->staangle, false);
+        info.direction = arcTangentAt(arc, arc->staangle, false);
         break;
     }
     case DRW::ETYPE::CIRCLE:
     {
         const DRW_Circle* circle = static_cast<const DRW_Circle*>(item->m_nativeEntity);
         const double startParameter = effectiveCircleStartParameter(item);
-        const QVector3D center(circle->basePoint.x, circle->basePoint.y, circle->basePoint.z);
         info.closedPath = true;
-        info.forwardStartPoint = QVector3D
-        (
-            static_cast<float>(center.x() + std::cos(startParameter) * circle->radious),
-            static_cast<float>(center.y() + std::sin(startParameter) * circle->radious),
-            center.z()
-        );
+        info.forwardStartPoint = circlePointAt(circle, startParameter);
         info.forwardEndPoint = info.forwardStartPoint;
-        info.labelAnchor = center;
-        info.direction = arcTangentAt(startParameter, false);
+        info.labelAnchor = QVector3D(circle->basePoint.x, circle->basePoint.y, circle->basePoint.z);
+        info.direction = circleTangentAt(circle, startParameter, false);
         break;
     }
     case DRW::ETYPE::ELLIPSE:
@@ -688,11 +801,11 @@ CadProcessVisualInfo buildProcessVisualInfo(const CadItem* item)
         case DRW::ETYPE::ARC:
         {
             const DRW_Arc* arc = static_cast<const DRW_Arc*>(item->m_nativeEntity);
-            info.direction = arcTangentAt(arc->endangle, true);
+            info.direction = arcTangentAt(arc, arc->endangle, true);
             break;
         }
         case DRW::ETYPE::CIRCLE:
-            info.direction = arcTangentAt(effectiveCircleStartParameter(item), true);
+            info.direction = circleTangentAt(static_cast<const DRW_Circle*>(item->m_nativeEntity), effectiveCircleStartParameter(item), true);
             break;
         case DRW::ETYPE::ELLIPSE:
         {

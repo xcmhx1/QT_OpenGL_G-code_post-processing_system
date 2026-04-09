@@ -1,4 +1,4 @@
-// 实现 CadCommandLineWidget 模块，对应头文件中声明的主要行为和协作流程。
+﻿// 实现 CadCommandLineWidget 模块，对应头文件中声明的主要行为和协作流程。
 // 命令栏模块，负责命令提示、最新消息和历史记录的界面展示。
 #include "pch.h"
 

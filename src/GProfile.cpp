@@ -13,9 +13,17 @@ namespace
     constexpr const char* kEntityTypeCodesKey = "entityTypeCodes";
     constexpr const char* kLayerCodesKey = "layerCodes";
     constexpr const char* kEntityColorCodesKey = "entityColorCodes";
+    constexpr const char* kRotaryAxisConfigKey = "rotaryAxisConfig";
     constexpr const char* kHeaderKey = "header";
     constexpr const char* kFooterKey = "footer";
     constexpr const char* kCommentKey = "comment";
+    constexpr const char* kCenterYKey = "centerY";
+    constexpr const char* kCenterZKey = "centerZ";
+    constexpr const char* kAAxisOffsetDegreesKey = "aAxisOffsetDegrees";
+    constexpr const char* kSafeZKey = "safeZ";
+    constexpr const char* kInvertAAxisDirectionKey = "invertAAxisDirection";
+    constexpr const char* kKeepContinuousAngleKey = "keepContinuousAngle";
+    constexpr const char* kUseSafeZBeforeRapidKey = "useSafeZBeforeRapid";
 }
 
 QJsonObject GProfileCodeBlock::toJson() const
@@ -34,6 +42,32 @@ GProfileCodeBlock GProfileCodeBlock::fromJson(const QJsonObject& object)
     codeBlock.footer = object.value(kFooterKey).toString();
     codeBlock.comment = object.value(kCommentKey).toString();
     return codeBlock;
+}
+
+QJsonObject GProfileRotaryAxisConfig::toJson() const
+{
+    QJsonObject object;
+    object.insert(kCenterYKey, centerY);
+    object.insert(kCenterZKey, centerZ);
+    object.insert(kAAxisOffsetDegreesKey, aAxisOffsetDegrees);
+    object.insert(kSafeZKey, safeZ);
+    object.insert(kInvertAAxisDirectionKey, invertAAxisDirection);
+    object.insert(kKeepContinuousAngleKey, keepContinuousAngle);
+    object.insert(kUseSafeZBeforeRapidKey, useSafeZBeforeRapid);
+    return object;
+}
+
+GProfileRotaryAxisConfig GProfileRotaryAxisConfig::fromJson(const QJsonObject& object)
+{
+    GProfileRotaryAxisConfig config;
+    config.centerY = object.value(kCenterYKey).toDouble(config.centerY);
+    config.centerZ = object.value(kCenterZKey).toDouble(config.centerZ);
+    config.aAxisOffsetDegrees = object.value(kAAxisOffsetDegreesKey).toDouble(config.aAxisOffsetDegrees);
+    config.safeZ = object.value(kSafeZKey).toDouble(config.safeZ);
+    config.invertAAxisDirection = object.value(kInvertAAxisDirectionKey).toBool(config.invertAAxisDirection);
+    config.keepContinuousAngle = object.value(kKeepContinuousAngleKey).toBool(config.keepContinuousAngle);
+    config.useSafeZBeforeRapid = object.value(kUseSafeZBeforeRapidKey).toBool(config.useSafeZBeforeRapid);
+    return config;
 }
 
 GProfile GProfile::createDefaultLaserProfile()
@@ -142,6 +176,8 @@ GProfile GProfile::loadFromFile(const QString& filePath, QString* errorMessage)
         profile.m_entityColorCodes.insert(normalizeColorKey(it.key()), GProfileCodeBlock::fromJson(it.value().toObject()));
     }
 
+    profile.m_rotaryAxisConfig = GProfileRotaryAxisConfig::fromJson(rootObject.value(kRotaryAxisConfigKey).toObject());
+
     if (errorMessage != nullptr)
     {
         errorMessage->clear();
@@ -182,6 +218,7 @@ bool GProfile::saveToFile(const QString& filePath, QString* errorMessage) const
     }
 
     rootObject.insert(kEntityColorCodesKey, entityColorObject);
+    rootObject.insert(kRotaryAxisConfigKey, m_rotaryAxisConfig.toJson());
 
     QFile file(filePath);
 
@@ -224,6 +261,7 @@ void GProfile::clear()
     m_entityTypeCodes.clear();
     m_layerCodes.clear();
     m_entityColorCodes.clear();
+    m_rotaryAxisConfig = GProfileRotaryAxisConfig();
 }
 
 void GProfile::setProfileName(const QString& profileName)
@@ -360,6 +398,16 @@ void GProfile::removeEntityColorCode(const QColor& color)
 const QMap<QString, GProfileCodeBlock>& GProfile::entityColorCodes() const
 {
     return m_entityColorCodes;
+}
+
+void GProfile::setRotaryAxisConfig(const GProfileRotaryAxisConfig& config)
+{
+    m_rotaryAxisConfig = config;
+}
+
+const GProfileRotaryAxisConfig& GProfile::rotaryAxisConfig() const
+{
+    return m_rotaryAxisConfig;
 }
 
 QString GProfile::normalizeEntityTypeKey(const QString& entityType)

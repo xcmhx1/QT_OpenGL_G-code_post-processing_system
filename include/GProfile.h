@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include <QColor>
 #include <QJsonObject>
@@ -13,6 +13,20 @@ struct GProfileCodeBlock
 
     QJsonObject toJson() const;
     static GProfileCodeBlock fromJson(const QJsonObject& object);
+};
+
+struct GProfileRotaryAxisConfig
+{
+    double centerY = 0.0;
+    double centerZ = 0.0;
+    double aAxisOffsetDegrees = 0.0;
+    double safeZ = 50.0;
+    bool invertAAxisDirection = false;
+    bool keepContinuousAngle = true;
+    bool useSafeZBeforeRapid = true;
+
+    QJsonObject toJson() const;
+    static GProfileRotaryAxisConfig fromJson(const QJsonObject& object);
 };
 
 class GProfile
@@ -55,6 +69,9 @@ public:
     void removeEntityColorCode(const QColor& color);
     const QMap<QString, GProfileCodeBlock>& entityColorCodes() const;
 
+    void setRotaryAxisConfig(const GProfileRotaryAxisConfig& config);
+    const GProfileRotaryAxisConfig& rotaryAxisConfig() const;
+
     static QString normalizeEntityTypeKey(const QString& entityType);
     static QString normalizeLayerKey(const QString& layerName);
     static QString normalizeColorKey(const QString& colorKey);
@@ -67,4 +84,5 @@ private:
     QMap<QString, GProfileCodeBlock> m_entityTypeCodes;
     QMap<QString, GProfileCodeBlock> m_layerCodes;
     QMap<QString, GProfileCodeBlock> m_entityColorCodes;
+    GProfileRotaryAxisConfig m_rotaryAxisConfig;
 };

@@ -35,6 +35,8 @@ namespace
         return QString::number(value, 'f', 5);
     }
 
+    QVector<QVector3D> buildEllipsePolyline(const CadEllipseItem* item);
+
     void writeTextBlock(QTextStream& stream, const QString& text)
     {
         if (text.trimmed().isEmpty())
@@ -697,6 +699,7 @@ namespace
             return false;
         }
     }
+
 }
 
 GGenerator::GGenerator()
@@ -767,16 +770,6 @@ bool GGenerator::generate(QWidget* parent, QString* errorMessage) const
 
 bool GGenerator::generateToFile(const QString& filePath, QString* errorMessage) const
 {
-    if (m_generationMode != GenerationMode::Mode2D)
-    {
-        if (errorMessage != nullptr)
-        {
-            *errorMessage = QStringLiteral("当前仅实现纯 2D G 代码生成。");
-        }
-
-        return false;
-    }
-
     if (m_document == nullptr)
     {
         if (errorMessage != nullptr)
@@ -792,6 +785,16 @@ bool GGenerator::generateToFile(const QString& filePath, QString* errorMessage) 
         if (errorMessage != nullptr)
         {
             *errorMessage = QStringLiteral("未设置 GProfile，无法生成 G 代码。");
+        }
+
+        return false;
+    }
+
+    if (m_generationMode == GenerationMode::Mode3D)
+    {
+        if (errorMessage != nullptr)
+        {
+            *errorMessage = QStringLiteral("当前 3D 刀路 G 代码生成链路已清理，等待按新的工艺模型重写。");
         }
 
         return false;
@@ -834,7 +837,9 @@ bool GGenerator::generateToFile(const QString& filePath, QString* errorMessage) 
         QTextStream geometryStream(&geometryText);
         geometryStream.setEncoding(QStringConverter::Utf8);
 
-        if (!writeItemGeometry(geometryStream, item))
+        const bool geometryWritten = writeItemGeometry(geometryStream, item);
+
+        if (!geometryWritten)
         {
             continue;
         }

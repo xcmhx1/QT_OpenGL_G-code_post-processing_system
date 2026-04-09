@@ -37,6 +37,10 @@ namespace
     constexpr double kNextDistanceWeight = 0.15;
     constexpr double kDirectionPenaltyWeight = 0.35;
     constexpr double kBacktrackPenaltyWeight = 1.2;
+    constexpr double kRotaryAngleDistanceWeight = 0.08;
+    constexpr double kRotaryNextDistanceWeight = 0.12;
+    constexpr double kRotaryBacktrackPenaltyWeight = 1.35;
+    constexpr double kRotaryDirectionPenaltyWeight = 0.2;
     const QVector3D kSortOrigin(0.0f, 0.0f, 0.0f);
 
     enum class SortStrategy
@@ -67,6 +71,14 @@ namespace
         QVector3D startTangent;
         QVector3D endTangent;
     };
+
+    struct RotarySortPoint
+    {
+        double axis = 0.0;
+        double angleDegrees = 0.0;
+    };
+
+    std::vector<ProcessPathOption> buildPathOptionsForItem(const CadItem* item, SortStrategy strategy);
 
     QColor colorFromAci(int colorIndex)
     {
@@ -196,6 +208,90 @@ namespace
         const double dx = static_cast<double>(left.x()) - static_cast<double>(right.x());
         const double dy = static_cast<double>(left.y()) - static_cast<double>(right.y());
         return dx * dx + dy * dy;
+    }
+
+    bool documentContainsThreeDimensionalGeometry(const CadDocument& document)
+    {
+        constexpr float kThreeDimensionalTolerance = 1.0e-5f;
+
+        for (const std::unique_ptr<CadItem>& entity : document.m_entities)
+        {
+            if (entity == nullptr)
+            {
+                continue;
+            }
+
+            for (const QVector3D& vertex : entity->m_geometry.vertices)
+            {
+                if (std::abs(vertex.z()) > kThreeDimensionalTolerance)
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    double unwrapAngleDegrees(double referenceDegrees, double wrappedDegrees)
+    {
+        return referenceDegrees + std::remainder(wrappedDegrees - referenceDegrees, 360.0);
+    }
+
+    bool tryBuildRotarySortPoint(const QVector3D& point, const GProfileRotaryAxisConfig& config, RotarySortPoint& rotaryPoint)
+    {
+        const double relativeY = static_cast<double>(point.y()) - config.centerY;
+        const double relativeZ = static_cast<double>(point.z()) - config.centerZ;
+
+        if (std::hypot(relativeY, relativeZ) <= kSortEpsilon)
+        {
+            return false;
+        }
+
+        double angleDegrees = std::atan2(relativeZ, relativeY) * 180.0 / kPi;
+
+        if (config.invertAAxisDirection)
+        {
+            angleDegrees = -angleDegrees;
+        }
+
+        rotaryPoint.axis = static_cast<double>(point.x());
+        rotaryPoint.angleDegrees = angleDegrees + config.aAxisOffsetDegrees;
+        return true;
+    }
+
+    double rotarySortTravelDistance
+    (
+        const QVector3D& fromPoint,
+        const QVector3D& toPoint,
+        const GProfileRotaryAxisConfig& config,
+        double* resolvedToAngleDegrees = nullptr
+    )
+    {
+        const double dx = static_cast<double>(toPoint.x()) - static_cast<double>(fromPoint.x());
+        const double spatialDistance = static_cast<double>((toPoint - fromPoint).length());
+        RotarySortPoint fromRotaryPoint;
+        RotarySortPoint toRotaryPoint;
+
+        if (!tryBuildRotarySortPoint(fromPoint, config, fromRotaryPoint) || !tryBuildRotarySortPoint(toPoint, config, toRotaryPoint))
+        {
+            if (resolvedToAngleDegrees != nullptr)
+            {
+                *resolvedToAngleDegrees = 0.0;
+            }
+
+            return spatialDistance;
+        }
+
+        const double resolvedToAngle = unwrapAngleDegrees(fromRotaryPoint.angleDegrees, toRotaryPoint.angleDegrees);
+        const double angleDistance = std::abs(resolvedToAngle - fromRotaryPoint.angleDegrees);
+
+        if (resolvedToAngleDegrees != nullptr)
+        {
+            *resolvedToAngleDegrees = resolvedToAngle;
+        }
+
+        return std::abs(dx) + spatialDistance + angleDistance * kRotaryAngleDistanceWeight;
     }
 
     QVector3D normalizeOrZero(QVector3D vector)
@@ -355,6 +451,153 @@ namespace
         return true;
     }
 
+    QVector3D resolveNormal(const DRW_Coord& extPoint)
+    {
+        QVector3D normal(extPoint.x, extPoint.y, extPoint.z);
+
+        if (normal.lengthSquared() <= kSortEpsilon)
+        {
+            return QVector3D(0.0f, 0.0f, 1.0f);
+        }
+
+        normal.normalize();
+        return normal;
+    }
+
+    void buildPlaneBasis(const QVector3D& normal, QVector3D& axisX, QVector3D& axisY)
+    {
+        if (std::abs(normal.x()) <= 1.0e-6f && std::abs(normal.y()) <= 1.0e-6f)
+        {
+            axisX = QVector3D(1.0f, 0.0f, 0.0f);
+            axisY = QVector3D::crossProduct(normal, axisX);
+
+            if (axisY.lengthSquared() <= kSortEpsilon)
+            {
+                axisY = QVector3D(0.0f, 1.0f, 0.0f);
+            }
+            else
+            {
+                axisY.normalize();
+            }
+
+            return;
+        }
+
+        const QVector3D helper = std::abs(normal.z()) < 0.999f
+            ? QVector3D(0.0f, 0.0f, 1.0f)
+            : QVector3D(0.0f, 1.0f, 0.0f);
+
+        axisX = QVector3D::crossProduct(helper, normal);
+
+        if (axisX.lengthSquared() <= kSortEpsilon)
+        {
+            axisX = QVector3D(1.0f, 0.0f, 0.0f);
+        }
+        else
+        {
+            axisX.normalize();
+        }
+
+        axisY = QVector3D::crossProduct(normal, axisX);
+
+        if (axisY.lengthSquared() <= kSortEpsilon)
+        {
+            axisY = QVector3D(0.0f, 1.0f, 0.0f);
+        }
+        else
+        {
+            axisY.normalize();
+        }
+    }
+
+    QVector3D arcPointAt(const DRW_Arc* arc, double angle)
+    {
+        if (arc == nullptr || arc->radious <= 0.0)
+        {
+            return QVector3D();
+        }
+
+        const QVector3D center(arc->basePoint.x, arc->basePoint.y, arc->basePoint.z);
+        const QVector3D normal = resolveNormal(arc->extPoint);
+        QVector3D axisX;
+        QVector3D axisY;
+        buildPlaneBasis(normal, axisX, axisY);
+
+        return center
+            + axisX * static_cast<float>(std::cos(angle) * arc->radious)
+            + axisY * static_cast<float>(std::sin(angle) * arc->radious);
+    }
+
+    QVector3D arcTangentAt(const DRW_Arc* arc, double angle, bool reverseDirection)
+    {
+        if (arc == nullptr || arc->radious <= 0.0)
+        {
+            return QVector3D();
+        }
+
+        const QVector3D normal = resolveNormal(arc->extPoint);
+        QVector3D axisX;
+        QVector3D axisY;
+        buildPlaneBasis(normal, axisX, axisY);
+
+        QVector3D tangent
+        (
+            axisX * static_cast<float>(-std::sin(angle))
+            + axisY * static_cast<float>(std::cos(angle))
+        );
+
+        if (reverseDirection)
+        {
+            tangent = -tangent;
+        }
+
+        return normalizeOrZero(tangent);
+    }
+
+    QVector3D circlePointAt(const DRW_Circle* circle, double parameter)
+    {
+        if (circle == nullptr || circle->radious <= 0.0)
+        {
+            return QVector3D();
+        }
+
+        const QVector3D center(circle->basePoint.x, circle->basePoint.y, circle->basePoint.z);
+        const QVector3D normal = resolveNormal(circle->extPoint);
+        QVector3D axisX;
+        QVector3D axisY;
+        buildPlaneBasis(normal, axisX, axisY);
+
+        return center
+            + axisX * static_cast<float>(std::cos(parameter) * circle->radious)
+            + axisY * static_cast<float>(std::sin(parameter) * circle->radious);
+    }
+
+    QVector3D circleTangentAt(const DRW_Circle* circle, double parameter, bool reverseDirection)
+    {
+        if (circle == nullptr || circle->radious <= 0.0)
+        {
+            return QVector3D();
+        }
+
+        const QVector3D normal = resolveNormal(circle->extPoint);
+        QVector3D axisX;
+        QVector3D axisY;
+        buildPlaneBasis(normal, axisX, axisY);
+
+        QVector3D tangent
+        (
+            axisX * static_cast<float>(-std::sin(parameter))
+            + axisY * static_cast<float>(std::cos(parameter))
+        );
+
+        if (reverseDirection)
+        {
+            tangent = -tangent;
+        }
+
+        return normalizeOrZero(tangent);
+    }
+
     QVector3D ellipsePointAt(const DRW_Ellipse* ellipse, double parameter)
     {
         if (ellipse == nullptr)
@@ -390,23 +633,6 @@ namespace
         (
             static_cast<float>(-std::sin(parameter)) * majorAxis
             + static_cast<float>(std::cos(parameter)) * minorAxis
-        );
-
-        if (reverseDirection)
-        {
-            tangent = -tangent;
-        }
-
-        return normalizeOrZero(tangent);
-    }
-
-    QVector3D arcTangentAt(double angle, bool reverseDirection)
-    {
-        QVector3D tangent
-        (
-            static_cast<float>(-std::sin(angle)),
-            static_cast<float>(std::cos(angle)),
-            0.0f
         );
 
         if (reverseDirection)
@@ -703,6 +929,64 @@ namespace
             : normalizeOrZero(QVector3D(1.0f, 1.0f, 0.0f));
     }
 
+    QVector3D computeRotarySweepDirection(const std::vector<CadItem*>& sortableItems, const GProfileRotaryAxisConfig& config)
+    {
+        bool hasBounds = false;
+        double minAxis = 0.0;
+        double maxAxis = 0.0;
+        double minAngle = 0.0;
+        double maxAngle = 0.0;
+        double referenceAngle = 0.0;
+
+        for (CadItem* item : sortableItems)
+        {
+            const std::vector<ProcessPathOption> options = buildPathOptionsForItem(item, SortStrategy::KeepDirection);
+
+            if (options.empty())
+            {
+                continue;
+            }
+
+            RotarySortPoint rotaryPoint;
+
+            if (!tryBuildRotarySortPoint(options.front().startPoint, config, rotaryPoint))
+            {
+                continue;
+            }
+
+            if (!hasBounds)
+            {
+                minAxis = maxAxis = rotaryPoint.axis;
+                minAngle = maxAngle = rotaryPoint.angleDegrees;
+                referenceAngle = rotaryPoint.angleDegrees;
+                hasBounds = true;
+                continue;
+            }
+
+            const double resolvedAngle = unwrapAngleDegrees(referenceAngle, rotaryPoint.angleDegrees);
+            minAxis = std::min(minAxis, rotaryPoint.axis);
+            maxAxis = std::max(maxAxis, rotaryPoint.axis);
+            minAngle = std::min(minAngle, resolvedAngle);
+            maxAngle = std::max(maxAngle, resolvedAngle);
+        }
+
+        if (!hasBounds)
+        {
+            return normalizeOrZero(QVector3D(1.0f, 1.0f, 0.0f));
+        }
+
+        const QVector3D diagonal
+        (
+            static_cast<float>(maxAxis - minAxis),
+            static_cast<float>(maxAngle - minAngle),
+            0.0f
+        );
+        const QVector3D normalized = normalizeOrZero(diagonal);
+        return normalized.lengthSquared() > kSortEpsilon
+            ? normalized
+            : normalizeOrZero(QVector3D(1.0f, 1.0f, 0.0f));
+    }
+
     double movementContinuityPenalty(const QVector3D& moveVector, const QVector3D& tangentVector)
     {
         const QVector3D normalizedMove = normalizeOrZero(moveVector);
@@ -715,6 +999,39 @@ namespace
 
         const double alignment = std::clamp(static_cast<double>(QVector3D::dotProduct(normalizedMove, normalizedTangent)), -1.0, 1.0);
         return 1.0 - alignment;
+    }
+
+    double rotaryMovementContinuityPenalty
+    (
+        const QVector3D& fromPoint,
+        const QVector3D& toPoint,
+        const QVector3D& tangentVector,
+        const GProfileRotaryAxisConfig& config
+    )
+    {
+        RotarySortPoint fromRotaryPoint;
+        RotarySortPoint toRotaryPoint;
+
+        if (!tryBuildRotarySortPoint(fromPoint, config, fromRotaryPoint) || !tryBuildRotarySortPoint(toPoint, config, toRotaryPoint))
+        {
+            return movementContinuityPenalty(toPoint - fromPoint, tangentVector);
+        }
+
+        const double resolvedToAngle = unwrapAngleDegrees(fromRotaryPoint.angleDegrees, toRotaryPoint.angleDegrees);
+        QVector3D movementVector
+        (
+            static_cast<float>(toPoint.x() - fromPoint.x()),
+            static_cast<float>(resolvedToAngle - fromRotaryPoint.angleDegrees),
+            0.0f
+        );
+        QVector3D tangentRotary
+        (
+            tangentVector.x(),
+            tangentVector.y() * static_cast<float>(kRotaryAngleDistanceWeight),
+            0.0f
+        );
+
+        return movementContinuityPenalty(movementVector, tangentRotary);
     }
 
     std::vector<ProcessPathOption> buildPathOptionsForItem(const CadItem* item, SortStrategy strategy)
@@ -754,17 +1071,6 @@ namespace
         case DRW::ETYPE::ARC:
         {
             const DRW_Arc* arc = static_cast<const DRW_Arc*>(item->m_nativeEntity);
-            const QVector3D center(arc->basePoint.x, arc->basePoint.y, arc->basePoint.z);
-            const auto pointAtAngle =
-                [&center, arc](double angle)
-                {
-                    return QVector3D
-                    (
-                        static_cast<float>(center.x() + std::cos(angle) * arc->radious),
-                        static_cast<float>(center.y() + std::sin(angle) * arc->radious),
-                        center.z()
-                    );
-                };
             const std::initializer_list<bool> reverseOptions = strategy == SortStrategy::Smart
                 ? std::initializer_list<bool>{ false, true }
                 : std::initializer_list<bool>{ item->m_isReverse };
@@ -773,10 +1079,10 @@ namespace
             {
                 ProcessPathOption option;
                 option.reverse = reverse;
-                option.startPoint = reverse ? pointAtAngle(arc->endangle) : pointAtAngle(arc->staangle);
-                option.endPoint = reverse ? pointAtAngle(arc->staangle) : pointAtAngle(arc->endangle);
-                option.startTangent = reverse ? arcTangentAt(arc->endangle, true) : arcTangentAt(arc->staangle, false);
-                option.endTangent = reverse ? arcTangentAt(arc->staangle, true) : arcTangentAt(arc->endangle, false);
+                option.startPoint = reverse ? arcPointAt(arc, arc->endangle) : arcPointAt(arc, arc->staangle);
+                option.endPoint = reverse ? arcPointAt(arc, arc->staangle) : arcPointAt(arc, arc->endangle);
+                option.startTangent = reverse ? arcTangentAt(arc, arc->endangle, true) : arcTangentAt(arc, arc->staangle, false);
+                option.endTangent = reverse ? arcTangentAt(arc, arc->staangle, true) : arcTangentAt(arc, arc->endangle, false);
                 options.push_back(option);
             }
 
@@ -785,7 +1091,6 @@ namespace
         case DRW::ETYPE::CIRCLE:
         {
             const DRW_Circle* circle = static_cast<const DRW_Circle*>(item->m_nativeEntity);
-            const QVector3D center(circle->basePoint.x, circle->basePoint.y, circle->basePoint.z);
             const std::initializer_list<bool> reverseOptions = strategy == SortStrategy::Smart
                 ? std::initializer_list<bool>{ false, true }
                 : std::initializer_list<bool>{ item->m_isReverse };
@@ -799,14 +1104,9 @@ namespace
                 option.reverse = reverse;
                 option.hasCustomStart = false;
                 option.processStartParameter = startParameter;
-                option.startPoint = QVector3D
-                (
-                    static_cast<float>(center.x() + std::cos(startParameter) * circle->radious),
-                    static_cast<float>(center.y() + std::sin(startParameter) * circle->radious),
-                    center.z()
-                );
+                option.startPoint = circlePointAt(circle, startParameter);
                 option.endPoint = option.startPoint;
-                option.startTangent = arcTangentAt(startParameter, reverse);
+                option.startTangent = circleTangentAt(circle, startParameter, reverse);
                 option.endTangent = option.startTangent;
                 options.push_back(option);
             }
@@ -1104,6 +1404,58 @@ namespace
         return true;
     }
 
+    bool tryFindNearestNextStartPoint3D
+    (
+        const std::vector<CadItem*>& sortableItems,
+        const std::vector<bool>& visited,
+        SortStrategy strategy,
+        size_t currentIndex,
+        const QVector3D& currentEndPoint,
+        const GProfileRotaryAxisConfig& config,
+        QVector3D& nextStartPoint
+    )
+    {
+        int bestIndex = -1;
+        double bestDistance = std::numeric_limits<double>::max();
+        QVector3D bestStartPoint;
+
+        for (size_t index = 0; index < sortableItems.size(); ++index)
+        {
+            if (index == currentIndex || visited[index])
+            {
+                continue;
+            }
+
+            const std::vector<ProcessPathOption> options = buildPathOptionsForItem(sortableItems[index], strategy);
+
+            for (const ProcessPathOption& option : options)
+            {
+                const double distance = rotarySortTravelDistance(currentEndPoint, option.startPoint, config);
+                const bool shouldReplace = bestIndex < 0
+                    || distance < bestDistance - kSortEpsilon
+                    || (std::abs(distance - bestDistance) <= kSortEpsilon
+                        && isPointLexicographicallyLess(option.startPoint, bestStartPoint));
+
+                if (!shouldReplace)
+                {
+                    continue;
+                }
+
+                bestIndex = static_cast<int>(index);
+                bestDistance = distance;
+                bestStartPoint = option.startPoint;
+            }
+        }
+
+        if (bestIndex < 0)
+        {
+            return false;
+        }
+
+        nextStartPoint = bestStartPoint;
+        return true;
+    }
+
     SortCandidate chooseNext2DSortCandidate
     (
         const std::vector<CadItem*>& sortableItems,
@@ -1156,6 +1508,94 @@ namespace
                     + nextDistance * kNextDistanceWeight
                     + backtrackDistance * kBacktrackPenaltyWeight
                     + continuityScale * kDirectionPenaltyWeight * continuityPenalty;
+
+                const bool shouldReplace = bestCandidate.index < 0
+                    || optionScore < bestCandidate.score - kSortEpsilon
+                    || (std::abs(optionScore - bestCandidate.score) <= kSortEpsilon
+                        && (entryDistance < bestCandidate.priorityDistance - kSortEpsilon
+                            || (std::abs(entryDistance - bestCandidate.priorityDistance) <= kSortEpsilon
+                                && isPointLexicographicallyLess(option.startPoint, bestCandidate.startPoint))));
+
+                if (!shouldReplace)
+                {
+                    continue;
+                }
+
+                bestCandidate.index = static_cast<int>(index);
+                bestCandidate.reverse = option.reverse;
+                bestCandidate.hasCustomStart = option.hasCustomStart;
+                bestCandidate.processStartParameter = option.processStartParameter;
+                bestCandidate.priorityDistance = entryDistance;
+                bestCandidate.score = optionScore;
+                bestCandidate.startPoint = option.startPoint;
+                bestCandidate.endPoint = option.endPoint;
+            }
+        }
+
+        return bestCandidate;
+    }
+
+    SortCandidate chooseNext3DSortCandidate
+    (
+        const std::vector<CadItem*>& sortableItems,
+        const std::vector<bool>& visited,
+        SortStrategy strategy,
+        bool hasCurrentEndPoint,
+        const QVector3D& currentEndPoint,
+        const QVector3D& sweepDirection,
+        const GProfileRotaryAxisConfig& config
+    )
+    {
+        SortCandidate bestCandidate;
+        const QVector3D referencePoint = hasCurrentEndPoint ? currentEndPoint : kSortOrigin;
+        RotarySortPoint referenceRotaryPoint;
+        const bool hasReferenceRotaryPoint = tryBuildRotarySortPoint(referencePoint, config, referenceRotaryPoint);
+        const QVector3D normalizedSweepDirection = normalizeOrZero(sweepDirection);
+        const double referenceProgress = hasReferenceRotaryPoint
+            ? static_cast<double>(referencePoint.x()) * static_cast<double>(normalizedSweepDirection.x())
+                + referenceRotaryPoint.angleDegrees * static_cast<double>(normalizedSweepDirection.y())
+            : static_cast<double>(referencePoint.x()) * static_cast<double>(normalizedSweepDirection.x());
+
+        for (size_t index = 0; index < sortableItems.size(); ++index)
+        {
+            if (visited[index])
+            {
+                continue;
+            }
+
+            const std::vector<ProcessPathOption> options = buildPathOptionsForItem(sortableItems[index], strategy);
+
+            for (const ProcessPathOption& option : options)
+            {
+                double resolvedCandidateAngle = 0.0;
+                const double entryDistance = rotarySortTravelDistance(referencePoint, option.startPoint, config, &resolvedCandidateAngle);
+                QVector3D nextStartPoint;
+                const bool hasNextStartPoint = tryFindNearestNextStartPoint3D
+                (
+                    sortableItems,
+                    visited,
+                    strategy,
+                    index,
+                    option.endPoint,
+                    config,
+                    nextStartPoint
+                );
+                const double nextDistance = hasNextStartPoint
+                    ? rotarySortTravelDistance(option.endPoint, nextStartPoint, config)
+                    : 0.0;
+                const double candidateProgress = static_cast<double>(option.startPoint.x()) * static_cast<double>(normalizedSweepDirection.x())
+                    + resolvedCandidateAngle * static_cast<double>(normalizedSweepDirection.y());
+                const double backtrackDistance = hasCurrentEndPoint && normalizedSweepDirection.lengthSquared() > kSortEpsilon
+                    ? std::max(0.0, referenceProgress - candidateProgress)
+                    : 0.0;
+                const double continuityPenalty =
+                    rotaryMovementContinuityPenalty(referencePoint, option.startPoint, option.startTangent, config)
+                    + (hasNextStartPoint ? rotaryMovementContinuityPenalty(option.endPoint, nextStartPoint, option.endTangent, config) : 0.0);
+                const double continuityScale = std::max(1.0, 0.5 * (entryDistance + nextDistance));
+                const double optionScore = entryDistance
+                    + nextDistance * kRotaryNextDistanceWeight
+                    + backtrackDistance * kRotaryBacktrackPenaltyWeight
+                    + continuityScale * kRotaryDirectionPenaltyWeight * continuityPenalty;
 
                 const bool shouldReplace = bestCandidate.index < 0
                     || optionScore < bestCandidate.score - kSortEpsilon
@@ -1288,6 +1728,7 @@ Gcode_postprocessing_system::Gcode_postprocessing_system(QWidget* parent)
     connect(ui->action_Sort_3D_Assign, &QAction::triggered, this, [this]() { sortEntitiesByCurrentDirection3D(); });
     connect(ui->action_Sort_3D_Smart, &QAction::triggered, this, [this]() { smartSortEntities3D(); });
 
+    m_generationPreference = loadGenerationPreference();
     initializeThemeMenu();
     initializeToolPanel();
     applyDefaultDrawingProperties();
@@ -1410,6 +1851,7 @@ bool Gcode_postprocessing_system::exportGCode()
     GGenerator generator;
     generator.setDocument(&m_document);
     generator.setProfile(&m_activeProfile);
+    generator.setGenerationMode(resolveGenerationMode());
 
     QString errorMessage;
 
@@ -1423,9 +1865,20 @@ bool Gcode_postprocessing_system::exportGCode()
         return false;
     }
 
-    ui->openGLWidget->appendCommandMessage(QStringLiteral("G 代码导出完成。"));
+    ui->openGLWidget->appendCommandMessage
+    (
+        generator.generationMode() == GGenerator::GenerationMode::Mode3D
+            ? QStringLiteral("已检测到真实 3D 路径，G 代码已按 A 轴绕 X 轴模式导出。")
+            : QStringLiteral("G 代码导出完成。")
+    );
     ui->openGLWidget->refreshCommandPrompt();
-    statusBar()->showMessage(QStringLiteral("G 代码导出完成"), 5000);
+    statusBar()->showMessage
+    (
+        generator.generationMode() == GGenerator::GenerationMode::Mode3D
+            ? QStringLiteral("3D G 代码导出完成")
+            : QStringLiteral("G 代码导出完成"),
+        5000
+    );
     return true;
 }
 
@@ -1663,30 +2116,258 @@ bool Gcode_postprocessing_system::smartSortEntities()
 
 bool Gcode_postprocessing_system::sortEntitiesByCurrentDirection3D()
 {
-    QMessageBox::information
+    if (m_document.m_entities.empty())
+    {
+        QMessageBox::warning(this, QStringLiteral("3D排序"), QStringLiteral("当前文档为空，无法执行排序。"));
+        return false;
+    }
+
+    if (!documentContainsThreeDimensionalGeometry(m_document))
+    {
+        QMessageBox::warning(this, QStringLiteral("3D排序"), QStringLiteral("当前文档未检测到真实 3D 路径，3D 排序仅适用于导入后的三维图元。"));
+        return false;
+    }
+
+    std::vector<CadItem*> sortableItems;
+
+    for (const std::unique_ptr<CadItem>& entity : m_document.m_entities)
+    {
+        if (entity == nullptr)
+        {
+            continue;
+        }
+
+        const CadProcessVisualInfo info = buildProcessVisualInfo(entity.get());
+
+        if (!info.valid)
+        {
+            continue;
+        }
+
+        sortableItems.push_back(entity.get());
+    }
+
+    if (sortableItems.empty())
+    {
+        QMessageBox::warning(this, QStringLiteral("3D排序"), QStringLiteral("当前文档中没有可参与 3D G 代码排序的图元。"));
+        return false;
+    }
+
+    const GProfileRotaryAxisConfig& rotaryAxisConfig = m_activeProfile.rotaryAxisConfig();
+    const QVector3D sweepDirection = computeRotarySweepDirection(sortableItems, rotaryAxisConfig);
+    std::vector<CadEditer::ProcessStateUpdate> processUpdates;
+    std::vector<bool> visited(sortableItems.size(), false);
+
+    processUpdates.reserve(sortableItems.size());
+
+    bool hasCurrentEndPoint = false;
+    QVector3D currentEndPoint;
+
+    for (size_t order = 0; order < sortableItems.size(); ++order)
+    {
+        const SortCandidate bestCandidate = chooseNext3DSortCandidate
+        (
+            sortableItems,
+            visited,
+            SortStrategy::KeepDirection,
+            hasCurrentEndPoint,
+            currentEndPoint,
+            sweepDirection,
+            rotaryAxisConfig
+        );
+
+        if (bestCandidate.index < 0)
+        {
+            QMessageBox::warning(this, QStringLiteral("3D排序"), QStringLiteral("3D 排序过程中出现无效图元，排序已中止。"));
+            return false;
+        }
+
+        visited[static_cast<size_t>(bestCandidate.index)] = true;
+        processUpdates.push_back
+        ({
+            sortableItems[static_cast<size_t>(bestCandidate.index)],
+            static_cast<int>(order),
+            sortableItems[static_cast<size_t>(bestCandidate.index)]->m_isReverse,
+            sortableItems[static_cast<size_t>(bestCandidate.index)]->m_hasCustomProcessStart,
+            sortableItems[static_cast<size_t>(bestCandidate.index)]->m_processStartParameter
+        });
+        hasCurrentEndPoint = true;
+        currentEndPoint = bestCandidate.endPoint;
+    }
+
+    if (!m_editer.applyEntityProcessStates(processUpdates))
+    {
+        QMessageBox::warning(this, QStringLiteral("3D排序"), QStringLiteral("3D 排序结果写入失败。"));
+        return false;
+    }
+
+    ui->openGLWidget->appendCommandMessage
     (
-        this,
-        QStringLiteral("3D排序"),
-        QStringLiteral("3D 排序入口已分类预留，当前版本仅完善了纯 2D 排序逻辑，3D 排序（保留方向）暂未实现。")
+        QStringLiteral("3D排序完成，共更新 %1 个图元的加工顺序，排序已按 X 与 A 轴联动连续性重新整理。").arg(processUpdates.size())
     );
-    return false;
+    ui->openGLWidget->refreshCommandPrompt();
+    statusBar()->showMessage(QStringLiteral("3D排序完成，共更新 %1 个图元").arg(processUpdates.size()), 5000);
+    return true;
 }
 
 bool Gcode_postprocessing_system::smartSortEntities3D()
 {
-    QMessageBox::information
+    if (m_document.m_entities.empty())
+    {
+        QMessageBox::warning(this, QStringLiteral("3D智能排序"), QStringLiteral("当前文档为空，无法执行智能排序。"));
+        return false;
+    }
+
+    if (!documentContainsThreeDimensionalGeometry(m_document))
+    {
+        QMessageBox::warning(this, QStringLiteral("3D智能排序"), QStringLiteral("当前文档未检测到真实 3D 路径，3D 智能排序仅适用于导入后的三维图元。"));
+        return false;
+    }
+
+    std::vector<CadItem*> sortableItems;
+
+    for (const std::unique_ptr<CadItem>& entity : m_document.m_entities)
+    {
+        if (entity == nullptr)
+        {
+            continue;
+        }
+
+        const CadProcessVisualInfo info = buildProcessVisualInfo(entity.get());
+
+        if (!info.valid)
+        {
+            continue;
+        }
+
+        sortableItems.push_back(entity.get());
+    }
+
+    if (sortableItems.empty())
+    {
+        QMessageBox::warning(this, QStringLiteral("3D智能排序"), QStringLiteral("当前文档中没有可参与 3D G 代码排序的图元。"));
+        return false;
+    }
+
+    const GProfileRotaryAxisConfig& rotaryAxisConfig = m_activeProfile.rotaryAxisConfig();
+    const QVector3D sweepDirection = computeRotarySweepDirection(sortableItems, rotaryAxisConfig);
+    std::vector<CadEditer::ProcessStateUpdate> processUpdates;
+    std::vector<bool> visited(sortableItems.size(), false);
+
+    processUpdates.reserve(sortableItems.size());
+
+    bool hasCurrentEndPoint = false;
+    QVector3D currentEndPoint;
+
+    for (size_t order = 0; order < sortableItems.size(); ++order)
+    {
+        const SortCandidate bestCandidate = chooseNext3DSortCandidate
+        (
+            sortableItems,
+            visited,
+            SortStrategy::Smart,
+            hasCurrentEndPoint,
+            currentEndPoint,
+            sweepDirection,
+            rotaryAxisConfig
+        );
+
+        if (bestCandidate.index < 0)
+        {
+            QMessageBox::warning(this, QStringLiteral("3D智能排序"), QStringLiteral("3D 智能排序过程中出现无效图元，排序已中止。"));
+            return false;
+        }
+
+        visited[static_cast<size_t>(bestCandidate.index)] = true;
+        processUpdates.push_back
+        ({
+            sortableItems[static_cast<size_t>(bestCandidate.index)],
+            static_cast<int>(order),
+            bestCandidate.reverse,
+            bestCandidate.hasCustomStart,
+            bestCandidate.processStartParameter
+        });
+        hasCurrentEndPoint = true;
+        currentEndPoint = bestCandidate.endPoint;
+    }
+
+    if (!m_editer.applyEntityProcessStates(processUpdates))
+    {
+        QMessageBox::warning(this, QStringLiteral("3D智能排序"), QStringLiteral("3D 智能排序结果写入失败。"));
+        return false;
+    }
+
+    ui->openGLWidget->appendCommandMessage
     (
-        this,
-        QStringLiteral("3D智能排序"),
-        QStringLiteral("3D 排序入口已分类预留，当前版本仅完善了纯 2D 智能排序逻辑，3D 智能排序暂未实现。")
+        QStringLiteral("3D智能排序完成，共更新 %1 个图元的加工顺序，并已按 A 轴连续性优化方向与闭合图元缝点。").arg(processUpdates.size())
     );
-    return false;
+    ui->openGLWidget->refreshCommandPrompt();
+    statusBar()->showMessage(QStringLiteral("3D智能排序完成，共更新 %1 个图元").arg(processUpdates.size()), 5000);
+    return true;
 }
 
 void Gcode_postprocessing_system::initializeThemeMenu()
 {
     ui->menuSet->setTitle(QStringLiteral("用户设置"));
 
+    QMenu* generationMenu = ui->menuSet->addMenu(QStringLiteral("G代码模式"));
+    QActionGroup* generationModeActionGroup = new QActionGroup(this);
+    generationModeActionGroup->setExclusive(true);
+
+    m_generationModeAutoAction = generationMenu->addAction(QStringLiteral("自动"));
+    m_generationModeAutoAction->setCheckable(true);
+    generationModeActionGroup->addAction(m_generationModeAutoAction);
+
+    m_generationMode2DAction = generationMenu->addAction(QStringLiteral("强制2D"));
+    m_generationMode2DAction->setCheckable(true);
+    generationModeActionGroup->addAction(m_generationMode2DAction);
+
+    m_generationMode3DAction = generationMenu->addAction(QStringLiteral("强制3D(A轴)"));
+    m_generationMode3DAction->setCheckable(true);
+    generationModeActionGroup->addAction(m_generationMode3DAction);
+
+    m_generationModeAutoAction->setChecked(m_generationPreference == GCodeGenerationPreference::Auto);
+    m_generationMode2DAction->setChecked(m_generationPreference == GCodeGenerationPreference::Force2D);
+    m_generationMode3DAction->setChecked(m_generationPreference == GCodeGenerationPreference::Force3D);
+
+    connect
+    (
+        m_generationModeAutoAction,
+        &QAction::triggered,
+        this,
+        [this]()
+        {
+            m_generationPreference = GCodeGenerationPreference::Auto;
+            saveGenerationPreference(m_generationPreference);
+            statusBar()->showMessage(QStringLiteral("G 代码输出模式已切换为自动"), 3000);
+        }
+    );
+    connect
+    (
+        m_generationMode2DAction,
+        &QAction::triggered,
+        this,
+        [this]()
+        {
+            m_generationPreference = GCodeGenerationPreference::Force2D;
+            saveGenerationPreference(m_generationPreference);
+            statusBar()->showMessage(QStringLiteral("G 代码输出模式已切换为强制2D"), 3000);
+        }
+    );
+    connect
+    (
+        m_generationMode3DAction,
+        &QAction::triggered,
+        this,
+        [this]()
+        {
+            m_generationPreference = GCodeGenerationPreference::Force3D;
+            saveGenerationPreference(m_generationPreference);
+            statusBar()->showMessage(QStringLiteral("G 代码输出模式已切换为强制3D(A轴)"), 3000);
+        }
+    );
+
+    ui->menuSet->addSeparator();
     QMenu* themeMenu = ui->menuSet->addMenu(QStringLiteral("主题"));
     QActionGroup* themeActionGroup = new QActionGroup(this);
     themeActionGroup->setExclusive(true);
@@ -1811,6 +2492,57 @@ void Gcode_postprocessing_system::saveThemeMode(AppThemeMode mode) const
 {
     QSettings settings(QStringLiteral("GCodePostProcessingSystem"), QStringLiteral("GCodePostProcessingSystem"));
     settings.setValue(QStringLiteral("ui/themeMode"), mode == AppThemeMode::Dark ? QStringLiteral("dark") : QStringLiteral("light"));
+}
+
+Gcode_postprocessing_system::GCodeGenerationPreference Gcode_postprocessing_system::loadGenerationPreference() const
+{
+    QSettings settings(QStringLiteral("GCodePostProcessingSystem"), QStringLiteral("GCodePostProcessingSystem"));
+    const QString modeValue = settings.value(QStringLiteral("gcode/outputMode"), QStringLiteral("auto")).toString().trimmed().toLower();
+
+    if (modeValue == QStringLiteral("2d"))
+    {
+        return GCodeGenerationPreference::Force2D;
+    }
+
+    if (modeValue == QStringLiteral("3d"))
+    {
+        return GCodeGenerationPreference::Force3D;
+    }
+
+    return GCodeGenerationPreference::Auto;
+}
+
+void Gcode_postprocessing_system::saveGenerationPreference(GCodeGenerationPreference preference) const
+{
+    QSettings settings(QStringLiteral("GCodePostProcessingSystem"), QStringLiteral("GCodePostProcessingSystem"));
+    QString modeValue = QStringLiteral("auto");
+
+    if (preference == GCodeGenerationPreference::Force2D)
+    {
+        modeValue = QStringLiteral("2d");
+    }
+    else if (preference == GCodeGenerationPreference::Force3D)
+    {
+        modeValue = QStringLiteral("3d");
+    }
+
+    settings.setValue(QStringLiteral("gcode/outputMode"), modeValue);
+}
+
+GGenerator::GenerationMode Gcode_postprocessing_system::resolveGenerationMode() const
+{
+    switch (m_generationPreference)
+    {
+    case GCodeGenerationPreference::Force2D:
+        return GGenerator::GenerationMode::Mode2D;
+    case GCodeGenerationPreference::Force3D:
+        return GGenerator::GenerationMode::Mode3D;
+    case GCodeGenerationPreference::Auto:
+    default:
+        return documentContainsThreeDimensionalGeometry(m_document)
+            ? GGenerator::GenerationMode::Mode3D
+            : GGenerator::GenerationMode::Mode2D;
+    }
 }
 
 void Gcode_postprocessing_system::initializeToolPanel()
