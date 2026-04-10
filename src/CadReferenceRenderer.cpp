@@ -60,7 +60,7 @@ namespace
 void CadReferenceRenderer::setTheme(const AppThemeColors& theme)
 {
     m_majorGridColor = toVector3D(theme.viewerGridColor);
-    m_minorGridColor = blendColor(m_majorGridColor, toVector3D(theme.viewerBackgroundColor), 0.58f);
+    m_minorGridColor = blendColor(m_majorGridColor, toVector3D(theme.viewerBackgroundColor), 0.64f);
 }
 
 // 初始化网格顶点缓冲

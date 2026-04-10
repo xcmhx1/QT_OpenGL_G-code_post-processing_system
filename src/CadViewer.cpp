@@ -1411,8 +1411,8 @@ std::vector<TransientPrimitive> CadViewer::buildProcessDirectionPrimitives() con
 
     const CadItem* selectedItem = selectedEntity();
     const float pixelScale = std::max(pixelToWorldScale(), 1.0e-4f);
-    const float shaftLength = pixelScale * 30.0f;
-    const float wingLength = pixelScale * 12.0f;
+    const float headLength = pixelScale * 9.2f;
+    const float headHalfWidth = pixelScale * 4.4f;
 
     for (const std::unique_ptr<CadItem>& entity : scene->m_entities)
     {
@@ -1435,37 +1435,35 @@ std::vector<TransientPrimitive> CadViewer::buildProcessDirectionPrimitives() con
             continue;
         }
 
-        const QVector3D shaftStart = info.startPoint;
-        const QVector3D shaftEnd = shaftStart + info.direction * shaftLength;
-        const QVector3D wingBase = shaftEnd - info.direction * wingLength;
-        const QVector3D wingOffset = perpendicular * (wingLength * 0.55f);
+        // 按用户要求：箭头尖端直接锚定在加工起始点（不做前向偏移）。
+        const QVector3D tip = info.startPoint;
+        const QVector3D headBase = tip - info.direction * headLength;
 
-        TransientPrimitive primitive;
-        primitive.primitiveType = GL_LINES;
-        primitive.vertices =
-        {
-            shaftStart,
-            shaftEnd,
-            shaftEnd,
-            wingBase + wingOffset,
-            shaftEnd,
-            wingBase - wingOffset
-        };
-
+        QVector3D arrowColor;
         if (entity.get() == selectedItem)
         {
-            primitive.color = QVector3D(1.0f, 0.78f, 0.30f);
+            arrowColor = QVector3D(1.0f, 0.78f, 0.30f);
         }
         else if (info.processOrder >= 0)
         {
-            primitive.color = info.isReverse ? QVector3D(1.0f, 0.42f, 0.28f) : QVector3D(0.12f, 0.92f, 0.72f);
+            arrowColor = info.isReverse ? QVector3D(1.0f, 0.42f, 0.28f) : QVector3D(0.12f, 0.92f, 0.72f);
         }
         else
         {
-            primitive.color = info.isReverse ? QVector3D(0.82f, 0.34f, 0.26f) : QVector3D(0.34f, 0.78f, 0.58f);
+            arrowColor = info.isReverse ? QVector3D(0.82f, 0.34f, 0.26f) : QVector3D(0.34f, 0.78f, 0.58f);
         }
 
-        primitives.push_back(std::move(primitive));
+        // 仅保留小实心三角箭头头
+        TransientPrimitive headPrimitive;
+        headPrimitive.primitiveType = GL_TRIANGLES;
+        headPrimitive.color = arrowColor;
+        headPrimitive.vertices =
+        {
+            tip,
+            headBase + perpendicular * headHalfWidth,
+            headBase - perpendicular * headHalfWidth
+        };
+        primitives.push_back(std::move(headPrimitive));
     }
 
     return primitives;
