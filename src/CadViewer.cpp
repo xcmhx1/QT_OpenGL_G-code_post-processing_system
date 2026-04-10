@@ -433,6 +433,12 @@ CadItem* CadViewer::selectedEntity() const
     return findEntityById(m_selectedEntityId);
 }
 
+void CadViewer::clearSelection()
+{
+    setSelectedEntityId(0);
+    update();
+}
+
 // 追加命令消息
 // @param message 消息内容
 void CadViewer::appendCommandMessage(const QString& message)
@@ -1117,50 +1123,41 @@ QVector3D CadViewer::applySnapToGroundPosition
 
     if (m_basePointSnapEnabled || m_controlPointSnapEnabled)
     {
-        CadDocument* scene = m_sceneCoordinator.document();
+        CadItem* selectedItem = selectedEntity();
 
-        if (scene != nullptr)
+        if (selectedItem != nullptr)
         {
-            for (const std::unique_ptr<CadItem>& entity : scene->m_entities)
+            const QVector<CadSelectionHandleInfo> handles = buildSelectionHandleInfo(selectedItem);
+
+            for (const CadSelectionHandleInfo& handle : handles)
             {
-                if (entity == nullptr)
+                if ((handle.isBasePoint && !m_basePointSnapEnabled)
+                    || (!handle.isBasePoint && !m_controlPointSnapEnabled))
                 {
                     continue;
                 }
 
-                const QVector<CadSelectionHandleInfo> handles = buildSelectionHandleInfo(entity.get());
+                const QPoint handleScreenPos = worldToScreen(handle.position);
+                const float dx = static_cast<float>(handleScreenPos.x() - screenPos.x());
+                const float dy = static_cast<float>(handleScreenPos.y() - screenPos.y());
+                const float distanceSquared = dx * dx + dy * dy;
 
-                for (const CadSelectionHandleInfo& handle : handles)
+                if (distanceSquared > snapDistanceSquared)
                 {
-                    if ((handle.isBasePoint && !m_basePointSnapEnabled)
-                        || (!handle.isBasePoint && !m_controlPointSnapEnabled))
-                    {
-                        continue;
-                    }
+                    continue;
+                }
 
-                    const QPoint handleScreenPos = worldToScreen(handle.position);
-                    const float dx = static_cast<float>(handleScreenPos.x() - screenPos.x());
-                    const float dy = static_cast<float>(handleScreenPos.y() - screenPos.y());
-                    const float distanceSquared = dx * dx + dy * dy;
+                const int priority = handle.isBasePoint ? 0 : 1;
+                const bool sameDistance = std::abs(distanceSquared - bestCandidate.distanceSquared) <= 1.0e-4f;
 
-                    if (distanceSquared > snapDistanceSquared)
-                    {
-                        continue;
-                    }
-
-                    const int priority = handle.isBasePoint ? 0 : 1;
-
-                    const bool sameDistance = std::abs(distanceSquared - bestCandidate.distanceSquared) <= 1.0e-4f;
-
-                    if (!bestCandidate.valid
-                        || distanceSquared < bestCandidate.distanceSquared
-                        || (sameDistance && priority < bestCandidate.priority))
-                    {
-                        bestCandidate.position = handle.position;
-                        bestCandidate.distanceSquared = distanceSquared;
-                        bestCandidate.priority = priority;
-                        bestCandidate.valid = true;
-                    }
+                if (!bestCandidate.valid
+                    || distanceSquared < bestCandidate.distanceSquared
+                    || (sameDistance && priority < bestCandidate.priority))
+                {
+                    bestCandidate.position = handle.position;
+                    bestCandidate.distanceSquared = distanceSquared;
+                    bestCandidate.priority = priority;
+                    bestCandidate.valid = true;
                 }
             }
         }

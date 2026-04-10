@@ -435,10 +435,22 @@ bool CadController::handleKeyPress(QKeyEvent* event)
         }
     }
 
-    // ESC键：取消当前操作
+    // ESC键：优先取消当前命令；无活动命令时清空当前选中
     if (event->key() == Qt::Key_Escape)
     {
-        cancelDrawing();
+        if (m_drawState.hasActiveCommand())
+        {
+            cancelDrawing();
+            return true;
+        }
+
+        if (m_viewer != nullptr && m_viewer->selectedEntity() != nullptr)
+        {
+            m_viewer->clearSelection();
+            m_viewer->appendCommandMessage(QStringLiteral("已取消选中"));
+            m_viewer->refreshCommandPrompt();
+        }
+
         return true;
     }
 

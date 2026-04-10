@@ -161,6 +161,9 @@ public:
     // 获取当前选中的实体
     CadItem* selectedEntity() const;
 
+    // 清空当前选中实体。
+    void clearSelection();
+
     // 追加命令消息
     // @param message 消息内容
     void appendCommandMessage(const QString& message);
