@@ -279,7 +279,16 @@ private:
     void updateHoveredWorldPosition(const QPoint& screenPos);
 
     // 将原始地面平面点按当前吸附配置修正到目标点。
-    QVector3D applySnapToGroundPosition(const QPoint& screenPos, const QVector3D& worldPos) const;
+    QVector3D applySnapToGroundPosition
+    (
+        const QPoint& screenPos,
+        const QVector3D& worldPos,
+        bool* snapped = nullptr,
+        bool* objectSnap = nullptr
+    ) const;
+
+    // 构建当前吸附命中的高亮 overlay 图元。
+    std::vector<TransientPrimitive> buildSnapHighlightPrimitives() const;
 
     // 更新当前选中实体并在变化时发出信号。
     void setSelectedEntityId(EntityId entityId);

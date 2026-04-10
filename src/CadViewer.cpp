@@ -43,6 +43,8 @@ namespace
     constexpr qint64 kSlowFrameThresholdMs = 16;
     // 对象吸附屏幕距离阈值（像素）
     constexpr float kObjectSnapDistancePixels = 14.0f;
+    // 网格吸附屏幕距离阈值（像素）
+    constexpr float kGridSnapDistancePixels = 10.0f;
     // 网格步长，需与参考网格绘制保持一致
     constexpr float kGridSnapStep = 100.0f;
 
@@ -830,8 +832,10 @@ void CadViewer::renderTransientPrimitives(const QMatrix4x4& viewProjection)
 
     std::vector<TransientPrimitive> processPrimitives = buildProcessDirectionPrimitives();
     const std::vector<TransientPrimitive> selectedHandlePrimitives = buildSelectedEntityHandlePrimitives();
+    const std::vector<TransientPrimitive> snapHighlightPrimitives = buildSnapHighlightPrimitives();
     // 构建命令预览图元
     const std::vector<TransientPrimitive> commandPrimitives = buildTransientPrimitives();
+    const QPoint crosshairScreenPos = worldToScreen(resolveInteractiveWorldPosition(m_cursorScreenPos));
     // 构建十字准线图元
     const std::vector<TransientPrimitive> crosshairPrimitives = CadCrosshairBuilder::buildCrosshairPrimitives
     (
@@ -840,7 +844,7 @@ void CadViewer::renderTransientPrimitives(const QMatrix4x4& viewProjection)
         m_viewportHeight,
         width(),
         height(),
-        m_cursorScreenPos,
+        crosshairScreenPos,
         m_showCrosshairOverlay,
         m_viewInteractionController.crosshairSuppressed(),
         m_crosshairPlaneZ,
@@ -850,6 +854,7 @@ void CadViewer::renderTransientPrimitives(const QMatrix4x4& viewProjection)
 
     // 如果没有临时图元，则返回
     processPrimitives.insert(processPrimitives.end(), selectedHandlePrimitives.begin(), selectedHandlePrimitives.end());
+    processPrimitives.insert(processPrimitives.end(), snapHighlightPrimitives.begin(), snapHighlightPrimitives.end());
     processPrimitives.insert(processPrimitives.end(), commandPrimitives.begin(), commandPrimitives.end());
 
     if (processPrimitives.empty() && crosshairPrimitives.empty())
@@ -1027,8 +1032,24 @@ void CadViewer::updateHoveredWorldPosition(const QPoint& screenPos)
     emit hoveredWorldPositionChanged(resolveInteractiveWorldPosition(screenPos));
 }
 
-QVector3D CadViewer::applySnapToGroundPosition(const QPoint& screenPos, const QVector3D& worldPos) const
+QVector3D CadViewer::applySnapToGroundPosition
+(
+    const QPoint& screenPos,
+    const QVector3D& worldPos,
+    bool* snapped,
+    bool* objectSnap
+) const
 {
+    if (snapped != nullptr)
+    {
+        *snapped = false;
+    }
+
+    if (objectSnap != nullptr)
+    {
+        *objectSnap = false;
+    }
+
     struct SnapCandidate
     {
         QVector3D position;
@@ -1093,6 +1114,16 @@ QVector3D CadViewer::applySnapToGroundPosition(const QPoint& screenPos, const QV
 
     if (bestCandidate.valid)
     {
+        if (snapped != nullptr)
+        {
+            *snapped = true;
+        }
+
+        if (objectSnap != nullptr)
+        {
+            *objectSnap = true;
+        }
+
         return QVector3D(bestCandidate.position.x(), bestCandidate.position.y(), 0.0f);
     }
 
@@ -1100,10 +1131,77 @@ QVector3D CadViewer::applySnapToGroundPosition(const QPoint& screenPos, const QV
     {
         const float snappedX = std::round(worldPos.x() / kGridSnapStep) * kGridSnapStep;
         const float snappedY = std::round(worldPos.y() / kGridSnapStep) * kGridSnapStep;
-        return QVector3D(snappedX, snappedY, 0.0f);
+        const QVector3D snappedGridPosition(snappedX, snappedY, 0.0f);
+        const QPoint snappedGridScreenPos = worldToScreen(snappedGridPosition);
+        const float dx = static_cast<float>(snappedGridScreenPos.x() - screenPos.x());
+        const float dy = static_cast<float>(snappedGridScreenPos.y() - screenPos.y());
+        const float distanceSquared = dx * dx + dy * dy;
+        const float gridSnapDistanceSquared = kGridSnapDistancePixels * kGridSnapDistancePixels;
+
+        if (distanceSquared <= gridSnapDistanceSquared)
+        {
+            if (snapped != nullptr)
+            {
+                *snapped = true;
+            }
+
+            return snappedGridPosition;
+        }
     }
 
     return QVector3D(worldPos.x(), worldPos.y(), 0.0f);
+}
+
+std::vector<TransientPrimitive> CadViewer::buildSnapHighlightPrimitives() const
+{
+    if (!m_showCrosshairOverlay)
+    {
+        return {};
+    }
+
+    bool snapped = false;
+    bool objectSnap = false;
+    const QVector3D snappedPosition = applySnapToGroundPosition
+    (
+        m_cursorScreenPos,
+        screenToGroundPlane(m_cursorScreenPos),
+        &snapped,
+        &objectSnap
+    );
+
+    if (!snapped)
+    {
+        return {};
+    }
+
+    const QColor outerColor = objectSnap ? m_theme.selectedControlPointColor : m_theme.accentColor;
+    const QColor innerColor = m_theme.viewerBackgroundColor;
+
+    TransientPrimitive outerPoint;
+    outerPoint.primitiveType = GL_POINTS;
+    outerPoint.color =
+    {
+        static_cast<float>(outerColor.redF()),
+        static_cast<float>(outerColor.greenF()),
+        static_cast<float>(outerColor.blueF())
+    };
+    outerPoint.pointSize = objectSnap ? 15.0f : 13.0f;
+    outerPoint.roundPoint = true;
+    outerPoint.vertices = { snappedPosition };
+
+    TransientPrimitive innerPoint;
+    innerPoint.primitiveType = GL_POINTS;
+    innerPoint.color =
+    {
+        static_cast<float>(innerColor.redF()),
+        static_cast<float>(innerColor.greenF()),
+        static_cast<float>(innerColor.blueF())
+    };
+    innerPoint.pointSize = objectSnap ? 7.0f : 5.5f;
+    innerPoint.roundPoint = true;
+    innerPoint.vertices = { snappedPosition };
+
+    return { outerPoint, innerPoint };
 }
 
 void CadViewer::setSelectedEntityId(EntityId entityId)
