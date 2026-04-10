@@ -1,8 +1,8 @@
-﻿# G-code Post Processing System
+# G-code Post Processing System
 
 [G/M 代码参考](./technical_file/G-M_Code.md)
 
-本项目是一个基于 Qt 6 Widgets、OpenGL 4.5 Core Profile、Visual Studio 2026 的 Windows 桌面 CAD / G-code 后处理程序。当前代码主线已经具备 CAD 文件导入、位图矢量化导入、二维图元显示、基础交互、简单绘图与编辑命令，并提供 `2D` G 代码生成后端与 JSON Profile 配置能力；主窗口已接通导入图片、导出 G 代码、反向加工以及按 `2D / 3D` 分类的排序菜单，其中 `2D` 下提供“排序（保留方向）”与“智能排序”，`3D` 排序逻辑保留，`3D` G 代码生成链路已整体清理并停用，等待按新的工艺模型重写。同时增加了仿 AutoCAD 风格的紧凑 Ribbon 工具面板，用于统一承载绘图、修改、图层与特性入口；其中“修改”面板现已接通 `移动`、`删除`、`旋转`、`复制`、`缩放`、`矩形阵列` 六类图元编辑操作，并提供显式的浅色 / 深色主题切换。当前“用户设置”菜单下也已接通 `G代码配置` 对话框，可按文件级、实体类型、图层规则、颜色规则四个层级定制导出行为，其中颜色规则已切换为以 AutoCAD 基础索引颜色为主的配置模型；Viewer 层也已支持加工方向箭头、加工顺序编号、选中图元基点/控制点手柄显示、AutoCAD 风格窗口框选（向左拖拽碰选、向右拖拽包含选）与框选过程实时候选高亮，底部状态栏也已接通基点 / 控制点 / 网格三类吸附开关，并已接入第一阶段控制点编辑（选中后点控点再点目标点，已覆盖 `Point`、`Line`、`Circle`、`Arc`、`Ellipse`、`Polyline`、`LWPolyline`）；近期又对方向箭头样式、主次网格对比和选中角标样式做了进一步优化。
+本项目是一个基于 Qt 6 Widgets、OpenGL 4.5 Core Profile、Visual Studio 2026 的 Windows 桌面 CAD / G-code 后处理程序。当前代码主线已经具备 CAD 文件导入、位图矢量化导入、二维图元显示、基础交互、简单绘图与编辑命令，并提供 `2D` G 代码生成后端与 JSON Profile 配置能力；主窗口已接通导入图片、导出 G 代码、反向加工以及按 `2D / 3D` 分类的排序菜单，其中 `2D` 下提供“排序（保留方向）”与“智能排序”，`3D` 排序逻辑保留，`3D` G 代码生成链路已整体清理并停用，等待按新的工艺模型重写。同时增加了仿 AutoCAD 风格的紧凑 Ribbon 工具面板，用于统一承载绘图、修改、图层与特性入口；其中“修改”面板现已接通 `移动`、`删除`、`旋转`、`复制`、`缩放`、`矩形阵列` 六类图元编辑操作，并提供显式的浅色 / 深色主题切换。当前“用户设置”菜单下也已接通 `G代码配置` 对话框，可按文件级、实体类型、图层规则、颜色规则四个层级定制导出行为，其中颜色规则已切换为以 AutoCAD 基础索引颜色为主的配置模型；Viewer 层也已支持加工方向箭头、加工顺序编号、选中图元基点/控制点手柄显示、AutoCAD 风格窗口框选（向左拖拽碰选、向右拖拽包含选）与框选过程实时候选高亮，底部状态栏也已接通基点 / 控制点 / 网格三类吸附开关，并已接入第一阶段控制点编辑（选中后点控点再点目标点，已覆盖 `Point`、`Line`、`Circle`、`Arc`、`Ellipse`、`Polyline`、`LWPolyline`）；夹点编辑现已支持实时几何预览，重叠夹点支持悬停 `1s` 弹出候选选择栏并可用 `Tab / Shift+Tab` 循环切换，候选项文案已改为夹点类型名且宽度自适应显示；近期又对方向箭头样式、主次网格对比和选中角标样式做了进一步优化。
 
 ## 项目现状
 
@@ -23,6 +23,9 @@
 - 提供点、线、圆、圆弧、椭圆、多段线、轻量多段线的交互式绘制
 - 提供删除、移动、旋转、复制、缩放、矩形阵列、改色、改图层、Undo / Redo
 - 提供第一阶段控制点编辑：在空闲态点击“当前选中图元”的可编辑控制点后，再次点击目标点提交；当前支持 `Point`、`Line`、`Circle`、`Arc`、`Ellipse`、`Polyline`、`LWPolyline`
+- 控制点编辑已支持实时预览：在确认前即可看到图元变形、基点到目标点引导线与目标点高亮
+- 当多个可编辑夹点发生重叠时，支持悬停 `1s` 弹出候选选择栏，并支持 `Tab / Shift+Tab` 循环切换候选
+- 重叠夹点候选选择栏已改为显示“夹点类型名”（如 `基点`、`长轴控制点`、`顶点拉伸点`），并按文本宽度自适应布局
 - 提供 transient 预览、十字光标叠加、选中高亮
 - 选中高亮已升级为叠加式样：保留图元原始显示色，额外绘制轻描边与四角角标，降低完整包围框对视野的遮挡
 - 提供 AutoCAD 风格窗口框选：向左拖拽为碰选，向右拖拽为包含选；框选拖拽过程中会实时高亮候选图元
@@ -53,7 +56,6 @@
 - 当前不提供可用的 `3D` G 代码导出，不提供完整 3D 建模/编辑工作流
 - `3D` 导出的旋转轴参数当前仅纳入 `GProfile` 数据模型和 JSON 读写，配置对话框暂未暴露专门编辑界面
 - [src/CadDocument.cpp](D:/projects/visual_studio_2026/G-code_post-processing_system/src/CadDocument.cpp) 中 `CadDocument::saveDxfDocument()` 与 `CadDocument::eportDxfDocument()` 仍为空实现
-- 仓库没有独立自动化测试工程，验证仍以手工构建和手工交互检查为主
 
 ## 技术栈
 
@@ -98,6 +100,13 @@ OpenCVBin      = $(OpenCVRoot)\build\x64\vc16\bin
 msbuild .\G-code_post-processing_system.vcxproj /p:Configuration=Debug /p:Platform=x64
 msbuild .\G-code_post-processing_system.vcxproj /p:Configuration=Release /p:Platform=x64
 devenv .\G-code_post-processing_system.slnx
+```
+
+若系统环境变量中未配置 `msbuild`，可直接使用 Visual Studio 2026 Insiders 的 `MSBuild.exe` 绝对路径：
+
+```powershell
+& "D:\Program Files\Microsoft Visual Studio\18\Insiders\MSBuild\Current\Bin\MSBuild.exe" .\G-code_post-processing_system.vcxproj /p:Configuration=Debug /p:Platform=x64
+& "D:\Program Files\Microsoft Visual Studio\18\Insiders\MSBuild\Current\Bin\MSBuild.exe" .\G-code_post-processing_system.vcxproj /p:Configuration=Release /p:Platform=x64
 ```
 
 建议优先使用 `Debug|x64` 进行日常开发和交互验证。
@@ -494,7 +503,7 @@ CadDocument                                (Model)
 - `旋转`、`缩放` 当前通过 Ribbon“修改”面板触发，默认绕选中图元几何包围盒中心执行
 - `复制` 当前通过 Ribbon“修改”面板触发，按输入的 `X / Y` 偏移量生成一个副本
 - `矩形阵列` 当前通过 Ribbon“修改”面板触发，按输入的行数、列数、行间距、列间距复制选中图元
-- 控制点编辑当前为第一阶段实现：采用“两次点击提交”交互，不包含拖拽实时预览；当前已支持 `Point`、`Line`、`Circle`、`Arc`、`Ellipse`、`Polyline`、`LWPolyline` 的可编辑夹点
+- 控制点编辑当前为第一阶段实现：采用“两次点击提交”交互，当前已支持实时预览与重叠夹点候选选择；已覆盖 `Point`、`Line`、`Circle`、`Arc`、`Ellipse`、`Polyline`、`LWPolyline` 的可编辑夹点
 
 ### Ribbon 工具面板
 
@@ -601,29 +610,6 @@ CadDocument                                (Model)
 
 这是一项显式设计。现阶段项目支持“二维绘制 + 三维观察”，不支持完整 3D 建模工作流。
 
-## 手工验证建议
-
-当前仓库没有自动化测试工程。每次修改后建议至少完成以下检查：
-
-1. 成功构建 `Debug|x64`
-2. 导入一个包含点、线、圆、圆弧、椭圆、多段线的 DXF 文件
-3. 导入一张简单黑白位图，验证预处理预览、矢量化结果和图层参数是否符合预期
-4. 验证平移、缩放、顶视图、轨道观察、拾取是否正常
-5. 验证绘图命令、移动、删除、旋转、复制、缩放、矩形阵列、改色、改图层、控制点编辑、Undo / Redo 是否正常
-6. 验证“反向加工”“2D -> 排序（保留方向）”“2D -> 智能排序”是否符合预期，并检查 Viewer 中方向箭头、顺序编号与 Undo / Redo 是否同步正常
-7. 载入一份 `GProfile` 配置并验证 JSON 读写是否正常
-8. 打开“用户设置 -> G代码配置...”，验证浅色 / 深色模式下对话框控件、页签和列表显示是否正常
-9. 在 `G代码配置` 中验证文件级、实体类型、图层规则、颜色规则的编辑、导入导出与恢复默认是否正常
-10. 通过主窗口“导出G代码”导出一份纯 `2D` G 代码，检查头尾、图层配置、颜色配置、类型配置、圆形顶部起刀、闭合轮廓缝点和空行过滤是否符合预期
-11. 验证 Ribbon 工具面板中的绘图、修改、图层、特性联动是否正常
-12. 验证浅色 / 深色主题切换后，菜单栏、Ribbon 面板、Viewer、命令栏、状态栏和 `G代码配置` 对话框都能正确刷新
-13. 在浅色主题下验证白色或近白色图层线条仍能清晰显示，并检查 `ByLayer` 色块是否始终对应真实图层颜色
-14. 验证命令栏提示、状态栏坐标、拖拽导入是否正常
-15. 打开状态栏中的 `基点`、`控制点`、`网格` 吸附，验证绘图和移动命令中的取点结果、状态栏坐标显示与预期一致
-16. 选中点、线、圆、圆弧、椭圆、多段线、轻量多段线，验证 Viewer 中基点/控制点手柄显示和悬停高亮是否正确
-17. 验证窗口框选：向左拖拽碰选、向右拖拽包含选，并检查拖拽过程中候选图元是否实时高亮、提交后四角角标是否与选中集合一致
-18. 逐一验证 `Point`、`Line`、`Circle`、`Arc`、`Ellipse`、`Polyline`、`LWPolyline` 的夹点编辑行为是否生效，并检查 Undo / Redo 是否正确回放
-
 ## 已知注意事项
 
 - 当前内部仅完整支持 7 类 CAD 图元的可视化与编辑
@@ -639,7 +625,7 @@ CadDocument                                (Model)
 - 当前吸附主要作用于命令取点和状态栏坐标显示，普通空闲态拾取/选择仍按原始屏幕位置进行
 - 基点/控制点吸附仅在图元已选中、且对应手柄可见时才会生效
 - 当前对象吸附点集合主要来自图元基点与控制点，不包含交点、中点、切点、垂足等更完整的 CAD 吸附类型
-- 控制点编辑当前仍为第一阶段实现，采用“两次点击提交”模式，不包含拖拽实时预览
+- 控制点编辑当前仍为第一阶段实现，采用“两次点击提交”模式；已支持实时预览与重叠夹点候选选择
 - `Ellipse` 当前按折线离散导出，精度取决于固定采样密度
 - 第三方 `libdxfrw` 目录不应轻易修改
 - 工程里仍存在部分历史遗留命名，修改构建配置前需要先核对 `.ui`、`.vcxproj` 与当前源码是否一致
@@ -651,3 +637,4 @@ CadDocument                                (Model)
 - 修改 `src/libdxfrw/` 或 `include/libdxfrw/` 时应明确说明原因和影响范围
 - 文本文件统一保持 Windows `CRLF`
 - OpenGL 保持 4.5 Core Profile
+

@@ -32,8 +32,10 @@
 #include <QWheelEvent>
 
 // 标准库
+#include <algorithm>
 #include <array>
 #include <cmath>
+#include <functional>
 #include <limits>
 #include <vector>
 
@@ -54,6 +56,27 @@ namespace
     constexpr float kGridSnapDistancePixels = 10.0f;
     // 窗口框选有效尺寸阈值（像素）。
     constexpr int kWindowSelectionMinimumPixels = 2;
+    // 重叠夹点悬停弹框延迟（毫秒）。
+    constexpr qint64 kOverlappedHandlePopupDelayMs = 1000;
+    // 重叠夹点悬停判定允许的屏幕漂移阈值（像素）。
+    constexpr int kOverlappedHandleStablePixels = 4;
+    // 重叠夹点判定时额外放宽的屏幕命中系数。
+    constexpr float kOverlappedHandlePickScale = 1.25f;
+
+    struct HandlePickCandidate
+    {
+        int handleIndex = -1;
+        float distanceSquared = std::numeric_limits<float>::max();
+        int priority = 1;
+    };
+
+    struct OverlappedHandlePopupLayout
+    {
+        QRect panelRect;
+        QVector<QRect> rowRects;
+        QVector<QString> rowTexts;
+        QRect badgeRect;
+    };
 
     // 检查是否为支持拖放的文件类型
     // @param localFile 本地文件路径
@@ -126,6 +149,248 @@ namespace
     {
         return QRect(anchorScreenPos, currentScreenPos).normalized();
     }
+
+    bool isPopupCycleModifierValid(Qt::KeyboardModifiers modifiers)
+    {
+        const Qt::KeyboardModifiers maskedModifiers = modifiers & ~(Qt::ShiftModifier);
+        return maskedModifiers == Qt::NoModifier;
+    }
+
+    QVector<int> collectEditableHandleCandidates
+    (
+        const QVector<CadSelectionHandleInfo>& handles,
+        const std::function<QPoint(const QVector3D&)>& worldToScreen,
+        const QPoint& cursorScreenPos,
+        float pickDistanceSquared
+    )
+    {
+        QVector<HandlePickCandidate> candidates;
+
+        for (int index = 0; index < handles.size(); ++index)
+        {
+            const CadSelectionHandleInfo& handle = handles.at(index);
+
+            if (!handle.editable)
+            {
+                continue;
+            }
+
+            const QPoint handleScreenPos = worldToScreen(handle.position);
+            const float dx = static_cast<float>(handleScreenPos.x() - cursorScreenPos.x());
+            const float dy = static_cast<float>(handleScreenPos.y() - cursorScreenPos.y());
+            const float distanceSquared = dx * dx + dy * dy;
+
+            if (distanceSquared > pickDistanceSquared)
+            {
+                continue;
+            }
+
+            HandlePickCandidate candidate;
+            candidate.handleIndex = index;
+            candidate.distanceSquared = distanceSquared;
+            candidate.priority = handle.isBasePoint ? 0 : 1;
+            candidates.push_back(candidate);
+        }
+
+        std::sort
+        (
+            candidates.begin(),
+            candidates.end(),
+            [](const HandlePickCandidate& left, const HandlePickCandidate& right)
+            {
+                if (std::abs(left.distanceSquared - right.distanceSquared) > 1.0e-4f)
+                {
+                    return left.distanceSquared < right.distanceSquared;
+                }
+
+                if (left.priority != right.priority)
+                {
+                    return left.priority < right.priority;
+                }
+
+                return left.handleIndex < right.handleIndex;
+            }
+        );
+
+        QVector<int> orderedIndices;
+        orderedIndices.reserve(candidates.size());
+
+        for (const HandlePickCandidate& candidate : candidates)
+        {
+            orderedIndices.push_back(candidate.handleIndex);
+        }
+
+        return orderedIndices;
+    }
+
+    QString handleTypeDisplayName(const CadItem* selectedItem, const CadSelectionHandleInfo& handle)
+    {
+        if (handle.isBasePoint)
+        {
+            return QStringLiteral("基点");
+        }
+
+        if (selectedItem == nullptr)
+        {
+            return QStringLiteral("拉伸点");
+        }
+
+        switch (selectedItem->m_type)
+        {
+        case DRW::ETYPE::POINT:
+            return QStringLiteral("点位控制点");
+        case DRW::ETYPE::LINE:
+            return QStringLiteral("拉伸点");
+        case DRW::ETYPE::CIRCLE:
+            return QStringLiteral("半径控制点");
+        case DRW::ETYPE::ARC:
+            if (handle.pointIndex == 1)
+            {
+                return QStringLiteral("起点拉伸点");
+            }
+
+            if (handle.pointIndex == 2)
+            {
+                return QStringLiteral("半径控制点");
+            }
+
+            if (handle.pointIndex == 3)
+            {
+                return QStringLiteral("终点拉伸点");
+            }
+
+            return QStringLiteral("拉伸点");
+        case DRW::ETYPE::ELLIPSE:
+            if (handle.pointIndex == 1 || handle.pointIndex == 2)
+            {
+                return QStringLiteral("长轴控制点");
+            }
+
+            if (handle.pointIndex == 3 || handle.pointIndex == 4)
+            {
+                return QStringLiteral("短轴控制点");
+            }
+
+            if (handle.pointIndex == 5)
+            {
+                return QStringLiteral("起点拉伸点");
+            }
+
+            if (handle.pointIndex == 6)
+            {
+                return QStringLiteral("终点拉伸点");
+            }
+
+            return QStringLiteral("拉伸点");
+        case DRW::ETYPE::POLYLINE:
+        case DRW::ETYPE::LWPOLYLINE:
+            return QStringLiteral("顶点拉伸点");
+        default:
+            return QStringLiteral("拉伸点");
+        }
+    }
+
+    QString overlappedHandleRowText
+    (
+        const CadItem* selectedItem,
+        const CadSelectionHandleInfo& handle,
+        int ordinal
+    )
+    {
+        return QStringLiteral("%1. %2")
+            .arg(ordinal + 1)
+            .arg(handleTypeDisplayName(selectedItem, handle));
+    }
+
+    bool computeOverlappedHandlePopupLayout
+    (
+        const CadItem* selectedItem,
+        const QVector<CadSelectionHandleInfo>& handles,
+        const QVector<int>& candidateIndices,
+        int activeCandidateOrdinal,
+        const QPoint& cursorScreenPos,
+        const QSize& viewportSize,
+        const QFontMetrics& metrics,
+        OverlappedHandlePopupLayout& layout
+    )
+    {
+        if (candidateIndices.size() < 2 || viewportSize.width() <= 0 || viewportSize.height() <= 0)
+        {
+            return false;
+        }
+
+        layout.rowTexts.clear();
+        layout.rowTexts.reserve(candidateIndices.size());
+        int maxTextWidth = 0;
+
+        for (int ordinal = 0; ordinal < candidateIndices.size(); ++ordinal)
+        {
+            const int handleIndex = candidateIndices.at(ordinal);
+
+            if (handleIndex < 0 || handleIndex >= handles.size())
+            {
+                continue;
+            }
+
+            const CadSelectionHandleInfo& handle = handles.at(handleIndex);
+            const QString rowText = overlappedHandleRowText(selectedItem, handle, ordinal);
+            layout.rowTexts.push_back(rowText);
+            maxTextWidth = std::max(maxTextWidth, metrics.horizontalAdvance(rowText));
+        }
+
+        if (layout.rowTexts.size() < 2)
+        {
+            return false;
+        }
+
+        const int panelPaddingX = 14;
+        const int panelPaddingY = 10;
+        const int rowHeight = std::max(22, metrics.height() + 8);
+        const int desiredPanelWidth = maxTextWidth + panelPaddingX * 2 + 24;
+        const int maxPanelWidth = std::max(140, viewportSize.width() - 16);
+        const int panelWidth = std::min(desiredPanelWidth, maxPanelWidth);
+        const int panelHeight = panelPaddingY * 2 + rowHeight * layout.rowTexts.size();
+        QPoint panelTopLeft = cursorScreenPos + QPoint(18, 16);
+
+        if (panelTopLeft.x() + panelWidth > viewportSize.width() - 8)
+        {
+            panelTopLeft.setX(std::max(8, viewportSize.width() - panelWidth - 8));
+        }
+
+        if (panelTopLeft.y() + panelHeight > viewportSize.height() - 8)
+        {
+            panelTopLeft.setY(std::max(8, viewportSize.height() - panelHeight - 8));
+        }
+
+        layout.panelRect = QRect(panelTopLeft, QSize(panelWidth, panelHeight));
+        layout.rowRects.clear();
+        layout.rowRects.reserve(layout.rowTexts.size());
+
+        for (int ordinal = 0; ordinal < layout.rowTexts.size(); ++ordinal)
+        {
+            const QRect rowRect
+            (
+                panelTopLeft.x() + panelPaddingX,
+                panelTopLeft.y() + panelPaddingY + ordinal * rowHeight,
+                panelWidth - panelPaddingX * 2,
+                rowHeight
+            );
+            layout.rowRects.push_back(rowRect);
+        }
+
+        const int badgeRadius = 9;
+        const QPoint badgeCenter = cursorScreenPos + QPoint(13, -13);
+        layout.badgeRect = QRect
+        (
+            badgeCenter.x() - badgeRadius,
+            badgeCenter.y() - badgeRadius,
+            badgeRadius * 2,
+            badgeRadius * 2
+        );
+
+        Q_UNUSED(activeCandidateOrdinal);
+        return true;
+    }
 }
 
 // 构造函数：
@@ -154,6 +419,34 @@ CadViewer::CadViewer(QWidget* parent)
     // 设置控制器与当前视图的关联
     m_controller.setViewer(this);
     m_graphicsCoordinator.setTheme(m_theme);
+
+    m_overlappedHandlePopupTimer.setSingleShot(true);
+    connect
+    (
+        &m_overlappedHandlePopupTimer,
+        &QTimer::timeout,
+        this,
+        [this]()
+        {
+            if (interactionMode() != ViewInteractionMode::Idle
+                || m_controller.drawState().hasActiveCommand()
+                || m_overlappedHandleHoverState.candidateIndices.size() < 2)
+            {
+                return;
+            }
+
+            const CadItem* selectedItem = selectedEntity();
+
+            if (selectedItem == nullptr
+                || CadViewerUtils::toEntityId(selectedItem) != m_overlappedHandleHoverState.entityId)
+            {
+                return;
+            }
+
+            m_overlappedHandleHoverState.popupVisible = true;
+            update();
+        }
+    );
 }
 
 // 析构时释放 OpenGL 资源。
@@ -182,6 +475,7 @@ void CadViewer::setDocument(CadDocument* document)
     m_sceneCoordinator.bindDocument(document, this, &CadViewer::handleDocumentSceneChanged);
     // 清除选中实体
     setSelectedEntityId(0);
+    resetOverlappedHandleHoverState();
     hideSelectionWindowPreview();
 
     // 如果图形协调器已初始化，则立即重建缓冲
@@ -476,6 +770,361 @@ void CadViewer::updateSelectionWindowPreviewCandidates()
     }
 }
 
+void CadViewer::resetOverlappedHandleHoverState()
+{
+    m_overlappedHandlePopupTimer.stop();
+    m_overlappedHandleHoverState.entityId = 0;
+    m_overlappedHandleHoverState.candidateIndices.clear();
+    m_overlappedHandleHoverState.activeCandidateOrdinal = 0;
+    m_overlappedHandleHoverState.anchorScreenPos = QPoint();
+    m_overlappedHandleHoverState.popupVisible = false;
+    m_overlappedHandleHoverState.hoverTimer.invalidate();
+}
+
+void CadViewer::updateOverlappedHandleHoverState(const QPoint& screenPos)
+{
+    if (interactionMode() != ViewInteractionMode::Idle
+        || m_controller.drawState().hasActiveCommand()
+        || m_selectionWindowPreview.visible
+        || (m_controller.drawState().pressedButtons & Qt::LeftButton) != 0)
+    {
+        resetOverlappedHandleHoverState();
+        return;
+    }
+
+    CadItem* selectedItem = selectedEntity();
+
+    if (selectedItem == nullptr)
+    {
+        resetOverlappedHandleHoverState();
+        return;
+    }
+
+    const QVector<CadSelectionHandleInfo> handles = buildSelectionHandleInfo(selectedItem);
+
+    if (handles.isEmpty())
+    {
+        resetOverlappedHandleHoverState();
+        return;
+    }
+
+    const float pickDistanceSquared = (kObjectSnapDistancePixels * kOverlappedHandlePickScale)
+        * (kObjectSnapDistancePixels * kOverlappedHandlePickScale);
+    const QVector<int> candidateIndices = collectEditableHandleCandidates
+    (
+        handles,
+        [this](const QVector3D& worldPosition)
+        {
+            return worldToScreen(worldPosition);
+        },
+        screenPos,
+        pickDistanceSquared
+    );
+
+    if (candidateIndices.size() < 2)
+    {
+        resetOverlappedHandleHoverState();
+        return;
+    }
+
+    const EntityId entityId = CadViewerUtils::toEntityId(selectedItem);
+    const bool sameEntity = m_overlappedHandleHoverState.entityId == entityId;
+    const bool sameCandidates = m_overlappedHandleHoverState.candidateIndices == candidateIndices;
+    const bool stableCursor = sameEntity
+        && sameCandidates
+        && (screenPos - m_overlappedHandleHoverState.anchorScreenPos).manhattanLength() <= kOverlappedHandleStablePixels;
+
+    if (!stableCursor)
+    {
+        m_overlappedHandleHoverState.entityId = entityId;
+        m_overlappedHandleHoverState.candidateIndices = candidateIndices;
+        m_overlappedHandleHoverState.activeCandidateOrdinal = 0;
+        m_overlappedHandleHoverState.anchorScreenPos = screenPos;
+        m_overlappedHandleHoverState.popupVisible = false;
+        m_overlappedHandleHoverState.hoverTimer.restart();
+        m_overlappedHandlePopupTimer.start(static_cast<int>(kOverlappedHandlePopupDelayMs));
+        return;
+    }
+
+    if (!m_overlappedHandleHoverState.popupVisible
+        && m_overlappedHandleHoverState.hoverTimer.isValid()
+        && m_overlappedHandleHoverState.hoverTimer.elapsed() >= kOverlappedHandlePopupDelayMs)
+    {
+        m_overlappedHandlePopupTimer.stop();
+        m_overlappedHandleHoverState.popupVisible = true;
+    }
+    else if (!m_overlappedHandleHoverState.popupVisible && !m_overlappedHandlePopupTimer.isActive())
+    {
+        const qint64 elapsedMs = m_overlappedHandleHoverState.hoverTimer.isValid()
+            ? m_overlappedHandleHoverState.hoverTimer.elapsed()
+            : 0;
+        const qint64 remainingMs = std::max<qint64>(1, kOverlappedHandlePopupDelayMs - elapsedMs);
+        m_overlappedHandlePopupTimer.start(static_cast<int>(remainingMs));
+    }
+
+    m_overlappedHandleHoverState.activeCandidateOrdinal = std::clamp
+    (
+        m_overlappedHandleHoverState.activeCandidateOrdinal,
+        0,
+        static_cast<int>(m_overlappedHandleHoverState.candidateIndices.size()) - 1
+    );
+}
+
+int CadViewer::resolveHoveredHandleIndex(const QVector<CadSelectionHandleInfo>& handles) const
+{
+    if (handles.isEmpty())
+    {
+        return -1;
+    }
+
+    const float pickDistanceSquared = (kObjectSnapDistancePixels * kOverlappedHandlePickScale)
+        * (kObjectSnapDistancePixels * kOverlappedHandlePickScale);
+    const QVector<int> candidateIndices = collectEditableHandleCandidates
+    (
+        handles,
+        [this](const QVector3D& worldPosition)
+        {
+            return worldToScreen(worldPosition);
+        },
+        m_cursorScreenPos,
+        pickDistanceSquared
+    );
+
+    if (candidateIndices.isEmpty())
+    {
+        return -1;
+    }
+
+    const CadItem* selectedItem = selectedEntity();
+    const EntityId selectedEntityId = selectedItem != nullptr ? CadViewerUtils::toEntityId(selectedItem) : 0;
+
+    if (candidateIndices.size() >= 2
+        && m_overlappedHandleHoverState.entityId == selectedEntityId
+        && m_overlappedHandleHoverState.candidateIndices == candidateIndices)
+    {
+        int resolvedOrdinal = std::clamp
+        (
+            m_overlappedHandleHoverState.activeCandidateOrdinal,
+            0,
+            static_cast<int>(candidateIndices.size()) - 1
+        );
+        return candidateIndices.at(resolvedOrdinal);
+    }
+
+    return candidateIndices.front();
+}
+
+bool CadViewer::handleOverlappedHandlePopupPress(const QPoint& screenPos)
+{
+    if (!m_overlappedHandleHoverState.popupVisible || m_overlappedHandleHoverState.candidateIndices.size() < 2)
+    {
+        return false;
+    }
+
+    const CadItem* selectedItem = selectedEntity();
+
+    if (selectedItem == nullptr
+        || CadViewerUtils::toEntityId(selectedItem) != m_overlappedHandleHoverState.entityId)
+    {
+        return false;
+    }
+
+    const QVector<CadSelectionHandleInfo> handles = buildSelectionHandleInfo(selectedItem);
+
+    if (handles.isEmpty())
+    {
+        return false;
+    }
+
+    QFont popupFont = font();
+    popupFont.setPointSize(9);
+    const QFontMetrics metrics(popupFont);
+    OverlappedHandlePopupLayout popupLayout;
+
+    if (!computeOverlappedHandlePopupLayout
+    (
+        selectedItem,
+        handles,
+        m_overlappedHandleHoverState.candidateIndices,
+        m_overlappedHandleHoverState.activeCandidateOrdinal,
+        m_cursorScreenPos,
+        size(),
+        metrics,
+        popupLayout
+    ))
+    {
+        return false;
+    }
+
+    for (int ordinal = 0; ordinal < popupLayout.rowRects.size(); ++ordinal)
+    {
+        if (!popupLayout.rowRects.at(ordinal).contains(screenPos))
+        {
+            continue;
+        }
+
+        m_overlappedHandleHoverState.activeCandidateOrdinal = ordinal;
+        m_overlappedHandleHoverState.popupVisible = true;
+        m_overlappedHandleHoverState.anchorScreenPos = m_cursorScreenPos;
+        m_overlappedHandleHoverState.hoverTimer.restart();
+        m_overlappedHandlePopupTimer.stop();
+        update();
+        return true;
+    }
+
+    if (popupLayout.panelRect.contains(screenPos))
+    {
+        return true;
+    }
+
+    return false;
+}
+
+bool CadViewer::cycleOverlappedHandleCandidate(int step)
+{
+    if (m_overlappedHandleHoverState.candidateIndices.size() < 2 || step == 0)
+    {
+        return false;
+    }
+
+    const CadItem* selectedItem = selectedEntity();
+
+    if (selectedItem == nullptr
+        || CadViewerUtils::toEntityId(selectedItem) != m_overlappedHandleHoverState.entityId)
+    {
+        return false;
+    }
+
+    const int candidateCount = m_overlappedHandleHoverState.candidateIndices.size();
+    int ordinal = m_overlappedHandleHoverState.activeCandidateOrdinal % candidateCount;
+
+    if (ordinal < 0)
+    {
+        ordinal += candidateCount;
+    }
+
+    ordinal = (ordinal + step) % candidateCount;
+
+    if (ordinal < 0)
+    {
+        ordinal += candidateCount;
+    }
+
+    m_overlappedHandleHoverState.activeCandidateOrdinal = ordinal;
+    m_overlappedHandleHoverState.popupVisible = true;
+    m_overlappedHandleHoverState.anchorScreenPos = m_cursorScreenPos;
+    m_overlappedHandleHoverState.hoverTimer.restart();
+    m_overlappedHandlePopupTimer.stop();
+    update();
+    return true;
+}
+
+void CadViewer::renderOverlappedHandlePopup()
+{
+    if (interactionMode() != ViewInteractionMode::Idle)
+    {
+        return;
+    }
+
+    const CadItem* selectedItem = selectedEntity();
+
+    if (selectedItem == nullptr
+        || CadViewerUtils::toEntityId(selectedItem) != m_overlappedHandleHoverState.entityId
+        || m_overlappedHandleHoverState.candidateIndices.size() < 2)
+    {
+        return;
+    }
+
+    const QVector<CadSelectionHandleInfo> handles = buildSelectionHandleInfo(selectedItem);
+
+    if (handles.isEmpty())
+    {
+        return;
+    }
+
+    QPainter painter(this);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setRenderHint(QPainter::TextAntialiasing, true);
+
+    QFont popupFont = painter.font();
+    popupFont.setPointSize(9);
+    painter.setFont(popupFont);
+    const QFontMetrics metrics(popupFont);
+
+    OverlappedHandlePopupLayout popupLayout;
+
+    if (!computeOverlappedHandlePopupLayout
+    (
+        selectedItem,
+        handles,
+        m_overlappedHandleHoverState.candidateIndices,
+        m_overlappedHandleHoverState.activeCandidateOrdinal,
+        m_cursorScreenPos,
+        size(),
+        metrics,
+        popupLayout
+    ))
+    {
+        return;
+    }
+
+    // 鼠标附近数量徽标：提示当前存在重叠夹点候选。
+    painter.setPen(QPen(QColor(15, 22, 30, 210), 1.0));
+    painter.setBrush(QColor(255, 186, 54, 235));
+    painter.drawEllipse(popupLayout.badgeRect);
+    painter.setPen(QColor(18, 24, 33));
+    painter.drawText(popupLayout.badgeRect, Qt::AlignCenter, QString::number(m_overlappedHandleHoverState.candidateIndices.size()));
+
+    if (!m_overlappedHandleHoverState.popupVisible)
+    {
+        return;
+    }
+
+    painter.setPen(QPen(QColor(94, 176, 255, 230), 1.0));
+    painter.setBrush(QColor(20, 26, 34, 228));
+    painter.drawRoundedRect(popupLayout.panelRect, 7.0, 7.0);
+
+    const int rowCount = popupLayout.rowRects.size();
+    const int activeOrdinal = std::clamp(m_overlappedHandleHoverState.activeCandidateOrdinal, 0, rowCount - 1);
+
+    for (int ordinal = 0; ordinal < rowCount; ++ordinal)
+    {
+        const QRect rowRect = popupLayout.rowRects.at(ordinal);
+        const QString rowText = ordinal < popupLayout.rowTexts.size()
+            ? popupLayout.rowTexts.at(ordinal)
+            : QStringLiteral("%1. 拉伸点").arg(ordinal + 1);
+        const QString displayText = metrics.elidedText(rowText, Qt::ElideRight, std::max(20, rowRect.width() - 8));
+
+        if (ordinal == activeOrdinal)
+        {
+            painter.setPen(Qt::NoPen);
+            painter.setBrush(QColor(84, 166, 255, 96));
+            painter.drawRoundedRect(rowRect.adjusted(0, 0, 0, -1), 4.0, 4.0);
+        }
+
+        painter.setPen(ordinal == activeOrdinal ? QColor(255, 248, 227) : QColor(220, 230, 242));
+        painter.drawText(rowRect.adjusted(4, 0, -4, 0), Qt::AlignVCenter | Qt::AlignLeft, displayText);
+    }
+
+    const QString hintText = QStringLiteral("Tab/Shift+Tab 切换");
+    const int hintTop = popupLayout.panelRect.bottom() + 5;
+    QRect hintRect
+    (
+        popupLayout.panelRect.left(),
+        hintTop,
+        popupLayout.panelRect.width(),
+        metrics.height() + 2
+    );
+
+    if (hintRect.bottom() > height() - 4)
+    {
+        hintRect.moveTop(popupLayout.panelRect.top() - hintRect.height() - 4);
+    }
+
+    painter.setPen(QColor(150, 172, 194, 228));
+    painter.drawText(hintRect, Qt::AlignLeft | Qt::AlignVCenter, hintText);
+}
+
 bool CadViewer::pickSelectedHandle(const QPoint& screenPos, CadSelectionHandleInfo* outHandle) const
 {
     const CadItem* selectedItem = selectedEntity();
@@ -493,40 +1142,40 @@ bool CadViewer::pickSelectedHandle(const QPoint& screenPos, CadSelectionHandleIn
     }
 
     const float handlePickDistanceSquared = kObjectSnapDistancePixels * kObjectSnapDistancePixels;
-    int bestIndex = -1;
-    float bestDistanceSquared = std::numeric_limits<float>::max();
-
-    for (int index = 0; index < handles.size(); ++index)
-    {
-        const CadSelectionHandleInfo& handle = handles[index];
-
-        if (!handle.editable)
+    const QVector<int> candidateIndices = collectEditableHandleCandidates
+    (
+        handles,
+        [this](const QVector3D& worldPosition)
         {
-            continue;
-        }
+            return worldToScreen(worldPosition);
+        },
+        screenPos,
+        handlePickDistanceSquared
+    );
 
-        const QPoint handleScreenPos = worldToScreen(handle.position);
-        const float dx = static_cast<float>(handleScreenPos.x() - screenPos.x());
-        const float dy = static_cast<float>(handleScreenPos.y() - screenPos.y());
-        const float distanceSquared = dx * dx + dy * dy;
-
-        if (distanceSquared > handlePickDistanceSquared || distanceSquared >= bestDistanceSquared)
-        {
-            continue;
-        }
-
-        bestDistanceSquared = distanceSquared;
-        bestIndex = index;
-    }
-
-    if (bestIndex < 0)
+    if (candidateIndices.isEmpty())
     {
         return false;
     }
 
+    int selectedIndex = candidateIndices.front();
+
+    if (candidateIndices.size() >= 2
+        && m_overlappedHandleHoverState.entityId == CadViewerUtils::toEntityId(selectedItem)
+        && m_overlappedHandleHoverState.candidateIndices == candidateIndices)
+    {
+        int resolvedOrdinal = std::clamp
+        (
+            m_overlappedHandleHoverState.activeCandidateOrdinal,
+            0,
+            static_cast<int>(candidateIndices.size()) - 1
+        );
+        selectedIndex = candidateIndices.at(resolvedOrdinal);
+    }
+
     if (outHandle != nullptr)
     {
-        *outHandle = handles[bestIndex];
+        *outHandle = handles[selectedIndex];
     }
 
     return true;
@@ -616,6 +1265,7 @@ void CadViewer::clearSelection()
 {
     setSelectedEntityId(0);
     m_windowPreviewEntityIds.clear();
+    resetOverlappedHandleHoverState();
     update();
 }
 
@@ -772,6 +1422,7 @@ void CadViewer::paintGL()
     renderEntitySelectionOverlays();
     renderProcessOrderLabels();
     renderSelectionWindowPreview();
+    renderOverlappedHandlePopup();
 
     // 性能日志记录
     if constexpr (kEnableViewerPerfLogging)
@@ -798,6 +1449,13 @@ void CadViewer::mousePressEvent(QMouseEvent* event)
     // 更新十字准线显示状态
     m_showCrosshairOverlay = rect().contains(event->pos());
 
+    if (event->button() == Qt::LeftButton && handleOverlappedHandlePopupPress(event->pos()))
+    {
+        event->accept();
+        updateHoveredWorldPosition(event->pos());
+        return;
+    }
+
     // 尝试由控制器处理鼠标按下事件
     if (!m_controller.handleMousePress(event))
     {
@@ -807,6 +1465,7 @@ void CadViewer::mousePressEvent(QMouseEvent* event)
 
     // 更新悬停世界位置
     updateHoveredWorldPosition(event->pos());
+    updateOverlappedHandleHoverState(event->pos());
     // 刷新命令提示
     refreshCommandPrompt();
     // 请求更新
@@ -830,6 +1489,11 @@ void CadViewer::mouseMoveEvent(QMouseEvent* event)
     if (interactionMode() == ViewInteractionMode::Idle)
     {
         updateHoveredWorldPosition(event->pos());
+        updateOverlappedHandleHoverState(event->pos());
+    }
+    else
+    {
+        resetOverlappedHandleHoverState();
     }
 
     update();
@@ -840,6 +1504,7 @@ void CadViewer::mouseMoveEvent(QMouseEvent* event)
 void CadViewer::leaveEvent(QEvent* event)
 {
     m_showCrosshairOverlay = false;
+    resetOverlappedHandleHoverState();
     update();
     QOpenGLWidget::leaveEvent(event);
 }
@@ -872,6 +1537,7 @@ void CadViewer::mouseReleaseEvent(QMouseEvent* event)
     }
 
     updateHoveredWorldPosition(event->pos());
+    updateOverlappedHandleHoverState(event->pos());
     refreshCommandPrompt();
     update();
 }
@@ -901,13 +1567,32 @@ void CadViewer::wheelEvent(QWheelEvent* event)
 void CadViewer::keyPressEvent(QKeyEvent* event)
 {
     ensureBlankCursor();
+
+    if (event->key() == Qt::Key_Tab && isPopupCycleModifierValid(event->modifiers()))
+    {
+        const int step = (event->modifiers() & Qt::ShiftModifier) != 0 ? -1 : 1;
+
+        if (cycleOverlappedHandleCandidate(step))
+        {
+            event->accept();
+            return;
+        }
+    }
+
     if (!m_controller.handleKeyPress(event))
     {
         QOpenGLWidget::keyPressEvent(event);
     }
 
+    updateOverlappedHandleHoverState(m_cursorScreenPos);
     refreshCommandPrompt();
     update();
+}
+
+bool CadViewer::focusNextPrevChild(bool next)
+{
+    Q_UNUSED(next);
+    return false;
 }
 
 // 拖拽进入事件处理
@@ -1441,6 +2126,7 @@ void CadViewer::handleDocumentSceneChanged()
         doneCurrent();
     }
 
+    updateOverlappedHandleHoverState(m_cursorScreenPos);
     update();
 }
 
@@ -1751,6 +2437,7 @@ void CadViewer::setSelectedEntities(const QSet<EntityId>& entityIds, EntityId pr
 
     if (selectionChanged)
     {
+        resetOverlappedHandleHoverState();
         emit selectedEntityChanged(selectedEntity());
     }
 }
@@ -1883,23 +2570,7 @@ std::vector<TransientPrimitive> CadViewer::buildSelectedEntityHandlePrimitives()
         return {};
     }
 
-    int hoveredHandleIndex = -1;
-    float bestHoveredDistanceSquared = std::numeric_limits<float>::max();
-    const float hoveredThresholdSquared = (kObjectSnapDistancePixels * 1.25f) * (kObjectSnapDistancePixels * 1.25f);
-
-    for (int index = 0; index < handles.size(); ++index)
-    {
-        const QPoint handleScreenPos = worldToScreen(handles.at(index).position);
-        const float dx = static_cast<float>(handleScreenPos.x() - m_cursorScreenPos.x());
-        const float dy = static_cast<float>(handleScreenPos.y() - m_cursorScreenPos.y());
-        const float distanceSquared = dx * dx + dy * dy;
-
-        if (distanceSquared <= hoveredThresholdSquared && distanceSquared < bestHoveredDistanceSquared)
-        {
-            bestHoveredDistanceSquared = distanceSquared;
-            hoveredHandleIndex = index;
-        }
-    }
+    const int hoveredHandleIndex = resolveHoveredHandleIndex(handles);
 
     TransientPrimitive basePointOuterPrimitive;
     basePointOuterPrimitive.primitiveType = GL_POINTS;
@@ -2071,3 +2742,8 @@ float CadViewer::pixelToWorldScale() const
 {
     return CadViewTransform::pixelToWorldScale(m_camera, m_viewportHeight);
 }
+
+
+
+
+

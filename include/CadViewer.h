@@ -9,6 +9,7 @@
 // Qt 核心模块
 #include <QDragEnterEvent>
 #include <QDropEvent>
+#include <QElapsedTimer>
 #include <QEnterEvent>
 #include <QFocusEvent>
 #include <QKeyEvent>
@@ -17,6 +18,7 @@
 #include <QOpenGLWidget>
 #include <QPoint>
 #include <QSet>
+#include <QTimer>
 #include <QVector>
 #include <QVector3D>
 #include <QWheelEvent>
@@ -255,6 +257,9 @@ protected:
     // @param event 键盘事件
     void keyPressEvent(QKeyEvent* event) override;
 
+    // 禁止 Tab/Shift+Tab 触发焦点跳转，保证其可用于 CAD 交互。
+    bool focusNextPrevChild(bool next) override;
+
     // 拖拽进入事件处理
     // @param event 拖拽事件
     void dragEnterEvent(QDragEnterEvent* event) override;
@@ -355,6 +360,24 @@ private:
     // 刷新框选预览阶段的命中实体集合。
     void updateSelectionWindowPreviewCandidates();
 
+    // 重置重叠夹点悬停选择状态。
+    void resetOverlappedHandleHoverState();
+
+    // 更新重叠夹点悬停选择状态。
+    void updateOverlappedHandleHoverState(const QPoint& screenPos);
+
+    // 根据当前重叠候选状态解析需要高亮的句柄索引。
+    int resolveHoveredHandleIndex(const QVector<CadSelectionHandleInfo>& handles) const;
+
+    // 处理重叠夹点选择框内的鼠标按下。
+    bool handleOverlappedHandlePopupPress(const QPoint& screenPos);
+
+    // 循环切换重叠夹点候选。
+    bool cycleOverlappedHandleCandidate(int step);
+
+    // 绘制重叠夹点选择框。
+    void renderOverlappedHandlePopup();
+
     // 获取当前视口宽高比
     // @return 宽高比（宽度/高度）
     float aspectRatio() const;
@@ -425,4 +448,20 @@ private:
 
     // 网格点吸附开关
     bool m_gridSnapEnabled = false;
+
+    // 重叠夹点候选状态。
+    struct OverlappedHandleHoverState
+    {
+        EntityId entityId = 0;
+        QVector<int> candidateIndices;
+        int activeCandidateOrdinal = 0;
+        QPoint anchorScreenPos;
+        bool popupVisible = false;
+        QElapsedTimer hoverTimer;
+    } m_overlappedHandleHoverState;
+
+    // 重叠夹点弹框延迟定时器（单次触发）。
+    QTimer m_overlappedHandlePopupTimer;
 };
+
+
