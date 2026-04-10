@@ -894,7 +894,7 @@ QVector<CadSelectionHandleInfo> buildSelectionHandleInfo(const CadItem* item)
     case DRW::ETYPE::POINT:
     {
         const DRW_Point* point = static_cast<const DRW_Point*>(item->m_nativeEntity);
-        appendSelectionHandle(handles, QVector3D(point->basePoint.x, point->basePoint.y, point->basePoint.z), true, false, 0);
+        appendSelectionHandle(handles, QVector3D(point->basePoint.x, point->basePoint.y, point->basePoint.z), true, true, 0);
         break;
     }
     case DRW::ETYPE::LINE:
@@ -907,23 +907,23 @@ QVector<CadSelectionHandleInfo> buildSelectionHandleInfo(const CadItem* item)
     case DRW::ETYPE::CIRCLE:
     {
         const DRW_Circle* circle = static_cast<const DRW_Circle*>(item->m_nativeEntity);
-        appendSelectionHandle(handles, QVector3D(circle->basePoint.x, circle->basePoint.y, circle->basePoint.z), true, false, 0);
-        appendSelectionHandle(handles, circlePointAt(circle, 0.0), false, false, 1);
-        appendSelectionHandle(handles, circlePointAt(circle, kPi * 0.5), false, false, 2);
-        appendSelectionHandle(handles, circlePointAt(circle, kPi), false, false, 3);
-        appendSelectionHandle(handles, circlePointAt(circle, kPi * 1.5), false, false, 4);
+        appendSelectionHandle(handles, QVector3D(circle->basePoint.x, circle->basePoint.y, circle->basePoint.z), true, true, 0);
+        appendSelectionHandle(handles, circlePointAt(circle, 0.0), false, true, 1);
+        appendSelectionHandle(handles, circlePointAt(circle, kPi * 0.5), false, true, 2);
+        appendSelectionHandle(handles, circlePointAt(circle, kPi), false, true, 3);
+        appendSelectionHandle(handles, circlePointAt(circle, kPi * 1.5), false, true, 4);
         break;
     }
     case DRW::ETYPE::ARC:
     {
         const DRW_Arc* arc = static_cast<const DRW_Arc*>(item->m_nativeEntity);
-        appendSelectionHandle(handles, QVector3D(arc->basePoint.x, arc->basePoint.y, arc->basePoint.z), true, false, 0);
+        appendSelectionHandle(handles, QVector3D(arc->basePoint.x, arc->basePoint.y, arc->basePoint.z), true, true, 0);
         appendSelectionHandle
         (
             handles,
             arcPointAt(arc, arc->staangle),
             false,
-            false,
+            true,
             1,
             CadSelectionHandleShape::Triangle,
             arcTangentAt(arc, arc->staangle, false)
@@ -936,13 +936,13 @@ QVector<CadSelectionHandleInfo> buildSelectionHandleInfo(const CadItem* item)
             endAngle += kTwoPi;
         }
 
-        appendSelectionHandle(handles, arcPointAt(arc, (arc->staangle + endAngle) * 0.5), false, false, 2);
+        appendSelectionHandle(handles, arcPointAt(arc, (arc->staangle + endAngle) * 0.5), false, true, 2);
         appendSelectionHandle
         (
             handles,
             arcPointAt(arc, endAngle),
             false,
-            false,
+            true,
             3,
             CadSelectionHandleShape::Triangle,
             arcTangentAt(arc, endAngle, false)
@@ -961,11 +961,11 @@ QVector<CadSelectionHandleInfo> buildSelectionHandleInfo(const CadItem* item)
         }
 
         const QVector3D center(ellipse->basePoint.x, ellipse->basePoint.y, ellipse->basePoint.z);
-        appendSelectionHandle(handles, center, true, false, 0);
-        appendSelectionHandle(handles, center + majorAxis, false, false, 1);
-        appendSelectionHandle(handles, center - majorAxis, false, false, 2);
-        appendSelectionHandle(handles, center + minorAxis, false, false, 3);
-        appendSelectionHandle(handles, center - minorAxis, false, false, 4);
+        appendSelectionHandle(handles, center, true, true, 0);
+        appendSelectionHandle(handles, center + majorAxis, false, true, 1);
+        appendSelectionHandle(handles, center - majorAxis, false, true, 2);
+        appendSelectionHandle(handles, center + minorAxis, false, true, 3);
+        appendSelectionHandle(handles, center - minorAxis, false, true, 4);
 
         if (!isFullEllipsePath(ellipse))
         {
@@ -974,7 +974,7 @@ QVector<CadSelectionHandleInfo> buildSelectionHandleInfo(const CadItem* item)
                 handles,
                 ellipsePointAt(ellipse, ellipse->staparam),
                 false,
-                false,
+                true,
                 5,
                 CadSelectionHandleShape::Triangle,
                 ellipseTangentAt(ellipse, ellipse->staparam, false)
@@ -984,7 +984,7 @@ QVector<CadSelectionHandleInfo> buildSelectionHandleInfo(const CadItem* item)
                 handles,
                 ellipsePointAt(ellipse, ellipse->endparam),
                 false,
-                false,
+                true,
                 6,
                 CadSelectionHandleShape::Triangle,
                 ellipseTangentAt(ellipse, ellipse->endparam, false)
