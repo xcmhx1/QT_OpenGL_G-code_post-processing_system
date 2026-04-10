@@ -18,6 +18,9 @@
 // 匿名命名空间，存放局部辅助函数
 namespace
 {
+    // 从点击切换到框选拖拽的最小屏幕位移阈值（像素）。
+    constexpr int kWindowSelectionDragThresholdPixels = 6;
+
     // 将三维点投影到绘图平面（XY平面）
     // @param point 三维点
     // @return 投影到XY平面的点（Z坐标为0）
@@ -78,10 +81,15 @@ void CadController::reset()
 
     // 重置绘图状态机
     m_drawState.reset();
+    m_idleWindowSelectionTracking = false;
+    m_idleWindowSelectionDragging = false;
+    m_idleWindowSelectionAnchor = QPoint();
+    m_idleWindowSelectionCurrent = QPoint();
 
     // 如果有视图，刷新命令提示
     if (m_viewer != nullptr)
     {
+        m_viewer->hideSelectionWindowPreview();
         m_viewer->refreshCommandPrompt();
     }
 }
@@ -168,10 +176,16 @@ void CadController::cancelDrawing()
 
     // 重置子模式
     resetSubModes();
+    m_idleWindowSelectionTracking = false;
+    m_idleWindowSelectionDragging = false;
+    m_idleWindowSelectionAnchor = QPoint();
+    m_idleWindowSelectionCurrent = QPoint();
 
     // 如果有视图，发送取消消息并刷新提示
     if (m_viewer != nullptr)
     {
+        m_viewer->hideSelectionWindowPreview();
+
         if (hadActiveCommand)
         {
             m_viewer->appendCommandMessage(QStringLiteral("命令已取消"));
@@ -221,9 +235,15 @@ bool CadController::handleMousePress(QMouseEvent* event)
         return true;
     }
 
-    // 处理左键按下：选择或绘图
+    // 处理左键按下：空闲态进入候选框选，命令态按既有流程执行。
     if (event->button() == Qt::LeftButton)
     {
+        if (!m_drawState.hasActiveCommand())
+        {
+            beginIdleWindowSelection(event->pos());
+            return true;
+        }
+
         // 保存之前的状态用于比较
         const DrawStateMachine previousState = m_drawState;
 
@@ -279,25 +299,6 @@ bool CadController::handleMousePress(QMouseEvent* event)
             return true;
         }
 
-        // 空闲状态下优先尝试命中当前选中图元的可编辑控制点
-        if (!m_drawState.hasActiveCommand() && m_editer != nullptr)
-        {
-            CadSelectionHandleInfo handleInfo;
-
-            if (m_viewer->pickSelectedHandle(event->pos(), &handleInfo))
-            {
-                if (m_editer->beginGripEdit(m_drawState, m_viewer->selectedEntity(), handleInfo))
-                {
-                    m_viewer->appendCommandMessage(QStringLiteral("已进入控制点编辑"));
-                    m_viewer->refreshCommandPrompt();
-                    return true;
-                }
-            }
-        }
-
-        // 如果编辑器未处理，执行实体选择
-        m_viewer->selectEntityAt(event->pos());
-        m_viewer->refreshCommandPrompt();
         return true;
     }
 
@@ -348,6 +349,14 @@ bool CadController::handleMouseMove(QMouseEvent* event)
         break;
     }
 
+    if (m_idleWindowSelectionTracking
+        && (event->buttons() & Qt::LeftButton) != 0
+        && !m_drawState.hasActiveCommand())
+    {
+        updateIdleWindowSelection(event->pos());
+        return true;
+    }
+
     return false;
 }
 
@@ -373,6 +382,12 @@ bool CadController::handleMouseRelease(QMouseEvent* event)
     {
         m_viewer->endViewInteraction();
         return true;
+    }
+
+    // 空闲态左键释放：点击选中或窗口框选提交。
+    if (event->button() == Qt::LeftButton && !m_drawState.hasActiveCommand())
+    {
+        return finishIdleWindowSelection(event->pos());
     }
 
     return false;
@@ -791,6 +806,95 @@ QString CadController::currentCommandName() const
     }
 
     return drawTypeName(m_drawState.drawType);
+}
+
+void CadController::beginIdleWindowSelection(const QPoint& screenPos)
+{
+    m_idleWindowSelectionTracking = true;
+    m_idleWindowSelectionDragging = false;
+    m_idleWindowSelectionAnchor = screenPos;
+    m_idleWindowSelectionCurrent = screenPos;
+
+    if (m_viewer != nullptr)
+    {
+        m_viewer->hideSelectionWindowPreview();
+    }
+}
+
+void CadController::updateIdleWindowSelection(const QPoint& screenPos)
+{
+    if (!m_idleWindowSelectionTracking || m_viewer == nullptr)
+    {
+        return;
+    }
+
+    m_idleWindowSelectionCurrent = screenPos;
+
+    if (!m_idleWindowSelectionDragging)
+    {
+        const QPoint delta = m_idleWindowSelectionCurrent - m_idleWindowSelectionAnchor;
+
+        if (delta.manhattanLength() < kWindowSelectionDragThresholdPixels)
+        {
+            return;
+        }
+
+        m_idleWindowSelectionDragging = true;
+    }
+
+    m_viewer->showSelectionWindowPreview(m_idleWindowSelectionAnchor, m_idleWindowSelectionCurrent);
+}
+
+bool CadController::finishIdleWindowSelection(const QPoint& screenPos)
+{
+    if (!m_idleWindowSelectionTracking || m_viewer == nullptr)
+    {
+        return false;
+    }
+
+    m_idleWindowSelectionCurrent = screenPos;
+    const bool draggedSelection = m_idleWindowSelectionDragging;
+    const QPoint selectionAnchor = m_idleWindowSelectionAnchor;
+
+    m_idleWindowSelectionTracking = false;
+    m_idleWindowSelectionDragging = false;
+    m_idleWindowSelectionAnchor = QPoint();
+    m_idleWindowSelectionCurrent = QPoint();
+    m_viewer->hideSelectionWindowPreview();
+
+    if (draggedSelection)
+    {
+        const bool crossingSelection = screenPos.x() < selectionAnchor.x();
+        m_viewer->selectEntitiesInWindow(selectionAnchor, screenPos, crossingSelection);
+        m_viewer->appendCommandMessage
+        (
+            crossingSelection
+                ? QStringLiteral("框选完成（碰选）")
+                : QStringLiteral("框选完成（包含选）")
+        );
+        m_viewer->refreshCommandPrompt();
+        return true;
+    }
+
+    // 空闲状态下优先尝试命中当前主选中图元的可编辑控制点
+    if (m_editer != nullptr)
+    {
+        CadSelectionHandleInfo handleInfo;
+
+        if (m_viewer->pickSelectedHandle(screenPos, &handleInfo))
+        {
+            if (m_editer->beginGripEdit(m_drawState, m_viewer->selectedEntity(), handleInfo))
+            {
+                m_viewer->appendCommandMessage(QStringLiteral("已进入控制点编辑"));
+                m_viewer->refreshCommandPrompt();
+                return true;
+            }
+        }
+    }
+
+    m_viewer->selectEntityAt(screenPos);
+    m_viewer->refreshCommandPrompt();
+    return true;
 }
 
 // 重置所有子模式

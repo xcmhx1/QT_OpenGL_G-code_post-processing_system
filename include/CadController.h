@@ -92,6 +92,15 @@ public:
     QString currentCommandName() const;
 
 private:
+    // 开始空闲态候选框选。
+    void beginIdleWindowSelection(const QPoint& screenPos);
+
+    // 更新空闲态候选框选。
+    void updateIdleWindowSelection(const QPoint& screenPos);
+
+    // 结束空闲态候选框选。
+    bool finishIdleWindowSelection(const QPoint& screenPos);
+
     // 重置所有子模式
     void resetSubModes();
 
@@ -125,4 +134,10 @@ private:
 
     // 绘图状态机，管理绘图状态和流程
     DrawStateMachine m_drawState;
+
+    // 空闲态窗口框选状态。
+    bool m_idleWindowSelectionTracking = false;
+    bool m_idleWindowSelectionDragging = false;
+    QPoint m_idleWindowSelectionAnchor;
+    QPoint m_idleWindowSelectionCurrent;
 };

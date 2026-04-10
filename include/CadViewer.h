@@ -16,6 +16,8 @@
 #include <QOpenGLFunctions_4_5_Core>
 #include <QOpenGLWidget>
 #include <QPoint>
+#include <QSet>
+#include <QVector>
 #include <QVector3D>
 #include <QWheelEvent>
 
@@ -132,6 +134,19 @@ public:
     // 在屏幕位置选择实体
     // @param screenPos 屏幕坐标点
     void selectEntityAt(const QPoint& screenPos);
+
+    // 在屏幕矩形窗口内批量选择实体。
+    // crossingSelection=true 为碰选；false 为包含选。
+    void selectEntitiesInWindow(const QPoint& startScreenPos, const QPoint& endScreenPos, bool crossingSelection);
+
+    // 获取当前选中的实体集合（按场景遍历顺序）。
+    QVector<CadItem*> selectedEntities() const;
+
+    // 显示框选预览窗口。
+    void showSelectionWindowPreview(const QPoint& anchorScreenPos, const QPoint& currentScreenPos);
+
+    // 隐藏框选预览窗口。
+    void hideSelectionWindowPreview();
 
     // 在当前选中实体上命中控制点/基点手柄。
     bool pickSelectedHandle(const QPoint& screenPos, CadSelectionHandleInfo* outHandle = nullptr) const;
@@ -278,6 +293,9 @@ private:
     // 绘制加工顺序编号
     void renderProcessOrderLabels();
 
+    // 绘制框选窗口预览。
+    void renderSelectionWindowPreview();
+
     // 处理文档场景变化
     void handleDocumentSceneChanged();
 
@@ -305,6 +323,9 @@ private:
 
     // 更新当前选中实体并在变化时发出信号。
     void setSelectedEntityId(EntityId entityId);
+
+    // 批量设置当前选中实体集合并同步主选中实体。
+    void setSelectedEntities(const QSet<EntityId>& entityIds, EntityId preferredEntityId = 0);
 
     // 简单屏幕空间拾取，返回命中的实体 ID
     // @param screenPos 屏幕坐标
@@ -359,6 +380,18 @@ private:
 
     // 当前选中实体的 ID，0 表示无选中
     EntityId m_selectedEntityId = 0;
+
+    // 当前选中实体集合，用于后续批量编辑能力扩展。
+    QSet<EntityId> m_selectedEntityIds;
+
+    // 框选预览状态。
+    struct SelectionWindowPreviewState
+    {
+        bool visible = false;
+        bool crossingSelection = false;
+        QPoint anchorScreenPos;
+        QPoint currentScreenPos;
+    } m_selectionWindowPreview;
 
     // 当前光标屏幕位置
     QPoint m_cursorScreenPos;

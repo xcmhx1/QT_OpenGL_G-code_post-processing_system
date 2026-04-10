@@ -11,6 +11,7 @@
 // Qt 核心模块
 #include <QMatrix4x4>
 #include <QPoint>
+#include <QRectF>
 
 // CAD 模块内部依赖
 #include "CadRenderTypes.h"
@@ -44,5 +45,18 @@ namespace CadEntityPicker
         int viewportHeight,
         const QPoint& screenPos,
         float pickThresholdPixels
+    );
+
+    // 在屏幕空间窗口内批量拾取实体：
+    // - crossingSelection=true：碰选（实体与窗口有交集即命中）
+    // - crossingSelection=false：包含选（实体离散顶点全部落入窗口才命中）
+    std::vector<EntityId> pickEntitiesByWindow
+    (
+        const std::vector<std::unique_ptr<CadItem>>& entities,
+        const QMatrix4x4& viewProjection,
+        int viewportWidth,
+        int viewportHeight,
+        const QRectF& windowRect,
+        bool crossingSelection
     );
 }

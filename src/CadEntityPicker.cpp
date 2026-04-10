@@ -12,10 +12,110 @@
 
 // 标准库
 #include <limits>
+#include <algorithm>
+#include <array>
+
+// Qt 核心模块
+#include <QLineF>
 
 // CadEntityPicker 命名空间实现
 namespace CadEntityPicker
 {
+    namespace
+    {
+        bool isFinitePoint(const QPointF& point)
+        {
+            return qIsFinite(point.x()) && qIsFinite(point.y());
+        }
+
+        bool containsPoint(const QRectF& rect, const QPointF& point)
+        {
+            return rect.contains(point);
+        }
+
+        bool segmentIntersectsRect(const QPointF& start, const QPointF& end, const QRectF& rect)
+        {
+            if (containsPoint(rect, start) || containsPoint(rect, end))
+            {
+                return true;
+            }
+
+            const QLineF segment(start, end);
+            const QPointF topLeft = rect.topLeft();
+            const QPointF topRight = rect.topRight();
+            const QPointF bottomLeft = rect.bottomLeft();
+            const QPointF bottomRight = rect.bottomRight();
+            const std::array<QLineF, 4> edges =
+            {
+                QLineF(topLeft, topRight),
+                QLineF(topRight, bottomRight),
+                QLineF(bottomRight, bottomLeft),
+                QLineF(bottomLeft, topLeft)
+            };
+
+            QPointF intersectionPoint;
+
+            for (const QLineF& edge : edges)
+            {
+                if (segment.intersects(edge, &intersectionPoint) == QLineF::BoundedIntersection)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        bool intersectsWindow(const QVector<QPointF>& screenVertices, const QRectF& windowRect)
+        {
+            if (screenVertices.isEmpty())
+            {
+                return false;
+            }
+
+            for (const QPointF& vertex : screenVertices)
+            {
+                if (containsPoint(windowRect, vertex))
+                {
+                    return true;
+                }
+            }
+
+            if (screenVertices.size() == 1)
+            {
+                return false;
+            }
+
+            for (int index = 0; index < screenVertices.size() - 1; ++index)
+            {
+                if (segmentIntersectsRect(screenVertices.at(index), screenVertices.at(index + 1), windowRect))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        bool fullyContainedByWindow(const QVector<QPointF>& screenVertices, const QRectF& windowRect)
+        {
+            if (screenVertices.isEmpty())
+            {
+                return false;
+            }
+
+            for (const QPointF& vertex : screenVertices)
+            {
+                if (!containsPoint(windowRect, vertex))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+    }
+
     // 在屏幕空间执行简单拾取：
     // 1. 遍历所有实体
     // 2. 将实体的世界坐标通过视图投影矩阵变换到屏幕空间
@@ -120,5 +220,81 @@ namespace CadEntityPicker
         }
 
         return bestId;
+    }
+
+    std::vector<EntityId> pickEntitiesByWindow
+    (
+        const std::vector<std::unique_ptr<CadItem>>& entities,
+        const QMatrix4x4& viewProjection,
+        int viewportWidth,
+        int viewportHeight,
+        const QRectF& windowRect,
+        bool crossingSelection
+    )
+    {
+        std::vector<EntityId> pickedIds;
+
+        const QRectF normalizedWindow = windowRect.normalized();
+
+        if (normalizedWindow.width() <= 0.0 || normalizedWindow.height() <= 0.0)
+        {
+            return pickedIds;
+        }
+
+        pickedIds.reserve(entities.size());
+
+        for (const std::unique_ptr<CadItem>& entity : entities)
+        {
+            if (entity == nullptr)
+            {
+                continue;
+            }
+
+            const QVector<QVector3D>& worldVertices = entity->m_geometry.vertices;
+
+            if (worldVertices.isEmpty())
+            {
+                continue;
+            }
+
+            QVector<QPointF> screenVertices;
+            screenVertices.reserve(worldVertices.size());
+            bool invalidProjection = false;
+
+            for (const QVector3D& worldVertex : worldVertices)
+            {
+                const QPointF screenPoint = CadViewerUtils::projectToScreen
+                (
+                    worldVertex,
+                    viewProjection,
+                    viewportWidth,
+                    viewportHeight
+                );
+
+                if (!isFinitePoint(screenPoint))
+                {
+                    invalidProjection = true;
+                    break;
+                }
+
+                screenVertices.push_back(screenPoint);
+            }
+
+            if (invalidProjection || screenVertices.isEmpty())
+            {
+                continue;
+            }
+
+            const bool matched = crossingSelection
+                ? intersectsWindow(screenVertices, normalizedWindow)
+                : fullyContainedByWindow(screenVertices, normalizedWindow);
+
+            if (matched)
+            {
+                pickedIds.push_back(CadViewerUtils::toEntityId(entity.get()));
+            }
+        }
+
+        return pickedIds;
     }
 }

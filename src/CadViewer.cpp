@@ -1,4 +1,4 @@
-#include "pch.h"
+﻿#include "pch.h"
 
 // CadViewer 实现文件
 // 实现 CadViewer 模块，对应头文件中声明的主要行为和协作流程。
@@ -16,6 +16,7 @@
 #include "CadProcessVisualUtils.h"
 #include "CadPreviewBuilder.h"
 #include "CadViewTransform.h"
+#include "CadViewerUtils.h"
 
 // Qt 核心模块
 #include <QDragEnterEvent>
@@ -50,6 +51,8 @@ namespace
     constexpr float kObjectSnapDistancePixels = 14.0f;
     // 网格吸附屏幕距离阈值（像素）
     constexpr float kGridSnapDistancePixels = 10.0f;
+    // 窗口框选有效尺寸阈值（像素）。
+    constexpr int kWindowSelectionMinimumPixels = 2;
 
     // 检查是否为支持拖放的文件类型
     // @param localFile 本地文件路径
@@ -116,6 +119,11 @@ namespace
         const float level = std::round(std::log2(safeStep / kGridStepAnchor));
         const float step = kGridStepAnchor * std::pow(2.0f, level);
         return std::max(step, 1.0e-6f);
+    }
+
+    QRect normalizedSelectionRect(const QPoint& anchorScreenPos, const QPoint& currentScreenPos)
+    {
+        return QRect(anchorScreenPos, currentScreenPos).normalized();
     }
 }
 
@@ -316,6 +324,102 @@ void CadViewer::endViewInteraction()
 void CadViewer::selectEntityAt(const QPoint& screenPos)
 {
     setSelectedEntityId(pickEntity(screenPos));
+    update();
+}
+
+void CadViewer::selectEntitiesInWindow(const QPoint& startScreenPos, const QPoint& endScreenPos, bool crossingSelection)
+{
+    CadDocument* scene = m_sceneCoordinator.document();
+
+    if (scene == nullptr)
+    {
+        setSelectedEntities(QSet<EntityId>(), 0);
+        update();
+        return;
+    }
+
+    const QRect selectionRect = normalizedSelectionRect(startScreenPos, endScreenPos);
+
+    if (selectionRect.width() < kWindowSelectionMinimumPixels || selectionRect.height() < kWindowSelectionMinimumPixels)
+    {
+        setSelectedEntities(QSet<EntityId>(), 0);
+        update();
+        return;
+    }
+
+    const std::vector<EntityId> pickedIds = CadEntityPicker::pickEntitiesByWindow
+    (
+        scene->m_entities,
+        m_camera.viewProjectionMatrix(aspectRatio()),
+        m_viewportWidth,
+        m_viewportHeight,
+        QRectF(selectionRect),
+        crossingSelection
+    );
+
+    QSet<EntityId> selectedIds;
+    selectedIds.reserve(static_cast<qsizetype>(pickedIds.size()));
+
+    for (EntityId id : pickedIds)
+    {
+        if (id != 0)
+        {
+            selectedIds.insert(id);
+        }
+    }
+
+    const EntityId preferredEntityId = pickedIds.empty() ? 0 : pickedIds.front();
+    setSelectedEntities(selectedIds, preferredEntityId);
+    update();
+}
+
+QVector<CadItem*> CadViewer::selectedEntities() const
+{
+    QVector<CadItem*> entities;
+    CadDocument* scene = m_sceneCoordinator.document();
+
+    if (scene == nullptr || m_selectedEntityIds.isEmpty())
+    {
+        return entities;
+    }
+
+    entities.reserve(static_cast<qsizetype>(m_selectedEntityIds.size()));
+
+    for (const std::unique_ptr<CadItem>& entity : scene->m_entities)
+    {
+        if (entity == nullptr)
+        {
+            continue;
+        }
+
+        const EntityId id = CadViewerUtils::toEntityId(entity.get());
+
+        if (m_selectedEntityIds.contains(id))
+        {
+            entities.push_back(entity.get());
+        }
+    }
+
+    return entities;
+}
+
+void CadViewer::showSelectionWindowPreview(const QPoint& anchorScreenPos, const QPoint& currentScreenPos)
+{
+    m_selectionWindowPreview.visible = true;
+    m_selectionWindowPreview.anchorScreenPos = anchorScreenPos;
+    m_selectionWindowPreview.currentScreenPos = currentScreenPos;
+    m_selectionWindowPreview.crossingSelection = currentScreenPos.x() < anchorScreenPos.x();
+    update();
+}
+
+void CadViewer::hideSelectionWindowPreview()
+{
+    if (!m_selectionWindowPreview.visible)
+    {
+        return;
+    }
+
+    m_selectionWindowPreview.visible = false;
     update();
 }
 
@@ -612,6 +716,7 @@ void CadViewer::paintGL()
     renderAxis(viewProjection);
     renderOrbitMarker(viewProjection);
     renderProcessOrderLabels();
+    renderSelectionWindowPreview();
 
     // 性能日志记录
     if constexpr (kEnableViewerPerfLogging)
@@ -973,8 +1078,6 @@ void CadViewer::renderProcessOrderLabels()
     std::vector<ProcessOrderLabel> labels;
     labels.reserve(scene->m_entities.size());
 
-    const CadItem* selectedItem = selectedEntity();
-
     for (const std::unique_ptr<CadItem>& entity : scene->m_entities)
     {
         if (entity == nullptr)
@@ -999,7 +1102,7 @@ void CadViewer::renderProcessOrderLabels()
 
         ProcessOrderLabel label;
         label.order = info.processOrder;
-        label.selected = entity.get() == selectedItem;
+        label.selected = entity->m_isSelected;
         label.center = screenPoint;
         label.text = QString::number(info.processOrder + 1);
         labels.push_back(std::move(label));
@@ -1082,6 +1185,43 @@ void CadViewer::renderProcessOrderLabels()
     }
 }
 
+void CadViewer::renderSelectionWindowPreview()
+{
+    if (!m_selectionWindowPreview.visible || interactionMode() != ViewInteractionMode::Idle)
+    {
+        return;
+    }
+
+    const QRect selectionRect = normalizedSelectionRect
+    (
+        m_selectionWindowPreview.anchorScreenPos,
+        m_selectionWindowPreview.currentScreenPos
+    );
+
+    if (selectionRect.width() < kWindowSelectionMinimumPixels || selectionRect.height() < kWindowSelectionMinimumPixels)
+    {
+        return;
+    }
+
+    const bool crossingSelection = m_selectionWindowPreview.crossingSelection;
+    const QColor borderColor = crossingSelection
+        ? QColor(66, 205, 104, 220)
+        : QColor(74, 152, 250, 220);
+    const QColor fillColor = crossingSelection
+        ? QColor(66, 205, 104, 42)
+        : QColor(74, 152, 250, 42);
+
+    QPainter painter(this);
+    painter.setRenderHint(QPainter::Antialiasing, false);
+
+    QPen borderPen(borderColor, 1.0, Qt::DashLine);
+    borderPen.setDashPattern({ 7.0, 4.0 });
+
+    painter.setPen(borderPen);
+    painter.setBrush(fillColor);
+    painter.drawRect(selectionRect);
+}
+
 // 处理文档场景变化
 void CadViewer::handleDocumentSceneChanged()
 {
@@ -1090,11 +1230,8 @@ void CadViewer::handleDocumentSceneChanged()
     // 刷新场景边界
     m_sceneCoordinator.refreshBounds();
 
-    // 如果选中的实体已不存在，则清除选中状态
-    if (findEntityById(m_selectedEntityId) == nullptr)
-    {
-        setSelectedEntityId(0);
-    }
+    // 场景变化后重算选中集合，自动剔除已失效实体。
+    setSelectedEntities(m_selectedEntityIds, m_selectedEntityId);
 
     // 如果图形协调器已初始化，则重建缓冲
     if (m_graphicsCoordinator.isInitialized())
@@ -1347,13 +1484,75 @@ float CadViewer::currentGridStep() const
 
 void CadViewer::setSelectedEntityId(EntityId entityId)
 {
-    if (m_selectedEntityId == entityId)
+    QSet<EntityId> ids;
+
+    if (entityId != 0)
     {
-        return;
+        ids.insert(entityId);
     }
 
-    m_selectedEntityId = entityId;
-    emit selectedEntityChanged(selectedEntity());
+    setSelectedEntities(ids, entityId);
+}
+
+void CadViewer::setSelectedEntities(const QSet<EntityId>& entityIds, EntityId preferredEntityId)
+{
+    CadDocument* scene = m_sceneCoordinator.document();
+    QSet<EntityId> filteredIds;
+    EntityId resolvedPrimaryId = 0;
+
+    if (scene != nullptr)
+    {
+        filteredIds.reserve(entityIds.size());
+
+        for (const std::unique_ptr<CadItem>& entity : scene->m_entities)
+        {
+            if (entity == nullptr)
+            {
+                continue;
+            }
+
+            const EntityId id = CadViewerUtils::toEntityId(entity.get());
+            const bool selected = entityIds.contains(id);
+            entity->m_isSelected = selected;
+
+            if (selected)
+            {
+                filteredIds.insert(id);
+            }
+        }
+    }
+
+    if (preferredEntityId != 0 && filteredIds.contains(preferredEntityId))
+    {
+        resolvedPrimaryId = preferredEntityId;
+    }
+    else if (!filteredIds.isEmpty() && scene != nullptr)
+    {
+        for (const std::unique_ptr<CadItem>& entity : scene->m_entities)
+        {
+            if (entity == nullptr)
+            {
+                continue;
+            }
+
+            const EntityId id = CadViewerUtils::toEntityId(entity.get());
+
+            if (filteredIds.contains(id))
+            {
+                resolvedPrimaryId = id;
+                break;
+            }
+        }
+    }
+
+    const bool selectionChanged = m_selectedEntityId != resolvedPrimaryId || m_selectedEntityIds != filteredIds;
+    m_selectedEntityId = resolvedPrimaryId;
+    m_selectedEntityIds = filteredIds;
+
+    if (selectionChanged)
+    {
+        emit selectedEntityChanged(selectedEntity());
+    }
 }
 
 // 屏幕空间拾取：
@@ -1409,7 +1608,6 @@ std::vector<TransientPrimitive> CadViewer::buildProcessDirectionPrimitives() con
     std::vector<TransientPrimitive> primitives;
     primitives.reserve(scene->m_entities.size());
 
-    const CadItem* selectedItem = selectedEntity();
     const float pixelScale = std::max(pixelToWorldScale(), 1.0e-4f);
     const float headLength = pixelScale * 9.2f;
     const float headHalfWidth = pixelScale * 4.4f;
@@ -1440,7 +1638,7 @@ std::vector<TransientPrimitive> CadViewer::buildProcessDirectionPrimitives() con
         const QVector3D headBase = tip - info.direction * headLength;
 
         QVector3D arrowColor;
-        if (entity.get() == selectedItem)
+        if (entity->m_isSelected)
         {
             arrowColor = QVector3D(1.0f, 0.78f, 0.30f);
         }
