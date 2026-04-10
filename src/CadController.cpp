@@ -909,6 +909,7 @@ void CadController::resetSubModes()
     m_drawState.lwPolylineSubMode = LWPolylineDrawSubMode::Idle;
     m_drawState.moveSubMode = MoveEditSubMode::Idle;
     m_drawState.gripSubMode = GripEditSubMode::Idle;
+    m_drawState.gripPointIndex = -1;
 }
 
 // 准备图元子模式（进入绘图状态）
@@ -1135,3 +1136,4 @@ QVector3D CadController::currentWorldPos(const QPoint& screenPos) const
 
     return m_viewer->resolveInteractiveWorldPosition(screenPos);
 }
+

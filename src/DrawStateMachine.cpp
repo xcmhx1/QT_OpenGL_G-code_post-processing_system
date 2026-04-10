@@ -22,6 +22,7 @@ void DrawStateMachine::reset()
     editType = EditType::None;
     moveSubMode = MoveEditSubMode::Idle;
     gripSubMode = GripEditSubMode::Idle;
+    gripPointIndex = -1;
     commandPoints.clear();
     commandBulges.clear();
     polylineArcMode = false;
@@ -53,3 +54,4 @@ bool DrawStateMachine::hasActiveCommand() const
 {
     return isDrawing || editType != EditType::None;
 }
+

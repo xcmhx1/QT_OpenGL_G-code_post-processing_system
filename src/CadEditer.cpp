@@ -1,4 +1,4 @@
-﻿// CadEditer 实现文件
+// CadEditer 实现文件
 // 实现 CadEditer 模块，对应头文件中声明的主要行为和协作流程。
 // 编辑器模块，负责绘图创建、实体修改以及 Undo/Redo 命令栈管理。
 #include "pch.h"
@@ -2433,6 +2433,7 @@ bool CadEditer::beginMove(DrawStateMachine& drawState, CadItem* item)
     drawState.editType = EditType::Move;
     drawState.moveSubMode = MoveEditSubMode::AwaitBasePoint;
     drawState.gripSubMode = GripEditSubMode::Idle;
+    drawState.gripPointIndex = -1;
     m_moveTarget = item;
     m_gripTarget = nullptr;
     m_gripPointIndex = -1;
@@ -2464,6 +2465,7 @@ bool CadEditer::beginGripEdit(DrawStateMachine& drawState, CadItem* item, const 
     drawState.editType = EditType::GripEdit;
     drawState.moveSubMode = MoveEditSubMode::Idle;
     drawState.gripSubMode = GripEditSubMode::AwaitTargetPoint;
+    drawState.gripPointIndex = handle.pointIndex;
     m_moveTarget = nullptr;
     m_gripTarget = item;
     m_gripPointIndex = handle.pointIndex;
@@ -3087,6 +3089,7 @@ bool CadEditer::handleGripEditing
         currentState.commandPoints.clear();
         currentState.editType = EditType::None;
         currentState.gripSubMode = GripEditSubMode::Idle;
+        currentState.gripPointIndex = -1;
         m_gripTarget = nullptr;
         m_gripPointIndex = -1;
         return false;
@@ -3108,6 +3111,7 @@ bool CadEditer::handleGripEditing
         currentState.commandPoints.clear();
         currentState.editType = EditType::None;
         currentState.gripSubMode = GripEditSubMode::Idle;
+        currentState.gripPointIndex = -1;
         m_gripTarget = nullptr;
         m_gripPointIndex = -1;
         return true;
@@ -3128,3 +3132,4 @@ bool CadEditer::addEntity(std::unique_ptr<DRW_Entity> entity)
 
     return executeCommand(std::make_unique<AddEntityCommand>(m_document, std::move(entity)));
 }
+

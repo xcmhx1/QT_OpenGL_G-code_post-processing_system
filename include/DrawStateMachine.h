@@ -133,6 +133,8 @@ public:
     MoveEditSubMode moveSubMode = MoveEditSubMode::Idle;
     // 控制点编辑子状态
     GripEditSubMode gripSubMode = GripEditSubMode::Idle;
+    // 当前控制点编辑的句柄索引，未激活时为 -1。
+    int gripPointIndex = -1;
 
     // 当前命令过程里已采集的控制点
     QVector<QVector3D> commandPoints;
@@ -181,3 +183,4 @@ public:
     // 静态成员变量，在程序启动时即被初始化
     static DrawStateMachine s_instance;
 };
+

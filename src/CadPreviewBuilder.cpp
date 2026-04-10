@@ -1,4 +1,4 @@
-﻿// CadPreviewBuilder 实现文件
+// CadPreviewBuilder 实现文件
 // 实现 CadPreviewBuilder 模块，对应头文件中声明的主要行为和协作流程。
 // 预览构建模块，负责根据当前命令状态生成 transient 预览图元。
 
@@ -7,13 +7,16 @@
 #include "CadPreviewBuilder.h"
 
 // CAD 模块内部依赖
+#include "CadDocument.h"
 #include "CadItem.h"
 #include "CadViewerUtils.h"
 #include "DrawStateMachine.h"
 
 // 标准库
+#include <algorithm>
 #include <cmath>
 #include <limits>
+#include <memory>
 
 // 匿名命名空间，存放局部常量和辅助函数
 namespace
@@ -26,6 +29,17 @@ namespace
     constexpr int kPreviewCurveSegments = 48;
     // 预览圆弧基础分段数
     constexpr int kPreviewBulgeBaseSegments = 64;
+    // 几何精度阈值
+    constexpr double kGeometryEpsilon = 1.0e-9;
+    // 两倍圆周率
+    constexpr double kTwoPi = 6.28318530717958647692;
+    // 椭圆最小短长轴比
+    constexpr double kMinEllipseRatio = 1.0e-4;
+
+    // 夹点编辑预览颜色
+    const QVector3D kGripPreviewColor(0.98f, 0.67f, 0.12f);
+    const QVector3D kGripGuideColor(0.35f, 0.90f, 1.0f);
+    const QVector3D kGripTargetColor(1.0f, 0.92f, 0.25f);
 
     // 将当前鼠标点投影到已知半径的圆上，便于圆/圆弧预览保持半径稳定
     // @param center 圆心坐标
@@ -360,6 +374,518 @@ namespace
 
         return std::tan(alpha * 0.5);
     }
+
+    QVector3D flattenToDrawingPlane(const QVector3D& point)
+    {
+        return QVector3D(point.x(), point.y(), 0.0f);
+    }
+
+    double normalizeAnglePositive(double angle)
+    {
+        double normalized = std::fmod(angle, kTwoPi);
+
+        if (normalized < 0.0)
+        {
+            normalized += kTwoPi;
+        }
+
+        return normalized;
+    }
+
+    QVector3D resolveEntityNormal(const DRW_Coord& extPoint)
+    {
+        QVector3D normal(extPoint.x, extPoint.y, extPoint.z);
+
+        if (normal.lengthSquared() <= kGeometryEpsilon)
+        {
+            return QVector3D(0.0f, 0.0f, 1.0f);
+        }
+
+        normal.normalize();
+        return normal;
+    }
+
+    void buildPlaneBasis(const QVector3D& normal, QVector3D& axisX, QVector3D& axisY)
+    {
+        if (std::abs(normal.x()) <= 1.0e-6f && std::abs(normal.y()) <= 1.0e-6f)
+        {
+            axisX = QVector3D(1.0f, 0.0f, 0.0f);
+            axisY = QVector3D::crossProduct(normal, axisX);
+
+            if (axisY.lengthSquared() <= kGeometryEpsilon)
+            {
+                axisY = QVector3D(0.0f, 1.0f, 0.0f);
+            }
+            else
+            {
+                axisY.normalize();
+            }
+
+            return;
+        }
+
+        const QVector3D helper = std::abs(normal.z()) < 0.999f
+            ? QVector3D(0.0f, 0.0f, 1.0f)
+            : QVector3D(0.0f, 1.0f, 0.0f);
+
+        axisX = QVector3D::crossProduct(helper, normal);
+
+        if (axisX.lengthSquared() <= kGeometryEpsilon)
+        {
+            axisX = QVector3D(1.0f, 0.0f, 0.0f);
+        }
+        else
+        {
+            axisX.normalize();
+        }
+
+        axisY = QVector3D::crossProduct(normal, axisX);
+
+        if (axisY.lengthSquared() <= kGeometryEpsilon)
+        {
+            axisY = QVector3D(0.0f, 1.0f, 0.0f);
+        }
+        else
+        {
+            axisY.normalize();
+        }
+    }
+
+    double angleFromPointOnCircle(const DRW_Circle* circle, const QVector3D& point, bool* valid = nullptr)
+    {
+        if (valid != nullptr)
+        {
+            *valid = false;
+        }
+
+        if (circle == nullptr)
+        {
+            return 0.0;
+        }
+
+        const QVector3D center(circle->basePoint.x, circle->basePoint.y, circle->basePoint.z);
+        const QVector3D local = flattenToDrawingPlane(point) - center;
+
+        if (local.lengthSquared() <= kGeometryEpsilon)
+        {
+            return 0.0;
+        }
+
+        const QVector3D normal = resolveEntityNormal(circle->extPoint);
+        QVector3D axisX;
+        QVector3D axisY;
+        buildPlaneBasis(normal, axisX, axisY);
+
+        const double x = QVector3D::dotProduct(local, axisX);
+        const double y = QVector3D::dotProduct(local, axisY);
+
+        if (std::abs(x) <= kGeometryEpsilon && std::abs(y) <= kGeometryEpsilon)
+        {
+            return 0.0;
+        }
+
+        if (valid != nullptr)
+        {
+            *valid = true;
+        }
+
+        return std::atan2(y, x);
+    }
+
+    bool tryBuildEllipseAxes(const DRW_Ellipse* ellipse, QVector3D& majorAxis, QVector3D& minorAxis)
+    {
+        if (ellipse == nullptr)
+        {
+            return false;
+        }
+
+        majorAxis = QVector3D(ellipse->secPoint.x, ellipse->secPoint.y, ellipse->secPoint.z);
+        const double majorLength = majorAxis.length();
+
+        if (majorLength <= kGeometryEpsilon || ellipse->ratio <= kMinEllipseRatio)
+        {
+            return false;
+        }
+
+        const QVector3D normal = resolveEntityNormal(ellipse->extPoint);
+        minorAxis = QVector3D::crossProduct(normal, majorAxis);
+
+        if (minorAxis.lengthSquared() <= kGeometryEpsilon)
+        {
+            return false;
+        }
+
+        minorAxis.normalize();
+        minorAxis *= static_cast<float>(majorLength * ellipse->ratio);
+        return true;
+    }
+
+    bool ellipseParameterFromPoint(const DRW_Ellipse* ellipse, const QVector3D& worldPoint, double& parameter)
+    {
+        QVector3D majorAxis;
+        QVector3D minorAxis;
+
+        if (ellipse == nullptr || !tryBuildEllipseAxes(ellipse, majorAxis, minorAxis))
+        {
+            return false;
+        }
+
+        const double majorLength = majorAxis.length();
+        const double minorLength = minorAxis.length();
+
+        if (majorLength <= kGeometryEpsilon || minorLength <= kGeometryEpsilon)
+        {
+            return false;
+        }
+
+        QVector3D majorUnit = majorAxis;
+        QVector3D minorUnit = minorAxis;
+        majorUnit.normalize();
+        minorUnit.normalize();
+
+        const QVector3D center(ellipse->basePoint.x, ellipse->basePoint.y, ellipse->basePoint.z);
+        const QVector3D local = flattenToDrawingPlane(worldPoint) - center;
+        const double x = QVector3D::dotProduct(local, majorUnit);
+        const double y = QVector3D::dotProduct(local, minorUnit);
+        const double cosValue = x / majorLength;
+        const double sinValue = y / minorLength;
+        parameter = std::atan2(sinValue, cosValue);
+        return true;
+    }
+
+    std::unique_ptr<DRW_Entity> cloneEntityForPreview(const DRW_Entity* entity)
+    {
+        if (entity == nullptr)
+        {
+            return nullptr;
+        }
+
+        switch (entity->eType)
+        {
+        case DRW::ETYPE::POINT:
+            return std::make_unique<DRW_Point>(*static_cast<const DRW_Point*>(entity));
+        case DRW::ETYPE::LINE:
+            return std::make_unique<DRW_Line>(*static_cast<const DRW_Line*>(entity));
+        case DRW::ETYPE::CIRCLE:
+            return std::make_unique<DRW_Circle>(*static_cast<const DRW_Circle*>(entity));
+        case DRW::ETYPE::ARC:
+            return std::make_unique<DRW_Arc>(*static_cast<const DRW_Arc*>(entity));
+        case DRW::ETYPE::ELLIPSE:
+            return std::make_unique<DRW_Ellipse>(*static_cast<const DRW_Ellipse*>(entity));
+        case DRW::ETYPE::LWPOLYLINE:
+            return std::make_unique<DRW_LWPolyline>(*static_cast<const DRW_LWPolyline*>(entity));
+        case DRW::ETYPE::POLYLINE:
+            return std::make_unique<DRW_Polyline>(*static_cast<const DRW_Polyline*>(entity));
+        default:
+            return nullptr;
+        }
+    }
+
+    bool applyEditableControlPoint(DRW_Entity* entity, int pointIndex, const QVector3D& worldPos)
+    {
+        if (entity == nullptr || pointIndex < 0)
+        {
+            return false;
+        }
+
+        const QVector3D point = flattenToDrawingPlane(worldPos);
+
+        switch (entity->eType)
+        {
+        case DRW::ETYPE::POINT:
+        {
+            if (pointIndex != 0)
+            {
+                return false;
+            }
+
+            DRW_Point* pointEntity = static_cast<DRW_Point*>(entity);
+            pointEntity->basePoint.x = point.x();
+            pointEntity->basePoint.y = point.y();
+            pointEntity->basePoint.z = point.z();
+            return true;
+        }
+        case DRW::ETYPE::LINE:
+        {
+            DRW_Line* line = static_cast<DRW_Line*>(entity);
+
+            if (pointIndex == 0)
+            {
+                line->basePoint.x = point.x();
+                line->basePoint.y = point.y();
+                line->basePoint.z = point.z();
+                return true;
+            }
+
+            if (pointIndex == 1)
+            {
+                line->secPoint.x = point.x();
+                line->secPoint.y = point.y();
+                line->secPoint.z = point.z();
+                return true;
+            }
+
+            return false;
+        }
+        case DRW::ETYPE::POLYLINE:
+        {
+            DRW_Polyline* polyline = static_cast<DRW_Polyline*>(entity);
+
+            if (pointIndex >= static_cast<int>(polyline->vertlist.size()))
+            {
+                return false;
+            }
+
+            const std::shared_ptr<DRW_Vertex>& vertex = polyline->vertlist[static_cast<size_t>(pointIndex)];
+
+            if (vertex == nullptr)
+            {
+                return false;
+            }
+
+            vertex->basePoint.x = point.x();
+            vertex->basePoint.y = point.y();
+            vertex->basePoint.z = point.z();
+            return true;
+        }
+        case DRW::ETYPE::LWPOLYLINE:
+        {
+            DRW_LWPolyline* polyline = static_cast<DRW_LWPolyline*>(entity);
+
+            if (pointIndex >= static_cast<int>(polyline->vertlist.size()))
+            {
+                return false;
+            }
+
+            const std::shared_ptr<DRW_Vertex2D>& vertex = polyline->vertlist[static_cast<size_t>(pointIndex)];
+
+            if (vertex == nullptr)
+            {
+                return false;
+            }
+
+            vertex->x = point.x();
+            vertex->y = point.y();
+            return true;
+        }
+        case DRW::ETYPE::CIRCLE:
+        {
+            DRW_Circle* circle = static_cast<DRW_Circle*>(entity);
+            const QVector3D center(circle->basePoint.x, circle->basePoint.y, circle->basePoint.z);
+
+            if (pointIndex == 0)
+            {
+                circle->basePoint.x = point.x();
+                circle->basePoint.y = point.y();
+                circle->basePoint.z = point.z();
+                return true;
+            }
+
+            if (pointIndex >= 1 && pointIndex <= 4)
+            {
+                const double radius = (point - center).length();
+
+                if (radius <= kGeometryEpsilon)
+                {
+                    return false;
+                }
+
+                circle->radious = radius;
+                return true;
+            }
+
+            return false;
+        }
+        case DRW::ETYPE::ARC:
+        {
+            DRW_Arc* arc = static_cast<DRW_Arc*>(entity);
+            DRW_Circle circleProxy;
+            circleProxy.basePoint = arc->basePoint;
+            circleProxy.extPoint = arc->extPoint;
+            circleProxy.radious = arc->radious;
+
+            if (pointIndex == 0)
+            {
+                arc->basePoint.x = point.x();
+                arc->basePoint.y = point.y();
+                arc->basePoint.z = point.z();
+                return true;
+            }
+
+            if (pointIndex == 2)
+            {
+                const QVector3D center(arc->basePoint.x, arc->basePoint.y, arc->basePoint.z);
+                const double radius = (point - center).length();
+
+                if (radius <= kGeometryEpsilon)
+                {
+                    return false;
+                }
+
+                arc->radious = radius;
+                return true;
+            }
+
+            bool validAngle = false;
+            const double targetAngle = angleFromPointOnCircle(&circleProxy, point, &validAngle);
+
+            if (!validAngle)
+            {
+                return false;
+            }
+
+            if (pointIndex == 1)
+            {
+                arc->staangle = normalizeAnglePositive(targetAngle);
+                arc->endangle = normalizeAnglePositive(arc->endangle);
+
+                while (arc->endangle <= arc->staangle)
+                {
+                    arc->endangle += kTwoPi;
+                }
+
+                return true;
+            }
+
+            if (pointIndex == 3)
+            {
+                arc->staangle = normalizeAnglePositive(arc->staangle);
+                arc->endangle = normalizeAnglePositive(targetAngle);
+
+                while (arc->endangle <= arc->staangle)
+                {
+                    arc->endangle += kTwoPi;
+                }
+
+                return true;
+            }
+
+            return false;
+        }
+        case DRW::ETYPE::ELLIPSE:
+        {
+            DRW_Ellipse* ellipse = static_cast<DRW_Ellipse*>(entity);
+            QVector3D majorAxis;
+            QVector3D minorAxis;
+
+            if (!tryBuildEllipseAxes(ellipse, majorAxis, minorAxis))
+            {
+                return false;
+            }
+
+            const QVector3D center(ellipse->basePoint.x, ellipse->basePoint.y, ellipse->basePoint.z);
+            const double majorLength = majorAxis.length();
+
+            if (majorLength <= kGeometryEpsilon)
+            {
+                return false;
+            }
+
+            QVector3D majorUnit = majorAxis;
+            QVector3D minorUnit = minorAxis;
+            majorUnit.normalize();
+            minorUnit.normalize();
+
+            if (pointIndex == 0)
+            {
+                ellipse->basePoint.x = point.x();
+                ellipse->basePoint.y = point.y();
+                ellipse->basePoint.z = point.z();
+                return true;
+            }
+
+            if (pointIndex == 1 || pointIndex == 2)
+            {
+                const QVector3D direction = pointIndex == 1 ? (point - center) : (center - point);
+
+                if (direction.lengthSquared() <= kGeometryEpsilon)
+                {
+                    return false;
+                }
+
+                ellipse->secPoint.x = direction.x();
+                ellipse->secPoint.y = direction.y();
+                ellipse->secPoint.z = direction.z();
+                return true;
+            }
+
+            if (pointIndex == 3 || pointIndex == 4)
+            {
+                const QVector3D local = point - center;
+                const double minorLength = std::abs(QVector3D::dotProduct(local, minorUnit));
+
+                if (minorLength <= kGeometryEpsilon)
+                {
+                    return false;
+                }
+
+                ellipse->ratio = std::clamp(minorLength / majorLength, kMinEllipseRatio, 1.0 - 1.0e-6);
+                return true;
+            }
+
+            if (pointIndex == 5 || pointIndex == 6)
+            {
+                double parameter = 0.0;
+
+                if (!ellipseParameterFromPoint(ellipse, point, parameter))
+                {
+                    return false;
+                }
+
+                if (pointIndex == 5)
+                {
+                    ellipse->staparam = normalizeAnglePositive(parameter);
+                }
+                else
+                {
+                    ellipse->endparam = normalizeAnglePositive(parameter);
+                }
+
+                return true;
+            }
+
+            return false;
+        }
+        default:
+            return false;
+        }
+    }
+
+    bool buildGripEditedEntityPreview
+    (
+        const CadItem* selectedItem,
+        int gripPointIndex,
+        const QVector3D& targetPoint,
+        TransientPrimitive& preview
+    )
+    {
+        if (selectedItem == nullptr || selectedItem->m_nativeEntity == nullptr || gripPointIndex < 0)
+        {
+            return false;
+        }
+
+        std::unique_ptr<DRW_Entity> previewEntity = cloneEntityForPreview(selectedItem->m_nativeEntity);
+
+        if (previewEntity == nullptr || !applyEditableControlPoint(previewEntity.get(), gripPointIndex, targetPoint))
+        {
+            return false;
+        }
+
+        std::unique_ptr<CadItem> previewItem = CadDocument::createCadItemForEntity(previewEntity.get());
+
+        if (previewItem == nullptr)
+        {
+            return false;
+        }
+
+        previewItem->buildGeometryDatay();
+        preview.primitiveType = CadViewerUtils::primitiveTypeForEntity(previewItem.get());
+        preview.color = kGripPreviewColor;
+        preview.pointSize = preview.primitiveType == GL_POINTS ? 12.0f : 1.0f;
+        preview.roundPoint = preview.primitiveType == GL_POINTS;
+        preview.vertices = previewItem->m_geometry.vertices;
+        return !preview.vertices.isEmpty();
+    }
 }
 
 // CadPreviewBuilder 命名空间实现
@@ -417,6 +943,44 @@ namespace CadPreviewBuilder
                 guideLine.color = QVector3D(0.35f, 0.90f, 1.0f);  // 青色
                 guideLine.vertices = { basePoint, state.currentPos };
                 primitives.push_back(std::move(guideLine));
+            }
+
+            return primitives;
+        }
+
+        // 处理控制点编辑命令预览
+        if (state.editType == EditType::GripEdit)
+        {
+            if (selectedItem != nullptr
+                && state.gripSubMode == GripEditSubMode::AwaitTargetPoint
+                && state.gripPointIndex >= 0
+                && !state.commandPoints.isEmpty())
+            {
+                const QVector3D basePoint = CadViewerUtils::flattenedToGroundPlane(state.commandPoints.front());
+                const QVector3D targetPoint = CadViewerUtils::flattenedToGroundPlane(state.currentPos);
+
+                TransientPrimitive entityPreview;
+
+                if (buildGripEditedEntityPreview(selectedItem, state.gripPointIndex, targetPoint, entityPreview))
+                {
+                    primitives.push_back(std::move(entityPreview));
+                }
+
+                // 基点到目标点的引导线
+                TransientPrimitive guideLine;
+                guideLine.primitiveType = GL_LINES;
+                guideLine.color = kGripGuideColor;
+                guideLine.vertices = { basePoint, targetPoint };
+                primitives.push_back(std::move(guideLine));
+
+                // 当前目标点高亮
+                TransientPrimitive targetPointMarker;
+                targetPointMarker.primitiveType = GL_POINTS;
+                targetPointMarker.color = kGripTargetColor;
+                targetPointMarker.pointSize = 11.0f;
+                targetPointMarker.roundPoint = true;
+                targetPointMarker.vertices = { targetPoint };
+                primitives.push_back(std::move(targetPointMarker));
             }
 
             return primitives;
@@ -645,3 +1209,4 @@ namespace CadPreviewBuilder
         return primitives;
     }
 }
+
