@@ -12,6 +12,7 @@ void DrawStateMachine::reset()
     const QColor preservedDrawingColor = drawingColor;
     const QString preservedLayerName = drawingLayerName;
     const int preservedColorIndex = drawingColorIndex;
+    const bool preservedOrthoEnabled = orthoEnabled;
 
     // 重置基本状态
     isDrawing = false;
@@ -48,6 +49,8 @@ void DrawStateMachine::reset()
     activeButton = Qt::NoButton;
     pressedButtons = Qt::NoButton;
     keyboardModifiers = Qt::NoModifier;
+    dynamicInputBuffer.clear();
+    orthoEnabled = preservedOrthoEnabled;
 }
 
 bool DrawStateMachine::hasActiveCommand() const

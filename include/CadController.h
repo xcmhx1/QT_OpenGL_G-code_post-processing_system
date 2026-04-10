@@ -125,6 +125,30 @@ private:
     // @return 对应的世界坐标
     QVector3D currentWorldPos(const QPoint& screenPos) const;
 
+    // 当前命令阶段是否正在等待输入一个点。
+    bool isAwaitingPointInput() const;
+
+    // 对活动命令执行一次“确认”动作（Enter/右键）。
+    bool confirmActiveCommand();
+
+    // 按当前命令状态提交一个点（与左键提交共享路径）。
+    bool commitCommandPoint(const QVector3D& worldPos);
+
+    // 尝试从动态输入缓冲解析并提交一个点。
+    bool submitDynamicInputBuffer();
+
+    // 在当前命令上下文中解析动态输入字符串。
+    bool tryResolveDynamicInputPoint(const QString& inputText, QVector3D& worldPoint, QString& errorMessage) const;
+
+    // 获取动态输入参考点（相对坐标/极坐标的基准点）。
+    QVector3D dynamicInputReferencePoint() const;
+
+    // 对输入点应用正交约束。
+    QVector3D applyOrthoConstraint(const QVector3D& worldPos) const;
+
+    // 在提示栏追加动态输入状态说明。
+    QString appendDynamicInputPromptState(const QString& basePrompt) const;
+
 private:
     // 关联的 CAD 视图对象
     CadViewer* m_viewer = nullptr;

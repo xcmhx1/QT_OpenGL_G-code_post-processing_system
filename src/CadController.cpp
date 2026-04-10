@@ -15,6 +15,9 @@
 #include "CadProcessVisualUtils.h"
 #include "CadViewer.h"
 
+// 标准库
+#include <cmath>
+
 // 匿名命名空间，存放局部辅助函数
 namespace
 {
@@ -53,6 +56,42 @@ namespace
         default:
             return QStringLiteral("空闲");
         }
+    }
+
+    // 统一判断输入字符是否属于动态输入内容。
+    bool isDynamicInputCharacter(QChar character)
+    {
+        return character.isDigit()
+            || character == QLatin1Char('.')
+            || character == QLatin1Char('+')
+            || character == QLatin1Char('-')
+            || character == QLatin1Char(',')
+            || character == QLatin1Char('@')
+            || character == QLatin1Char('<');
+    }
+
+    bool tryParseCoordinatePair(const QString& text, double& first, double& second)
+    {
+        const QStringList parts = text.split(QLatin1Char(','), Qt::KeepEmptyParts);
+
+        if (parts.size() != 2)
+        {
+            return false;
+        }
+
+        bool firstOk = false;
+        bool secondOk = false;
+        const double firstValue = parts.at(0).toDouble(&firstOk);
+        const double secondValue = parts.at(1).toDouble(&secondOk);
+
+        if (!firstOk || !secondOk)
+        {
+            return false;
+        }
+
+        first = firstValue;
+        second = secondValue;
+        return true;
     }
 }
 
@@ -121,6 +160,7 @@ void CadController::beginDrawing(DrawType drawType, const QColor& color)
     m_drawState.commandBulges.clear();
     m_drawState.polylineArcMode = false;
     m_drawState.lwPolylineArcMode = false;
+    m_drawState.dynamicInputBuffer.clear();
 
     // 重置子模式
     resetSubModes();
@@ -146,6 +186,7 @@ bool CadController::beginMoveSelected()
 
     if (handled)
     {
+        m_drawState.dynamicInputBuffer.clear();
         m_viewer->appendCommandMessage(QStringLiteral("已进入移动命令"));
         m_viewer->refreshCommandPrompt();
     }
@@ -173,6 +214,7 @@ void CadController::cancelDrawing()
     m_drawState.commandBulges.clear();
     m_drawState.polylineArcMode = false;
     m_drawState.lwPolylineArcMode = false;
+    m_drawState.dynamicInputBuffer.clear();
 
     // 重置子模式
     resetSubModes();
@@ -216,7 +258,7 @@ bool CadController::handleMousePress(QMouseEvent* event)
     m_drawState.pressedButtons = event->buttons();
     m_drawState.keyboardModifiers = event->modifiers();
     m_drawState.lastPos = m_drawState.currentPos;
-    m_drawState.currentPos = worldPos;
+    m_drawState.currentPos = applyOrthoConstraint(worldPos);
 
     // 处理中键按下：视图操作
     if (event->button() == Qt::MiddleButton)
@@ -244,61 +286,14 @@ bool CadController::handleMousePress(QMouseEvent* event)
             return true;
         }
 
-        // 保存之前的状态用于比较
-        const DrawStateMachine previousState = m_drawState;
+        commitCommandPoint(worldPos);
+        return true;
+    }
 
-        // 处理命令状态下的左键按下
-        handleLeftPressInCommand(worldPos);
-
-        // 尝试由编辑器处理左键按下事件
-        if (m_editer != nullptr && m_editer->handleLeftPress(previousState, m_drawState, worldPos))
-        {
-            // 如果编辑器处理了事件，根据状态变化发送相应消息
-            if (m_viewer != nullptr)
-            {
-                if (previousState.editType == EditType::Move && m_drawState.editType == EditType::None)
-                {
-                    m_viewer->appendCommandMessage(QStringLiteral("移动完成"));
-                }
-                else if (previousState.editType == EditType::GripEdit && m_drawState.editType == EditType::None)
-                {
-                    m_viewer->appendCommandMessage(QStringLiteral("控制点编辑完成"));
-                }
-                else if (previousState.drawType == DrawType::Point)
-                {
-                    m_viewer->appendCommandMessage(QStringLiteral("已创建点图元"));
-                }
-                else if (previousState.drawType == DrawType::Circle
-                    && previousState.circleSubMode == CircleDrawSubMode::AwaitRadius
-                    && m_drawState.circleSubMode == CircleDrawSubMode::AwaitCenter)
-                {
-                    m_viewer->appendCommandMessage(QStringLiteral("已创建圆图元"));
-                }
-                else if (previousState.drawType == DrawType::Arc
-                    && previousState.arcSubMode == ArcDrawSubMode::AwaitEndAngle
-                    && m_drawState.arcSubMode == ArcDrawSubMode::AwaitCenter)
-                {
-                    m_viewer->appendCommandMessage(QStringLiteral("已创建圆弧图元"));
-                }
-                else if (previousState.drawType == DrawType::Ellipse
-                    && previousState.ellipseSubMode == EllipseDrawSubMode::AwaitMinorAxis
-                    && m_drawState.ellipseSubMode == EllipseDrawSubMode::AwaitCenter)
-                {
-                    m_viewer->appendCommandMessage(QStringLiteral("已创建椭圆图元"));
-                }
-                else if (previousState.drawType == DrawType::Line
-                    && previousState.lineSubMode == LineDrawSubMode::AwaitEndPoint
-                    && m_drawState.lineSubMode == LineDrawSubMode::AwaitEndPoint)
-                {
-                    m_viewer->appendCommandMessage(QStringLiteral("已创建直线图元"));
-                }
-
-                m_viewer->refreshCommandPrompt();
-            }
-
-            return true;
-        }
-
+    // 处理右键按下：命令态统一执行确认动作（与 Enter 行为保持一致）。
+    if (event->button() == Qt::RightButton && m_drawState.hasActiveCommand())
+    {
+        confirmActiveCommand();
         return true;
     }
 
@@ -324,7 +319,7 @@ bool CadController::handleMouseMove(QMouseEvent* event)
     m_drawState.pressedButtons = event->buttons();
     m_drawState.keyboardModifiers = event->modifiers();
     m_drawState.lastPos = m_drawState.currentPos;
-    m_drawState.currentPos = worldPos;
+    m_drawState.currentPos = applyOrthoConstraint(worldPos);
 
     // 如果是轨道交互且需要忽略下一次增量，则消费此标志
     if (m_viewer->interactionMode() == ViewInteractionMode::Orbiting && m_viewer->shouldIgnoreNextOrbitDelta())
@@ -471,11 +466,42 @@ bool CadController::handleKeyPress(QKeyEvent* event)
         }
     }
 
+    // F8：切换正交约束
+    if (event->key() == Qt::Key_F8)
+    {
+        m_drawState.orthoEnabled = !m_drawState.orthoEnabled;
+
+        if (m_viewer != nullptr)
+        {
+            m_viewer->appendCommandMessage
+            (
+                m_drawState.orthoEnabled
+                    ? QStringLiteral("正交约束: 开")
+                    : QStringLiteral("正交约束: 关")
+            );
+            m_viewer->refreshCommandPrompt();
+        }
+
+        return true;
+    }
+
     // ESC键：优先取消当前命令；无活动命令时清空当前选中
     if (event->key() == Qt::Key_Escape)
     {
         if (m_drawState.hasActiveCommand())
         {
+            if (!m_drawState.dynamicInputBuffer.isEmpty())
+            {
+                m_drawState.dynamicInputBuffer.clear();
+
+                if (m_viewer != nullptr)
+                {
+                    m_viewer->refreshCommandPrompt();
+                }
+
+                return true;
+            }
+
             cancelDrawing();
             return true;
         }
@@ -490,57 +516,113 @@ bool CadController::handleKeyPress(QKeyEvent* event)
         return true;
     }
 
-    // 在绘图状态下处理多段线相关按键
-    if (m_drawState.isDrawing && m_editer != nullptr)
-    {
-        // 多段线：A键切换到圆弧模式
-        if ((m_drawState.drawType == DrawType::Polyline || m_drawState.drawType == DrawType::LWPolyline)
-            && event->key() == Qt::Key_A)
-        {
-            return setPolylineInputMode(true);
-        }
-
-        // 多段线：L键切换到直线模式
-        if ((m_drawState.drawType == DrawType::Polyline || m_drawState.drawType == DrawType::LWPolyline)
-            && event->key() == Qt::Key_L)
-        {
-            return setPolylineInputMode(false);
-        }
-
-        // 多段线：Enter或空格键完成多段线（不闭合）
-        if ((m_drawState.drawType == DrawType::Polyline || m_drawState.drawType == DrawType::LWPolyline)
-            && (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter || event->key() == Qt::Key_Space))
-        {
-            const bool handled = m_editer->finishActivePolyline(m_drawState, false);
-
-            if (handled && m_viewer != nullptr)
-            {
-                m_viewer->appendCommandMessage(QStringLiteral("已创建多段线图元"));
-                m_viewer->refreshCommandPrompt();
-            }
-
-            return handled;
-        }
-
-        // 多段线：C键闭合多段线
-        if ((m_drawState.drawType == DrawType::Polyline || m_drawState.drawType == DrawType::LWPolyline)
-            && event->key() == Qt::Key_C)
-        {
-            const bool handled = m_editer->finishActivePolyline(m_drawState, true);
-
-            if (handled && m_viewer != nullptr)
-            {
-                m_viewer->appendCommandMessage(QStringLiteral("已创建闭合多段线图元"));
-                m_viewer->refreshCommandPrompt();
-            }
-
-            return handled;
-        }
-    }
-
-    // 在有活动命令时处理其他快捷键
+    // 有活动命令时优先处理动态输入和确认逻辑
     if (m_drawState.hasActiveCommand())
     {
+        if (event->key() == Qt::Key_Backspace)
+        {
+            if (!m_drawState.dynamicInputBuffer.isEmpty())
+            {
+                m_drawState.dynamicInputBuffer.chop(1);
+
+                if (m_viewer != nullptr)
+                {
+                    m_viewer->refreshCommandPrompt();
+                }
+            }
+
+            return true;
+        }
+
+        if (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter)
+        {
+            return confirmActiveCommand();
+        }
+
+        // 保留多段线空格完成行为。
+        if ((m_drawState.drawType == DrawType::Polyline || m_drawState.drawType == DrawType::LWPolyline)
+            && event->key() == Qt::Key_Space
+            && m_drawState.dynamicInputBuffer.isEmpty())
+        {
+            return confirmActiveCommand();
+        }
+
+        // 在绘图状态下处理多段线相关按键
+        if (m_drawState.isDrawing && m_editer != nullptr)
+        {
+            // 多段线：A键切换到圆弧模式
+            if ((m_drawState.drawType == DrawType::Polyline || m_drawState.drawType == DrawType::LWPolyline)
+                && event->key() == Qt::Key_A)
+            {
+                return setPolylineInputMode(true);
+            }
+
+            // 多段线：L键切换到直线模式
+            if ((m_drawState.drawType == DrawType::Polyline || m_drawState.drawType == DrawType::LWPolyline)
+                && event->key() == Qt::Key_L)
+            {
+                return setPolylineInputMode(false);
+            }
+
+            // 多段线：C键闭合多段线
+            if ((m_drawState.drawType == DrawType::Polyline || m_drawState.drawType == DrawType::LWPolyline)
+                && event->key() == Qt::Key_C)
+            {
+                const bool handled = m_editer->finishActivePolyline(m_drawState, true);
+
+                if (handled && m_viewer != nullptr)
+                {
+                    m_drawState.dynamicInputBuffer.clear();
+                    m_viewer->appendCommandMessage(QStringLiteral("已创建闭合多段线图元"));
+                    m_viewer->refreshCommandPrompt();
+                }
+
+                return handled;
+            }
+        }
+
+        // 动态输入字符（数字、@、<、逗号等）
+        if ((event->modifiers() & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier)) == 0)
+        {
+            const QString inputText = event->text();
+
+            if (!inputText.isEmpty())
+            {
+                QString sanitizedText;
+                sanitizedText.reserve(inputText.size());
+                bool allAllowed = true;
+
+                for (const QChar character : inputText)
+                {
+                    if (character.isSpace())
+                    {
+                        continue;
+                    }
+
+                    if (!isDynamicInputCharacter(character))
+                    {
+                        allAllowed = false;
+                        break;
+                    }
+
+                    sanitizedText.append(character);
+                }
+
+                if (allAllowed && !sanitizedText.isEmpty())
+                {
+                    m_drawState.dynamicInputBuffer.append(sanitizedText);
+
+                    if (m_viewer != nullptr)
+                    {
+                        m_viewer->refreshCommandPrompt();
+                    }
+
+                    return true;
+                }
+            }
+        }
+
+        // 在有活动命令时吞掉会触发全局快捷功能的按键
         switch (event->key())
         {
         case Qt::Key_F:     // 适配视图
@@ -700,95 +782,121 @@ const DrawStateMachine& CadController::drawState() const
 // @return 命令提示字符串
 QString CadController::currentPrompt() const
 {
+    QString basePrompt = QStringLiteral("无活动命令");
+
     // 编辑命令提示
     if (m_drawState.editType == EditType::Move)
     {
         switch (m_drawState.moveSubMode)
         {
         case MoveEditSubMode::AwaitBasePoint:
-            return QStringLiteral("MOVE: 指定基点");
+            basePrompt = QStringLiteral("MOVE: 指定基点");
+            break;
         case MoveEditSubMode::AwaitTargetPoint:
-            return QStringLiteral("MOVE: 指定目标点");
+            basePrompt = QStringLiteral("MOVE: 指定目标点");
+            break;
         default:
-            return QStringLiteral("MOVE");
+            basePrompt = QStringLiteral("MOVE");
+            break;
         }
+
+        return appendDynamicInputPromptState(basePrompt);
     }
 
     if (m_drawState.editType == EditType::GripEdit)
     {
-        return QStringLiteral("GRIP: 指定目标点");
+        basePrompt = QStringLiteral("GRIP: 指定目标点");
+        return appendDynamicInputPromptState(basePrompt);
     }
 
     // 无活动命令提示
     if (!m_drawState.isDrawing)
     {
-        return QStringLiteral("无活动命令");
+        return appendDynamicInputPromptState(basePrompt);
     }
 
     // 根据当前绘制类型和子模式返回相应提示
     switch (m_drawState.drawType)
     {
     case DrawType::Point:
-        return QStringLiteral("POINT: 指定点位置");
+        basePrompt = QStringLiteral("POINT: 指定点位置");
+        break;
     case DrawType::Line:
-        return m_drawState.lineSubMode == LineDrawSubMode::AwaitEndPoint
+        basePrompt = m_drawState.lineSubMode == LineDrawSubMode::AwaitEndPoint
             ? QStringLiteral("LINE: 指定下一点")
             : QStringLiteral("LINE: 指定第一点");
+        break;
     case DrawType::Circle:
-        return m_drawState.circleSubMode == CircleDrawSubMode::AwaitRadius
+        basePrompt = m_drawState.circleSubMode == CircleDrawSubMode::AwaitRadius
             ? QStringLiteral("CIRCLE: 指定半径")
             : QStringLiteral("CIRCLE: 指定圆心");
+        break;
     case DrawType::Arc:
         switch (m_drawState.arcSubMode)
         {
         case ArcDrawSubMode::AwaitRadius:
-            return QStringLiteral("ARC: 指定半径");
+            basePrompt = QStringLiteral("ARC: 指定半径");
+            break;
         case ArcDrawSubMode::AwaitStartAngle:
-            return QStringLiteral("ARC: 指定起始角");
+            basePrompt = QStringLiteral("ARC: 指定起始角");
+            break;
         case ArcDrawSubMode::AwaitEndAngle:
-            return QStringLiteral("ARC: 指定终止角");
+            basePrompt = QStringLiteral("ARC: 指定终止角");
+            break;
         default:
-            return QStringLiteral("ARC: 指定圆心");
+            basePrompt = QStringLiteral("ARC: 指定圆心");
+            break;
         }
+        break;
     case DrawType::Ellipse:
         switch (m_drawState.ellipseSubMode)
         {
         case EllipseDrawSubMode::AwaitMajorAxis:
-            return QStringLiteral("ELLIPSE: 指定长轴端点");
+            basePrompt = QStringLiteral("ELLIPSE: 指定长轴端点");
+            break;
         case EllipseDrawSubMode::AwaitMinorAxis:
-            return QStringLiteral("ELLIPSE: 指定短轴距离");
+            basePrompt = QStringLiteral("ELLIPSE: 指定短轴距离");
+            break;
         default:
-            return QStringLiteral("ELLIPSE: 指定中心");
+            basePrompt = QStringLiteral("ELLIPSE: 指定中心");
+            break;
         }
+        break;
     case DrawType::Polyline:
         if (m_drawState.polylineSubMode == PolylineDrawSubMode::AwaitArcEndPoint)
         {
-            return QStringLiteral("POLYLINE[圆弧]: 指定圆弧终点，L切换直线，Enter结束，C闭合");
+            basePrompt = QStringLiteral("POLYLINE[圆弧]: 指定圆弧终点，L切换直线，Enter结束，C闭合");
+            break;
         }
 
         if (m_drawState.polylineSubMode == PolylineDrawSubMode::AwaitLineEndPoint)
         {
-            return QStringLiteral("POLYLINE[直线]: 指定下一点，A切换圆弧，Enter结束，C闭合");
+            basePrompt = QStringLiteral("POLYLINE[直线]: 指定下一点，A切换圆弧，Enter结束，C闭合");
+            break;
         }
 
-        return QStringLiteral("POLYLINE: 指定第一点");
+        basePrompt = QStringLiteral("POLYLINE: 指定第一点");
+        break;
     case DrawType::LWPolyline:
         if (m_drawState.lwPolylineSubMode == LWPolylineDrawSubMode::AwaitArcEndPoint)
         {
-            return QStringLiteral("LWPOLYLINE[圆弧]: 指定圆弧终点，L切换直线，Enter结束，C闭合");
+            basePrompt = QStringLiteral("LWPOLYLINE[圆弧]: 指定圆弧终点，L切换直线，Enter结束，C闭合");
+            break;
         }
 
         if (m_drawState.lwPolylineSubMode == LWPolylineDrawSubMode::AwaitLineEndPoint)
         {
-            return QStringLiteral("LWPOLYLINE[直线]: 指定下一点，A切换圆弧，Enter结束，C闭合");
+            basePrompt = QStringLiteral("LWPOLYLINE[直线]: 指定下一点，A切换圆弧，Enter结束，C闭合");
+            break;
         }
 
-        return QStringLiteral("LWPOLYLINE: 指定第一点");
+        basePrompt = QStringLiteral("LWPOLYLINE: 指定第一点");
+        break;
     default:
         break;
     }
 
-    return QStringLiteral("无活动命令");
+    return appendDynamicInputPromptState(basePrompt);
 }
 
 // 获取当前命令名称
@@ -806,6 +914,338 @@ QString CadController::currentCommandName() const
     }
 
     return drawTypeName(m_drawState.drawType);
+}
+
+bool CadController::isAwaitingPointInput() const
+{
+    if (m_drawState.editType == EditType::Move)
+    {
+        return m_drawState.moveSubMode == MoveEditSubMode::AwaitBasePoint
+            || m_drawState.moveSubMode == MoveEditSubMode::AwaitTargetPoint;
+    }
+
+    if (m_drawState.editType == EditType::GripEdit)
+    {
+        return m_drawState.gripSubMode == GripEditSubMode::AwaitTargetPoint;
+    }
+
+    if (!m_drawState.isDrawing)
+    {
+        return false;
+    }
+
+    switch (m_drawState.drawType)
+    {
+    case DrawType::Point:
+        return m_drawState.pointSubMode == PointDrawSubMode::AwaitPosition;
+    case DrawType::Line:
+        return m_drawState.lineSubMode == LineDrawSubMode::AwaitStartPoint
+            || m_drawState.lineSubMode == LineDrawSubMode::AwaitEndPoint;
+    case DrawType::Circle:
+        return m_drawState.circleSubMode == CircleDrawSubMode::AwaitCenter
+            || m_drawState.circleSubMode == CircleDrawSubMode::AwaitRadius;
+    case DrawType::Arc:
+        return m_drawState.arcSubMode == ArcDrawSubMode::AwaitCenter
+            || m_drawState.arcSubMode == ArcDrawSubMode::AwaitRadius
+            || m_drawState.arcSubMode == ArcDrawSubMode::AwaitStartAngle
+            || m_drawState.arcSubMode == ArcDrawSubMode::AwaitEndAngle;
+    case DrawType::Ellipse:
+        return m_drawState.ellipseSubMode == EllipseDrawSubMode::AwaitCenter
+            || m_drawState.ellipseSubMode == EllipseDrawSubMode::AwaitMajorAxis
+            || m_drawState.ellipseSubMode == EllipseDrawSubMode::AwaitMinorAxis;
+    case DrawType::Polyline:
+        return m_drawState.polylineSubMode == PolylineDrawSubMode::AwaitFirstPoint
+            || m_drawState.polylineSubMode == PolylineDrawSubMode::AwaitLineEndPoint
+            || m_drawState.polylineSubMode == PolylineDrawSubMode::AwaitArcEndPoint;
+    case DrawType::LWPolyline:
+        return m_drawState.lwPolylineSubMode == LWPolylineDrawSubMode::AwaitFirstPoint
+            || m_drawState.lwPolylineSubMode == LWPolylineDrawSubMode::AwaitLineEndPoint
+            || m_drawState.lwPolylineSubMode == LWPolylineDrawSubMode::AwaitArcEndPoint;
+    default:
+        break;
+    }
+
+    return false;
+}
+
+QVector3D CadController::dynamicInputReferencePoint() const
+{
+    if (!m_drawState.commandPoints.isEmpty())
+    {
+        return flattenToDrawingPlane(m_drawState.commandPoints.back());
+    }
+
+    return flattenToDrawingPlane(m_drawState.currentPos);
+}
+
+QVector3D CadController::applyOrthoConstraint(const QVector3D& worldPos) const
+{
+    const QVector3D planarPoint = flattenToDrawingPlane(worldPos);
+
+    if (!m_drawState.orthoEnabled
+        || !m_drawState.hasActiveCommand()
+        || !isAwaitingPointInput()
+        || m_drawState.commandPoints.isEmpty())
+    {
+        return planarPoint;
+    }
+
+    const QVector3D basePoint = dynamicInputReferencePoint();
+    const QVector3D delta = planarPoint - basePoint;
+
+    if (std::abs(delta.x()) >= std::abs(delta.y()))
+    {
+        return QVector3D(planarPoint.x(), basePoint.y(), 0.0f);
+    }
+
+    return QVector3D(basePoint.x(), planarPoint.y(), 0.0f);
+}
+
+bool CadController::tryResolveDynamicInputPoint(const QString& inputText, QVector3D& worldPoint, QString& errorMessage) const
+{
+    QString normalizedInput = inputText;
+    normalizedInput.remove(QLatin1Char(' '));
+    normalizedInput.remove(QLatin1Char('\t'));
+
+    if (normalizedInput.isEmpty())
+    {
+        errorMessage = QStringLiteral("请输入坐标值");
+        return false;
+    }
+
+    const QVector3D referencePoint = dynamicInputReferencePoint();
+    const int polarSeparator = normalizedInput.indexOf(QLatin1Char('<'));
+
+    if (polarSeparator >= 0)
+    {
+        const QString distanceText = normalizedInput.left(polarSeparator).trimmed();
+        const QString angleText = normalizedInput.mid(polarSeparator + 1).trimmed();
+        const QString normalizedDistanceText = distanceText.startsWith(QLatin1Char('@'))
+            ? distanceText.mid(1)
+            : distanceText;
+
+        bool distanceOk = false;
+        bool angleOk = false;
+        const double distance = normalizedDistanceText.toDouble(&distanceOk);
+        const double angleDegrees = angleText.toDouble(&angleOk);
+
+        if (!distanceOk || !angleOk)
+        {
+            errorMessage = QStringLiteral("极坐标输入格式无效，应为 距离<角度，例如 100<30");
+            return false;
+        }
+
+        constexpr double kRadiansPerDegree = 3.14159265358979323846 / 180.0;
+        const double radians = angleDegrees * kRadiansPerDegree;
+        worldPoint = QVector3D
+        (
+            static_cast<float>(referencePoint.x() + distance * std::cos(radians)),
+            static_cast<float>(referencePoint.y() + distance * std::sin(radians)),
+            0.0f
+        );
+        worldPoint = applyOrthoConstraint(worldPoint);
+        return true;
+    }
+
+    const bool relative = normalizedInput.startsWith(QLatin1Char('@'));
+    const QString coordinateText = relative ? normalizedInput.mid(1) : normalizedInput;
+    double firstValue = 0.0;
+    double secondValue = 0.0;
+
+    if (!tryParseCoordinatePair(coordinateText, firstValue, secondValue))
+    {
+        errorMessage = QStringLiteral("坐标输入格式无效，应为 x,y 或 @dx,dy");
+        return false;
+    }
+
+    if (relative)
+    {
+        worldPoint = QVector3D
+        (
+            static_cast<float>(referencePoint.x() + firstValue),
+            static_cast<float>(referencePoint.y() + secondValue),
+            0.0f
+        );
+    }
+    else
+    {
+        worldPoint = QVector3D(static_cast<float>(firstValue), static_cast<float>(secondValue), 0.0f);
+    }
+
+    worldPoint = applyOrthoConstraint(worldPoint);
+    return true;
+}
+
+bool CadController::commitCommandPoint(const QVector3D& worldPos)
+{
+    if (!m_drawState.hasActiveCommand() || m_editer == nullptr)
+    {
+        return false;
+    }
+
+    const QVector3D constrainedWorldPos = applyOrthoConstraint(worldPos);
+    m_drawState.currentPos = constrainedWorldPos;
+
+    // 保存之前的状态用于比较
+    const DrawStateMachine previousState = m_drawState;
+
+    // 处理命令状态下的点提交
+    handleLeftPressInCommand(constrainedWorldPos);
+
+    // 尝试由编辑器处理点提交事件
+    if (!m_editer->handleLeftPress(previousState, m_drawState, constrainedWorldPos))
+    {
+        return false;
+    }
+
+    m_drawState.dynamicInputBuffer.clear();
+
+    if (m_viewer != nullptr)
+    {
+        if (previousState.editType == EditType::Move && m_drawState.editType == EditType::None)
+        {
+            m_viewer->appendCommandMessage(QStringLiteral("移动完成"));
+        }
+        else if (previousState.editType == EditType::GripEdit && m_drawState.editType == EditType::None)
+        {
+            m_viewer->appendCommandMessage(QStringLiteral("控制点编辑完成"));
+        }
+        else if (previousState.drawType == DrawType::Point)
+        {
+            m_viewer->appendCommandMessage(QStringLiteral("已创建点图元"));
+        }
+        else if (previousState.drawType == DrawType::Circle
+            && previousState.circleSubMode == CircleDrawSubMode::AwaitRadius
+            && m_drawState.circleSubMode == CircleDrawSubMode::AwaitCenter)
+        {
+            m_viewer->appendCommandMessage(QStringLiteral("已创建圆图元"));
+        }
+        else if (previousState.drawType == DrawType::Arc
+            && previousState.arcSubMode == ArcDrawSubMode::AwaitEndAngle
+            && m_drawState.arcSubMode == ArcDrawSubMode::AwaitCenter)
+        {
+            m_viewer->appendCommandMessage(QStringLiteral("已创建圆弧图元"));
+        }
+        else if (previousState.drawType == DrawType::Ellipse
+            && previousState.ellipseSubMode == EllipseDrawSubMode::AwaitMinorAxis
+            && m_drawState.ellipseSubMode == EllipseDrawSubMode::AwaitCenter)
+        {
+            m_viewer->appendCommandMessage(QStringLiteral("已创建椭圆图元"));
+        }
+        else if (previousState.drawType == DrawType::Line
+            && previousState.lineSubMode == LineDrawSubMode::AwaitEndPoint
+            && m_drawState.lineSubMode == LineDrawSubMode::AwaitEndPoint)
+        {
+            m_viewer->appendCommandMessage(QStringLiteral("已创建直线图元"));
+        }
+
+        m_viewer->refreshCommandPrompt();
+    }
+
+    return true;
+}
+
+bool CadController::submitDynamicInputBuffer()
+{
+    if (m_drawState.dynamicInputBuffer.isEmpty())
+    {
+        return false;
+    }
+
+    if (!isAwaitingPointInput())
+    {
+        if (m_viewer != nullptr)
+        {
+            m_viewer->appendCommandMessage(QStringLiteral("当前命令阶段不接受坐标输入"));
+            m_viewer->refreshCommandPrompt();
+        }
+
+        return true;
+    }
+
+    QVector3D parsedPoint;
+    QString errorMessage;
+
+    if (!tryResolveDynamicInputPoint(m_drawState.dynamicInputBuffer, parsedPoint, errorMessage))
+    {
+        if (m_viewer != nullptr)
+        {
+            m_viewer->appendCommandMessage(errorMessage);
+            m_viewer->refreshCommandPrompt();
+        }
+
+        return true;
+    }
+
+    if (commitCommandPoint(parsedPoint))
+    {
+        return true;
+    }
+
+    if (m_viewer != nullptr)
+    {
+        m_viewer->appendCommandMessage(QStringLiteral("输入未被当前命令接受"));
+        m_viewer->refreshCommandPrompt();
+    }
+
+    return true;
+}
+
+bool CadController::confirmActiveCommand()
+{
+    if (!m_drawState.hasActiveCommand())
+    {
+        return false;
+    }
+
+    if (!m_drawState.dynamicInputBuffer.isEmpty())
+    {
+        return submitDynamicInputBuffer();
+    }
+
+    if ((m_drawState.drawType == DrawType::Polyline || m_drawState.drawType == DrawType::LWPolyline)
+        && m_editer != nullptr)
+    {
+        const bool handled = m_editer->finishActivePolyline(m_drawState, false);
+
+        if (handled && m_viewer != nullptr)
+        {
+            m_drawState.dynamicInputBuffer.clear();
+            m_viewer->appendCommandMessage(QStringLiteral("已创建多段线图元"));
+            m_viewer->refreshCommandPrompt();
+        }
+
+        return true;
+    }
+
+    if (isAwaitingPointInput())
+    {
+        if (!commitCommandPoint(m_drawState.currentPos) && m_viewer != nullptr)
+        {
+            m_viewer->refreshCommandPrompt();
+        }
+
+        return true;
+    }
+
+    return true;
+}
+
+QString CadController::appendDynamicInputPromptState(const QString& basePrompt) const
+{
+    QString prompt = basePrompt;
+
+    if (!m_drawState.dynamicInputBuffer.isEmpty())
+    {
+        prompt += QStringLiteral(" | 输入: %1").arg(m_drawState.dynamicInputBuffer);
+    }
+
+    if (m_drawState.orthoEnabled)
+    {
+        prompt += QStringLiteral(" | [正交]");
+    }
+
+    return prompt;
 }
 
 void CadController::beginIdleWindowSelection(const QPoint& screenPos)
@@ -885,6 +1325,7 @@ bool CadController::finishIdleWindowSelection(const QPoint& screenPos)
         {
             if (m_editer->beginGripEdit(m_drawState, m_viewer->selectedEntity(), handleInfo))
             {
+                m_drawState.dynamicInputBuffer.clear();
                 m_viewer->appendCommandMessage(QStringLiteral("已进入控制点编辑"));
                 m_viewer->refreshCommandPrompt();
                 return true;

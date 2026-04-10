@@ -2,6 +2,7 @@
 
 #include <QColor>
 #include <QPoint>
+#include <QString>
 #include <QVector>
 #include <QVector3D>
 
@@ -179,6 +180,12 @@ public:
     Qt::MouseButtons pressedButtons = Qt::NoButton;
     // 当前按下的键盘修饰符（如 Shift, Ctrl, Alt）
     Qt::KeyboardModifiers keyboardModifiers = Qt::NoModifier;
+
+    // 动态输入缓冲（用于键盘坐标/距离输入）。
+    QString dynamicInputBuffer;
+
+    // 正交约束开关（F8）。
+    bool orthoEnabled = false;
 
     // 静态成员变量，在程序启动时即被初始化
     static DrawStateMachine s_instance;
