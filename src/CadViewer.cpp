@@ -107,49 +107,15 @@ namespace
         return { tip, left, right };
     }
 
-    float chooseNiceGridStep(float desiredStep)
+    // 采用二分层级网格步长，保证细分后不会丢失上一级网格点。
+    // 示例：100 -> 50 -> 25 -> 12.5 -> 6.25
+    float chooseHierarchicalGridStep(float desiredStep)
     {
+        constexpr float kGridStepAnchor = 100.0f;
         const float safeStep = std::max(desiredStep, 1.0e-6f);
-        const float exponent = std::floor(std::log10(safeStep));
-        const float base = std::pow(10.0f, exponent);
-        const float normalized = safeStep / base;
-
-        if (normalized <= 1.0f)
-        {
-            return base;
-        }
-
-        if (normalized <= 2.0f)
-        {
-            return base * 2.0f;
-        }
-
-        if (normalized <= 5.0f)
-        {
-            return base * 5.0f;
-        }
-
-        return base * 10.0f;
-    }
-
-    float nextNiceGridStep(float currentStep)
-    {
-        const float safeStep = std::max(currentStep, 1.0e-6f);
-        const float exponent = std::floor(std::log10(safeStep));
-        const float base = std::pow(10.0f, exponent);
-        const float normalized = safeStep / base;
-
-        if (normalized < 1.5f)
-        {
-            return base * 2.0f;
-        }
-
-        if (normalized < 3.5f)
-        {
-            return base * 5.0f;
-        }
-
-        return base * 10.0f;
+        const float level = std::round(std::log2(safeStep / kGridStepAnchor));
+        const float step = kGridStepAnchor * std::pow(2.0f, level);
+        return std::max(step, 1.0e-6f);
     }
 }
 
@@ -1366,14 +1332,14 @@ float CadViewer::currentGridStep() const
     float maxY = 0.0f;
     computeVisibleGroundBounds(minX, maxX, minY, maxY);
 
-    float gridStep = chooseNiceGridStep(pixelToWorldScale() * kTargetGridSpacingPixels);
+    float gridStep = chooseHierarchicalGridStep(pixelToWorldScale() * kTargetGridSpacingPixels);
     const float width = std::max(maxX - minX, 0.0f);
     const float height = std::max(maxY - minY, 0.0f);
 
     while ((width / gridStep) > kMaxGridLineCountPerAxis
         || (height / gridStep) > kMaxGridLineCountPerAxis)
     {
-        gridStep = nextNiceGridStep(gridStep);
+        gridStep *= 2.0f;
     }
 
     return gridStep;
