@@ -129,10 +129,10 @@ void CadEntityRenderer::renderEntities
         }
 
         EntityGpuBuffer& buffer = it->second;
-        // 选中实体通过单独颜色和更大的点尺寸突出显示。
+        // 保持实体原始显示色；选中效果改由 Viewer 的叠加层统一绘制。
         const bool isSelected = entity->m_isSelected || id == selectedEntityId;
-        const QVector3D color = isSelected ? QVector3D(1.0f, 0.80f, 0.15f) : resolveDisplayColor(buffer.color, theme);
-        const float pointSize = buffer.primitiveType == GL_POINTS ? (isSelected ? 12.0f : 8.0f) : 1.0f;
+        const QVector3D color = resolveDisplayColor(buffer.color, theme);
+        const float pointSize = buffer.primitiveType == GL_POINTS ? (isSelected ? 9.5f : 8.0f) : 1.0f;
 
         shader.setUniformValue("uColor", color);
         shader.setUniformValue("uPointSize", pointSize);

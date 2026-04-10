@@ -1,4 +1,4 @@
-// CadEditer 头文件
+﻿// CadEditer 头文件
 // 声明 CadEditer 模块，对外暴露当前组件的核心类型、接口和协作边界。
 // 编辑器模块，负责绘图创建、实体修改以及 Undo/Redo 命令栈管理。
 #pragma once

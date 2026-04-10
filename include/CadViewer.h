@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 // CadViewer 头文件
 // 声明 CadViewer 模块，对外暴露当前组件的核心类型、接口和协作边界。
@@ -293,6 +293,9 @@ private:
     // 绘制加工顺序编号
     void renderProcessOrderLabels();
 
+    // 绘制选中/框选候选图元的叠加高亮（AutoCAD 风格）。
+    void renderEntitySelectionOverlays();
+
     // 绘制框选窗口预览。
     void renderSelectionWindowPreview();
 
@@ -349,6 +352,9 @@ private:
     // @return 选中态手柄 overlay 图元列表
     std::vector<TransientPrimitive> buildSelectedEntityHandlePrimitives() const;
 
+    // 刷新框选预览阶段的命中实体集合。
+    void updateSelectionWindowPreviewCandidates();
+
     // 获取当前视口宽高比
     // @return 宽高比（宽度/高度）
     float aspectRatio() const;
@@ -383,6 +389,9 @@ private:
 
     // 当前选中实体集合，用于后续批量编辑能力扩展。
     QSet<EntityId> m_selectedEntityIds;
+
+    // 框选拖拽预览阶段的候选实体集合（鼠标释放前实时更新）。
+    QSet<EntityId> m_windowPreviewEntityIds;
 
     // 框选预览状态。
     struct SelectionWindowPreviewState

@@ -1,4 +1,4 @@
-// CadEntityRenderer 头文件
+﻿// CadEntityRenderer 头文件
 // 声明 CadEntityRenderer 模块，对外暴露当前组件的核心类型、接口和协作边界。
 // 实体渲染模块，负责把缓存好的图元数据提交给 OpenGL 绘制。
 #pragma once

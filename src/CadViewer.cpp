@@ -27,6 +27,7 @@
 #include <QKeyEvent>
 #include <QMimeData>
 #include <QPainter>
+#include <QPolygonF>
 #include <QSurfaceFormat>
 #include <QWheelEvent>
 
@@ -181,6 +182,7 @@ void CadViewer::setDocument(CadDocument* document)
     m_sceneCoordinator.bindDocument(document, this, &CadViewer::handleDocumentSceneChanged);
     // 清除选中实体
     setSelectedEntityId(0);
+    hideSelectionWindowPreview();
 
     // 如果图形协调器已初始化，则立即重建缓冲
     if (m_graphicsCoordinator.isInitialized())
@@ -370,6 +372,7 @@ void CadViewer::selectEntitiesInWindow(const QPoint& startScreenPos, const QPoin
 
     const EntityId preferredEntityId = pickedIds.empty() ? 0 : pickedIds.front();
     setSelectedEntities(selectedIds, preferredEntityId);
+    m_windowPreviewEntityIds.clear();
     update();
 }
 
@@ -409,18 +412,68 @@ void CadViewer::showSelectionWindowPreview(const QPoint& anchorScreenPos, const 
     m_selectionWindowPreview.anchorScreenPos = anchorScreenPos;
     m_selectionWindowPreview.currentScreenPos = currentScreenPos;
     m_selectionWindowPreview.crossingSelection = currentScreenPos.x() < anchorScreenPos.x();
+    updateSelectionWindowPreviewCandidates();
     update();
 }
 
 void CadViewer::hideSelectionWindowPreview()
 {
+    const bool hadVisiblePreview = m_selectionWindowPreview.visible;
+    m_selectionWindowPreview.visible = false;
+
+    if (m_windowPreviewEntityIds.isEmpty() && !hadVisiblePreview)
+    {
+        return;
+    }
+
+    m_windowPreviewEntityIds.clear();
+    update();
+}
+
+void CadViewer::updateSelectionWindowPreviewCandidates()
+{
+    m_windowPreviewEntityIds.clear();
+
     if (!m_selectionWindowPreview.visible)
     {
         return;
     }
 
-    m_selectionWindowPreview.visible = false;
-    update();
+    CadDocument* scene = m_sceneCoordinator.document();
+
+    if (scene == nullptr)
+    {
+        return;
+    }
+
+    const QRect selectionRect = normalizedSelectionRect
+    (
+        m_selectionWindowPreview.anchorScreenPos,
+        m_selectionWindowPreview.currentScreenPos
+    );
+
+    if (selectionRect.width() < kWindowSelectionMinimumPixels || selectionRect.height() < kWindowSelectionMinimumPixels)
+    {
+        return;
+    }
+
+    const std::vector<EntityId> previewIds = CadEntityPicker::pickEntitiesByWindow
+    (
+        scene->m_entities,
+        m_camera.viewProjectionMatrix(aspectRatio()),
+        m_viewportWidth,
+        m_viewportHeight,
+        QRectF(selectionRect),
+        m_selectionWindowPreview.crossingSelection
+    );
+
+    for (EntityId id : previewIds)
+    {
+        if (id != 0)
+        {
+            m_windowPreviewEntityIds.insert(id);
+        }
+    }
 }
 
 bool CadViewer::pickSelectedHandle(const QPoint& screenPos, CadSelectionHandleInfo* outHandle) const
@@ -562,6 +615,7 @@ CadItem* CadViewer::selectedEntity() const
 void CadViewer::clearSelection()
 {
     setSelectedEntityId(0);
+    m_windowPreviewEntityIds.clear();
     update();
 }
 
@@ -715,6 +769,7 @@ void CadViewer::paintGL()
     renderTransientPrimitives(viewProjection);
     renderAxis(viewProjection);
     renderOrbitMarker(viewProjection);
+    renderEntitySelectionOverlays();
     renderProcessOrderLabels();
     renderSelectionWindowPreview();
 
@@ -1185,6 +1240,142 @@ void CadViewer::renderProcessOrderLabels()
     }
 }
 
+void CadViewer::renderEntitySelectionOverlays()
+{
+    CadDocument* scene = m_sceneCoordinator.document();
+
+    if (scene == nullptr || interactionMode() != ViewInteractionMode::Idle)
+    {
+        return;
+    }
+
+    if (m_selectedEntityIds.isEmpty() && m_windowPreviewEntityIds.isEmpty())
+    {
+        return;
+    }
+
+    const QMatrix4x4 viewProjection = m_camera.viewProjectionMatrix(aspectRatio());
+    const QColor committedColor(0, 188, 255, 228);
+    const QColor previewColor = m_selectionWindowPreview.crossingSelection
+        ? QColor(66, 205, 104, 220)
+        : QColor(74, 152, 250, 220);
+
+    QPainter painter(this);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+
+    for (const std::unique_ptr<CadItem>& entity : scene->m_entities)
+    {
+        if (entity == nullptr)
+        {
+            continue;
+        }
+
+        const EntityId id = CadViewerUtils::toEntityId(entity.get());
+        const bool committedSelected = m_selectedEntityIds.contains(id);
+        const bool previewSelected = m_windowPreviewEntityIds.contains(id);
+
+        if (!committedSelected && !previewSelected)
+        {
+            continue;
+        }
+
+        const QVector<QVector3D>& worldVertices = entity->m_geometry.vertices;
+
+        if (worldVertices.isEmpty())
+        {
+            continue;
+        }
+
+        QPolygonF projectedPolyline;
+        projectedPolyline.reserve(worldVertices.size());
+        bool validProjection = true;
+
+        for (const QVector3D& worldVertex : worldVertices)
+        {
+            const QPointF screenPoint = CadViewerUtils::projectToScreen
+            (
+                worldVertex,
+                viewProjection,
+                m_viewportWidth,
+                m_viewportHeight
+            );
+
+            if (!qIsFinite(screenPoint.x()) || !qIsFinite(screenPoint.y()))
+            {
+                validProjection = false;
+                break;
+            }
+
+            projectedPolyline << screenPoint;
+        }
+
+        if (!validProjection || projectedPolyline.isEmpty())
+        {
+            continue;
+        }
+
+        const QColor mainColor = committedSelected ? committedColor : previewColor;
+        const QColor glowColor = committedSelected
+            ? QColor(255, 255, 255, 235)
+            : QColor(232, 246, 255, 220);
+
+        QPen glowPen(glowColor, committedSelected ? 2.4 : 2.0, Qt::SolidLine);
+        QPen mainPen(mainColor, committedSelected ? 1.5 : 1.2, Qt::DashLine);
+        mainPen.setDashPattern(committedSelected ? QList<qreal>{ 7.0, 3.0 } : QList<qreal>{ 5.0, 4.0 });
+
+        painter.setBrush(Qt::NoBrush);
+
+        if (projectedPolyline.size() == 1)
+        {
+            const QPointF center = projectedPolyline.front();
+            painter.setPen(glowPen);
+            painter.drawEllipse(center, 5.8, 5.8);
+            painter.setPen(mainPen);
+            painter.drawEllipse(center, 4.0, 4.0);
+        }
+        else
+        {
+            painter.setPen(glowPen);
+            painter.drawPolyline(projectedPolyline);
+
+            painter.setPen(mainPen);
+            painter.drawPolyline(projectedPolyline);
+        }
+
+        // 仅绘制四角角标，避免完整包围框遮挡视野。
+        const QRectF bounds = projectedPolyline.boundingRect().adjusted(-4.0, -4.0, 4.0, 4.0);
+        const qreal maxCornerLength = 10.0;
+        const qreal minCornerLength = 4.0;
+        const qreal cornerLength = std::clamp
+        (
+            std::min(bounds.width(), bounds.height()) * 0.28,
+            minCornerLength,
+            maxCornerLength
+        );
+
+        QPen cornerPen(mainColor, committedSelected ? 1.4 : 1.2, Qt::SolidLine);
+        painter.setPen(cornerPen);
+
+        const qreal left = bounds.left();
+        const qreal right = bounds.right();
+        const qreal top = bounds.top();
+        const qreal bottom = bounds.bottom();
+
+        // 左上
+        painter.drawLine(QPointF(left, top), QPointF(left + cornerLength, top));
+        painter.drawLine(QPointF(left, top), QPointF(left, top + cornerLength));
+        // 右上
+        painter.drawLine(QPointF(right, top), QPointF(right - cornerLength, top));
+        painter.drawLine(QPointF(right, top), QPointF(right, top + cornerLength));
+        // 左下
+        painter.drawLine(QPointF(left, bottom), QPointF(left + cornerLength, bottom));
+        painter.drawLine(QPointF(left, bottom), QPointF(left, bottom - cornerLength));
+        // 右下
+        painter.drawLine(QPointF(right, bottom), QPointF(right - cornerLength, bottom));
+        painter.drawLine(QPointF(right, bottom), QPointF(right, bottom - cornerLength));
+    }
+}
+
 void CadViewer::renderSelectionWindowPreview()
 {
     if (!m_selectionWindowPreview.visible || interactionMode() != ViewInteractionMode::Idle)
@@ -1232,6 +1423,15 @@ void CadViewer::handleDocumentSceneChanged()
 
     // 场景变化后重算选中集合，自动剔除已失效实体。
     setSelectedEntities(m_selectedEntityIds, m_selectedEntityId);
+
+    if (m_selectionWindowPreview.visible)
+    {
+        updateSelectionWindowPreviewCandidates();
+    }
+    else
+    {
+        m_windowPreviewEntityIds.clear();
+    }
 
     // 如果图形协调器已初始化，则重建缓冲
     if (m_graphicsCoordinator.isInitialized())
@@ -1683,56 +1883,155 @@ std::vector<TransientPrimitive> CadViewer::buildSelectedEntityHandlePrimitives()
         return {};
     }
 
-    TransientPrimitive basePointPrimitive;
-    basePointPrimitive.primitiveType = GL_POINTS;
-    basePointPrimitive.color =
+    int hoveredHandleIndex = -1;
+    float bestHoveredDistanceSquared = std::numeric_limits<float>::max();
+    const float hoveredThresholdSquared = (kObjectSnapDistancePixels * 1.25f) * (kObjectSnapDistancePixels * 1.25f);
+
+    for (int index = 0; index < handles.size(); ++index)
+    {
+        const QPoint handleScreenPos = worldToScreen(handles.at(index).position);
+        const float dx = static_cast<float>(handleScreenPos.x() - m_cursorScreenPos.x());
+        const float dy = static_cast<float>(handleScreenPos.y() - m_cursorScreenPos.y());
+        const float distanceSquared = dx * dx + dy * dy;
+
+        if (distanceSquared <= hoveredThresholdSquared && distanceSquared < bestHoveredDistanceSquared)
+        {
+            bestHoveredDistanceSquared = distanceSquared;
+            hoveredHandleIndex = index;
+        }
+    }
+
+    TransientPrimitive basePointOuterPrimitive;
+    basePointOuterPrimitive.primitiveType = GL_POINTS;
+    basePointOuterPrimitive.color =
     {
         static_cast<float>(m_theme.selectedBasePointColor.redF()),
         static_cast<float>(m_theme.selectedBasePointColor.greenF()),
         static_cast<float>(m_theme.selectedBasePointColor.blueF())
     };
-    basePointPrimitive.pointSize = 13.0f;
-    basePointPrimitive.roundPoint = true;
+    basePointOuterPrimitive.pointSize = 13.0f;
+    basePointOuterPrimitive.roundPoint = true;
 
-    TransientPrimitive controlPointPrimitive;
-    controlPointPrimitive.primitiveType = GL_POINTS;
-    controlPointPrimitive.color =
+    TransientPrimitive basePointInnerPrimitive;
+    basePointInnerPrimitive.primitiveType = GL_POINTS;
+    basePointInnerPrimitive.color =
+    {
+        static_cast<float>(m_theme.viewerBackgroundColor.redF()),
+        static_cast<float>(m_theme.viewerBackgroundColor.greenF()),
+        static_cast<float>(m_theme.viewerBackgroundColor.blueF())
+    };
+    basePointInnerPrimitive.pointSize = 6.2f;
+    basePointInnerPrimitive.roundPoint = true;
+
+    TransientPrimitive controlPointOuterPrimitive;
+    controlPointOuterPrimitive.primitiveType = GL_POINTS;
+    controlPointOuterPrimitive.color =
     {
         static_cast<float>(m_theme.selectedControlPointColor.redF()),
         static_cast<float>(m_theme.selectedControlPointColor.greenF()),
         static_cast<float>(m_theme.selectedControlPointColor.blueF())
     };
-    controlPointPrimitive.pointSize = 10.0f;
-    controlPointPrimitive.roundPoint = true;
+    controlPointOuterPrimitive.pointSize = 10.0f;
+    controlPointOuterPrimitive.roundPoint = true;
+
+    TransientPrimitive controlPointInnerPrimitive;
+    controlPointInnerPrimitive.primitiveType = GL_POINTS;
+    controlPointInnerPrimitive.color =
+    {
+        static_cast<float>(m_theme.viewerBackgroundColor.redF()),
+        static_cast<float>(m_theme.viewerBackgroundColor.greenF()),
+        static_cast<float>(m_theme.viewerBackgroundColor.blueF())
+    };
+    controlPointInnerPrimitive.pointSize = 4.4f;
+    controlPointInnerPrimitive.roundPoint = true;
 
     TransientPrimitive trianglePrimitive;
     trianglePrimitive.primitiveType = GL_TRIANGLES;
-    trianglePrimitive.color = controlPointPrimitive.color;
+    trianglePrimitive.color = controlPointOuterPrimitive.color;
+
+    TransientPrimitive hoveredPointOuterPrimitive;
+    hoveredPointOuterPrimitive.primitiveType = GL_POINTS;
+    hoveredPointOuterPrimitive.color =
+    {
+        static_cast<float>(m_theme.accentColor.redF()),
+        static_cast<float>(m_theme.accentColor.greenF()),
+        static_cast<float>(m_theme.accentColor.blueF())
+    };
+    hoveredPointOuterPrimitive.pointSize = 17.0f;
+    hoveredPointOuterPrimitive.roundPoint = true;
+
+    TransientPrimitive hoveredPointInnerPrimitive;
+    hoveredPointInnerPrimitive.primitiveType = GL_POINTS;
+    hoveredPointInnerPrimitive.color = { 1.0f, 1.0f, 1.0f };
+    hoveredPointInnerPrimitive.pointSize = 9.0f;
+    hoveredPointInnerPrimitive.roundPoint = true;
+
+    TransientPrimitive hoveredTrianglePrimitive;
+    hoveredTrianglePrimitive.primitiveType = GL_TRIANGLES;
+    hoveredTrianglePrimitive.color = hoveredPointOuterPrimitive.color;
+
     const float pixelScale = std::max(pixelToWorldScale(), 1.0e-4f);
     const float triangleSize = pixelScale * 6.5f;
+    const float hoveredTriangleSize = pixelScale * 8.4f;
 
-    for (const CadSelectionHandleInfo& handle : handles)
+    for (int handleIndex = 0; handleIndex < handles.size(); ++handleIndex)
     {
+        const CadSelectionHandleInfo& handle = handles.at(handleIndex);
+
         if (handle.shape == CadSelectionHandleShape::Triangle)
         {
             const QVector<QVector3D> triangleVertices = buildTriangleVertices(handle.position, handle.direction, triangleSize);
             trianglePrimitive.vertices += triangleVertices;
+
+            if (handleIndex == hoveredHandleIndex)
+            {
+                const QVector<QVector3D> hoveredTriangleVertices = buildTriangleVertices
+                (
+                    handle.position,
+                    handle.direction,
+                    hoveredTriangleSize
+                );
+                hoveredTrianglePrimitive.vertices += hoveredTriangleVertices;
+            }
         }
         else if (handle.isBasePoint)
         {
-            basePointPrimitive.vertices.push_back(handle.position);
+            basePointOuterPrimitive.vertices.push_back(handle.position);
+            basePointInnerPrimitive.vertices.push_back(handle.position);
         }
         else
         {
-            controlPointPrimitive.vertices.push_back(handle.position);
+            controlPointOuterPrimitive.vertices.push_back(handle.position);
+            controlPointInnerPrimitive.vertices.push_back(handle.position);
+        }
+
+        if (handleIndex == hoveredHandleIndex)
+        {
+            hoveredPointOuterPrimitive.vertices.push_back(handle.position);
+            hoveredPointInnerPrimitive.vertices.push_back(handle.position);
         }
     }
 
     std::vector<TransientPrimitive> primitives;
 
-    if (!controlPointPrimitive.vertices.isEmpty())
+    if (!hoveredPointOuterPrimitive.vertices.isEmpty())
     {
-        primitives.push_back(std::move(controlPointPrimitive));
+        primitives.push_back(std::move(hoveredPointOuterPrimitive));
+    }
+
+    if (!controlPointOuterPrimitive.vertices.isEmpty())
+    {
+        primitives.push_back(std::move(controlPointOuterPrimitive));
+    }
+
+    if (!controlPointInnerPrimitive.vertices.isEmpty())
+    {
+        primitives.push_back(std::move(controlPointInnerPrimitive));
+    }
+
+    if (!hoveredPointInnerPrimitive.vertices.isEmpty())
+    {
+        primitives.push_back(std::move(hoveredPointInnerPrimitive));
     }
 
     if (!trianglePrimitive.vertices.isEmpty())
@@ -1740,9 +2039,19 @@ std::vector<TransientPrimitive> CadViewer::buildSelectedEntityHandlePrimitives()
         primitives.push_back(std::move(trianglePrimitive));
     }
 
-    if (!basePointPrimitive.vertices.isEmpty())
+    if (!hoveredTrianglePrimitive.vertices.isEmpty())
     {
-        primitives.push_back(std::move(basePointPrimitive));
+        primitives.push_back(std::move(hoveredTrianglePrimitive));
+    }
+
+    if (!basePointOuterPrimitive.vertices.isEmpty())
+    {
+        primitives.push_back(std::move(basePointOuterPrimitive));
+    }
+
+    if (!basePointInnerPrimitive.vertices.isEmpty())
+    {
+        primitives.push_back(std::move(basePointInnerPrimitive));
     }
 
     return primitives;
