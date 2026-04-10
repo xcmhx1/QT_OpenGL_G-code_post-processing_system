@@ -290,6 +290,12 @@ private:
     // 构建当前吸附命中的高亮 overlay 图元。
     std::vector<TransientPrimitive> buildSnapHighlightPrimitives() const;
 
+    // 计算当前视口在地平面上的包围范围。
+    void computeVisibleGroundBounds(float& minX, float& maxX, float& minY, float& maxY) const;
+
+    // 计算当前缩放等级下的动态网格步长。
+    float currentGridStep() const;
+
     // 更新当前选中实体并在变化时发出信号。
     void setSelectedEntityId(EntityId entityId);
 

@@ -57,9 +57,17 @@ QOpenGLShaderProgram& CadGraphicsCoordinator::generalShader()
 
 // 绘制背景网格
 // @param mvp 当前视图使用的模型视图投影矩阵
-void CadGraphicsCoordinator::renderGrid(const QMatrix4x4& mvp)
+void CadGraphicsCoordinator::renderGrid
+(
+    const QMatrix4x4& mvp,
+    float minX,
+    float maxX,
+    float minY,
+    float maxY,
+    float gridStep
+)
 {
-    m_referenceRenderer.renderGrid(m_shaderManager.generalShader(), mvp);
+    m_referenceRenderer.renderGrid(m_shaderManager.generalShader(), mvp, minX, maxX, minY, maxY, gridStep);
 }
 
 // 绘制世界坐标轴

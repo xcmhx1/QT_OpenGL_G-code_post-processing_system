@@ -27,7 +27,16 @@ public:
     // 绘制背景网格
     // @param shader 通用绘制 Shader
     // @param mvp 当前视图使用的模型视图投影矩阵
-    void renderGrid(QOpenGLShaderProgram& shader, const QMatrix4x4& mvp);
+    void renderGrid
+    (
+        QOpenGLShaderProgram& shader,
+        const QMatrix4x4& mvp,
+        float minX,
+        float maxX,
+        float minY,
+        float maxY,
+        float gridStep
+    );
 
     // 绘制世界坐标轴
     // @param shader 通用绘制 Shader

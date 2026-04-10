@@ -43,7 +43,15 @@ public:
 
     // 绘制背景网格
     // @param mvp 当前视图使用的模型视图投影矩阵
-    void renderGrid(const QMatrix4x4& mvp);
+    void renderGrid
+    (
+        const QMatrix4x4& mvp,
+        float minX,
+        float maxX,
+        float minY,
+        float maxY,
+        float gridStep
+    );
 
     // 绘制世界坐标轴
     // @param mvp 当前视图使用的模型视图投影矩阵

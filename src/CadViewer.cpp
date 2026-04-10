@@ -30,6 +30,7 @@
 #include <QWheelEvent>
 
 // 标准库
+#include <array>
 #include <cmath>
 #include <limits>
 #include <vector>
@@ -41,12 +42,14 @@ namespace
     constexpr bool kEnableViewerPerfLogging = false;
     // 慢帧阈值（毫秒），超过此值会记录日志
     constexpr qint64 kSlowFrameThresholdMs = 16;
+    // 期望网格在屏幕上的视觉间距（像素）
+    constexpr float kTargetGridSpacingPixels = 40.0f;
+    // 单个方向上允许绘制的最大网格线数量
+    constexpr float kMaxGridLineCountPerAxis = 240.0f;
     // 对象吸附屏幕距离阈值（像素）
     constexpr float kObjectSnapDistancePixels = 14.0f;
     // 网格吸附屏幕距离阈值（像素）
     constexpr float kGridSnapDistancePixels = 10.0f;
-    // 网格步长，需与参考网格绘制保持一致
-    constexpr float kGridSnapStep = 100.0f;
 
     // 检查是否为支持拖放的文件类型
     // @param localFile 本地文件路径
@@ -102,6 +105,51 @@ namespace
         const QVector3D left = baseCenter + perpendicular * (size * 0.7f);
         const QVector3D right = baseCenter - perpendicular * (size * 0.7f);
         return { tip, left, right };
+    }
+
+    float chooseNiceGridStep(float desiredStep)
+    {
+        const float safeStep = std::max(desiredStep, 1.0e-6f);
+        const float exponent = std::floor(std::log10(safeStep));
+        const float base = std::pow(10.0f, exponent);
+        const float normalized = safeStep / base;
+
+        if (normalized <= 1.0f)
+        {
+            return base;
+        }
+
+        if (normalized <= 2.0f)
+        {
+            return base * 2.0f;
+        }
+
+        if (normalized <= 5.0f)
+        {
+            return base * 5.0f;
+        }
+
+        return base * 10.0f;
+    }
+
+    float nextNiceGridStep(float currentStep)
+    {
+        const float safeStep = std::max(currentStep, 1.0e-6f);
+        const float exponent = std::floor(std::log10(safeStep));
+        const float base = std::pow(10.0f, exponent);
+        const float normalized = safeStep / base;
+
+        if (normalized < 1.5f)
+        {
+            return base * 2.0f;
+        }
+
+        if (normalized < 3.5f)
+        {
+            return base * 5.0f;
+        }
+
+        return base * 10.0f;
     }
 }
 
@@ -753,7 +801,13 @@ void CadViewer::renderGrid(const QMatrix4x4& viewProjection)
         return;
     }
 
-    m_graphicsCoordinator.renderGrid(viewProjection);
+    float minX = 0.0f;
+    float maxX = 0.0f;
+    float minY = 0.0f;
+    float maxY = 0.0f;
+    computeVisibleGroundBounds(minX, maxX, minY, maxY);
+
+    m_graphicsCoordinator.renderGrid(viewProjection, minX, maxX, minY, maxY, currentGridStep());
 }
 
 // 绘制三轴：
@@ -1129,8 +1183,9 @@ QVector3D CadViewer::applySnapToGroundPosition
 
     if (m_gridSnapEnabled)
     {
-        const float snappedX = std::round(worldPos.x() / kGridSnapStep) * kGridSnapStep;
-        const float snappedY = std::round(worldPos.y() / kGridSnapStep) * kGridSnapStep;
+        const float gridStep = currentGridStep();
+        const float snappedX = std::round(worldPos.x() / gridStep) * gridStep;
+        const float snappedY = std::round(worldPos.y() / gridStep) * gridStep;
         const QVector3D snappedGridPosition(snappedX, snappedY, 0.0f);
         const QPoint snappedGridScreenPos = worldToScreen(snappedGridPosition);
         const float dx = static_cast<float>(snappedGridScreenPos.x() - screenPos.x());
@@ -1202,6 +1257,73 @@ std::vector<TransientPrimitive> CadViewer::buildSnapHighlightPrimitives() const
     innerPoint.vertices = { snappedPosition };
 
     return { outerPoint, innerPoint };
+}
+
+void CadViewer::computeVisibleGroundBounds(float& minX, float& maxX, float& minY, float& maxY) const
+{
+    minX = std::numeric_limits<float>::max();
+    maxX = -std::numeric_limits<float>::max();
+    minY = std::numeric_limits<float>::max();
+    maxY = -std::numeric_limits<float>::max();
+
+    const int safeWidth = std::max(1, width());
+    const int safeHeight = std::max(1, height());
+    const std::array<QPoint, 4> corners =
+    {
+        QPoint(0, 0),
+        QPoint(safeWidth - 1, 0),
+        QPoint(0, safeHeight - 1),
+        QPoint(safeWidth - 1, safeHeight - 1)
+    };
+
+    bool hasValidCorner = false;
+
+    for (const QPoint& corner : corners)
+    {
+        const QVector3D position = screenToGroundPlane(corner);
+
+        if (!std::isfinite(position.x()) || !std::isfinite(position.y()))
+        {
+            continue;
+        }
+
+        minX = std::min(minX, position.x());
+        maxX = std::max(maxX, position.x());
+        minY = std::min(minY, position.y());
+        maxY = std::max(maxY, position.y());
+        hasValidCorner = true;
+    }
+
+    if (!hasValidCorner)
+    {
+        const float halfHeight = m_camera.viewHeight * 0.5f;
+        const float halfWidth = halfHeight * aspectRatio();
+        minX = m_camera.target.x() - halfWidth;
+        maxX = m_camera.target.x() + halfWidth;
+        minY = m_camera.target.y() - halfHeight;
+        maxY = m_camera.target.y() + halfHeight;
+    }
+}
+
+float CadViewer::currentGridStep() const
+{
+    float minX = 0.0f;
+    float maxX = 0.0f;
+    float minY = 0.0f;
+    float maxY = 0.0f;
+    computeVisibleGroundBounds(minX, maxX, minY, maxY);
+
+    float gridStep = chooseNiceGridStep(pixelToWorldScale() * kTargetGridSpacingPixels);
+    const float width = std::max(maxX - minX, 0.0f);
+    const float height = std::max(maxY - minY, 0.0f);
+
+    while ((width / gridStep) > kMaxGridLineCountPerAxis
+        || (height / gridStep) > kMaxGridLineCountPerAxis)
+    {
+        gridStep = nextNiceGridStep(gridStep);
+    }
+
+    return gridStep;
 }
 
 void CadViewer::setSelectedEntityId(EntityId entityId)

@@ -10,6 +10,7 @@
 #include <QVector3D>
 
 #include <algorithm>
+#include <cmath>
 #include <vector>
 
 namespace
@@ -50,36 +51,21 @@ void CadReferenceRenderer::setTheme(const AppThemeColors& theme)
 // 初始化网格顶点缓冲
 void CadReferenceRenderer::initializeGridBuffer()
 {
-    std::vector<QVector3D> vertices;
-    constexpr int gridHalfCount = 20;
-    constexpr float gridStep = 100.0f;
-    constexpr float gridExtent = gridHalfCount * gridStep;
-
-    vertices.reserve((gridHalfCount * 2 + 1) * 4);
-
-    for (int i = -gridHalfCount; i <= gridHalfCount; ++i)
-    {
-        // 每个 offset 同时生成一条纵向线和一条横向线
-        const float offset = i * gridStep;
-        vertices.emplace_back(offset, -gridExtent, 0.0f);
-        vertices.emplace_back(offset, gridExtent, 0.0f);
-        vertices.emplace_back(-gridExtent, offset, 0.0f);
-        vertices.emplace_back(gridExtent, offset, 0.0f);
-    }
-
-    m_gridVertexCount = static_cast<int>(vertices.size());
-
     m_gridVao.create();
     m_gridVao.bind();
 
     m_gridVbo.create();
     m_gridVbo.bind();
-    m_gridVbo.allocate(vertices.data(), m_gridVertexCount * static_cast<int>(sizeof(QVector3D)));
+    m_gridVbo.setUsagePattern(QOpenGLBuffer::DynamicDraw);
+
+    const QVector3D initialPoint(0.0f, 0.0f, 0.0f);
+    m_gridVbo.allocate(&initialPoint, static_cast<int>(sizeof(QVector3D)));
 
     bindVec3VertexAttribute();
 
     m_gridVbo.release();
     m_gridVao.release();
+    m_gridVertexCount = 0;
 }
 
 // 初始化坐标轴顶点缓冲
@@ -145,9 +131,18 @@ void CadReferenceRenderer::destroy()
 // 绘制背景网格
 // @param shader 通用绘制 Shader
 // @param mvp 当前视图使用的模型视图投影矩阵
-void CadReferenceRenderer::renderGrid(QOpenGLShaderProgram& shader, const QMatrix4x4& mvp)
+void CadReferenceRenderer::renderGrid
+(
+    QOpenGLShaderProgram& shader,
+    const QMatrix4x4& mvp,
+    float minX,
+    float maxX,
+    float minY,
+    float maxY,
+    float gridStep
+)
 {
-    if (m_gridVertexCount <= 0)
+    if (gridStep <= 0.0f || !std::isfinite(gridStep))
     {
         return;
     }
@@ -158,6 +153,45 @@ void CadReferenceRenderer::renderGrid(QOpenGLShaderProgram& shader, const QMatri
     {
         return;
     }
+
+    const float margin = gridStep * 2.0f;
+    const int startX = static_cast<int>(std::floor((minX - margin) / gridStep));
+    const int endX = static_cast<int>(std::ceil((maxX + margin) / gridStep));
+    const int startY = static_cast<int>(std::floor((minY - margin) / gridStep));
+    const int endY = static_cast<int>(std::ceil((maxY + margin) / gridStep));
+
+    std::vector<QVector3D> vertices;
+    vertices.reserve(((endX - startX + 1) + (endY - startY + 1)) * 2);
+
+    const float extendedMinY = minY - margin;
+    const float extendedMaxY = maxY + margin;
+    const float extendedMinX = minX - margin;
+    const float extendedMaxX = maxX + margin;
+
+    for (int index = startX; index <= endX; ++index)
+    {
+        const float x = static_cast<float>(index) * gridStep;
+        vertices.emplace_back(x, extendedMinY, 0.0f);
+        vertices.emplace_back(x, extendedMaxY, 0.0f);
+    }
+
+    for (int index = startY; index <= endY; ++index)
+    {
+        const float y = static_cast<float>(index) * gridStep;
+        vertices.emplace_back(extendedMinX, y, 0.0f);
+        vertices.emplace_back(extendedMaxX, y, 0.0f);
+    }
+
+    m_gridVertexCount = static_cast<int>(vertices.size());
+
+    if (m_gridVertexCount <= 0)
+    {
+        return;
+    }
+
+    m_gridVbo.bind();
+    m_gridVbo.allocate(vertices.data(), m_gridVertexCount * static_cast<int>(sizeof(QVector3D)));
+    m_gridVbo.release();
 
     // 网格仅作为背景参考，不参与深度写入，避免干扰实体显示
     shader.bind();
