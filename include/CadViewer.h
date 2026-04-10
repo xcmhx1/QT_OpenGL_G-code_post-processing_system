@@ -31,6 +31,7 @@
 /// 前向声明
 // 图元类
 class CadItem;
+struct CadSelectionHandleInfo;
 // 数据层类
 class CadDocument;
 class CadEditer;
@@ -131,6 +132,9 @@ public:
     // 在屏幕位置选择实体
     // @param screenPos 屏幕坐标点
     void selectEntityAt(const QPoint& screenPos);
+
+    // 在当前选中实体上命中控制点/基点手柄。
+    bool pickSelectedHandle(const QPoint& screenPos, CadSelectionHandleInfo* outHandle = nullptr) const;
 
     // 在指定屏幕位置缩放
     // @param screenPos 屏幕坐标点

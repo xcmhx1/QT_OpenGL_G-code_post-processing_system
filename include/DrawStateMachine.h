@@ -82,12 +82,19 @@ enum class EditType
 {
     None,
     Move,
+    GripEdit,
 };
 
 enum class MoveEditSubMode
 {
     Idle,
     AwaitBasePoint,
+    AwaitTargetPoint,
+};
+
+enum class GripEditSubMode
+{
+    Idle,
     AwaitTargetPoint,
 };
 
@@ -124,6 +131,8 @@ public:
     EditType editType = EditType::None;
     // Move 命令子状态
     MoveEditSubMode moveSubMode = MoveEditSubMode::Idle;
+    // 控制点编辑子状态
+    GripEditSubMode gripSubMode = GripEditSubMode::Idle;
 
     // 当前命令过程里已采集的控制点
     QVector<QVector3D> commandPoints;

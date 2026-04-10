@@ -9,6 +9,8 @@
 #include <QColor>
 #include <QVector3D>
 
+#include "CadProcessVisualUtils.h"
+
 class CadDocument;
 class CadItem;
 class DRW_Entity;
@@ -79,6 +81,9 @@ public:
     // @param item 待移动实体
     // @return 如果命令成功进入活动状态返回 true，否则返回 false
     bool beginMove(DrawStateMachine& drawState, CadItem* item);
+
+    // 开始控制点编辑命令
+    bool beginGripEdit(DrawStateMachine& drawState, CadItem* item, const CadSelectionHandleInfo& handle);
 
     // 删除指定实体
     // @param item 待删除实体
@@ -171,6 +176,9 @@ private:
     // 处理移动编辑命令
     bool handleMoveEditing(const DrawStateMachine& previousState, DrawStateMachine& currentState, const QVector3D& worldPos);
 
+    // 处理控制点编辑命令
+    bool handleGripEditing(const DrawStateMachine& previousState, DrawStateMachine& currentState, const QVector3D& worldPos);
+
     // 向文档追加新实体
     // @param entity 待追加的原生 DXF 实体
     // @return 如果追加成功返回 true，否则返回 false
@@ -182,6 +190,12 @@ private:
 
     // Move 命令当前锁定的目标实体
     CadItem* m_moveTarget = nullptr;
+
+    // 控制点编辑当前锁定的目标实体
+    CadItem* m_gripTarget = nullptr;
+
+    // 控制点编辑当前锁定的控制点索引
+    int m_gripPointIndex = -1;
 
     // Undo 栈
     std::vector<std::unique_ptr<EditCommand>> m_undoStack;

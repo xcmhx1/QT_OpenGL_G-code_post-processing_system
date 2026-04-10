@@ -12,6 +12,7 @@
 // CAD 模块内部依赖
 #include "CadEditer.h"
 #include "CadItem.h"
+#include "CadProcessVisualUtils.h"
 #include "CadViewer.h"
 
 // 匿名命名空间，存放局部辅助函数
@@ -239,6 +240,10 @@ bool CadController::handleMousePress(QMouseEvent* event)
                 {
                     m_viewer->appendCommandMessage(QStringLiteral("移动完成"));
                 }
+                else if (previousState.editType == EditType::GripEdit && m_drawState.editType == EditType::None)
+                {
+                    m_viewer->appendCommandMessage(QStringLiteral("控制点编辑完成"));
+                }
                 else if (previousState.drawType == DrawType::Point)
                 {
                     m_viewer->appendCommandMessage(QStringLiteral("已创建点图元"));
@@ -272,6 +277,22 @@ bool CadController::handleMousePress(QMouseEvent* event)
             }
 
             return true;
+        }
+
+        // 空闲状态下优先尝试命中当前选中图元的可编辑控制点
+        if (!m_drawState.hasActiveCommand() && m_editer != nullptr)
+        {
+            CadSelectionHandleInfo handleInfo;
+
+            if (m_viewer->pickSelectedHandle(event->pos(), &handleInfo))
+            {
+                if (m_editer->beginGripEdit(m_drawState, m_viewer->selectedEntity(), handleInfo))
+                {
+                    m_viewer->appendCommandMessage(QStringLiteral("已进入控制点编辑"));
+                    m_viewer->refreshCommandPrompt();
+                    return true;
+                }
+            }
         }
 
         // 如果编辑器未处理，执行实体选择
@@ -678,6 +699,11 @@ QString CadController::currentPrompt() const
         }
     }
 
+    if (m_drawState.editType == EditType::GripEdit)
+    {
+        return QStringLiteral("GRIP: 指定目标点");
+    }
+
     // 无活动命令提示
     if (!m_drawState.isDrawing)
     {
@@ -759,6 +785,11 @@ QString CadController::currentCommandName() const
         return QStringLiteral("移动");
     }
 
+    if (m_drawState.editType == EditType::GripEdit)
+    {
+        return QStringLiteral("控制点编辑");
+    }
+
     return drawTypeName(m_drawState.drawType);
 }
 
@@ -773,6 +804,7 @@ void CadController::resetSubModes()
     m_drawState.polylineSubMode = PolylineDrawSubMode::Idle;
     m_drawState.lwPolylineSubMode = LWPolylineDrawSubMode::Idle;
     m_drawState.moveSubMode = MoveEditSubMode::Idle;
+    m_drawState.gripSubMode = GripEditSubMode::Idle;
 }
 
 // 准备图元子模式（进入绘图状态）
@@ -831,6 +863,16 @@ void CadController::handleLeftPressInCommand(const QVector3D& worldPos)
         else
         {
             m_drawState.moveSubMode = MoveEditSubMode::Idle;
+        }
+
+        return;
+    }
+
+    if (m_drawState.editType == EditType::GripEdit)
+    {
+        if (m_drawState.gripSubMode == GripEditSubMode::AwaitTargetPoint)
+        {
+            m_drawState.gripSubMode = GripEditSubMode::Idle;
         }
 
         return;

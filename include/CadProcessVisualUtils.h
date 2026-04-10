@@ -29,6 +29,8 @@ struct CadSelectionHandleInfo
 {
     QVector3D position;
     bool isBasePoint = false;
+    bool editable = false;
+    int pointIndex = -1;
     CadSelectionHandleShape shape = CadSelectionHandleShape::RoundPoint;
     QVector3D direction;
 };

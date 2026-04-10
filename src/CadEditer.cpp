@@ -306,6 +306,155 @@ namespace
         }
     }
 
+    bool readEditableControlPoint(const CadItem* item, int pointIndex, QVector3D& point)
+    {
+        if (item == nullptr || item->m_nativeEntity == nullptr || pointIndex < 0)
+        {
+            return false;
+        }
+
+        switch (item->m_type)
+        {
+        case DRW::ETYPE::LINE:
+        {
+            const DRW_Line* line = static_cast<const DRW_Line*>(item->m_nativeEntity);
+
+            if (pointIndex == 0)
+            {
+                point = QVector3D(line->basePoint.x, line->basePoint.y, 0.0f);
+                return true;
+            }
+
+            if (pointIndex == 1)
+            {
+                point = QVector3D(line->secPoint.x, line->secPoint.y, 0.0f);
+                return true;
+            }
+
+            return false;
+        }
+        case DRW::ETYPE::POLYLINE:
+        {
+            const DRW_Polyline* polyline = static_cast<const DRW_Polyline*>(item->m_nativeEntity);
+
+            if (pointIndex >= static_cast<int>(polyline->vertlist.size()))
+            {
+                return false;
+            }
+
+            const std::shared_ptr<DRW_Vertex>& vertex = polyline->vertlist[static_cast<size_t>(pointIndex)];
+
+            if (vertex == nullptr)
+            {
+                return false;
+            }
+
+            point = QVector3D(vertex->basePoint.x, vertex->basePoint.y, 0.0f);
+            return true;
+        }
+        case DRW::ETYPE::LWPOLYLINE:
+        {
+            const DRW_LWPolyline* polyline = static_cast<const DRW_LWPolyline*>(item->m_nativeEntity);
+
+            if (pointIndex >= static_cast<int>(polyline->vertlist.size()))
+            {
+                return false;
+            }
+
+            const std::shared_ptr<DRW_Vertex2D>& vertex = polyline->vertlist[static_cast<size_t>(pointIndex)];
+
+            if (vertex == nullptr)
+            {
+                return false;
+            }
+
+            point = QVector3D(static_cast<float>(vertex->x), static_cast<float>(vertex->y), 0.0f);
+            return true;
+        }
+        default:
+            return false;
+        }
+    }
+
+    bool applyEditableControlPoint(DRW_Entity* entity, int pointIndex, const QVector3D& worldPos)
+    {
+        if (entity == nullptr || pointIndex < 0)
+        {
+            return false;
+        }
+
+        const QVector3D point = flattenToDrawingPlane(worldPos);
+
+        switch (entity->eType)
+        {
+        case DRW::ETYPE::LINE:
+        {
+            DRW_Line* line = static_cast<DRW_Line*>(entity);
+
+            if (pointIndex == 0)
+            {
+                line->basePoint.x = point.x();
+                line->basePoint.y = point.y();
+                line->basePoint.z = point.z();
+                return true;
+            }
+
+            if (pointIndex == 1)
+            {
+                line->secPoint.x = point.x();
+                line->secPoint.y = point.y();
+                line->secPoint.z = point.z();
+                return true;
+            }
+
+            return false;
+        }
+        case DRW::ETYPE::POLYLINE:
+        {
+            DRW_Polyline* polyline = static_cast<DRW_Polyline*>(entity);
+
+            if (pointIndex >= static_cast<int>(polyline->vertlist.size()))
+            {
+                return false;
+            }
+
+            const std::shared_ptr<DRW_Vertex>& vertex = polyline->vertlist[static_cast<size_t>(pointIndex)];
+
+            if (vertex == nullptr)
+            {
+                return false;
+            }
+
+            vertex->basePoint.x = point.x();
+            vertex->basePoint.y = point.y();
+            vertex->basePoint.z = point.z();
+            return true;
+        }
+        case DRW::ETYPE::LWPOLYLINE:
+        {
+            DRW_LWPolyline* polyline = static_cast<DRW_LWPolyline*>(entity);
+
+            if (pointIndex >= static_cast<int>(polyline->vertlist.size()))
+            {
+                return false;
+            }
+
+            const std::shared_ptr<DRW_Vertex2D>& vertex = polyline->vertlist[static_cast<size_t>(pointIndex)];
+
+            if (vertex == nullptr)
+            {
+                return false;
+            }
+
+            vertex->x = point.x();
+            vertex->y = point.y();
+            return true;
+        }
+        default:
+            return false;
+        }
+    }
+
     std::unique_ptr<DRW_Entity> cloneEntity(const DRW_Entity* entity)
     {
         if (entity == nullptr)
@@ -927,6 +1076,60 @@ private:
     QVector3D m_delta;
 };
 
+class GripPointEditCommand final : public CadEditer::EditCommand
+{
+public:
+    GripPointEditCommand(CadDocument* document, CadItem* item, int pointIndex, const QVector3D& newPoint)
+        : m_document(document)
+        , m_item(item)
+        , m_pointIndex(pointIndex)
+        , m_newPoint(flattenToDrawingPlane(newPoint))
+    {
+        if (m_item != nullptr)
+        {
+            m_valid = readEditableControlPoint(m_item, m_pointIndex, m_oldPoint);
+        }
+    }
+
+    bool execute() override
+    {
+        return apply(m_newPoint);
+    }
+
+    bool undo() override
+    {
+        return apply(m_oldPoint);
+    }
+
+private:
+    bool apply(const QVector3D& point)
+    {
+        if (!m_valid
+            || m_document == nullptr
+            || m_item == nullptr
+            || m_item->m_nativeEntity == nullptr
+            || !m_document->containsEntity(m_item))
+        {
+            return false;
+        }
+
+        if (!applyEditableControlPoint(m_item->m_nativeEntity, m_pointIndex, point))
+        {
+            return false;
+        }
+
+        return m_document->refreshEntity(m_item);
+    }
+
+private:
+    CadDocument* m_document = nullptr;
+    CadItem* m_item = nullptr;
+    int m_pointIndex = -1;
+    QVector3D m_oldPoint;
+    QVector3D m_newPoint;
+    bool m_valid = false;
+};
+
 class CopyEntityCommand final : public CadEditer::EditCommand
 {
 public:
@@ -1478,6 +1681,8 @@ void CadEditer::clearHistory()
 void CadEditer::cancelTransientCommand()
 {
     m_moveTarget = nullptr;
+    m_gripTarget = nullptr;
+    m_gripPointIndex = -1;
 }
 
 // 查询是否可以撤销
@@ -1555,6 +1760,11 @@ bool CadEditer::handleLeftPress
     if (currentState.editType == EditType::Move || previousState.editType == EditType::Move)
     {
         return handleMoveEditing(previousState, currentState, worldPos);
+    }
+
+    if (currentState.editType == EditType::GripEdit || previousState.editType == EditType::GripEdit)
+    {
+        return handleGripEditing(previousState, currentState, worldPos);
     }
 
     if (!currentState.isDrawing && !previousState.isDrawing)
@@ -1659,7 +1869,41 @@ bool CadEditer::beginMove(DrawStateMachine& drawState, CadItem* item)
     drawState.drawType = DrawType::None;
     drawState.editType = EditType::Move;
     drawState.moveSubMode = MoveEditSubMode::AwaitBasePoint;
+    drawState.gripSubMode = GripEditSubMode::Idle;
     m_moveTarget = item;
+    m_gripTarget = nullptr;
+    m_gripPointIndex = -1;
+    return true;
+}
+
+bool CadEditer::beginGripEdit(DrawStateMachine& drawState, CadItem* item, const CadSelectionHandleInfo& handle)
+{
+    if (m_document == nullptr
+        || item == nullptr
+        || !m_document->containsEntity(item)
+        || !handle.editable
+        || handle.pointIndex < 0)
+    {
+        return false;
+    }
+
+    QVector3D currentPoint;
+
+    if (!readEditableControlPoint(item, handle.pointIndex, currentPoint))
+    {
+        return false;
+    }
+
+    drawState.commandPoints = { currentPoint };
+    drawState.commandBulges.clear();
+    drawState.isDrawing = false;
+    drawState.drawType = DrawType::None;
+    drawState.editType = EditType::GripEdit;
+    drawState.moveSubMode = MoveEditSubMode::Idle;
+    drawState.gripSubMode = GripEditSubMode::AwaitTargetPoint;
+    m_moveTarget = nullptr;
+    m_gripTarget = item;
+    m_gripPointIndex = handle.pointIndex;
     return true;
 }
 
@@ -1676,6 +1920,12 @@ bool CadEditer::deleteEntity(CadItem* item)
     if (item == m_moveTarget)
     {
         m_moveTarget = nullptr;
+    }
+
+    if (item == m_gripTarget)
+    {
+        m_gripTarget = nullptr;
+        m_gripPointIndex = -1;
     }
 
     return executeCommand(std::make_unique<DeleteEntityCommand>(m_document, item));
@@ -2253,6 +2503,50 @@ bool CadEditer::handleMoveEditing
         currentState.editType = EditType::None;
         currentState.moveSubMode = MoveEditSubMode::Idle;
         m_moveTarget = nullptr;
+        return true;
+    }
+
+    return false;
+}
+
+bool CadEditer::handleGripEditing
+(
+    const DrawStateMachine& previousState,
+    DrawStateMachine& currentState,
+    const QVector3D& worldPos
+)
+{
+    if (m_gripTarget == nullptr
+        || m_document == nullptr
+        || !m_document->containsEntity(m_gripTarget)
+        || m_gripPointIndex < 0)
+    {
+        currentState.commandPoints.clear();
+        currentState.editType = EditType::None;
+        currentState.gripSubMode = GripEditSubMode::Idle;
+        m_gripTarget = nullptr;
+        m_gripPointIndex = -1;
+        return false;
+    }
+
+    if (previousState.gripSubMode == GripEditSubMode::AwaitTargetPoint && !currentState.commandPoints.isEmpty())
+    {
+        const QVector3D basePoint = currentState.commandPoints.front();
+        const QVector3D targetPoint = flattenToDrawingPlane(worldPos);
+
+        if ((targetPoint - basePoint).lengthSquared() > kGeometryEpsilon)
+        {
+            if (!executeCommand(std::make_unique<GripPointEditCommand>(m_document, m_gripTarget, m_gripPointIndex, targetPoint)))
+            {
+                return false;
+            }
+        }
+
+        currentState.commandPoints.clear();
+        currentState.editType = EditType::None;
+        currentState.gripSubMode = GripEditSubMode::Idle;
+        m_gripTarget = nullptr;
+        m_gripPointIndex = -1;
         return true;
     }
 

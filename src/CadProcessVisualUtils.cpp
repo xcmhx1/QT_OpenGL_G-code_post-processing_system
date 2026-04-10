@@ -637,6 +637,8 @@ namespace
         QVector<CadSelectionHandleInfo>& handles,
         const QVector3D& position,
         bool isBasePoint,
+        bool editable,
+        int pointIndex,
         CadSelectionHandleShape shape = CadSelectionHandleShape::RoundPoint,
         const QVector3D& direction = QVector3D()
     )
@@ -652,6 +654,8 @@ namespace
         CadSelectionHandleInfo handle;
         handle.position = position;
         handle.isBasePoint = isBasePoint;
+        handle.editable = editable;
+        handle.pointIndex = pointIndex;
         handle.shape = shape;
         handle.direction = normalizeOrZero(direction);
         handles.push_back(std::move(handle));
@@ -890,35 +894,37 @@ QVector<CadSelectionHandleInfo> buildSelectionHandleInfo(const CadItem* item)
     case DRW::ETYPE::POINT:
     {
         const DRW_Point* point = static_cast<const DRW_Point*>(item->m_nativeEntity);
-        appendSelectionHandle(handles, QVector3D(point->basePoint.x, point->basePoint.y, point->basePoint.z), true);
+        appendSelectionHandle(handles, QVector3D(point->basePoint.x, point->basePoint.y, point->basePoint.z), true, false, 0);
         break;
     }
     case DRW::ETYPE::LINE:
     {
         const DRW_Line* line = static_cast<const DRW_Line*>(item->m_nativeEntity);
-        appendSelectionHandle(handles, QVector3D(line->basePoint.x, line->basePoint.y, line->basePoint.z), true);
-        appendSelectionHandle(handles, QVector3D(line->secPoint.x, line->secPoint.y, line->secPoint.z), false);
+        appendSelectionHandle(handles, QVector3D(line->basePoint.x, line->basePoint.y, line->basePoint.z), true, true, 0);
+        appendSelectionHandle(handles, QVector3D(line->secPoint.x, line->secPoint.y, line->secPoint.z), false, true, 1);
         break;
     }
     case DRW::ETYPE::CIRCLE:
     {
         const DRW_Circle* circle = static_cast<const DRW_Circle*>(item->m_nativeEntity);
-        appendSelectionHandle(handles, QVector3D(circle->basePoint.x, circle->basePoint.y, circle->basePoint.z), true);
-        appendSelectionHandle(handles, circlePointAt(circle, 0.0), false);
-        appendSelectionHandle(handles, circlePointAt(circle, kPi * 0.5), false);
-        appendSelectionHandle(handles, circlePointAt(circle, kPi), false);
-        appendSelectionHandle(handles, circlePointAt(circle, kPi * 1.5), false);
+        appendSelectionHandle(handles, QVector3D(circle->basePoint.x, circle->basePoint.y, circle->basePoint.z), true, false, 0);
+        appendSelectionHandle(handles, circlePointAt(circle, 0.0), false, false, 1);
+        appendSelectionHandle(handles, circlePointAt(circle, kPi * 0.5), false, false, 2);
+        appendSelectionHandle(handles, circlePointAt(circle, kPi), false, false, 3);
+        appendSelectionHandle(handles, circlePointAt(circle, kPi * 1.5), false, false, 4);
         break;
     }
     case DRW::ETYPE::ARC:
     {
         const DRW_Arc* arc = static_cast<const DRW_Arc*>(item->m_nativeEntity);
-        appendSelectionHandle(handles, QVector3D(arc->basePoint.x, arc->basePoint.y, arc->basePoint.z), true);
+        appendSelectionHandle(handles, QVector3D(arc->basePoint.x, arc->basePoint.y, arc->basePoint.z), true, false, 0);
         appendSelectionHandle
         (
             handles,
             arcPointAt(arc, arc->staangle),
             false,
+            false,
+            1,
             CadSelectionHandleShape::Triangle,
             arcTangentAt(arc, arc->staangle, false)
         );
@@ -930,12 +936,14 @@ QVector<CadSelectionHandleInfo> buildSelectionHandleInfo(const CadItem* item)
             endAngle += kTwoPi;
         }
 
-        appendSelectionHandle(handles, arcPointAt(arc, (arc->staangle + endAngle) * 0.5), false);
+        appendSelectionHandle(handles, arcPointAt(arc, (arc->staangle + endAngle) * 0.5), false, false, 2);
         appendSelectionHandle
         (
             handles,
             arcPointAt(arc, endAngle),
             false,
+            false,
+            3,
             CadSelectionHandleShape::Triangle,
             arcTangentAt(arc, endAngle, false)
         );
@@ -953,11 +961,11 @@ QVector<CadSelectionHandleInfo> buildSelectionHandleInfo(const CadItem* item)
         }
 
         const QVector3D center(ellipse->basePoint.x, ellipse->basePoint.y, ellipse->basePoint.z);
-        appendSelectionHandle(handles, center, true);
-        appendSelectionHandle(handles, center + majorAxis, false);
-        appendSelectionHandle(handles, center - majorAxis, false);
-        appendSelectionHandle(handles, center + minorAxis, false);
-        appendSelectionHandle(handles, center - minorAxis, false);
+        appendSelectionHandle(handles, center, true, false, 0);
+        appendSelectionHandle(handles, center + majorAxis, false, false, 1);
+        appendSelectionHandle(handles, center - majorAxis, false, false, 2);
+        appendSelectionHandle(handles, center + minorAxis, false, false, 3);
+        appendSelectionHandle(handles, center - minorAxis, false, false, 4);
 
         if (!isFullEllipsePath(ellipse))
         {
@@ -966,6 +974,8 @@ QVector<CadSelectionHandleInfo> buildSelectionHandleInfo(const CadItem* item)
                 handles,
                 ellipsePointAt(ellipse, ellipse->staparam),
                 false,
+                false,
+                5,
                 CadSelectionHandleShape::Triangle,
                 ellipseTangentAt(ellipse, ellipse->staparam, false)
             );
@@ -974,6 +984,8 @@ QVector<CadSelectionHandleInfo> buildSelectionHandleInfo(const CadItem* item)
                 handles,
                 ellipsePointAt(ellipse, ellipse->endparam),
                 false,
+                false,
+                6,
                 CadSelectionHandleShape::Triangle,
                 ellipseTangentAt(ellipse, ellipse->endparam, false)
             );
@@ -994,7 +1006,9 @@ QVector<CadSelectionHandleInfo> buildSelectionHandleInfo(const CadItem* item)
         (
             handles,
             QVector3D(firstVertex->basePoint.x, firstVertex->basePoint.y, firstVertex->basePoint.z),
-            true
+            true,
+            true,
+            0
         );
 
         for (size_t index = 1; index < polyline->vertlist.size(); ++index)
@@ -1004,7 +1018,9 @@ QVector<CadSelectionHandleInfo> buildSelectionHandleInfo(const CadItem* item)
             (
                 handles,
                 QVector3D(vertex->basePoint.x, vertex->basePoint.y, vertex->basePoint.z),
-                false
+                false,
+                true,
+                static_cast<int>(index)
             );
         }
         break;
@@ -1024,7 +1040,9 @@ QVector<CadSelectionHandleInfo> buildSelectionHandleInfo(const CadItem* item)
         (
             handles,
             QVector3D(static_cast<float>(firstVertex->x), static_cast<float>(firstVertex->y), z),
-            true
+            true,
+            true,
+            0
         );
 
         for (size_t index = 1; index < polyline->vertlist.size(); ++index)
@@ -1034,7 +1052,9 @@ QVector<CadSelectionHandleInfo> buildSelectionHandleInfo(const CadItem* item)
             (
                 handles,
                 QVector3D(static_cast<float>(vertex->x), static_cast<float>(vertex->y), z),
-                false
+                false,
+                true,
+                static_cast<int>(index)
             );
         }
         break;

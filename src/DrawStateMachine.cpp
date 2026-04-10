@@ -21,6 +21,7 @@ void DrawStateMachine::reset()
     drawingColorIndex = preservedColorIndex;
     editType = EditType::None;
     moveSubMode = MoveEditSubMode::Idle;
+    gripSubMode = GripEditSubMode::Idle;
     commandPoints.clear();
     commandBulges.clear();
     polylineArcMode = false;

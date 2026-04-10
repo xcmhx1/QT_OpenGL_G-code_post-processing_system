@@ -353,6 +353,62 @@ void CadViewer::selectEntityAt(const QPoint& screenPos)
     update();
 }
 
+bool CadViewer::pickSelectedHandle(const QPoint& screenPos, CadSelectionHandleInfo* outHandle) const
+{
+    const CadItem* selectedItem = selectedEntity();
+
+    if (selectedItem == nullptr)
+    {
+        return false;
+    }
+
+    const QVector<CadSelectionHandleInfo> handles = buildSelectionHandleInfo(selectedItem);
+
+    if (handles.isEmpty())
+    {
+        return false;
+    }
+
+    const float handlePickDistanceSquared = kObjectSnapDistancePixels * kObjectSnapDistancePixels;
+    int bestIndex = -1;
+    float bestDistanceSquared = std::numeric_limits<float>::max();
+
+    for (int index = 0; index < handles.size(); ++index)
+    {
+        const CadSelectionHandleInfo& handle = handles[index];
+
+        if (!handle.editable)
+        {
+            continue;
+        }
+
+        const QPoint handleScreenPos = worldToScreen(handle.position);
+        const float dx = static_cast<float>(handleScreenPos.x() - screenPos.x());
+        const float dy = static_cast<float>(handleScreenPos.y() - screenPos.y());
+        const float distanceSquared = dx * dx + dy * dy;
+
+        if (distanceSquared > handlePickDistanceSquared || distanceSquared >= bestDistanceSquared)
+        {
+            continue;
+        }
+
+        bestDistanceSquared = distanceSquared;
+        bestIndex = index;
+    }
+
+    if (bestIndex < 0)
+    {
+        return false;
+    }
+
+    if (outHandle != nullptr)
+    {
+        *outHandle = handles[bestIndex];
+    }
+
+    return true;
+}
+
 // 在指定屏幕位置缩放
 // @param screenPos 屏幕坐标点
 // @param factor 缩放因子
