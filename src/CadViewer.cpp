@@ -31,6 +31,7 @@
 
 // 标准库
 #include <cmath>
+#include <limits>
 #include <vector>
 
 // 匿名命名空间，存放局部常量和辅助函数
@@ -40,6 +41,10 @@ namespace
     constexpr bool kEnableViewerPerfLogging = false;
     // 慢帧阈值（毫秒），超过此值会记录日志
     constexpr qint64 kSlowFrameThresholdMs = 16;
+    // 对象吸附屏幕距离阈值（像素）
+    constexpr float kObjectSnapDistancePixels = 14.0f;
+    // 网格步长，需与参考网格绘制保持一致
+    constexpr float kGridSnapStep = 100.0f;
 
     // 检查是否为支持拖放的文件类型
     // @param localFile 本地文件路径
@@ -64,6 +69,37 @@ namespace
         }
 
         return perpendicular;
+    }
+
+    QVector<QVector3D> buildTriangleVertices(const QVector3D& center, QVector3D direction, float size)
+    {
+        direction.setZ(0.0f);
+
+        if (direction.lengthSquared() <= 1.0e-6f)
+        {
+            direction = QVector3D(0.0f, 1.0f, 0.0f);
+        }
+        else
+        {
+            direction.normalize();
+        }
+
+        QVector3D perpendicular(-direction.y(), direction.x(), 0.0f);
+
+        if (perpendicular.lengthSquared() <= 1.0e-6f)
+        {
+            perpendicular = QVector3D(1.0f, 0.0f, 0.0f);
+        }
+        else
+        {
+            perpendicular.normalize();
+        }
+
+        const QVector3D tip = center + direction * size;
+        const QVector3D baseCenter = center - direction * (size * 0.8f);
+        const QVector3D left = baseCenter + perpendicular * (size * 0.7f);
+        const QVector3D right = baseCenter - perpendicular * (size * 0.7f);
+        return { tip, left, right };
     }
 }
 
@@ -147,6 +183,27 @@ void CadViewer::setDefaultDrawingProperties(const QString& layerName, const QCol
 {
     m_controller.setDefaultDrawingProperties(layerName, color, colorIndex);
     refreshCommandPrompt();
+}
+
+void CadViewer::setBasePointSnapEnabled(bool enabled)
+{
+    m_basePointSnapEnabled = enabled;
+    updateHoveredWorldPosition(m_cursorScreenPos);
+    update();
+}
+
+void CadViewer::setControlPointSnapEnabled(bool enabled)
+{
+    m_controlPointSnapEnabled = enabled;
+    updateHoveredWorldPosition(m_cursorScreenPos);
+    update();
+}
+
+void CadViewer::setGridSnapEnabled(bool enabled)
+{
+    m_gridSnapEnabled = enabled;
+    updateHoveredWorldPosition(m_cursorScreenPos);
+    update();
 }
 
 void CadViewer::setTheme(const AppThemeColors& theme)
@@ -387,6 +444,11 @@ QVector3D CadViewer::screenToGroundPlane(const QPoint& screenPos) const
 QPoint CadViewer::worldToScreen(const QVector3D& worldPos) const
 {
     return CadViewTransform::worldToScreen(m_camera, m_viewportWidth, m_viewportHeight, worldPos);
+}
+
+QVector3D CadViewer::resolveInteractiveWorldPosition(const QPoint& screenPos) const
+{
+    return applySnapToGroundPosition(screenPos, screenToGroundPlane(screenPos));
 }
 
 // OpenGL 初始化：
@@ -767,6 +829,7 @@ void CadViewer::renderTransientPrimitives(const QMatrix4x4& viewProjection)
     }
 
     std::vector<TransientPrimitive> processPrimitives = buildProcessDirectionPrimitives();
+    const std::vector<TransientPrimitive> selectedHandlePrimitives = buildSelectedEntityHandlePrimitives();
     // 构建命令预览图元
     const std::vector<TransientPrimitive> commandPrimitives = buildTransientPrimitives();
     // 构建十字准线图元
@@ -786,6 +849,7 @@ void CadViewer::renderTransientPrimitives(const QMatrix4x4& viewProjection)
     );
 
     // 如果没有临时图元，则返回
+    processPrimitives.insert(processPrimitives.end(), selectedHandlePrimitives.begin(), selectedHandlePrimitives.end());
     processPrimitives.insert(processPrimitives.end(), commandPrimitives.begin(), commandPrimitives.end());
 
     if (processPrimitives.empty() && crosshairPrimitives.empty())
@@ -960,7 +1024,86 @@ void CadViewer::handleDocumentSceneChanged()
 // @param screenPos 屏幕坐标
 void CadViewer::updateHoveredWorldPosition(const QPoint& screenPos)
 {
-    emit hoveredWorldPositionChanged(screenToGroundPlane(screenPos));
+    emit hoveredWorldPositionChanged(resolveInteractiveWorldPosition(screenPos));
+}
+
+QVector3D CadViewer::applySnapToGroundPosition(const QPoint& screenPos, const QVector3D& worldPos) const
+{
+    struct SnapCandidate
+    {
+        QVector3D position;
+        float distanceSquared = std::numeric_limits<float>::max();
+        int priority = 1;
+        bool valid = false;
+    };
+
+    SnapCandidate bestCandidate;
+    const float snapDistanceSquared = kObjectSnapDistancePixels * kObjectSnapDistancePixels;
+
+    if (m_basePointSnapEnabled || m_controlPointSnapEnabled)
+    {
+        CadDocument* scene = m_sceneCoordinator.document();
+
+        if (scene != nullptr)
+        {
+            for (const std::unique_ptr<CadItem>& entity : scene->m_entities)
+            {
+                if (entity == nullptr)
+                {
+                    continue;
+                }
+
+                const QVector<CadSelectionHandleInfo> handles = buildSelectionHandleInfo(entity.get());
+
+                for (const CadSelectionHandleInfo& handle : handles)
+                {
+                    if ((handle.isBasePoint && !m_basePointSnapEnabled)
+                        || (!handle.isBasePoint && !m_controlPointSnapEnabled))
+                    {
+                        continue;
+                    }
+
+                    const QPoint handleScreenPos = worldToScreen(handle.position);
+                    const float dx = static_cast<float>(handleScreenPos.x() - screenPos.x());
+                    const float dy = static_cast<float>(handleScreenPos.y() - screenPos.y());
+                    const float distanceSquared = dx * dx + dy * dy;
+
+                    if (distanceSquared > snapDistanceSquared)
+                    {
+                        continue;
+                    }
+
+                    const int priority = handle.isBasePoint ? 0 : 1;
+
+                    const bool sameDistance = std::abs(distanceSquared - bestCandidate.distanceSquared) <= 1.0e-4f;
+
+                    if (!bestCandidate.valid
+                        || distanceSquared < bestCandidate.distanceSquared
+                        || (sameDistance && priority < bestCandidate.priority))
+                    {
+                        bestCandidate.position = handle.position;
+                        bestCandidate.distanceSquared = distanceSquared;
+                        bestCandidate.priority = priority;
+                        bestCandidate.valid = true;
+                    }
+                }
+            }
+        }
+    }
+
+    if (bestCandidate.valid)
+    {
+        return QVector3D(bestCandidate.position.x(), bestCandidate.position.y(), 0.0f);
+    }
+
+    if (m_gridSnapEnabled)
+    {
+        const float snappedX = std::round(worldPos.x() / kGridSnapStep) * kGridSnapStep;
+        const float snappedY = std::round(worldPos.y() / kGridSnapStep) * kGridSnapStep;
+        return QVector3D(snappedX, snappedY, 0.0f);
+    }
+
+    return QVector3D(worldPos.x(), worldPos.y(), 0.0f);
 }
 
 void CadViewer::setSelectedEntityId(EntityId entityId)
@@ -1084,6 +1227,87 @@ std::vector<TransientPrimitive> CadViewer::buildProcessDirectionPrimitives() con
         }
 
         primitives.push_back(std::move(primitive));
+    }
+
+    return primitives;
+}
+
+std::vector<TransientPrimitive> CadViewer::buildSelectedEntityHandlePrimitives() const
+{
+    const CadItem* selectedItem = selectedEntity();
+
+    if (selectedItem == nullptr)
+    {
+        return {};
+    }
+
+    const QVector<CadSelectionHandleInfo> handles = buildSelectionHandleInfo(selectedItem);
+
+    if (handles.isEmpty())
+    {
+        return {};
+    }
+
+    TransientPrimitive basePointPrimitive;
+    basePointPrimitive.primitiveType = GL_POINTS;
+    basePointPrimitive.color =
+    {
+        static_cast<float>(m_theme.selectedBasePointColor.redF()),
+        static_cast<float>(m_theme.selectedBasePointColor.greenF()),
+        static_cast<float>(m_theme.selectedBasePointColor.blueF())
+    };
+    basePointPrimitive.pointSize = 13.0f;
+    basePointPrimitive.roundPoint = true;
+
+    TransientPrimitive controlPointPrimitive;
+    controlPointPrimitive.primitiveType = GL_POINTS;
+    controlPointPrimitive.color =
+    {
+        static_cast<float>(m_theme.selectedControlPointColor.redF()),
+        static_cast<float>(m_theme.selectedControlPointColor.greenF()),
+        static_cast<float>(m_theme.selectedControlPointColor.blueF())
+    };
+    controlPointPrimitive.pointSize = 10.0f;
+    controlPointPrimitive.roundPoint = true;
+
+    TransientPrimitive trianglePrimitive;
+    trianglePrimitive.primitiveType = GL_TRIANGLES;
+    trianglePrimitive.color = controlPointPrimitive.color;
+    const float pixelScale = std::max(pixelToWorldScale(), 1.0e-4f);
+    const float triangleSize = pixelScale * 6.5f;
+
+    for (const CadSelectionHandleInfo& handle : handles)
+    {
+        if (handle.shape == CadSelectionHandleShape::Triangle)
+        {
+            const QVector<QVector3D> triangleVertices = buildTriangleVertices(handle.position, handle.direction, triangleSize);
+            trianglePrimitive.vertices += triangleVertices;
+        }
+        else if (handle.isBasePoint)
+        {
+            basePointPrimitive.vertices.push_back(handle.position);
+        }
+        else
+        {
+            controlPointPrimitive.vertices.push_back(handle.position);
+        }
+    }
+
+    std::vector<TransientPrimitive> primitives;
+
+    if (!controlPointPrimitive.vertices.isEmpty())
+    {
+        primitives.push_back(std::move(controlPointPrimitive));
+    }
+
+    if (!trianglePrimitive.vertices.isEmpty())
+    {
+        primitives.push_back(std::move(trianglePrimitive));
+    }
+
+    if (!basePointPrimitive.vertices.isEmpty())
+    {
+        primitives.push_back(std::move(basePointPrimitive));
     }
 
     return primitives;

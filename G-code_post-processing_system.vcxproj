@@ -132,6 +132,7 @@
   <ItemGroup>
     <QtMoc Include="include\Gcode_postprocessing_system.h" />
     <QtMoc Include="include\CadToolPanelWidget.h" />
+    <QtMoc Include="include\CadStatusPaneWidget.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\CadItem.cpp" />
@@ -302,7 +303,6 @@
     <ClInclude Include="include\CadSceneContext.h" />
     <ClInclude Include="include\CadSceneRenderCache.h" />
     <ClInclude Include="include\CadShaderManager.h" />
-    <ClInclude Include="include\CadStatusPaneWidget.h" />
     <ClInclude Include="include\CadViewInteractionController.h" />
     <ClInclude Include="include\CadViewTransform.h" />
     <ClInclude Include="include\CadViewerUtils.h" />

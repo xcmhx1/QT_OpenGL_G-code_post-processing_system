@@ -32,6 +32,11 @@ struct AppThemeColors
     QColor selectedProcessLabelFillColor;
     QColor selectedProcessLabelBorderColor;
     QColor selectedProcessLabelTextColor;
+    QColor selectedBasePointColor;
+    QColor selectedControlPointColor;
+    QColor selectedHandleLabelFillColor;
+    QColor selectedHandleLabelBorderColor;
+    QColor selectedHandleLabelTextColor;
     QPalette palette;
 };
 
@@ -62,6 +67,11 @@ inline AppThemeColors buildAppThemeColors(AppThemeMode mode)
         theme.selectedProcessLabelFillColor = QColor(255, 196, 64, 230);
         theme.selectedProcessLabelBorderColor = QColor(255, 240, 180);
         theme.selectedProcessLabelTextColor = QColor(34, 22, 0);
+        theme.selectedBasePointColor = QColor(255, 206, 84);
+        theme.selectedControlPointColor = QColor(88, 214, 255);
+        theme.selectedHandleLabelFillColor = QColor(30, 36, 42, 226);
+        theme.selectedHandleLabelBorderColor = QColor(160, 214, 255, 230);
+        theme.selectedHandleLabelTextColor = QColor(243, 248, 252);
     }
     else
     {
@@ -85,6 +95,11 @@ inline AppThemeColors buildAppThemeColors(AppThemeMode mode)
         theme.selectedProcessLabelFillColor = QColor(255, 209, 102, 242);
         theme.selectedProcessLabelBorderColor = QColor(214, 155, 34);
         theme.selectedProcessLabelTextColor = QColor(62, 44, 0);
+        theme.selectedBasePointColor = QColor(224, 150, 24);
+        theme.selectedControlPointColor = QColor(26, 146, 198);
+        theme.selectedHandleLabelFillColor = QColor(255, 255, 255, 240);
+        theme.selectedHandleLabelBorderColor = QColor(132, 174, 214, 230);
+        theme.selectedHandleLabelTextColor = QColor(26, 34, 42);
     }
 
     QPalette palette;

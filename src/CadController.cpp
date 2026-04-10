@@ -975,11 +975,5 @@ QVector3D CadController::currentWorldPos(const QPoint& screenPos) const
         return QVector3D();
     }
 
-    // 在命令状态下使用地面平面坐标，否则使用屏幕到世界的标准转换
-    if (m_drawState.hasActiveCommand())
-    {
-        return m_viewer->screenToGroundPlane(screenPos);
-    }
-
-    return m_viewer->screenToWorld(screenPos);
+    return m_viewer->resolveInteractiveWorldPosition(screenPos);
 }

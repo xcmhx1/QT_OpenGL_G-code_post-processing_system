@@ -631,6 +631,31 @@ namespace
         anchor = (minPoint + maxPoint) * 0.5f;
         return true;
     }
+
+    void appendSelectionHandle
+    (
+        QVector<CadSelectionHandleInfo>& handles,
+        const QVector3D& position,
+        bool isBasePoint,
+        CadSelectionHandleShape shape = CadSelectionHandleShape::RoundPoint,
+        const QVector3D& direction = QVector3D()
+    )
+    {
+        for (const CadSelectionHandleInfo& handle : handles)
+        {
+            if ((handle.position - position).lengthSquared() <= kVisualEpsilon)
+            {
+                return;
+            }
+        }
+
+        CadSelectionHandleInfo handle;
+        handle.position = position;
+        handle.isBasePoint = isBasePoint;
+        handle.shape = shape;
+        handle.direction = normalizeOrZero(direction);
+        handles.push_back(std::move(handle));
+    }
 }
 
 bool isProcessVisualizable(const CadItem* item)
@@ -849,4 +874,174 @@ CadProcessVisualInfo buildProcessVisualInfo(const CadItem* item)
 
     info.valid = true;
     return info;
+}
+
+QVector<CadSelectionHandleInfo> buildSelectionHandleInfo(const CadItem* item)
+{
+    QVector<CadSelectionHandleInfo> handles;
+
+    if (item == nullptr || item->m_nativeEntity == nullptr)
+    {
+        return handles;
+    }
+
+    switch (item->m_type)
+    {
+    case DRW::ETYPE::POINT:
+    {
+        const DRW_Point* point = static_cast<const DRW_Point*>(item->m_nativeEntity);
+        appendSelectionHandle(handles, QVector3D(point->basePoint.x, point->basePoint.y, point->basePoint.z), true);
+        break;
+    }
+    case DRW::ETYPE::LINE:
+    {
+        const DRW_Line* line = static_cast<const DRW_Line*>(item->m_nativeEntity);
+        appendSelectionHandle(handles, QVector3D(line->basePoint.x, line->basePoint.y, line->basePoint.z), true);
+        appendSelectionHandle(handles, QVector3D(line->secPoint.x, line->secPoint.y, line->secPoint.z), false);
+        break;
+    }
+    case DRW::ETYPE::CIRCLE:
+    {
+        const DRW_Circle* circle = static_cast<const DRW_Circle*>(item->m_nativeEntity);
+        appendSelectionHandle(handles, QVector3D(circle->basePoint.x, circle->basePoint.y, circle->basePoint.z), true);
+        appendSelectionHandle(handles, circlePointAt(circle, 0.0), false);
+        appendSelectionHandle(handles, circlePointAt(circle, kPi * 0.5), false);
+        appendSelectionHandle(handles, circlePointAt(circle, kPi), false);
+        appendSelectionHandle(handles, circlePointAt(circle, kPi * 1.5), false);
+        break;
+    }
+    case DRW::ETYPE::ARC:
+    {
+        const DRW_Arc* arc = static_cast<const DRW_Arc*>(item->m_nativeEntity);
+        appendSelectionHandle(handles, QVector3D(arc->basePoint.x, arc->basePoint.y, arc->basePoint.z), true);
+        appendSelectionHandle
+        (
+            handles,
+            arcPointAt(arc, arc->staangle),
+            false,
+            CadSelectionHandleShape::Triangle,
+            arcTangentAt(arc, arc->staangle, false)
+        );
+
+        double endAngle = arc->endangle;
+
+        while (endAngle <= arc->staangle)
+        {
+            endAngle += kTwoPi;
+        }
+
+        appendSelectionHandle(handles, arcPointAt(arc, (arc->staangle + endAngle) * 0.5), false);
+        appendSelectionHandle
+        (
+            handles,
+            arcPointAt(arc, endAngle),
+            false,
+            CadSelectionHandleShape::Triangle,
+            arcTangentAt(arc, endAngle, false)
+        );
+        break;
+    }
+    case DRW::ETYPE::ELLIPSE:
+    {
+        const DRW_Ellipse* ellipse = static_cast<const DRW_Ellipse*>(item->m_nativeEntity);
+        QVector3D majorAxis;
+        QVector3D minorAxis;
+
+        if (!tryBuildEllipseAxes(ellipse, majorAxis, minorAxis))
+        {
+            return handles;
+        }
+
+        const QVector3D center(ellipse->basePoint.x, ellipse->basePoint.y, ellipse->basePoint.z);
+        appendSelectionHandle(handles, center, true);
+        appendSelectionHandle(handles, center + majorAxis, false);
+        appendSelectionHandle(handles, center - majorAxis, false);
+        appendSelectionHandle(handles, center + minorAxis, false);
+        appendSelectionHandle(handles, center - minorAxis, false);
+
+        if (!isFullEllipsePath(ellipse))
+        {
+            appendSelectionHandle
+            (
+                handles,
+                ellipsePointAt(ellipse, ellipse->staparam),
+                false,
+                CadSelectionHandleShape::Triangle,
+                ellipseTangentAt(ellipse, ellipse->staparam, false)
+            );
+            appendSelectionHandle
+            (
+                handles,
+                ellipsePointAt(ellipse, ellipse->endparam),
+                false,
+                CadSelectionHandleShape::Triangle,
+                ellipseTangentAt(ellipse, ellipse->endparam, false)
+            );
+        }
+        break;
+    }
+    case DRW::ETYPE::POLYLINE:
+    {
+        const DRW_Polyline* polyline = static_cast<const DRW_Polyline*>(item->m_nativeEntity);
+
+        if (polyline->vertlist.empty())
+        {
+            return handles;
+        }
+
+        const auto& firstVertex = polyline->vertlist.front();
+        appendSelectionHandle
+        (
+            handles,
+            QVector3D(firstVertex->basePoint.x, firstVertex->basePoint.y, firstVertex->basePoint.z),
+            true
+        );
+
+        for (size_t index = 1; index < polyline->vertlist.size(); ++index)
+        {
+            const auto& vertex = polyline->vertlist.at(index);
+            appendSelectionHandle
+            (
+                handles,
+                QVector3D(vertex->basePoint.x, vertex->basePoint.y, vertex->basePoint.z),
+                false
+            );
+        }
+        break;
+    }
+    case DRW::ETYPE::LWPOLYLINE:
+    {
+        const DRW_LWPolyline* polyline = static_cast<const DRW_LWPolyline*>(item->m_nativeEntity);
+
+        if (polyline->vertlist.empty())
+        {
+            return handles;
+        }
+
+        const float z = static_cast<float>(polyline->elevation);
+        const auto& firstVertex = polyline->vertlist.front();
+        appendSelectionHandle
+        (
+            handles,
+            QVector3D(static_cast<float>(firstVertex->x), static_cast<float>(firstVertex->y), z),
+            true
+        );
+
+        for (size_t index = 1; index < polyline->vertlist.size(); ++index)
+        {
+            const auto& vertex = polyline->vertlist.at(index);
+            appendSelectionHandle
+            (
+                handles,
+                QVector3D(static_cast<float>(vertex->x), static_cast<float>(vertex->y), z),
+                false
+            );
+        }
+        break;
+    }
+    default:
+        break;
+    }
+
+    return handles;
 }

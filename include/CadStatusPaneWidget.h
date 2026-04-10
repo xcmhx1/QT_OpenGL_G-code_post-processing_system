@@ -5,17 +5,28 @@
 #include "AppTheme.h"
 
 #include <QLabel>
+#include <QPushButton>
 #include <QWidget>
 #include <QVector3D>
 
 class CadStatusPaneWidget : public QWidget
 {
+    Q_OBJECT
+
 public:
     explicit CadStatusPaneWidget(QWidget* parent = nullptr);
 
     void setWorldPosition(const QVector3D& worldPos);
     void setTheme(const AppThemeColors& theme);
 
+signals:
+    void basePointSnapToggled(bool enabled);
+    void controlPointSnapToggled(bool enabled);
+    void gridSnapToggled(bool enabled);
+
 private:
     QLabel* m_coordinateValueLabel = nullptr;
+    QPushButton* m_basePointSnapButton = nullptr;
+    QPushButton* m_controlPointSnapButton = nullptr;
+    QPushButton* m_gridSnapButton = nullptr;
 };

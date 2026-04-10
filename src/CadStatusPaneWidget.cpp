@@ -40,8 +40,32 @@ CadStatusPaneWidget::CadStatusPaneWidget(QWidget* parent)
     coordinateLayout->addWidget(coordinateTitleLabel);
     coordinateLayout->addWidget(m_coordinateValueLabel);
 
-    QLabel* snapReservedLabel = new QLabel(QStringLiteral("吸附: 预留"), this);
-    snapReservedLabel->setFont(valueFont);
+    QFrame* snapFrame = new QFrame(this);
+    snapFrame->setObjectName("SnapBlock");
+    QHBoxLayout* snapLayout = new QHBoxLayout(snapFrame);
+    snapLayout->setContentsMargins(10, 4, 10, 4);
+    snapLayout->setSpacing(8);
+
+    QLabel* snapTitleLabel = new QLabel(QStringLiteral("吸附"), snapFrame);
+    snapTitleLabel->setFont(titleFont);
+
+    m_basePointSnapButton = new QPushButton(QStringLiteral("基点"), snapFrame);
+    m_controlPointSnapButton = new QPushButton(QStringLiteral("控制点"), snapFrame);
+    m_gridSnapButton = new QPushButton(QStringLiteral("网格"), snapFrame);
+
+    for (QPushButton* button : { m_basePointSnapButton, m_controlPointSnapButton, m_gridSnapButton })
+    {
+        button->setCheckable(true);
+        button->setFont(valueFont);
+        button->setCursor(Qt::PointingHandCursor);
+        button->setProperty("snapToggle", true);
+        button->setMinimumHeight(28);
+    }
+
+    snapLayout->addWidget(snapTitleLabel);
+    snapLayout->addWidget(m_basePointSnapButton);
+    snapLayout->addWidget(m_controlPointSnapButton);
+    snapLayout->addWidget(m_gridSnapButton);
 
     QLabel* orthoReservedLabel = new QLabel(QStringLiteral("正交: 预留"), this);
     orthoReservedLabel->setFont(valueFont);
@@ -51,10 +75,14 @@ CadStatusPaneWidget::CadStatusPaneWidget(QWidget* parent)
 
     layout->addWidget(coordinateFrame);
     layout->addSpacing(8);
-    layout->addWidget(snapReservedLabel);
+    layout->addWidget(snapFrame);
     layout->addWidget(orthoReservedLabel);
     layout->addWidget(polarReservedLabel);
     layout->addStretch(1);
+
+    connect(m_basePointSnapButton, &QPushButton::toggled, this, &CadStatusPaneWidget::basePointSnapToggled);
+    connect(m_controlPointSnapButton, &QPushButton::toggled, this, &CadStatusPaneWidget::controlPointSnapToggled);
+    connect(m_gridSnapButton, &QPushButton::toggled, this, &CadStatusPaneWidget::gridSnapToggled);
 
     setTheme(buildAppThemeColors(AppThemeMode::Light));
 
@@ -87,8 +115,29 @@ void CadStatusPaneWidget::setTheme(const AppThemeColors& theme)
             "border: 1px solid %4;"
             "border-radius: 4px;"
             "}"
+            "#SnapBlock {"
+            "background-color: %3;"
+            "border: 1px solid %4;"
+            "border-radius: 4px;"
+            "}"
             "#CadStatusPaneWidget QLabel {"
             "color: %5;"
+            "}"
+            "QPushButton[snapToggle=\"true\"] {"
+            "background-color: %6;"
+            "color: %5;"
+            "border: 1px solid %2;"
+            "border-radius: 4px;"
+            "padding: 3px 10px;"
+            "}"
+            "QPushButton[snapToggle=\"true\"]:hover {"
+            "background-color: %7;"
+            "}"
+            "QPushButton[snapToggle=\"true\"]:checked {"
+            "background-color: %8;"
+            "color: %9;"
+            "border: 1px solid %8;"
+            "font-weight: 600;"
             "}"
         )
         .arg(theme.panelBackground.name())
@@ -96,5 +145,9 @@ void CadStatusPaneWidget::setTheme(const AppThemeColors& theme)
         .arg(theme.surfaceBackground.name())
         .arg(theme.borderStrongColor.name())
         .arg(theme.textPrimaryColor.name())
+        .arg(theme.surfaceAltBackground.name())
+        .arg(theme.hoverBackgroundColor.name())
+        .arg(theme.accentColor.name())
+        .arg(theme.accentTextColor.name())
     );
 }

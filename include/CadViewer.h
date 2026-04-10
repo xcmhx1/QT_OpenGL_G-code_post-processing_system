@@ -61,6 +61,15 @@ public:
     // 设置默认绘图属性。
     void setDefaultDrawingProperties(const QString& layerName, const QColor& color, int colorIndex);
 
+    // 设置基点吸附开关。
+    void setBasePointSnapEnabled(bool enabled);
+
+    // 设置控制点吸附开关。
+    void setControlPointSnapEnabled(bool enabled);
+
+    // 设置网格点吸附开关。
+    void setGridSnapEnabled(bool enabled);
+
     // 设置 Viewer 主题。
     void setTheme(const AppThemeColors& theme);
 
@@ -96,6 +105,9 @@ public:
     // @param worldPos 世界坐标
     // @return 对应的屏幕坐标
     QPoint worldToScreen(const QVector3D& worldPos) const;
+
+    // 屏幕坐标转交互用世界坐标，并按当前开关执行吸附。
+    QVector3D resolveInteractiveWorldPosition(const QPoint& screenPos) const;
 
     // 供控制器调用的视图动作接口
 
@@ -266,6 +278,9 @@ private:
     // @param screenPos 屏幕坐标
     void updateHoveredWorldPosition(const QPoint& screenPos);
 
+    // 将原始地面平面点按当前吸附配置修正到目标点。
+    QVector3D applySnapToGroundPosition(const QPoint& screenPos, const QVector3D& worldPos) const;
+
     // 更新当前选中实体并在变化时发出信号。
     void setSelectedEntityId(EntityId entityId);
 
@@ -286,6 +301,10 @@ private:
     // 构建加工方向箭头图元
     // @return 加工方向 overlay 图元列表
     std::vector<TransientPrimitive> buildProcessDirectionPrimitives() const;
+
+    // 构建选中图元的基点/控制点图元
+    // @return 选中态手柄 overlay 图元列表
+    std::vector<TransientPrimitive> buildSelectedEntityHandlePrimitives() const;
 
     // 获取当前视口宽高比
     // @return 宽高比（宽度/高度）
@@ -333,4 +352,13 @@ private:
 
     // 当前主题颜色
     AppThemeColors m_theme = buildAppThemeColors(AppThemeMode::Light);
+
+    // 基点吸附开关
+    bool m_basePointSnapEnabled = false;
+
+    // 控制点吸附开关
+    bool m_controlPointSnapEnabled = false;
+
+    // 网格点吸附开关
+    bool m_gridSnapEnabled = false;
 };
