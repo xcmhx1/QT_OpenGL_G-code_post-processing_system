@@ -45,7 +45,8 @@ public:
     void renderAxis(QOpenGLShaderProgram& shader, const QMatrix4x4& mvp, bool axesSwapped);
 
 private:
-    QVector3D m_gridColor = QVector3D(0.82f, 0.83f, 0.86f);
+    QVector3D m_majorGridColor = QVector3D(0.82f, 0.83f, 0.86f);
+    QVector3D m_minorGridColor = QVector3D(0.90f, 0.91f, 0.93f);
 
     // 网格顶点缓冲
     QOpenGLBuffer m_gridVbo{ QOpenGLBuffer::VertexBuffer };

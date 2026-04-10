@@ -15,6 +15,9 @@
 
 namespace
 {
+    // 主/次网格线分层频率：每 2 条次网格中的一条作为主网格
+    constexpr int kMajorGridLineInterval = 2;
+
     // 获取当前 OpenGL 上下文导出的函数表
     // @return 可用的 OpenGL 函数表指针，无上下文时返回 nullptr
     QOpenGLFunctions* currentFunctions()
@@ -41,11 +44,23 @@ namespace
     {
         return QVector3D(color.redF(), color.greenF(), color.blueF());
     }
+
+    QVector3D blendColor(const QVector3D& from, const QVector3D& to, float t)
+    {
+        const float ratio = std::clamp(t, 0.0f, 1.0f);
+        return from * (1.0f - ratio) + to * ratio;
+    }
+
+    bool isMajorGridLineIndex(int index)
+    {
+        return (index % kMajorGridLineInterval) == 0;
+    }
 }
 
 void CadReferenceRenderer::setTheme(const AppThemeColors& theme)
 {
-    m_gridColor = toVector3D(theme.viewerGridColor);
+    m_majorGridColor = toVector3D(theme.viewerGridColor);
+    m_minorGridColor = blendColor(m_majorGridColor, toVector3D(theme.viewerBackgroundColor), 0.58f);
 }
 
 // 初始化网格顶点缓冲
@@ -160,8 +175,11 @@ void CadReferenceRenderer::renderGrid
     const int startY = static_cast<int>(std::floor((minY - margin) / gridStep));
     const int endY = static_cast<int>(std::ceil((maxY + margin) / gridStep));
 
-    std::vector<QVector3D> vertices;
-    vertices.reserve(((endX - startX + 1) + (endY - startY + 1)) * 2);
+    std::vector<QVector3D> majorVertices;
+    std::vector<QVector3D> minorVertices;
+    const int estimatedLineCount = (endX - startX + 1) + (endY - startY + 1);
+    majorVertices.reserve(estimatedLineCount * 2);
+    minorVertices.reserve(estimatedLineCount * 2);
 
     const float extendedMinY = minY - margin;
     const float extendedMaxY = maxY + margin;
@@ -171,32 +189,27 @@ void CadReferenceRenderer::renderGrid
     for (int index = startX; index <= endX; ++index)
     {
         const float x = static_cast<float>(index) * gridStep;
-        vertices.emplace_back(x, extendedMinY, 0.0f);
-        vertices.emplace_back(x, extendedMaxY, 0.0f);
+        std::vector<QVector3D>& target = isMajorGridLineIndex(index) ? majorVertices : minorVertices;
+        target.emplace_back(x, extendedMinY, 0.0f);
+        target.emplace_back(x, extendedMaxY, 0.0f);
     }
 
     for (int index = startY; index <= endY; ++index)
     {
         const float y = static_cast<float>(index) * gridStep;
-        vertices.emplace_back(extendedMinX, y, 0.0f);
-        vertices.emplace_back(extendedMaxX, y, 0.0f);
+        std::vector<QVector3D>& target = isMajorGridLineIndex(index) ? majorVertices : minorVertices;
+        target.emplace_back(extendedMinX, y, 0.0f);
+        target.emplace_back(extendedMaxX, y, 0.0f);
     }
 
-    m_gridVertexCount = static_cast<int>(vertices.size());
-
-    if (m_gridVertexCount <= 0)
+    if (majorVertices.empty() && minorVertices.empty())
     {
         return;
     }
 
-    m_gridVbo.bind();
-    m_gridVbo.allocate(vertices.data(), m_gridVertexCount * static_cast<int>(sizeof(QVector3D)));
-    m_gridVbo.release();
-
     // 网格仅作为背景参考，不参与深度写入，避免干扰实体显示
     shader.bind();
     shader.setUniformValue("uMvp", mvp);
-    shader.setUniformValue("uColor", m_gridColor);
     shader.setUniformValue("uPointSize", 1.0f);
     shader.setUniformValue("uRoundPoint", 0);
 
@@ -205,7 +218,29 @@ void CadReferenceRenderer::renderGrid
     functions->glLineWidth(1.0f);
 
     m_gridVao.bind();
-    functions->glDrawArrays(GL_LINES, 0, m_gridVertexCount);
+
+    if (!minorVertices.empty())
+    {
+        m_gridVertexCount = static_cast<int>(minorVertices.size());
+        m_gridVbo.bind();
+        m_gridVbo.allocate(minorVertices.data(), m_gridVertexCount * static_cast<int>(sizeof(QVector3D)));
+        m_gridVbo.release();
+
+        shader.setUniformValue("uColor", m_minorGridColor);
+        functions->glDrawArrays(GL_LINES, 0, m_gridVertexCount);
+    }
+
+    if (!majorVertices.empty())
+    {
+        m_gridVertexCount = static_cast<int>(majorVertices.size());
+        m_gridVbo.bind();
+        m_gridVbo.allocate(majorVertices.data(), m_gridVertexCount * static_cast<int>(sizeof(QVector3D)));
+        m_gridVbo.release();
+
+        shader.setUniformValue("uColor", m_majorGridColor);
+        functions->glDrawArrays(GL_LINES, 0, m_gridVertexCount);
+    }
+
     m_gridVao.release();
 
     functions->glDepthMask(GL_TRUE);
