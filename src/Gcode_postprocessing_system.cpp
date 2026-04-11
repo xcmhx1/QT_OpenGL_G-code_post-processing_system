@@ -13,6 +13,7 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QInputDialog>
+#include <QKeySequence>
 #include <QMap>
 #include <QMessageBox>
 #include <QMenu>
@@ -1779,6 +1780,55 @@ Gcode_postprocessing_system::Gcode_postprocessing_system(QWidget* parent)
         }
     );
 
+    QAction* importDxfOnlyAction = new QAction(QStringLiteral("导入DXF..."), this);
+    QAction* importDwgOnlyAction = new QAction(QStringLiteral("导入DWG..."), this);
+    ui->menuFile->insertAction(ui->action_File_Import_Image, importDxfOnlyAction);
+    ui->menuFile->insertAction(ui->action_File_Import_Image, importDwgOnlyAction);
+
+    connect
+    (
+        importDxfOnlyAction,
+        &QAction::triggered,
+        this,
+        [this]()
+        {
+            const QString filePath = QFileDialog::getOpenFileName
+            (
+                this,
+                QStringLiteral("导入DXF"),
+                QString(),
+                QStringLiteral("DXF 文件 (*.dxf)")
+            );
+
+            if (!filePath.isEmpty())
+            {
+                importDxfFile(filePath);
+            }
+        }
+    );
+
+    connect
+    (
+        importDwgOnlyAction,
+        &QAction::triggered,
+        this,
+        [this]()
+        {
+            const QString filePath = QFileDialog::getOpenFileName
+            (
+                this,
+                QStringLiteral("导入DWG"),
+                QString(),
+                QStringLiteral("DWG 文件 (*.dwg)")
+            );
+
+            if (!filePath.isEmpty())
+            {
+                importDxfFile(filePath);
+            }
+        }
+    );
+
     connect
     (
         ui->action_File_Import_Image,
@@ -1803,7 +1853,17 @@ Gcode_postprocessing_system::Gcode_postprocessing_system(QWidget* parent)
         }
     );
 
-    connect(ui->action_File_Export_G, &QAction::triggered, this, [this]() { exportGCode(); });
+    ui->action_FileExport->setText(QStringLiteral("保存文件"));
+    ui->action_FileExport->setShortcut(QKeySequence::Save);
+    ui->action_FileExport->setShortcutContext(Qt::ApplicationShortcut);
+    ui->menuFile->insertAction(ui->action_File_Export_G, ui->action_FileExport);
+
+    ui->action_File_Export_G->setText(QStringLiteral("导出为DXF..."));
+    QAction* exportSafeDxfAction = new QAction(QStringLiteral("导出为DXF（安全模式）..."), this);
+    ui->menuFile->insertAction(ui->action_File_Export_G, exportSafeDxfAction);
+    connect(ui->action_FileExport, &QAction::triggered, this, [this]() { saveCurrentDocument(); });
+    connect(ui->action_File_Export_G, &QAction::triggered, this, [this]() { exportDxfDocument(); });
+    connect(exportSafeDxfAction, &QAction::triggered, this, [this]() { exportDxfDocument(true); });
     connect(ui->action_Edit_ReversePeocess, &QAction::triggered, this, [this]() { toggleSelectedEntityReverse(); });
     connect(ui->action_Sort_2D_Assign, &QAction::triggered, this, [this]() { sortEntitiesByCurrentDirection(); });
     connect(ui->action_Sort_2D_Smart, &QAction::triggered, this, [this]() { smartSortEntities(); });
@@ -1848,6 +1908,7 @@ bool Gcode_postprocessing_system::importDxfFile(const QString& filePath)
 {
     m_editer.clearHistory();
     m_document.readDxfDocument(filePath);
+    m_currentDocumentPath = ensureDxfSuffix(filePath);
     ui->openGLWidget->setDocument(&m_document);
     ui->openGLWidget->appendCommandMessage(QStringLiteral("已导入文件: %1").arg(QFileInfo(filePath).fileName()));
     ui->openGLWidget->refreshCommandPrompt();
@@ -1922,46 +1983,139 @@ bool Gcode_postprocessing_system::importBitmapFile(const QString& filePath)
     return true;
 }
 
-bool Gcode_postprocessing_system::exportGCode()
+bool Gcode_postprocessing_system::saveCurrentDocument()
 {
-    if (m_document.m_entities.empty())
+    QString filePath = m_currentDocumentPath.trimmed();
+
+    if (filePath.isEmpty())
     {
-        QMessageBox::warning(this, QStringLiteral("导出失败"), QStringLiteral("当前文档为空，无法导出 G 代码。"));
+        filePath = QFileDialog::getSaveFileName
+        (
+            this,
+            QStringLiteral("保存DXF文件"),
+            defaultDxfPathForCurrentDocument(),
+            QStringLiteral("DXF 文件 (*.dxf)")
+        );
+
+        if (filePath.isEmpty())
+        {
+            return false;
+        }
+    }
+
+    filePath = ensureDxfSuffix(filePath);
+
+    if (!writeDocumentToDxf(filePath, true, false))
+    {
         return false;
     }
 
-    GGenerator generator;
-    generator.setDocument(&m_document);
-    generator.setProfile(&m_activeProfile);
-    generator.setGenerationMode(resolveGenerationMode());
+    ui->openGLWidget->appendCommandMessage(QStringLiteral("文件已保存: %1").arg(QFileInfo(filePath).fileName()));
+    ui->openGLWidget->refreshCommandPrompt();
+    statusBar()->showMessage(QStringLiteral("保存完成: %1").arg(QFileInfo(filePath).fileName()), 5000);
+    return true;
+}
 
-    QString errorMessage;
+bool Gcode_postprocessing_system::exportDxfDocument(bool safeMode)
+{
+    QString filePath = QFileDialog::getSaveFileName
+    (
+        this,
+        safeMode ? QStringLiteral("导出为DXF（安全模式）") : QStringLiteral("导出为DXF"),
+        defaultDxfPathForCurrentDocument(),
+        QStringLiteral("DXF 文件 (*.dxf)")
+    );
 
-    if (!generator.generate(this, &errorMessage))
+    if (filePath.isEmpty())
     {
-        if (!errorMessage.isEmpty())
-        {
-            QMessageBox::warning(this, QStringLiteral("导出失败"), errorMessage);
-        }
+        return false;
+    }
 
+    filePath = ensureDxfSuffix(filePath);
+
+    if (!writeDocumentToDxf(filePath, false, safeMode))
+    {
         return false;
     }
 
     ui->openGLWidget->appendCommandMessage
     (
-        generator.generationMode() == GGenerator::GenerationMode::Mode3D
-            ? QStringLiteral("已检测到真实 3D 路径，G 代码已按 A 轴绕 X 轴模式导出。")
-            : QStringLiteral("G 代码导出完成。")
+        safeMode
+            ? QStringLiteral("文件已安全导出: %1").arg(QFileInfo(filePath).fileName())
+            : QStringLiteral("文件已导出: %1").arg(QFileInfo(filePath).fileName())
     );
     ui->openGLWidget->refreshCommandPrompt();
     statusBar()->showMessage
     (
-        generator.generationMode() == GGenerator::GenerationMode::Mode3D
-            ? QStringLiteral("3D G 代码导出完成")
-            : QStringLiteral("G 代码导出完成"),
+        safeMode
+            ? QStringLiteral("安全导出完成: %1").arg(QFileInfo(filePath).fileName())
+            : QStringLiteral("导出完成: %1").arg(QFileInfo(filePath).fileName()),
         5000
     );
     return true;
+}
+
+bool Gcode_postprocessing_system::writeDocumentToDxf(const QString& filePath, bool updateCurrentPath, bool safeMode)
+{
+    if (filePath.trimmed().isEmpty())
+    {
+        return false;
+    }
+
+    const QString normalizedPath = ensureDxfSuffix(filePath);
+    const bool writeSuccess = updateCurrentPath
+        ? m_document.saveDxfDocument(normalizedPath, safeMode)
+        : m_document.eportDxfDocument(normalizedPath, safeMode);
+
+    if (!writeSuccess)
+    {
+        QMessageBox::warning(this, QStringLiteral("文件操作失败"), QStringLiteral("写入 DXF 文件失败: %1").arg(normalizedPath));
+        return false;
+    }
+
+    if (updateCurrentPath)
+    {
+        m_currentDocumentPath = normalizedPath;
+    }
+
+    return true;
+}
+
+QString Gcode_postprocessing_system::ensureDxfSuffix(const QString& filePath) const
+{
+    const QString trimmedPath = filePath.trimmed();
+
+    if (trimmedPath.isEmpty())
+    {
+        return QString();
+    }
+
+    if (trimmedPath.endsWith(QStringLiteral(".dxf"), Qt::CaseInsensitive))
+    {
+        return trimmedPath;
+    }
+
+    const QFileInfo fileInfo(trimmedPath);
+
+    if (!fileInfo.suffix().isEmpty())
+    {
+        return fileInfo.absolutePath()
+            + QLatin1Char('/')
+            + fileInfo.completeBaseName()
+            + QStringLiteral(".dxf");
+    }
+
+    return trimmedPath + QStringLiteral(".dxf");
+}
+
+QString Gcode_postprocessing_system::defaultDxfPathForCurrentDocument() const
+{
+    if (!m_currentDocumentPath.trimmed().isEmpty())
+    {
+        return ensureDxfSuffix(m_currentDocumentPath);
+    }
+
+    return QStringLiteral("untitled.dxf");
 }
 
 bool Gcode_postprocessing_system::toggleSelectedEntityReverse()

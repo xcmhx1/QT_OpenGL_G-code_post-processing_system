@@ -27,9 +27,9 @@ public:
     // 读取Dxf文档
     void readDxfDocument(const QString& filePath);
     // 保存Dxf文档
-    void saveDxfDocument(const QString& filePath);
+    bool saveDxfDocument(const QString& filePath, bool safeMode = false);
     // 另存为Dxf文档
-    void eportDxfDocument(const QString& filePath);
+    bool eportDxfDocument(const QString& filePath, bool safeMode = false);
     // 清空数据
     void clearAll();
     // 初始化

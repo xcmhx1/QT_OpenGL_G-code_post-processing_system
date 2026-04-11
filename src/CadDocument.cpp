@@ -19,6 +19,132 @@
 
 namespace
 {
+    std::unique_ptr<DRW_Entity> cloneSupportedEntity(const DRW_Entity* entity)
+    {
+        if (entity == nullptr)
+        {
+            return nullptr;
+        }
+
+        switch (entity->eType)
+        {
+        case DRW::ETYPE::POINT:
+            return std::make_unique<DRW_Point>(*static_cast<const DRW_Point*>(entity));
+        case DRW::ETYPE::LINE:
+            return std::make_unique<DRW_Line>(*static_cast<const DRW_Line*>(entity));
+        case DRW::ETYPE::CIRCLE:
+            return std::make_unique<DRW_Circle>(*static_cast<const DRW_Circle*>(entity));
+        case DRW::ETYPE::ARC:
+            return std::make_unique<DRW_Arc>(*static_cast<const DRW_Arc*>(entity));
+        case DRW::ETYPE::ELLIPSE:
+            return std::make_unique<DRW_Ellipse>(*static_cast<const DRW_Ellipse*>(entity));
+        case DRW::ETYPE::POLYLINE:
+            return std::make_unique<DRW_Polyline>(*static_cast<const DRW_Polyline*>(entity));
+        case DRW::ETYPE::LWPOLYLINE:
+            return std::make_unique<DRW_LWPolyline>(*static_cast<const DRW_LWPolyline*>(entity));
+        default:
+            return nullptr;
+        }
+    }
+
+    void sanitizeEntityForSafeExport(DRW_Entity* entity)
+    {
+        if (entity == nullptr)
+        {
+            return;
+        }
+
+        entity->handle = DRW::NoHandle;
+        entity->parentHandle = DRW::NoHandle;
+        entity->appData.clear();
+        entity->extData.clear();
+        entity->numProxyGraph = 0;
+        entity->proxyGraphics.clear();
+        entity->colorName.clear();
+        entity->material = DRW::MaterialByLayer;
+        entity->plotStyle = DRW::DefaultPlotStyle;
+
+        if (entity->layer.empty())
+        {
+            entity->layer = "0";
+        }
+
+        if (entity->lineType.empty())
+        {
+            entity->lineType = "BYLAYER";
+        }
+    }
+
+    std::unique_ptr<dx_data> buildSafeExportData(const CadDocument& document)
+    {
+        auto safeData = std::make_unique<dx_data>();
+
+        if (document.m_data != nullptr)
+        {
+            safeData->headerC = document.m_data->headerC;
+        }
+
+        QSet<QString> addedLayerNames;
+        const auto tryAppendLayer =
+            [&addedLayerNames, &document, &safeData](const QString& layerName)
+            {
+                const QString normalizedLayerName = layerName.trimmed().isEmpty()
+                    ? QStringLiteral("0")
+                    : layerName.trimmed();
+
+                if (addedLayerNames.contains(normalizedLayerName))
+                {
+                    return;
+                }
+
+                if (document.m_data != nullptr)
+                {
+                    for (const DRW_Layer& layer : document.m_data->layers)
+                    {
+                        if (QString::fromUtf8(layer.name.c_str()).compare(normalizedLayerName, Qt::CaseSensitive) != 0)
+                        {
+                            continue;
+                        }
+
+                        DRW_Layer copiedLayer(layer);
+                        copiedLayer.handle = DRW::NoHandle;
+                        copiedLayer.parentHandle = DRW::NoHandle;
+                        safeData->layers.push_back(copiedLayer);
+                        addedLayerNames.insert(normalizedLayerName);
+                        return;
+                    }
+                }
+
+                DRW_Layer layer;
+                layer.name = normalizedLayerName.toUtf8().constData();
+                safeData->layers.push_back(layer);
+                addedLayerNames.insert(normalizedLayerName);
+            };
+
+        tryAppendLayer(QStringLiteral("0"));
+
+        for (const std::unique_ptr<CadItem>& item : document.m_entities)
+        {
+            if (item == nullptr || item->m_nativeEntity == nullptr)
+            {
+                continue;
+            }
+
+            std::unique_ptr<DRW_Entity> safeEntity = cloneSupportedEntity(item->m_nativeEntity);
+
+            if (safeEntity == nullptr)
+            {
+                continue;
+            }
+
+            sanitizeEntityForSafeExport(safeEntity.get());
+            tryAppendLayer(QString::fromUtf8(safeEntity->layer.c_str()));
+            safeData->mBlock->ent.push_back(safeEntity.release());
+        }
+
+        return safeData;
+    }
+
     QColor colorFromAci(int index)
     {
         static const QRgb aciStandardColors[] =
@@ -148,14 +274,49 @@ void CadDocument::readDxfDocument(const QString& filePath)
     qDebug() << "CadDocument::readDxfDocument() ->" << filePath << "导入成功";
 }
 
-void CadDocument::saveDxfDocument(const QString& filePath)
+bool CadDocument::saveDxfDocument(const QString& filePath, bool safeMode)
 {
-    Q_UNUSED(filePath);
+    if (m_data == nullptr || filePath.trimmed().isEmpty())
+    {
+        return false;
+    }
+
+    std::unique_ptr<dx_data> safeExportData;
+    dx_data* exportData = m_data.get();
+    DRW::Version exportVersion = DRW::Version::AC1027;
+
+    if (safeMode)
+    {
+        // 安全模式：仅导出当前系统支持的实体，并剥离扩展数据，提升 AutoCAD 兼容性。
+        safeExportData = buildSafeExportData(*this);
+        exportData = safeExportData.get();
+        exportVersion = DRW::Version::AC1015;
+    }
+
+    const bool success = std::make_unique<dx_iface>()->fileExport
+    (
+        filePath.toLocal8Bit().constData(),
+        exportVersion,
+        false,
+        exportData,
+        false
+    );
+
+    if (!success)
+    {
+        qWarning() << "CadDocument::saveDxfDocument() failed ->" << filePath;
+        return false;
+    }
+
+    qDebug() << "CadDocument::saveDxfDocument() ->" << filePath
+        << (safeMode ? "安全导出成功" : "保存成功");
+    return true;
 }
 
-void CadDocument::eportDxfDocument(const QString& filePath)
+bool CadDocument::eportDxfDocument(const QString& filePath, bool safeMode)
 {
-    Q_UNUSED(filePath);
+    // 当前导出与保存共用同一条 DXF 写出链路。
+    return saveDxfDocument(filePath, safeMode);
 }
 
 void CadDocument::clearAll()

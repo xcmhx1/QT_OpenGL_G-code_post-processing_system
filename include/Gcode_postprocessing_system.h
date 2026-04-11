@@ -53,7 +53,11 @@ private:
     bool importCadFile(const QString& filePath);
     bool importDxfFile(const QString& filePath);
     bool importBitmapFile(const QString& filePath);
-    bool exportGCode();
+    bool saveCurrentDocument();
+    bool exportDxfDocument(bool safeMode = false);
+    bool writeDocumentToDxf(const QString& filePath, bool updateCurrentPath, bool safeMode = false);
+    QString ensureDxfSuffix(const QString& filePath) const;
+    QString defaultDxfPathForCurrentDocument() const;
     bool toggleSelectedEntityReverse();
     bool deleteSelectedEntity();
     bool copySelectedEntity();
@@ -85,4 +89,5 @@ private:
     int m_currentColorIndex = 256;
     AppThemeMode m_themeMode = AppThemeMode::Light;
     GCodeGenerationPreference m_generationPreference = GCodeGenerationPreference::Auto;
+    QString m_currentDocumentPath;
 };
