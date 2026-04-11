@@ -50,6 +50,15 @@ void DrawStateMachine::reset()
     pressedButtons = Qt::NoButton;
     keyboardModifiers = Qt::NoModifier;
     dynamicInputBuffer.clear();
+    dynamicInputStageKey.clear();
+    dynamicInputExpressionMode = false;
+    dynamicInputActiveFieldIndex = 0;
+    dynamicInputFieldBuffer.clear();
+    dynamicInputXLocked = false;
+    dynamicInputYLocked = false;
+    dynamicInputXValue = 0.0;
+    dynamicInputYValue = 0.0;
+    dynamicCommandBuffer.clear();
     orthoEnabled = preservedOrthoEnabled;
 }
 

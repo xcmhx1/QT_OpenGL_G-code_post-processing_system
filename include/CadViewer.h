@@ -378,6 +378,9 @@ private:
     // 绘制重叠夹点选择框。
     void renderOverlappedHandlePopup();
 
+    // 绘制动态输入浮框。
+    void renderDynamicInputOverlay();
+
     // 获取当前视口宽高比
     // @return 宽高比（宽度/高度）
     float aspectRatio() const;

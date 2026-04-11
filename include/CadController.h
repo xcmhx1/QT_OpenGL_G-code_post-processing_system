@@ -19,6 +19,22 @@
 class CadViewer;
 class CadEditer;
 
+// Viewer 动态输入浮框展示数据。
+struct CadDynamicInputOverlayState
+{
+    bool visible = false;
+    QString title;
+    QString stageHint;
+    QString xValueText;
+    QString yValueText;
+    bool xLocked = false;
+    bool yLocked = false;
+    bool xActive = false;
+    bool yActive = false;
+    bool expressionMode = false;
+    QString expressionText;
+};
+
 // CAD 控制器类：
 // 负责解释用户输入（键盘、鼠标、滚轮事件），
 // 将其转换为具体的绘图/编辑命令，并管理绘图状态机。
@@ -91,6 +107,9 @@ public:
     // @return 命令名称字符串
     QString currentCommandName() const;
 
+    // 查询当前动态输入浮框展示状态。
+    CadDynamicInputOverlayState dynamicInputOverlayState() const;
+
 private:
     // 开始空闲态候选框选。
     void beginIdleWindowSelection(const QPoint& screenPos);
@@ -125,6 +144,9 @@ private:
     // @return 对应的世界坐标
     QVector3D currentWorldPos(const QPoint& screenPos) const;
 
+    // 尝试把 currentPos 与当前光标位置同步，避免键盘确认后预览滞后。
+    void syncCurrentPosWithCursor();
+
     // 当前命令阶段是否正在等待输入一个点。
     bool isAwaitingPointInput() const;
 
@@ -148,6 +170,39 @@ private:
 
     // 在提示栏追加动态输入状态说明。
     QString appendDynamicInputPromptState(const QString& basePrompt) const;
+
+    // 当前“点参数输入”阶段键。
+    QString currentPointInputStageKey() const;
+
+    // 同步点参数动态输入会话（阶段切换时自动重置）。
+    void syncPointDynamicInputSession();
+
+    // 重置点参数动态输入会话。
+    void resetPointDynamicInputSession(const QString& stageKey = QString());
+
+    // 当前是否处于点参数动态输入（字段模式）。
+    bool isPointDynamicFieldModeActive() const;
+
+    // 当前是否存在任何键盘动态输入内容。
+    bool hasPendingDynamicKeyboardInput() const;
+
+    // 应用字段模式动态输入覆盖（用于预览与提交）。
+    QVector3D applyPointDynamicFieldOverride(const QVector3D& worldPos, bool includeEditingValue) const;
+
+    // 尝试解析字段缓冲为数值。
+    bool tryParseDynamicFieldBuffer(double& value, QString& errorMessage) const;
+
+    // 提交当前字段编辑值；无编辑值时按当前坐标锁定字段。
+    bool commitActiveDynamicField(QString& errorMessage);
+
+    // 处理字段切换（Tab / Shift+Tab）。
+    bool handleDynamicFieldTab(int step);
+
+    // 提交点参数动态输入（字段模式）。
+    bool submitPointDynamicFieldInput();
+
+    // 格式化动态输入数值显示。
+    static QString formatDynamicInputValue(double value);
 
 private:
     // 关联的 CAD 视图对象

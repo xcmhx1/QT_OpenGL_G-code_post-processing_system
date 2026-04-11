@@ -1125,6 +1125,110 @@ void CadViewer::renderOverlappedHandlePopup()
     painter.drawText(hintRect, Qt::AlignLeft | Qt::AlignVCenter, hintText);
 }
 
+void CadViewer::renderDynamicInputOverlay()
+{
+    if (interactionMode() != ViewInteractionMode::Idle)
+    {
+        return;
+    }
+
+    const CadDynamicInputOverlayState overlayState = m_controller.dynamicInputOverlayState();
+
+    if (!overlayState.visible)
+    {
+        return;
+    }
+
+    QPainter painter(this);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setRenderHint(QPainter::TextAntialiasing, true);
+
+    QFont titleFont = painter.font();
+    titleFont.setPointSize(9);
+    titleFont.setBold(true);
+
+    QFont valueFont = painter.font();
+    valueFont.setPointSize(9);
+
+    const QFontMetrics titleMetrics(titleFont);
+    const QFontMetrics valueMetrics(valueFont);
+    const int horizontalPadding = 8;
+    const int verticalPadding = 6;
+    const int rowHeight = valueMetrics.height() + 6;
+    const int titleHeight = titleMetrics.height();
+    const int hintHeight = valueMetrics.height();
+    const int valueColumnWidth = 140;
+    const int labelColumnWidth = 58;
+    const int panelWidth = horizontalPadding * 2 + labelColumnWidth + valueColumnWidth;
+    const int rowCount = overlayState.expressionMode ? 1 : 2;
+    const int panelHeight = verticalPadding * 2 + titleHeight + 4 + rowCount * rowHeight + 4 + hintHeight;
+
+    QPoint panelTopLeft = m_cursorScreenPos + QPoint(16, 20);
+
+    if (panelTopLeft.x() + panelWidth > width() - 6)
+    {
+        panelTopLeft.setX(std::max(6, width() - panelWidth - 6));
+    }
+
+    if (panelTopLeft.y() + panelHeight > height() - 6)
+    {
+        panelTopLeft.setY(std::max(6, m_cursorScreenPos.y() - panelHeight - 16));
+    }
+
+    const QRect panelRect(panelTopLeft, QSize(panelWidth, panelHeight));
+    painter.setPen(QPen(QColor(88, 160, 245, 220), 1.0));
+    painter.setBrush(QColor(16, 22, 30, 222));
+    painter.drawRoundedRect(panelRect, 7.0, 7.0);
+
+    QRect contentRect = panelRect.adjusted(horizontalPadding, verticalPadding, -horizontalPadding, -verticalPadding);
+
+    painter.setFont(titleFont);
+    painter.setPen(QColor(228, 238, 252, 235));
+    painter.drawText(QRect(contentRect.left(), contentRect.top(), contentRect.width(), titleHeight), Qt::AlignLeft | Qt::AlignVCenter, overlayState.title);
+
+    int rowTop = contentRect.top() + titleHeight + 4;
+
+    auto drawValueRow = [&](int rowIndex, const QString& labelText, const QString& valueText, bool active)
+    {
+        QRect rowRect(contentRect.left(), rowTop + rowIndex * rowHeight, contentRect.width(), rowHeight);
+
+        if (active)
+        {
+            painter.setPen(Qt::NoPen);
+            painter.setBrush(QColor(82, 162, 245, 92));
+            painter.drawRoundedRect(rowRect.adjusted(0, 0, 0, -1), 4.0, 4.0);
+        }
+
+        painter.setFont(valueFont);
+        painter.setPen(active ? QColor(246, 251, 255) : QColor(212, 224, 239));
+        painter.drawText(QRect(rowRect.left(), rowRect.top(), labelColumnWidth, rowRect.height()), Qt::AlignLeft | Qt::AlignVCenter, labelText);
+        painter.drawText(QRect(rowRect.left() + labelColumnWidth, rowRect.top(), rowRect.width() - labelColumnWidth, rowRect.height()), Qt::AlignLeft | Qt::AlignVCenter, valueText);
+    };
+
+    if (overlayState.expressionMode)
+    {
+        const QString expressionText = overlayState.expressionText.trimmed().isEmpty()
+            ? QStringLiteral("请输入表达式")
+            : overlayState.expressionText;
+        drawValueRow(0, QStringLiteral("表达式"), expressionText, true);
+    }
+    else
+    {
+        const QString xLabel = overlayState.xLocked ? QStringLiteral("X [锁]") : QStringLiteral("X");
+        const QString yLabel = overlayState.yLocked ? QStringLiteral("Y [锁]") : QStringLiteral("Y");
+        drawValueRow(0, xLabel, overlayState.xValueText, overlayState.xActive);
+        drawValueRow(1, yLabel, overlayState.yValueText, overlayState.yActive);
+    }
+
+    const int hintTop = rowTop + rowCount * rowHeight + 4;
+    const QString hintText = overlayState.stageHint.trimmed().isEmpty()
+        ? QStringLiteral("Tab切换字段，Enter确认")
+        : overlayState.stageHint;
+    painter.setFont(valueFont);
+    painter.setPen(QColor(156, 178, 202, 228));
+    painter.drawText(QRect(contentRect.left(), hintTop, contentRect.width(), hintHeight), Qt::AlignLeft | Qt::AlignVCenter, hintText);
+}
+
 bool CadViewer::pickSelectedHandle(const QPoint& screenPos, CadSelectionHandleInfo* outHandle) const
 {
     const CadItem* selectedItem = selectedEntity();
@@ -1423,6 +1527,7 @@ void CadViewer::paintGL()
     renderProcessOrderLabels();
     renderSelectionWindowPreview();
     renderOverlappedHandlePopup();
+    renderDynamicInputOverlay();
 
     // 性能日志记录
     if constexpr (kEnableViewerPerfLogging)

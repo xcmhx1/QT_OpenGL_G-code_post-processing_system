@@ -8,6 +8,7 @@
 
 // Qt 核心模块
 #include <QColorDialog>
+#include <QCursor>
 
 // CAD 模块内部依赖
 #include "CadEditer.h"
@@ -16,6 +17,7 @@
 #include "CadViewer.h"
 
 // 标准库
+#include <algorithm>
 #include <cmath>
 
 // 匿名命名空间，存放局部辅助函数
@@ -58,8 +60,8 @@ namespace
         }
     }
 
-    // 统一判断输入字符是否属于动态输入内容。
-    bool isDynamicInputCharacter(QChar character)
+    // 判断是否属于坐标表达式字符（兼容输入：x,y / @dx,dy / d<a）。
+    bool isDynamicExpressionCharacter(QChar character)
     {
         return character.isDigit()
             || character == QLatin1Char('.')
@@ -68,6 +70,15 @@ namespace
             || character == QLatin1Char(',')
             || character == QLatin1Char('@')
             || character == QLatin1Char('<');
+    }
+
+    // 判断是否属于字段化输入的数值字符。
+    bool isDynamicFieldCharacter(QChar character)
+    {
+        return character.isDigit()
+            || character == QLatin1Char('.')
+            || character == QLatin1Char('+')
+            || character == QLatin1Char('-');
     }
 
     bool tryParseCoordinatePair(const QString& text, double& first, double& second)
@@ -160,12 +171,13 @@ void CadController::beginDrawing(DrawType drawType, const QColor& color)
     m_drawState.commandBulges.clear();
     m_drawState.polylineArcMode = false;
     m_drawState.lwPolylineArcMode = false;
-    m_drawState.dynamicInputBuffer.clear();
+    resetPointDynamicInputSession();
 
     // 重置子模式
     resetSubModes();
     // 准备图元子模式
     preparePrimitiveSubMode();
+    resetPointDynamicInputSession(currentPointInputStageKey());
 
     // 如果有视图，发送消息并刷新提示
     if (m_viewer != nullptr)
@@ -186,7 +198,7 @@ bool CadController::beginMoveSelected()
 
     if (handled)
     {
-        m_drawState.dynamicInputBuffer.clear();
+        resetPointDynamicInputSession(currentPointInputStageKey());
         m_viewer->appendCommandMessage(QStringLiteral("已进入移动命令"));
         m_viewer->refreshCommandPrompt();
     }
@@ -214,7 +226,7 @@ void CadController::cancelDrawing()
     m_drawState.commandBulges.clear();
     m_drawState.polylineArcMode = false;
     m_drawState.lwPolylineArcMode = false;
-    m_drawState.dynamicInputBuffer.clear();
+    resetPointDynamicInputSession();
 
     // 重置子模式
     resetSubModes();
@@ -259,6 +271,14 @@ bool CadController::handleMousePress(QMouseEvent* event)
     m_drawState.keyboardModifiers = event->modifiers();
     m_drawState.lastPos = m_drawState.currentPos;
     m_drawState.currentPos = applyOrthoConstraint(worldPos);
+
+    syncPointDynamicInputSession();
+    syncCurrentPosWithCursor();
+
+    if (isPointDynamicFieldModeActive())
+    {
+        m_drawState.currentPos = applyPointDynamicFieldOverride(m_drawState.currentPos, true);
+    }
 
     // 处理中键按下：视图操作
     if (event->button() == Qt::MiddleButton)
@@ -320,6 +340,14 @@ bool CadController::handleMouseMove(QMouseEvent* event)
     m_drawState.keyboardModifiers = event->modifiers();
     m_drawState.lastPos = m_drawState.currentPos;
     m_drawState.currentPos = applyOrthoConstraint(worldPos);
+
+    syncPointDynamicInputSession();
+    syncCurrentPosWithCursor();
+
+    if (isPointDynamicFieldModeActive())
+    {
+        m_drawState.currentPos = applyPointDynamicFieldOverride(m_drawState.currentPos, true);
+    }
 
     // 如果是轨道交互且需要忽略下一次增量，则消费此标志
     if (m_viewer->interactionMode() == ViewInteractionMode::Orbiting && m_viewer->shouldIgnoreNextOrbitDelta())
@@ -490,13 +518,16 @@ bool CadController::handleKeyPress(QKeyEvent* event)
     {
         if (m_drawState.hasActiveCommand())
         {
-            if (!m_drawState.dynamicInputBuffer.isEmpty())
+            if (hasPendingDynamicKeyboardInput()
+                || m_drawState.dynamicInputXLocked
+                || m_drawState.dynamicInputYLocked)
             {
-                m_drawState.dynamicInputBuffer.clear();
+                resetPointDynamicInputSession(currentPointInputStageKey());
 
                 if (m_viewer != nullptr)
                 {
                     m_viewer->refreshCommandPrompt();
+                    m_viewer->requestViewUpdate();
                 }
 
                 return true;
@@ -519,9 +550,46 @@ bool CadController::handleKeyPress(QKeyEvent* event)
     // 有活动命令时优先处理动态输入和确认逻辑
     if (m_drawState.hasActiveCommand())
     {
+        syncPointDynamicInputSession();
+        syncCurrentPosWithCursor();
+
+        if (event->key() == Qt::Key_Tab
+            && (event->modifiers() == Qt::NoModifier || event->modifiers() == Qt::ShiftModifier)
+            && isPointDynamicFieldModeActive())
+        {
+            return handleDynamicFieldTab((event->modifiers() & Qt::ShiftModifier) != 0 ? -1 : 1);
+        }
+
         if (event->key() == Qt::Key_Backspace)
         {
-            if (!m_drawState.dynamicInputBuffer.isEmpty())
+            if (m_drawState.dynamicInputExpressionMode)
+            {
+                if (!m_drawState.dynamicInputBuffer.isEmpty())
+                {
+                    m_drawState.dynamicInputBuffer.chop(1);
+
+                    if (m_viewer != nullptr)
+                    {
+                        m_viewer->refreshCommandPrompt();
+                        m_viewer->requestViewUpdate();
+                    }
+                }
+            }
+            else if (isPointDynamicFieldModeActive())
+            {
+                if (!m_drawState.dynamicInputFieldBuffer.isEmpty())
+                {
+                    m_drawState.dynamicInputFieldBuffer.chop(1);
+                    m_drawState.currentPos = applyPointDynamicFieldOverride(m_drawState.currentPos, true);
+
+                    if (m_viewer != nullptr)
+                    {
+                        m_viewer->refreshCommandPrompt();
+                        m_viewer->requestViewUpdate();
+                    }
+                }
+            }
+            else if (!m_drawState.dynamicInputBuffer.isEmpty())
             {
                 m_drawState.dynamicInputBuffer.chop(1);
 
@@ -542,7 +610,7 @@ bool CadController::handleKeyPress(QKeyEvent* event)
         // 保留多段线空格完成行为。
         if ((m_drawState.drawType == DrawType::Polyline || m_drawState.drawType == DrawType::LWPolyline)
             && event->key() == Qt::Key_Space
-            && m_drawState.dynamicInputBuffer.isEmpty())
+            && !hasPendingDynamicKeyboardInput())
         {
             return confirmActiveCommand();
         }
@@ -572,7 +640,7 @@ bool CadController::handleKeyPress(QKeyEvent* event)
 
                 if (handled && m_viewer != nullptr)
                 {
-                    m_drawState.dynamicInputBuffer.clear();
+                    resetPointDynamicInputSession(currentPointInputStageKey());
                     m_viewer->appendCommandMessage(QStringLiteral("已创建闭合多段线图元"));
                     m_viewer->refreshCommandPrompt();
                 }
@@ -581,16 +649,14 @@ bool CadController::handleKeyPress(QKeyEvent* event)
             }
         }
 
-        // 动态输入字符（数字、@、<、逗号等）
+        // 动态输入字符（字段模式优先，表达式模式兼容）
         if ((event->modifiers() & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier)) == 0)
         {
             const QString inputText = event->text();
 
             if (!inputText.isEmpty())
             {
-                QString sanitizedText;
-                sanitizedText.reserve(inputText.size());
-                bool allAllowed = true;
+                bool consumed = false;
 
                 for (const QChar character : inputText)
                 {
@@ -599,22 +665,63 @@ bool CadController::handleKeyPress(QKeyEvent* event)
                         continue;
                     }
 
-                    if (!isDynamicInputCharacter(character))
+                    // 点参数输入：优先字段模式；在用户显式输入表达式字符时切到兼容表达式模式。
+                    if (isAwaitingPointInput())
                     {
-                        allAllowed = false;
-                        break;
+                        if (m_drawState.dynamicInputExpressionMode)
+                        {
+                            if (!isDynamicExpressionCharacter(character))
+                            {
+                                continue;
+                            }
+
+                            m_drawState.dynamicInputBuffer.append(character);
+                            consumed = true;
+                            continue;
+                        }
+
+                        if (character == QLatin1Char(',')
+                            || character == QLatin1Char('@')
+                            || character == QLatin1Char('<'))
+                        {
+                            m_drawState.dynamicInputExpressionMode = true;
+                            m_drawState.dynamicInputBuffer.clear();
+                            m_drawState.dynamicInputBuffer.append(character);
+                            m_drawState.dynamicInputFieldBuffer.clear();
+                            consumed = true;
+                            continue;
+                        }
+
+                        if (isDynamicFieldCharacter(character) && isPointDynamicFieldModeActive())
+                        {
+                            m_drawState.dynamicInputFieldBuffer.append(character);
+                            m_drawState.currentPos = applyPointDynamicFieldOverride(m_drawState.currentPos, true);
+                            consumed = true;
+                            continue;
+                        }
+
+                        if (isDynamicExpressionCharacter(character))
+                        {
+                            m_drawState.dynamicInputBuffer.append(character);
+                            consumed = true;
+                        }
+
+                        continue;
                     }
 
-                    sanitizedText.append(character);
+                    if (isDynamicExpressionCharacter(character))
+                    {
+                        m_drawState.dynamicInputBuffer.append(character);
+                        consumed = true;
+                    }
                 }
 
-                if (allAllowed && !sanitizedText.isEmpty())
+                if (consumed)
                 {
-                    m_drawState.dynamicInputBuffer.append(sanitizedText);
-
                     if (m_viewer != nullptr)
                     {
                         m_viewer->refreshCommandPrompt();
+                        m_viewer->requestViewUpdate();
                     }
 
                     return true;
@@ -916,6 +1023,382 @@ QString CadController::currentCommandName() const
     return drawTypeName(m_drawState.drawType);
 }
 
+CadDynamicInputOverlayState CadController::dynamicInputOverlayState() const
+{
+    CadDynamicInputOverlayState state;
+
+    if (!m_drawState.hasActiveCommand() || !isAwaitingPointInput())
+    {
+        return state;
+    }
+
+    state.visible = true;
+    state.title = currentCommandName();
+
+    if (state.title.trimmed().isEmpty() || state.title == QStringLiteral("空闲"))
+    {
+        state.title = QStringLiteral("动态输入");
+    }
+
+    state.stageHint = QStringLiteral("Tab切换字段，Enter确认，Esc清空输入");
+    state.xLocked = m_drawState.dynamicInputXLocked;
+    state.yLocked = m_drawState.dynamicInputYLocked;
+    state.xActive = m_drawState.dynamicInputActiveFieldIndex == 0;
+    state.yActive = m_drawState.dynamicInputActiveFieldIndex == 1;
+    state.expressionMode = m_drawState.dynamicInputExpressionMode;
+
+    if (state.expressionMode)
+    {
+        state.expressionText = m_drawState.dynamicInputBuffer;
+        return state;
+    }
+
+    const QVector3D previewPoint = applyPointDynamicFieldOverride(m_drawState.currentPos, true);
+    state.xValueText = formatDynamicInputValue(previewPoint.x());
+    state.yValueText = formatDynamicInputValue(previewPoint.y());
+
+    if (!m_drawState.dynamicInputFieldBuffer.isEmpty())
+    {
+        if (state.xActive)
+        {
+            state.xValueText = m_drawState.dynamicInputFieldBuffer;
+        }
+        else
+        {
+            state.yValueText = m_drawState.dynamicInputFieldBuffer;
+        }
+    }
+
+    return state;
+}
+
+QString CadController::currentPointInputStageKey() const
+{
+    if (!m_drawState.hasActiveCommand() || !isAwaitingPointInput())
+    {
+        return QString();
+    }
+
+    if (m_drawState.editType == EditType::Move)
+    {
+        if (m_drawState.moveSubMode == MoveEditSubMode::AwaitBasePoint)
+        {
+            return QStringLiteral("MOVE_BASE");
+        }
+
+        if (m_drawState.moveSubMode == MoveEditSubMode::AwaitTargetPoint)
+        {
+            return QStringLiteral("MOVE_TARGET");
+        }
+    }
+
+    if (m_drawState.editType == EditType::GripEdit)
+    {
+        if (m_drawState.gripSubMode == GripEditSubMode::AwaitTargetPoint)
+        {
+            return QStringLiteral("GRIP_TARGET");
+        }
+    }
+
+    switch (m_drawState.drawType)
+    {
+    case DrawType::Point:
+        return QStringLiteral("POINT_POSITION");
+    case DrawType::Line:
+        return m_drawState.lineSubMode == LineDrawSubMode::AwaitEndPoint
+            ? QStringLiteral("LINE_END")
+            : QStringLiteral("LINE_START");
+    case DrawType::Circle:
+        return m_drawState.circleSubMode == CircleDrawSubMode::AwaitRadius
+            ? QStringLiteral("CIRCLE_RADIUS")
+            : QStringLiteral("CIRCLE_CENTER");
+    case DrawType::Arc:
+        switch (m_drawState.arcSubMode)
+        {
+        case ArcDrawSubMode::AwaitRadius:
+            return QStringLiteral("ARC_RADIUS");
+        case ArcDrawSubMode::AwaitStartAngle:
+            return QStringLiteral("ARC_START");
+        case ArcDrawSubMode::AwaitEndAngle:
+            return QStringLiteral("ARC_END");
+        default:
+            return QStringLiteral("ARC_CENTER");
+        }
+    case DrawType::Ellipse:
+        switch (m_drawState.ellipseSubMode)
+        {
+        case EllipseDrawSubMode::AwaitMajorAxis:
+            return QStringLiteral("ELLIPSE_MAJOR");
+        case EllipseDrawSubMode::AwaitMinorAxis:
+            return QStringLiteral("ELLIPSE_MINOR");
+        default:
+            return QStringLiteral("ELLIPSE_CENTER");
+        }
+    case DrawType::Polyline:
+        return m_drawState.polylineSubMode == PolylineDrawSubMode::AwaitFirstPoint
+            ? QStringLiteral("POLYLINE_FIRST")
+            : QStringLiteral("POLYLINE_NEXT");
+    case DrawType::LWPolyline:
+        return m_drawState.lwPolylineSubMode == LWPolylineDrawSubMode::AwaitFirstPoint
+            ? QStringLiteral("LWPOLYLINE_FIRST")
+            : QStringLiteral("LWPOLYLINE_NEXT");
+    default:
+        break;
+    }
+
+    return QString();
+}
+
+void CadController::syncPointDynamicInputSession()
+{
+    if (!m_drawState.hasActiveCommand() || !isAwaitingPointInput())
+    {
+        resetPointDynamicInputSession();
+        return;
+    }
+
+    const QString stageKey = currentPointInputStageKey();
+
+    if (stageKey != m_drawState.dynamicInputStageKey)
+    {
+        resetPointDynamicInputSession(stageKey);
+    }
+}
+
+void CadController::resetPointDynamicInputSession(const QString& stageKey)
+{
+    m_drawState.dynamicInputStageKey = stageKey;
+    m_drawState.dynamicInputExpressionMode = false;
+    m_drawState.dynamicInputBuffer.clear();
+    m_drawState.dynamicInputActiveFieldIndex = 0;
+    m_drawState.dynamicInputFieldBuffer.clear();
+    m_drawState.dynamicInputXLocked = false;
+    m_drawState.dynamicInputYLocked = false;
+    m_drawState.dynamicInputXValue = 0.0;
+    m_drawState.dynamicInputYValue = 0.0;
+}
+
+bool CadController::isPointDynamicFieldModeActive() const
+{
+    return m_drawState.hasActiveCommand()
+        && isAwaitingPointInput()
+        && !m_drawState.dynamicInputExpressionMode;
+}
+
+bool CadController::hasPendingDynamicKeyboardInput() const
+{
+    if (m_drawState.dynamicInputExpressionMode)
+    {
+        return !m_drawState.dynamicInputBuffer.isEmpty();
+    }
+
+    if (isPointDynamicFieldModeActive())
+    {
+        return !m_drawState.dynamicInputFieldBuffer.isEmpty();
+    }
+
+    return !m_drawState.dynamicInputBuffer.isEmpty();
+}
+
+QVector3D CadController::applyPointDynamicFieldOverride(const QVector3D& worldPos, bool includeEditingValue) const
+{
+    QVector3D point = flattenToDrawingPlane(worldPos);
+
+    if (m_drawState.dynamicInputXLocked)
+    {
+        point.setX(static_cast<float>(m_drawState.dynamicInputXValue));
+    }
+
+    if (m_drawState.dynamicInputYLocked)
+    {
+        point.setY(static_cast<float>(m_drawState.dynamicInputYValue));
+    }
+
+    if (!includeEditingValue || m_drawState.dynamicInputFieldBuffer.isEmpty())
+    {
+        return point;
+    }
+
+    bool parsedOk = false;
+    const double parsedValue = m_drawState.dynamicInputFieldBuffer.toDouble(&parsedOk);
+
+    if (!parsedOk)
+    {
+        return point;
+    }
+
+    if (m_drawState.dynamicInputActiveFieldIndex == 0)
+    {
+        point.setX(static_cast<float>(parsedValue));
+    }
+    else
+    {
+        point.setY(static_cast<float>(parsedValue));
+    }
+
+    return point;
+}
+
+bool CadController::tryParseDynamicFieldBuffer(double& value, QString& errorMessage) const
+{
+    if (m_drawState.dynamicInputFieldBuffer.trimmed().isEmpty())
+    {
+        errorMessage = QStringLiteral("请输入数值");
+        return false;
+    }
+
+    bool parsedOk = false;
+    value = m_drawState.dynamicInputFieldBuffer.toDouble(&parsedOk);
+
+    if (!parsedOk)
+    {
+        errorMessage = QStringLiteral("数值输入无效");
+        return false;
+    }
+
+    return true;
+}
+
+bool CadController::commitActiveDynamicField(QString& errorMessage)
+{
+    if (!isPointDynamicFieldModeActive())
+    {
+        return false;
+    }
+
+    const int activeFieldIndex = std::clamp(m_drawState.dynamicInputActiveFieldIndex, 0, 1);
+    double fieldValue = (activeFieldIndex == 0) ? m_drawState.currentPos.x() : m_drawState.currentPos.y();
+
+    if (!m_drawState.dynamicInputFieldBuffer.isEmpty())
+    {
+        if (!tryParseDynamicFieldBuffer(fieldValue, errorMessage))
+        {
+            return false;
+        }
+    }
+
+    if (activeFieldIndex == 0)
+    {
+        m_drawState.dynamicInputXLocked = true;
+        m_drawState.dynamicInputXValue = fieldValue;
+    }
+    else
+    {
+        m_drawState.dynamicInputYLocked = true;
+        m_drawState.dynamicInputYValue = fieldValue;
+    }
+
+    m_drawState.dynamicInputFieldBuffer.clear();
+    return true;
+}
+
+bool CadController::handleDynamicFieldTab(int step)
+{
+    if (!isPointDynamicFieldModeActive())
+    {
+        return false;
+    }
+
+    QString errorMessage;
+
+    if (!commitActiveDynamicField(errorMessage))
+    {
+        if (m_viewer != nullptr && !errorMessage.isEmpty())
+        {
+            m_viewer->appendCommandMessage(errorMessage);
+            m_viewer->refreshCommandPrompt();
+        }
+
+        return true;
+    }
+
+    const int normalizedStep = step >= 0 ? 1 : -1;
+    int nextFieldIndex = m_drawState.dynamicInputActiveFieldIndex + normalizedStep;
+
+    if (nextFieldIndex < 0)
+    {
+        nextFieldIndex = 1;
+    }
+    else if (nextFieldIndex > 1)
+    {
+        nextFieldIndex = 0;
+    }
+
+    m_drawState.dynamicInputActiveFieldIndex = nextFieldIndex;
+    m_drawState.currentPos = applyPointDynamicFieldOverride(m_drawState.currentPos, false);
+
+    if (m_viewer != nullptr)
+    {
+        m_viewer->refreshCommandPrompt();
+        m_viewer->requestViewUpdate();
+    }
+
+    return true;
+}
+
+bool CadController::submitPointDynamicFieldInput()
+{
+    if (!isPointDynamicFieldModeActive())
+    {
+        return false;
+    }
+
+    QString errorMessage;
+
+    if (!m_drawState.dynamicInputFieldBuffer.isEmpty() && !commitActiveDynamicField(errorMessage))
+    {
+        if (m_viewer != nullptr)
+        {
+            m_viewer->appendCommandMessage(errorMessage);
+            m_viewer->refreshCommandPrompt();
+        }
+
+        return true;
+    }
+
+    const QVector3D resolvedPoint = applyPointDynamicFieldOverride(m_drawState.currentPos, false);
+
+    if (commitCommandPoint(resolvedPoint))
+    {
+        return true;
+    }
+
+    if (m_viewer != nullptr)
+    {
+        m_viewer->appendCommandMessage(QStringLiteral("输入未被当前命令接受"));
+        m_viewer->refreshCommandPrompt();
+    }
+
+    return true;
+}
+
+QString CadController::formatDynamicInputValue(double value)
+{
+    if (std::abs(value) < 1e-9)
+    {
+        value = 0.0;
+    }
+
+    QString text = QString::number(value, 'f', 6);
+
+    while (text.contains(QLatin1Char('.')) && text.endsWith(QLatin1Char('0')))
+    {
+        text.chop(1);
+    }
+
+    if (text.endsWith(QLatin1Char('.')))
+    {
+        text.chop(1);
+    }
+
+    if (text.isEmpty() || text == QStringLiteral("-0"))
+    {
+        text = QStringLiteral("0");
+    }
+
+    return text;
+}
+
 bool CadController::isAwaitingPointInput() const
 {
     if (m_drawState.editType == EditType::Move)
@@ -1083,7 +1566,15 @@ bool CadController::commitCommandPoint(const QVector3D& worldPos)
         return false;
     }
 
-    const QVector3D constrainedWorldPos = applyOrthoConstraint(worldPos);
+    syncPointDynamicInputSession();
+
+    QVector3D constrainedWorldPos = applyOrthoConstraint(worldPos);
+
+    if (isPointDynamicFieldModeActive())
+    {
+        constrainedWorldPos = applyPointDynamicFieldOverride(constrainedWorldPos, true);
+    }
+
     m_drawState.currentPos = constrainedWorldPos;
 
     // 保存之前的状态用于比较
@@ -1098,7 +1589,14 @@ bool CadController::commitCommandPoint(const QVector3D& worldPos)
         return false;
     }
 
-    m_drawState.dynamicInputBuffer.clear();
+    // 每次点提交后都重置输入会话，避免同阶段残留锁定值影响下一击。
+    resetPointDynamicInputSession(currentPointInputStageKey());
+
+    // 键盘确认点后，立即按当前光标位置刷新下一阶段预览点。
+    if (m_drawState.hasActiveCommand() && isAwaitingPointInput())
+    {
+        syncCurrentPosWithCursor();
+    }
 
     if (m_viewer != nullptr)
     {
@@ -1140,6 +1638,7 @@ bool CadController::commitCommandPoint(const QVector3D& worldPos)
         }
 
         m_viewer->refreshCommandPrompt();
+        m_viewer->requestViewUpdate();
     }
 
     return true;
@@ -1147,6 +1646,8 @@ bool CadController::commitCommandPoint(const QVector3D& worldPos)
 
 bool CadController::submitDynamicInputBuffer()
 {
+    syncPointDynamicInputSession();
+
     if (m_drawState.dynamicInputBuffer.isEmpty())
     {
         return false;
@@ -1198,6 +1699,32 @@ bool CadController::confirmActiveCommand()
         return false;
     }
 
+    syncPointDynamicInputSession();
+    syncCurrentPosWithCursor();
+
+    if (isPointDynamicFieldModeActive())
+    {
+        if ((m_drawState.drawType == DrawType::Polyline || m_drawState.drawType == DrawType::LWPolyline)
+            && m_editer != nullptr
+            && !hasPendingDynamicKeyboardInput()
+            && !m_drawState.dynamicInputXLocked
+            && !m_drawState.dynamicInputYLocked)
+        {
+            const bool handled = m_editer->finishActivePolyline(m_drawState, false);
+
+            if (handled && m_viewer != nullptr)
+            {
+                resetPointDynamicInputSession(currentPointInputStageKey());
+                m_viewer->appendCommandMessage(QStringLiteral("已创建多段线图元"));
+                m_viewer->refreshCommandPrompt();
+            }
+
+            return true;
+        }
+
+        return submitPointDynamicFieldInput();
+    }
+
     if (!m_drawState.dynamicInputBuffer.isEmpty())
     {
         return submitDynamicInputBuffer();
@@ -1210,7 +1737,7 @@ bool CadController::confirmActiveCommand()
 
         if (handled && m_viewer != nullptr)
         {
-            m_drawState.dynamicInputBuffer.clear();
+            resetPointDynamicInputSession(currentPointInputStageKey());
             m_viewer->appendCommandMessage(QStringLiteral("已创建多段线图元"));
             m_viewer->refreshCommandPrompt();
         }
@@ -1235,7 +1762,41 @@ QString CadController::appendDynamicInputPromptState(const QString& basePrompt) 
 {
     QString prompt = basePrompt;
 
-    if (!m_drawState.dynamicInputBuffer.isEmpty())
+    if (m_drawState.hasActiveCommand() && isAwaitingPointInput())
+    {
+        if (m_drawState.dynamicInputExpressionMode)
+        {
+            if (!m_drawState.dynamicInputBuffer.isEmpty())
+            {
+                prompt += QStringLiteral(" | 表达式: %1").arg(m_drawState.dynamicInputBuffer);
+            }
+        }
+        else
+        {
+            const QVector3D previewPoint = applyPointDynamicFieldOverride(m_drawState.currentPos, true);
+            QString xText = formatDynamicInputValue(previewPoint.x());
+            QString yText = formatDynamicInputValue(previewPoint.y());
+
+            if (!m_drawState.dynamicInputFieldBuffer.isEmpty())
+            {
+                if (m_drawState.dynamicInputActiveFieldIndex == 0)
+                {
+                    xText = m_drawState.dynamicInputFieldBuffer;
+                }
+                else
+                {
+                    yText = m_drawState.dynamicInputFieldBuffer;
+                }
+            }
+
+            prompt += QStringLiteral(" | X%1=%2 | Y%3=%4 | Tab切换")
+                .arg(m_drawState.dynamicInputXLocked ? QStringLiteral("[锁]") : QString())
+                .arg(xText)
+                .arg(m_drawState.dynamicInputYLocked ? QStringLiteral("[锁]") : QString())
+                .arg(yText);
+        }
+    }
+    else if (!m_drawState.dynamicInputBuffer.isEmpty())
     {
         prompt += QStringLiteral(" | 输入: %1").arg(m_drawState.dynamicInputBuffer);
     }
@@ -1325,7 +1886,7 @@ bool CadController::finishIdleWindowSelection(const QPoint& screenPos)
         {
             if (m_editer->beginGripEdit(m_drawState, m_viewer->selectedEntity(), handleInfo))
             {
-                m_drawState.dynamicInputBuffer.clear();
+                resetPointDynamicInputSession(currentPointInputStageKey());
                 m_viewer->appendCommandMessage(QStringLiteral("已进入控制点编辑"));
                 m_viewer->refreshCommandPrompt();
                 return true;
@@ -1576,5 +2137,29 @@ QVector3D CadController::currentWorldPos(const QPoint& screenPos) const
     }
 
     return m_viewer->resolveInteractiveWorldPosition(screenPos);
+}
+
+void CadController::syncCurrentPosWithCursor()
+{
+    if (m_viewer == nullptr || !m_drawState.hasActiveCommand())
+    {
+        return;
+    }
+
+    const QPoint localCursorPos = m_viewer->mapFromGlobal(QCursor::pos());
+
+    if (m_viewer->rect().contains(localCursorPos))
+    {
+        m_drawState.currentScreenPos = localCursorPos;
+    }
+
+    QVector3D resolvedWorldPos = applyOrthoConstraint(currentWorldPos(m_drawState.currentScreenPos));
+
+    if (isPointDynamicFieldModeActive())
+    {
+        resolvedWorldPos = applyPointDynamicFieldOverride(resolvedWorldPos, true);
+    }
+
+    m_drawState.currentPos = resolvedWorldPos;
 }
 

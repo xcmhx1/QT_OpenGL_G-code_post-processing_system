@@ -184,6 +184,27 @@ public:
     // 动态输入缓冲（用于键盘坐标/距离输入）。
     QString dynamicInputBuffer;
 
+    // 动态输入当前阶段标识（用于阶段切换时重置输入会话）。
+    QString dynamicInputStageKey;
+
+    // 动态输入是否处于“表达式模式”（如 x,y / @dx,dy / d<a）。
+    bool dynamicInputExpressionMode = false;
+
+    // 动态输入当前激活字段索引：0 表示 X，1 表示 Y。
+    int dynamicInputActiveFieldIndex = 0;
+
+    // 动态输入当前字段的编辑缓冲（字段模式）。
+    QString dynamicInputFieldBuffer;
+
+    // 动态输入字段锁定状态和值（字段模式）。
+    bool dynamicInputXLocked = false;
+    bool dynamicInputYLocked = false;
+    double dynamicInputXValue = 0.0;
+    double dynamicInputYValue = 0.0;
+
+    // 预留：后续“动态命令框”输入缓冲。
+    QString dynamicCommandBuffer;
+
     // 正交约束开关（F8）。
     bool orthoEnabled = false;
 
