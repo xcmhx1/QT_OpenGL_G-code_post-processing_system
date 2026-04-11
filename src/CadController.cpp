@@ -385,7 +385,7 @@ bool CadController::handleMousePress(QMouseEvent* event)
         return true;
     }
 
-    // 处理右键按下：命令态统一执行确认动作（与 Enter 行为保持一致）。
+    // 处理右键按下：命令态统一执行确认动作（与 Enter/Space 行为保持一致）。
     if (event->button() == Qt::RightButton && m_drawState.hasActiveCommand())
     {
         confirmActiveCommand();
@@ -691,15 +691,12 @@ bool CadController::handleKeyPress(QKeyEvent* event)
             return true;
         }
 
-        if (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter)
-        {
-            return confirmActiveCommand();
-        }
+        const bool isPlainSpaceConfirm = event->key() == Qt::Key_Space
+            && (event->modifiers() & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier)) == 0;
 
-        // 保留多段线空格完成行为。
-        if ((m_drawState.drawType == DrawType::Polyline || m_drawState.drawType == DrawType::LWPolyline)
-            && event->key() == Qt::Key_Space
-            && !hasPendingDynamicKeyboardInput())
+        if (event->key() == Qt::Key_Return
+            || event->key() == Qt::Key_Enter
+            || isPlainSpaceConfirm)
         {
             return confirmActiveCommand();
         }
@@ -844,7 +841,7 @@ bool CadController::handleKeyPress(QKeyEvent* event)
         }
     }
 
-    // 空闲态动态命令输入：键入字符后弹出命令匹配，Enter 执行。
+    // 空闲态动态命令输入：键入字符后弹出命令匹配，Enter/Space 执行。
     if (!m_drawState.hasActiveCommand())
     {
         const bool plainInput = (event->modifiers() & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier)) == 0;
@@ -1156,13 +1153,13 @@ QString CadController::currentPrompt() const
     case DrawType::Polyline:
         if (m_drawState.polylineSubMode == PolylineDrawSubMode::AwaitArcEndPoint)
         {
-            basePrompt = QStringLiteral("POLYLINE[圆弧]: 指定圆弧终点，L切换直线，Enter结束，C闭合");
+            basePrompt = QStringLiteral("POLYLINE[圆弧]: 指定圆弧终点，L切换直线，Enter/Space结束，C闭合");
             break;
         }
 
         if (m_drawState.polylineSubMode == PolylineDrawSubMode::AwaitLineEndPoint)
         {
-            basePrompt = QStringLiteral("POLYLINE[直线]: 指定下一点，A切换圆弧，Enter结束，C闭合");
+            basePrompt = QStringLiteral("POLYLINE[直线]: 指定下一点，A切换圆弧，Enter/Space结束，C闭合");
             break;
         }
 
@@ -1171,13 +1168,13 @@ QString CadController::currentPrompt() const
     case DrawType::LWPolyline:
         if (m_drawState.lwPolylineSubMode == LWPolylineDrawSubMode::AwaitArcEndPoint)
         {
-            basePrompt = QStringLiteral("LWPOLYLINE[圆弧]: 指定圆弧终点，L切换直线，Enter结束，C闭合");
+            basePrompt = QStringLiteral("LWPOLYLINE[圆弧]: 指定圆弧终点，L切换直线，Enter/Space结束，C闭合");
             break;
         }
 
         if (m_drawState.lwPolylineSubMode == LWPolylineDrawSubMode::AwaitLineEndPoint)
         {
-            basePrompt = QStringLiteral("LWPOLYLINE[直线]: 指定下一点，A切换圆弧，Enter结束，C闭合");
+            basePrompt = QStringLiteral("LWPOLYLINE[直线]: 指定下一点，A切换圆弧，Enter/Space结束，C闭合");
             break;
         }
 
@@ -1224,7 +1221,7 @@ CadDynamicInputOverlayState CadController::dynamicInputOverlayState() const
         state.title = QStringLiteral("动态输入");
     }
 
-    state.stageHint = QStringLiteral("Tab切换字段，Enter确认，Esc清空输入");
+    state.stageHint = QStringLiteral("Tab切换字段，Enter/Space确认，Esc清空输入");
     state.xLocked = m_drawState.dynamicInputXLocked;
     state.yLocked = m_drawState.dynamicInputYLocked;
     state.xActive = m_drawState.dynamicInputActiveFieldIndex == 0;
@@ -1267,7 +1264,7 @@ CadDynamicCommandOverlayState CadController::dynamicCommandOverlayState() const
 
     state.visible = true;
     state.inputText = m_drawState.dynamicCommandBuffer;
-    state.hintText = QStringLiteral("Tab/Shift+Tab 选择，Enter 执行，Esc 取消");
+    state.hintText = QStringLiteral("Tab/Shift+Tab 选择，Enter/Space 执行，Esc 取消");
 
     const QVector<int> matchIndices = collectDynamicCommandMatchIndices();
 

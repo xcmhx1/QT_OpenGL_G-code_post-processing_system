@@ -1306,7 +1306,7 @@ void CadViewer::renderDynamicInputOverlay()
 
     const int hintTop = rowTop + rowCount * rowHeight + 4;
     const QString hintText = overlayState.stageHint.trimmed().isEmpty()
-        ? QStringLiteral("Tab切换字段，Enter确认")
+        ? QStringLiteral("Tab切换字段，Enter/Space确认")
         : overlayState.stageHint;
     painter.setFont(valueFont);
     painter.setPen(QColor(156, 178, 202, 228));

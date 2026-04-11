@@ -164,7 +164,7 @@ private:
     // 当前命令阶段是否正在等待输入一个点。
     bool isAwaitingPointInput() const;
 
-    // 对活动命令执行一次“确认”动作（Enter/右键）。
+    // 对活动命令执行一次“确认”动作（Enter/Space/右键）。
     bool confirmActiveCommand();
 
     // 按当前命令状态提交一个点（与左键提交共享路径）。
