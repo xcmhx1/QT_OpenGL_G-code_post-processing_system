@@ -5,6 +5,7 @@
 // CAD 主视图模块，负责 OpenGL 生命周期、输入接入、场景刷新和信号分发。
 
 #include <memory>
+#include <limits>
 
 // Qt 核心模块
 #include <QDragEnterEvent>
@@ -347,6 +348,9 @@ private:
     // 构建当前吸附命中的高亮 overlay 图元。
     std::vector<TransientPrimitive> buildSnapHighlightPrimitives() const;
 
+    // 使吸附缓存失效（相机/场景/选择/开关变化后调用）。
+    void invalidateSnapCache();
+
     // 计算当前视口在地平面上的包围范围。
     void computeVisibleGroundBounds(float& minX, float& maxX, float& minY, float& maxY) const;
 
@@ -490,6 +494,26 @@ private:
 
     // 网格点吸附开关
     bool m_gridSnapEnabled = false;
+
+    // 吸附上下文版本号，影响吸附结果的状态变化时自增。
+    quint64 m_snapContextRevision = 1;
+
+    // 吸附结果缓存，避免同一输入在同一帧重复计算。
+    struct SnapResolveCache
+    {
+        bool valid = false;
+        quint64 revision = 0;
+        QPoint screenPos;
+        QVector3D inputWorldPos;
+        QVector3D resolvedWorldPos;
+        bool snapped = false;
+        bool objectSnap = false;
+    };
+    mutable SnapResolveCache m_snapResolveCache;
+
+    // 吸附相关计时器，用于相交捕捉节流。
+    QElapsedTimer m_snapComputationTimer;
+    mutable qint64 m_lastIntersectionComputeMs = std::numeric_limits<qint64>::min() / 4;
 
     // 重叠夹点候选状态。
     struct OverlappedHandleHoverState

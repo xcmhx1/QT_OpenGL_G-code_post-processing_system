@@ -54,6 +54,14 @@ namespace
     constexpr float kObjectSnapDistancePixels = 14.0f;
     // 网格吸附屏幕距离阈值（像素）
     constexpr float kGridSnapDistancePixels = 10.0f;
+    // 相交捕捉最小计算间隔（毫秒）。
+    constexpr qint64 kIntersectionSnapMinIntervalMs = 33;
+    // 相交捕捉参与求交的最大候选线段数量。
+    constexpr int kIntersectionMaxCandidateSegments = 64;
+    // 相交求解最大线段对检查数量。
+    constexpr int kIntersectionMaxPairChecks = 2200;
+    // 命中高优先级对象点时，允许提前跳过相交计算的屏幕阈值（像素）。
+    constexpr float kIntersectionEarlyAcceptDistancePixels = 3.5f;
     // 窗口框选有效尺寸阈值（像素）。
     constexpr int kWindowSelectionMinimumPixels = 2;
     // 重叠夹点悬停弹框延迟（毫秒）。
@@ -93,6 +101,7 @@ namespace
         QVector3D endWorld;
         QPoint startScreen;
         QPoint endScreen;
+        float cursorDistanceSquared = std::numeric_limits<float>::max();
     };
 
     float cross2D(float ax, float ay, float bx, float by)
@@ -570,6 +579,7 @@ CadViewer::CadViewer(QWidget* parent)
     // 设置控制器与当前视图的关联
     m_controller.setViewer(this);
     m_graphicsCoordinator.setTheme(m_theme);
+    m_snapComputationTimer.start();
 
     m_overlappedHandlePopupTimer.setSingleShot(true);
     connect
@@ -624,6 +634,7 @@ void CadViewer::setDocument(CadDocument* document)
 {
     // 绑定文档到场景协调器
     m_sceneCoordinator.bindDocument(document, this, &CadViewer::handleDocumentSceneChanged);
+    invalidateSnapCache();
     // 清除选中实体
     setSelectedEntityId(0);
     resetOverlappedHandleHoverState();
@@ -656,9 +667,16 @@ void CadViewer::setDefaultDrawingProperties(const QString& layerName, const QCol
     refreshCommandPrompt();
 }
 
+void CadViewer::invalidateSnapCache()
+{
+    ++m_snapContextRevision;
+    m_snapResolveCache.valid = false;
+}
+
 void CadViewer::setBasePointSnapEnabled(bool enabled)
 {
     m_basePointSnapEnabled = enabled;
+    invalidateSnapCache();
     updateHoveredWorldPosition(m_cursorScreenPos);
     update();
 }
@@ -666,6 +684,7 @@ void CadViewer::setBasePointSnapEnabled(bool enabled)
 void CadViewer::setControlPointSnapEnabled(bool enabled)
 {
     m_controlPointSnapEnabled = enabled;
+    invalidateSnapCache();
     updateHoveredWorldPosition(m_cursorScreenPos);
     update();
 }
@@ -673,6 +692,7 @@ void CadViewer::setControlPointSnapEnabled(bool enabled)
 void CadViewer::setGridSnapEnabled(bool enabled)
 {
     m_gridSnapEnabled = enabled;
+    invalidateSnapCache();
     updateHoveredWorldPosition(m_cursorScreenPos);
     update();
 }
@@ -680,6 +700,7 @@ void CadViewer::setGridSnapEnabled(bool enabled)
 void CadViewer::setEndpointSnapEnabled(bool enabled)
 {
     m_endpointSnapEnabled = enabled;
+    invalidateSnapCache();
     updateHoveredWorldPosition(m_cursorScreenPos);
     update();
 }
@@ -687,6 +708,7 @@ void CadViewer::setEndpointSnapEnabled(bool enabled)
 void CadViewer::setMidpointSnapEnabled(bool enabled)
 {
     m_midpointSnapEnabled = enabled;
+    invalidateSnapCache();
     updateHoveredWorldPosition(m_cursorScreenPos);
     update();
 }
@@ -694,6 +716,7 @@ void CadViewer::setMidpointSnapEnabled(bool enabled)
 void CadViewer::setCenterSnapEnabled(bool enabled)
 {
     m_centerSnapEnabled = enabled;
+    invalidateSnapCache();
     updateHoveredWorldPosition(m_cursorScreenPos);
     update();
 }
@@ -701,6 +724,7 @@ void CadViewer::setCenterSnapEnabled(bool enabled)
 void CadViewer::setIntersectionSnapEnabled(bool enabled)
 {
     m_intersectionSnapEnabled = enabled;
+    invalidateSnapCache();
     updateHoveredWorldPosition(m_cursorScreenPos);
     update();
 }
@@ -748,6 +772,7 @@ void CadViewer::fitScene()
     m_viewInteractionController.resetForFitScene();
     // 重置控制器
     m_controller.reset();
+    invalidateSnapCache();
     // 请求更新
     update();
 }
@@ -777,6 +802,7 @@ void CadViewer::updateOrbitInteraction(const QPoint& screenDelta)
         m_sceneCoordinator.hasBounds(),
         screenDelta
     );
+    invalidateSnapCache();
     update();
 }
 
@@ -785,6 +811,7 @@ void CadViewer::updateOrbitInteraction(const QPoint& screenDelta)
 void CadViewer::updatePanInteraction(const QPoint& screenDelta)
 {
     m_viewInteractionController.updatePanInteraction(m_camera, pixelToWorldScale(), screenDelta);
+    invalidateSnapCache();
     update();
 }
 
@@ -1661,6 +1688,7 @@ void CadViewer::zoomAtScreenPosition(const QPoint& screenPos, float factor)
 
     // 在交点处进行缩放
     m_camera.zoomAtPoint(factor, anchor);
+    invalidateSnapCache();
     update();
 }
 
@@ -1668,6 +1696,7 @@ void CadViewer::zoomAtScreenPosition(const QPoint& screenPos, float factor)
 void CadViewer::resetToTopView()
 {
     m_viewInteractionController.resetToTopView(m_camera);
+    invalidateSnapCache();
     update();
 }
 
@@ -1746,6 +1775,7 @@ void CadViewer::refreshCommandPrompt()
 void CadViewer::zoomIn(float factor)
 {
     m_camera.zoom(factor);
+    invalidateSnapCache();
     update();
 }
 
@@ -1759,6 +1789,7 @@ void CadViewer::zoomOut(float factor)
     }
 
     m_camera.zoom(1.0f / factor);
+    invalidateSnapCache();
     update();
 }
 
@@ -1822,6 +1853,7 @@ void CadViewer::resizeGL(int w, int h)
 {
     m_viewportWidth = std::max(1, w);
     m_viewportHeight = std::max(1, h);
+    invalidateSnapCache();
 }
 
 // 主绘制入口：
@@ -2562,6 +2594,7 @@ void CadViewer::renderSelectionWindowPreview()
 // 处理文档场景变化
 void CadViewer::handleDocumentSceneChanged()
 {
+    invalidateSnapCache();
     // 标记缓冲脏
     m_sceneCoordinator.markBuffersDirty();
     // 刷新场景边界
@@ -2616,6 +2649,48 @@ QVector3D CadViewer::applySnapToGroundPosition
         *objectSnap = false;
     }
 
+    const auto commitCacheAndReturn =
+        [this, &screenPos, &worldPos, snapped, objectSnap](const QVector3D& resolvedPosition, bool isSnapped, bool isObjectSnap)
+        {
+            m_snapResolveCache.valid = true;
+            m_snapResolveCache.revision = m_snapContextRevision;
+            m_snapResolveCache.screenPos = screenPos;
+            m_snapResolveCache.inputWorldPos = worldPos;
+            m_snapResolveCache.resolvedWorldPos = resolvedPosition;
+            m_snapResolveCache.snapped = isSnapped;
+            m_snapResolveCache.objectSnap = isObjectSnap;
+
+            if (snapped != nullptr)
+            {
+                *snapped = isSnapped;
+            }
+
+            if (objectSnap != nullptr)
+            {
+                *objectSnap = isObjectSnap;
+            }
+
+            return resolvedPosition;
+        };
+
+    if (m_snapResolveCache.valid
+        && m_snapResolveCache.revision == m_snapContextRevision
+        && m_snapResolveCache.screenPos == screenPos
+        && (m_snapResolveCache.inputWorldPos - worldPos).lengthSquared() <= 1.0e-10f)
+    {
+        if (snapped != nullptr)
+        {
+            *snapped = m_snapResolveCache.snapped;
+        }
+
+        if (objectSnap != nullptr)
+        {
+            *objectSnap = m_snapResolveCache.objectSnap;
+        }
+
+        return m_snapResolveCache.resolvedWorldPos;
+    }
+
     SnapCandidate bestCandidate;
     const float snapDistanceSquared = kObjectSnapDistancePixels * kObjectSnapDistancePixels;
     const auto tryConsumeCandidate =
@@ -2644,6 +2719,9 @@ QVector3D CadViewer::applySnapToGroundPosition
             }
         };
 
+    const float intersectionEarlyAcceptDistanceSquared =
+        kIntersectionEarlyAcceptDistancePixels * kIntersectionEarlyAcceptDistancePixels;
+
     if (m_basePointSnapEnabled || m_controlPointSnapEnabled)
     {
         CadItem* selectedItem = selectedEntity();
@@ -2666,8 +2744,10 @@ QVector3D CadViewer::applySnapToGroundPosition
         }
     }
 
-    const bool advancedObjectSnapEnabled =
-        m_endpointSnapEnabled || m_midpointSnapEnabled || m_centerSnapEnabled || m_intersectionSnapEnabled;
+    const bool advancedObjectSnapEnabled = m_endpointSnapEnabled
+        || m_midpointSnapEnabled
+        || m_centerSnapEnabled
+        || m_intersectionSnapEnabled;
 
     if (advancedObjectSnapEnabled)
     {
@@ -2678,6 +2758,43 @@ QVector3D CadViewer::applySnapToGroundPosition
             QVector<SnapSegmentScreenData> nearCursorSegments;
             const float intersectionCollectDistanceSquared =
                 (kObjectSnapDistancePixels * 1.8f) * (kObjectSnapDistancePixels * 1.8f);
+            const qint64 nowMs = m_snapComputationTimer.isValid() ? m_snapComputationTimer.elapsed() : 0;
+            const bool intersectionIntervalReady = !m_snapComputationTimer.isValid()
+                || (nowMs - m_lastIntersectionComputeMs) >= kIntersectionSnapMinIntervalMs;
+            const bool strongCandidateAlreadyFound = bestCandidate.valid
+                && bestCandidate.distanceSquared <= intersectionEarlyAcceptDistanceSquared;
+            const bool allowIntersectionEvaluation = m_intersectionSnapEnabled
+                && intersectionIntervalReady
+                && !strongCandidateAlreadyFound;
+
+            const auto appendIntersectionSegment =
+                [&nearCursorSegments](const SnapSegmentScreenData& segment)
+                {
+                    if (nearCursorSegments.size() < kIntersectionMaxCandidateSegments)
+                    {
+                        nearCursorSegments.push_back(segment);
+                        return;
+                    }
+
+                    int worstIndex = -1;
+                    float worstDistance = -1.0f;
+
+                    for (int index = 0; index < nearCursorSegments.size(); ++index)
+                    {
+                        const float candidateDistance = nearCursorSegments.at(index).cursorDistanceSquared;
+
+                        if (candidateDistance > worstDistance)
+                        {
+                            worstDistance = candidateDistance;
+                            worstIndex = index;
+                        }
+                    }
+
+                    if (worstIndex >= 0 && segment.cursorDistanceSquared < worstDistance)
+                    {
+                        nearCursorSegments[worstIndex] = segment;
+                    }
+                };
 
             for (const std::unique_ptr<CadItem>& entity : scene->m_entities)
             {
@@ -2866,7 +2983,7 @@ QVector3D CadViewer::applySnapToGroundPosition
                     }
                 }
 
-                if (m_intersectionSnapEnabled)
+                if (allowIntersectionEvaluation)
                 {
                     const QVector<QVector3D>& vertices = item->m_geometry.vertices;
 
@@ -2897,20 +3014,31 @@ QVector3D CadViewer::applySnapToGroundPosition
                             segment.endWorld = end;
                             segment.startScreen = startScreen;
                             segment.endScreen = endScreen;
-                            nearCursorSegments.push_back(segment);
+                            segment.cursorDistanceSquared = segmentDistanceSquared;
+                            appendIntersectionSegment(segment);
                         }
                     }
                 }
             }
 
-            if (m_intersectionSnapEnabled && nearCursorSegments.size() >= 2)
+            if (allowIntersectionEvaluation && nearCursorSegments.size() >= 2)
             {
+                int checkedPairCount = 0;
+
                 for (int left = 0; left < nearCursorSegments.size() - 1; ++left)
                 {
                     const SnapSegmentScreenData& first = nearCursorSegments.at(left);
+                    bool reachPairLimit = false;
 
                     for (int right = left + 1; right < nearCursorSegments.size(); ++right)
                     {
+                        if (checkedPairCount >= kIntersectionMaxPairChecks)
+                        {
+                            reachPairLimit = true;
+                            break;
+                        }
+
+                        ++checkedPairCount;
                         const SnapSegmentScreenData& second = nearCursorSegments.at(right);
 
                         if (first.owner == second.owner)
@@ -2934,24 +3062,29 @@ QVector3D CadViewer::applySnapToGroundPosition
 
                         tryConsumeCandidate(intersectionPoint, 2);
                     }
+
+                    if (reachPairLimit)
+                    {
+                        break;
+                    }
                 }
+            }
+
+            if (allowIntersectionEvaluation)
+            {
+                m_lastIntersectionComputeMs = nowMs;
             }
         }
     }
 
     if (bestCandidate.valid)
     {
-        if (snapped != nullptr)
-        {
-            *snapped = true;
-        }
-
-        if (objectSnap != nullptr)
-        {
-            *objectSnap = true;
-        }
-
-        return QVector3D(bestCandidate.position.x(), bestCandidate.position.y(), 0.0f);
+        return commitCacheAndReturn
+        (
+            QVector3D(bestCandidate.position.x(), bestCandidate.position.y(), 0.0f),
+            true,
+            true
+        );
     }
 
     if (m_gridSnapEnabled)
@@ -2968,16 +3101,11 @@ QVector3D CadViewer::applySnapToGroundPosition
 
         if (distanceSquared <= gridSnapDistanceSquared)
         {
-            if (snapped != nullptr)
-            {
-                *snapped = true;
-            }
-
-            return snappedGridPosition;
+            return commitCacheAndReturn(snappedGridPosition, true, false);
         }
     }
 
-    return QVector3D(worldPos.x(), worldPos.y(), 0.0f);
+    return commitCacheAndReturn(QVector3D(worldPos.x(), worldPos.y(), 0.0f), false, false);
 }
 
 std::vector<TransientPrimitive> CadViewer::buildSnapHighlightPrimitives() const
@@ -3168,6 +3296,7 @@ void CadViewer::setSelectedEntities(const QSet<EntityId>& entityIds, EntityId pr
 
     if (selectionChanged)
     {
+        invalidateSnapCache();
         resetOverlappedHandleHoverState();
         emit selectedEntityChanged(selectedEntity());
     }
