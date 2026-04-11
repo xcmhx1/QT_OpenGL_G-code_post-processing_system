@@ -19,6 +19,74 @@
 
 namespace
 {
+    std::unique_ptr<DRW_Entity> convertPolylineToLightweight(const DRW_Polyline* polyline)
+    {
+        if (polyline == nullptr)
+        {
+            return nullptr;
+        }
+
+        // 仅把“普通 2D 多段线”转换为 LWPOLYLINE；3D/网格/面片多段线在安全模式下跳过。
+        constexpr int kUnsupportedPolylineFlags = 8 | 16 | 32 | 64;
+
+        if ((polyline->flags & kUnsupportedPolylineFlags) != 0)
+        {
+            return nullptr;
+        }
+
+        auto lwPolyline = std::make_unique<DRW_LWPolyline>();
+        lwPolyline->space = polyline->space;
+        lwPolyline->layer = polyline->layer;
+        lwPolyline->lineType = polyline->lineType;
+        lwPolyline->color = polyline->color;
+        lwPolyline->color24 = polyline->color24;
+        lwPolyline->lWeight = polyline->lWeight;
+        lwPolyline->ltypeScale = polyline->ltypeScale;
+        lwPolyline->visible = polyline->visible;
+        lwPolyline->haveExtrusion = polyline->haveExtrusion;
+        lwPolyline->thickness = polyline->thickness;
+        lwPolyline->extPoint = polyline->extPoint;
+        lwPolyline->elevation = polyline->basePoint.z;
+        lwPolyline->flags = polyline->flags & (1 | 128);
+
+        if (std::abs(polyline->defstawidth - polyline->defendwidth) <= 1.0e-9)
+        {
+            lwPolyline->width = polyline->defstawidth;
+        }
+
+        lwPolyline->vertlist.reserve(polyline->vertlist.size());
+
+        for (const std::shared_ptr<DRW_Vertex>& vertex : polyline->vertlist)
+        {
+            if (vertex == nullptr)
+            {
+                continue;
+            }
+
+            // 面片顶点（64/128）不属于 LWPOLYLINE 语义，直接放弃转换。
+            if ((vertex->flags & (64 | 128)) != 0)
+            {
+                return nullptr;
+            }
+
+            auto lwVertex = std::make_shared<DRW_Vertex2D>();
+            lwVertex->x = vertex->basePoint.x;
+            lwVertex->y = vertex->basePoint.y;
+            lwVertex->stawidth = vertex->stawidth;
+            lwVertex->endwidth = vertex->endwidth;
+            lwVertex->bulge = vertex->bulge;
+            lwPolyline->vertlist.push_back(lwVertex);
+        }
+
+        if (lwPolyline->vertlist.size() < 2)
+        {
+            return nullptr;
+        }
+
+        lwPolyline->vertexnum = static_cast<int>(lwPolyline->vertlist.size());
+        return lwPolyline;
+    }
+
     std::unique_ptr<DRW_Entity> cloneSupportedEntity(const DRW_Entity* entity)
     {
         if (entity == nullptr)
@@ -39,7 +107,7 @@ namespace
         case DRW::ETYPE::ELLIPSE:
             return std::make_unique<DRW_Ellipse>(*static_cast<const DRW_Ellipse*>(entity));
         case DRW::ETYPE::POLYLINE:
-            return std::make_unique<DRW_Polyline>(*static_cast<const DRW_Polyline*>(entity));
+            return convertPolylineToLightweight(static_cast<const DRW_Polyline*>(entity));
         case DRW::ETYPE::LWPOLYLINE:
             return std::make_unique<DRW_LWPolyline>(*static_cast<const DRW_LWPolyline*>(entity));
         default:

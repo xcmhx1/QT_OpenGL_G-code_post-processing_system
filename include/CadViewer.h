@@ -81,6 +81,18 @@ public:
     // 设置网格点吸附开关。
     void setGridSnapEnabled(bool enabled);
 
+    // 设置端点吸附开关。
+    void setEndpointSnapEnabled(bool enabled);
+
+    // 设置中点吸附开关。
+    void setMidpointSnapEnabled(bool enabled);
+
+    // 设置圆心/中心吸附开关。
+    void setCenterSnapEnabled(bool enabled);
+
+    // 设置交点吸附开关。
+    void setIntersectionSnapEnabled(bool enabled);
+
     // 设置 Viewer 主题。
     void setTheme(const AppThemeColors& theme);
 
@@ -463,6 +475,18 @@ private:
 
     // 控制点吸附开关
     bool m_controlPointSnapEnabled = false;
+
+    // 端点吸附开关。
+    bool m_endpointSnapEnabled = false;
+
+    // 中点吸附开关。
+    bool m_midpointSnapEnabled = false;
+
+    // 圆心/中心吸附开关。
+    bool m_centerSnapEnabled = false;
+
+    // 交点吸附开关。
+    bool m_intersectionSnapEnabled = false;
 
     // 网格点吸附开关
     bool m_gridSnapEnabled = false;

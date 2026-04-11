@@ -4,8 +4,11 @@
 
 #include "AppTheme.h"
 
+#include <QAction>
 #include <QLabel>
+#include <QMenu>
 #include <QPushButton>
+#include <QToolButton>
 #include <QWidget>
 #include <QVector3D>
 
@@ -23,10 +26,23 @@ signals:
     void basePointSnapToggled(bool enabled);
     void controlPointSnapToggled(bool enabled);
     void gridSnapToggled(bool enabled);
+    void endpointSnapToggled(bool enabled);
+    void midpointSnapToggled(bool enabled);
+    void centerSnapToggled(bool enabled);
+    void intersectionSnapToggled(bool enabled);
+
+private:
+    void refreshSnapSummary();
 
 private:
     QLabel* m_coordinateValueLabel = nullptr;
-    QPushButton* m_basePointSnapButton = nullptr;
-    QPushButton* m_controlPointSnapButton = nullptr;
-    QPushButton* m_gridSnapButton = nullptr;
+    QToolButton* m_snapSettingsButton = nullptr;
+    QMenu* m_snapSettingsMenu = nullptr;
+    QAction* m_basePointSnapAction = nullptr;
+    QAction* m_controlPointSnapAction = nullptr;
+    QAction* m_gridSnapAction = nullptr;
+    QAction* m_endpointSnapAction = nullptr;
+    QAction* m_midpointSnapAction = nullptr;
+    QAction* m_centerSnapAction = nullptr;
+    QAction* m_intersectionSnapAction = nullptr;
 };

@@ -4,9 +4,11 @@
 
 #include "CadStatusPaneWidget.h"
 
+#include <QAction>
 #include <QBoxLayout>
 #include <QFont>
 #include <QFrame>
+#include <QStringList>
 
 CadStatusPaneWidget::CadStatusPaneWidget(QWidget* parent)
     : QWidget(parent)
@@ -40,32 +42,46 @@ CadStatusPaneWidget::CadStatusPaneWidget(QWidget* parent)
     coordinateLayout->addWidget(coordinateTitleLabel);
     coordinateLayout->addWidget(m_coordinateValueLabel);
 
-    QFrame* snapFrame = new QFrame(this);
-    snapFrame->setObjectName("SnapBlock");
-    QHBoxLayout* snapLayout = new QHBoxLayout(snapFrame);
-    snapLayout->setContentsMargins(10, 4, 10, 4);
-    snapLayout->setSpacing(8);
+    QWidget* snapContainer = new QWidget(this);
+    QHBoxLayout* snapLayout = new QHBoxLayout(snapContainer);
+    snapLayout->setContentsMargins(0, 0, 0, 0);
+    snapLayout->setSpacing(0);
 
-    QLabel* snapTitleLabel = new QLabel(QStringLiteral("吸附"), snapFrame);
-    snapTitleLabel->setFont(titleFont);
+    m_snapSettingsButton = new QToolButton(snapContainer);
+    m_snapSettingsButton->setText(QStringLiteral("捕捉设置"));
+    m_snapSettingsButton->setPopupMode(QToolButton::InstantPopup);
+    m_snapSettingsButton->setCursor(Qt::PointingHandCursor);
+    m_snapSettingsButton->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    m_snapSettingsButton->setProperty("snapToggle", true);
+    m_snapSettingsButton->setMinimumHeight(28);
 
-    m_basePointSnapButton = new QPushButton(QStringLiteral("基点"), snapFrame);
-    m_controlPointSnapButton = new QPushButton(QStringLiteral("控制点"), snapFrame);
-    m_gridSnapButton = new QPushButton(QStringLiteral("网格"), snapFrame);
+    m_snapSettingsMenu = new QMenu(m_snapSettingsButton);
+    m_snapSettingsMenu->setObjectName("SnapSettingsMenu");
 
-    for (QPushButton* button : { m_basePointSnapButton, m_controlPointSnapButton, m_gridSnapButton })
-    {
-        button->setCheckable(true);
-        button->setFont(valueFont);
-        button->setCursor(Qt::PointingHandCursor);
-        button->setProperty("snapToggle", true);
-        button->setMinimumHeight(28);
-    }
+    QAction* objectSnapTitle = m_snapSettingsMenu->addSection(QStringLiteral("对象捕捉"));
+    objectSnapTitle->setEnabled(false);
+    m_basePointSnapAction = m_snapSettingsMenu->addAction(QStringLiteral("基点"));
+    m_basePointSnapAction->setCheckable(true);
+    m_controlPointSnapAction = m_snapSettingsMenu->addAction(QStringLiteral("控制点"));
+    m_controlPointSnapAction->setCheckable(true);
+    m_endpointSnapAction = m_snapSettingsMenu->addAction(QStringLiteral("端点"));
+    m_endpointSnapAction->setCheckable(true);
+    m_midpointSnapAction = m_snapSettingsMenu->addAction(QStringLiteral("中点"));
+    m_midpointSnapAction->setCheckable(true);
+    m_centerSnapAction = m_snapSettingsMenu->addAction(QStringLiteral("圆心/中心"));
+    m_centerSnapAction->setCheckable(true);
+    m_intersectionSnapAction = m_snapSettingsMenu->addAction(QStringLiteral("交点"));
+    m_intersectionSnapAction->setCheckable(true);
+    m_snapSettingsMenu->addSeparator();
 
-    snapLayout->addWidget(snapTitleLabel);
-    snapLayout->addWidget(m_basePointSnapButton);
-    snapLayout->addWidget(m_controlPointSnapButton);
-    snapLayout->addWidget(m_gridSnapButton);
+    QAction* gridSnapTitle = m_snapSettingsMenu->addSection(QStringLiteral("网格捕捉"));
+    gridSnapTitle->setEnabled(false);
+    m_gridSnapAction = m_snapSettingsMenu->addAction(QStringLiteral("网格"));
+    m_gridSnapAction->setCheckable(true);
+
+    m_snapSettingsButton->setMenu(m_snapSettingsMenu);
+
+    snapLayout->addWidget(m_snapSettingsButton);
 
     QLabel* orthoReservedLabel = new QLabel(QStringLiteral("正交: 预留"), this);
     orthoReservedLabel->setFont(valueFont);
@@ -75,16 +91,40 @@ CadStatusPaneWidget::CadStatusPaneWidget(QWidget* parent)
 
     layout->addWidget(coordinateFrame);
     layout->addSpacing(8);
-    layout->addWidget(snapFrame);
+    layout->addWidget(snapContainer);
     layout->addWidget(orthoReservedLabel);
     layout->addWidget(polarReservedLabel);
     layout->addStretch(1);
 
-    connect(m_basePointSnapButton, &QPushButton::toggled, this, &CadStatusPaneWidget::basePointSnapToggled);
-    connect(m_controlPointSnapButton, &QPushButton::toggled, this, &CadStatusPaneWidget::controlPointSnapToggled);
-    connect(m_gridSnapButton, &QPushButton::toggled, this, &CadStatusPaneWidget::gridSnapToggled);
+    connect(m_basePointSnapAction, &QAction::toggled, this, &CadStatusPaneWidget::basePointSnapToggled);
+    connect(m_controlPointSnapAction, &QAction::toggled, this, &CadStatusPaneWidget::controlPointSnapToggled);
+    connect(m_gridSnapAction, &QAction::toggled, this, &CadStatusPaneWidget::gridSnapToggled);
+    connect(m_endpointSnapAction, &QAction::toggled, this, &CadStatusPaneWidget::endpointSnapToggled);
+    connect(m_midpointSnapAction, &QAction::toggled, this, &CadStatusPaneWidget::midpointSnapToggled);
+    connect(m_centerSnapAction, &QAction::toggled, this, &CadStatusPaneWidget::centerSnapToggled);
+    connect(m_intersectionSnapAction, &QAction::toggled, this, &CadStatusPaneWidget::intersectionSnapToggled);
+
+    const auto updateSummary = [this]()
+    {
+        refreshSnapSummary();
+    };
+
+    for (QAction* action :
+        {
+            m_basePointSnapAction,
+            m_controlPointSnapAction,
+            m_gridSnapAction,
+            m_endpointSnapAction,
+            m_midpointSnapAction,
+            m_centerSnapAction,
+            m_intersectionSnapAction
+        })
+    {
+        connect(action, &QAction::toggled, this, updateSummary);
+    }
 
     setTheme(buildAppThemeColors(AppThemeMode::Light));
+    refreshSnapSummary();
 
     setWorldPosition(QVector3D());
 }
@@ -115,11 +155,6 @@ void CadStatusPaneWidget::setTheme(const AppThemeColors& theme)
             "border: 1px solid %4;"
             "border-radius: 4px;"
             "}"
-            "#SnapBlock {"
-            "background-color: %3;"
-            "border: 1px solid %4;"
-            "border-radius: 4px;"
-            "}"
             "#CadStatusPaneWidget QLabel {"
             "color: %5;"
             "}"
@@ -133,11 +168,33 @@ void CadStatusPaneWidget::setTheme(const AppThemeColors& theme)
             "QPushButton[snapToggle=\"true\"]:hover {"
             "background-color: %7;"
             "}"
+            "QToolButton[snapToggle=\"true\"] {"
+            "background-color: %6;"
+            "color: %5;"
+            "border: 1px solid %2;"
+            "border-radius: 4px;"
+            "padding: 3px 12px;"
+            "font-weight: 600;"
+            "}"
+            "QToolButton[snapToggle=\"true\"]:hover {"
+            "background-color: %7;"
+            "}"
             "QPushButton[snapToggle=\"true\"]:checked {"
             "background-color: %8;"
             "color: %9;"
             "border: 1px solid %8;"
             "font-weight: 600;"
+            "}"
+            "#SnapSettingsMenu {"
+            "background-color: %3;"
+            "color: %5;"
+            "border: 1px solid %4;"
+            "}"
+            "#SnapSettingsMenu::item {"
+            "padding: 5px 18px 5px 22px;"
+            "}"
+            "#SnapSettingsMenu::item:selected {"
+            "background-color: %7;"
             "}"
         )
         .arg(theme.panelBackground.name())
@@ -150,4 +207,57 @@ void CadStatusPaneWidget::setTheme(const AppThemeColors& theme)
         .arg(theme.accentColor.name())
         .arg(theme.accentTextColor.name())
     );
+}
+
+void CadStatusPaneWidget::refreshSnapSummary()
+{
+    if (m_snapSettingsButton == nullptr)
+    {
+        return;
+    }
+
+    QStringList enabledOptions;
+
+    if (m_basePointSnapAction != nullptr && m_basePointSnapAction->isChecked())
+    {
+        enabledOptions.push_back(QStringLiteral("基点"));
+    }
+
+    if (m_controlPointSnapAction != nullptr && m_controlPointSnapAction->isChecked())
+    {
+        enabledOptions.push_back(QStringLiteral("控制点"));
+    }
+
+    if (m_endpointSnapAction != nullptr && m_endpointSnapAction->isChecked())
+    {
+        enabledOptions.push_back(QStringLiteral("端点"));
+    }
+
+    if (m_midpointSnapAction != nullptr && m_midpointSnapAction->isChecked())
+    {
+        enabledOptions.push_back(QStringLiteral("中点"));
+    }
+
+    if (m_centerSnapAction != nullptr && m_centerSnapAction->isChecked())
+    {
+        enabledOptions.push_back(QStringLiteral("圆心"));
+    }
+
+    if (m_intersectionSnapAction != nullptr && m_intersectionSnapAction->isChecked())
+    {
+        enabledOptions.push_back(QStringLiteral("交点"));
+    }
+
+    if (m_gridSnapAction != nullptr && m_gridSnapAction->isChecked())
+    {
+        enabledOptions.push_back(QStringLiteral("网格"));
+    }
+
+    if (enabledOptions.isEmpty())
+    {
+        m_snapSettingsButton->setToolTip(QStringLiteral("未启用任何捕捉选项"));
+        return;
+    }
+
+    m_snapSettingsButton->setToolTip(QStringLiteral("已启用: %1").arg(enabledOptions.join(QStringLiteral(" | "))));
 }

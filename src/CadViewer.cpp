@@ -78,6 +78,157 @@ namespace
         QRect badgeRect;
     };
 
+    struct SnapCandidate
+    {
+        QVector3D position;
+        float distanceSquared = std::numeric_limits<float>::max();
+        int priority = 100;
+        bool valid = false;
+    };
+
+    struct SnapSegmentScreenData
+    {
+        const CadItem* owner = nullptr;
+        QVector3D startWorld;
+        QVector3D endWorld;
+        QPoint startScreen;
+        QPoint endScreen;
+    };
+
+    float cross2D(float ax, float ay, float bx, float by)
+    {
+        return ax * by - ay * bx;
+    }
+
+    float pointToSegmentDistanceSquared(const QPoint& point, const QPoint& start, const QPoint& end)
+    {
+        const float dx = static_cast<float>(end.x() - start.x());
+        const float dy = static_cast<float>(end.y() - start.y());
+        const float lengthSquared = dx * dx + dy * dy;
+
+        if (lengthSquared <= 1.0e-6f)
+        {
+            const float px = static_cast<float>(point.x() - start.x());
+            const float py = static_cast<float>(point.y() - start.y());
+            return px * px + py * py;
+        }
+
+        const float px = static_cast<float>(point.x() - start.x());
+        const float py = static_cast<float>(point.y() - start.y());
+        const float t = std::clamp((px * dx + py * dy) / lengthSquared, 0.0f, 1.0f);
+        const float closestX = static_cast<float>(start.x()) + dx * t;
+        const float closestY = static_cast<float>(start.y()) + dy * t;
+        const float rx = static_cast<float>(point.x()) - closestX;
+        const float ry = static_cast<float>(point.y()) - closestY;
+        return rx * rx + ry * ry;
+    }
+
+    bool isFullEllipsePath(const DRW_Ellipse* ellipse)
+    {
+        if (ellipse == nullptr)
+        {
+            return false;
+        }
+
+        constexpr double kTwoPi = 6.28318530717958647692;
+        const double span = ellipse->endparam - ellipse->staparam;
+        return std::abs(span) < 1.0e-10 || std::abs(std::abs(span) - kTwoPi) < 1.0e-10;
+    }
+
+    QVector3D resolveNormal(const DRW_Coord& extPoint)
+    {
+        QVector3D normal(extPoint.x, extPoint.y, extPoint.z);
+
+        if (normal.lengthSquared() <= 1.0e-9f)
+        {
+            return QVector3D(0.0f, 0.0f, 1.0f);
+        }
+
+        normal.normalize();
+        return normal;
+    }
+
+    void buildPlaneBasis(const QVector3D& normal, QVector3D& axisX, QVector3D& axisY)
+    {
+        const QVector3D helper = std::abs(normal.z()) < 0.999f
+            ? QVector3D(0.0f, 0.0f, 1.0f)
+            : QVector3D(0.0f, 1.0f, 0.0f);
+
+        axisX = QVector3D::crossProduct(helper, normal);
+
+        if (axisX.lengthSquared() <= 1.0e-9f)
+        {
+            axisX = QVector3D(1.0f, 0.0f, 0.0f);
+        }
+        else
+        {
+            axisX.normalize();
+        }
+
+        axisY = QVector3D::crossProduct(normal, axisX);
+
+        if (axisY.lengthSquared() <= 1.0e-9f)
+        {
+            axisY = QVector3D(0.0f, 1.0f, 0.0f);
+        }
+        else
+        {
+            axisY.normalize();
+        }
+    }
+
+    QVector3D circleLikePointAt(const QVector3D& center, double radius, const DRW_Coord& extPoint, double parameter)
+    {
+        if (radius <= 0.0)
+        {
+            return center;
+        }
+
+        const QVector3D normal = resolveNormal(extPoint);
+        QVector3D axisX;
+        QVector3D axisY;
+        buildPlaneBasis(normal, axisX, axisY);
+
+        return center
+            + axisX * static_cast<float>(std::cos(parameter) * radius)
+            + axisY * static_cast<float>(std::sin(parameter) * radius);
+    }
+
+    bool trySegmentIntersection
+    (
+        const QVector3D& a0,
+        const QVector3D& a1,
+        const QVector3D& b0,
+        const QVector3D& b1,
+        QVector3D& intersection
+    )
+    {
+        const float rX = a1.x() - a0.x();
+        const float rY = a1.y() - a0.y();
+        const float sX = b1.x() - b0.x();
+        const float sY = b1.y() - b0.y();
+        const float denominator = cross2D(rX, rY, sX, sY);
+
+        if (std::abs(denominator) <= 1.0e-6f)
+        {
+            return false;
+        }
+
+        const float qpX = b0.x() - a0.x();
+        const float qpY = b0.y() - a0.y();
+        const float t = cross2D(qpX, qpY, sX, sY) / denominator;
+        const float u = cross2D(qpX, qpY, rX, rY) / denominator;
+        constexpr float kTolerance = 1.0e-4f;
+
+        if (t < -kTolerance || t > 1.0f + kTolerance || u < -kTolerance || u > 1.0f + kTolerance)
+        {
+            return false;
+        }
+
+        intersection = QVector3D(a0.x() + rX * t, a0.y() + rY * t, 0.0f);
+        return true;
+    }
+
     // 检查是否为支持拖放的文件类型
     // @param localFile 本地文件路径
     // @return 如果文件类型受支持则返回 true
@@ -522,6 +673,34 @@ void CadViewer::setControlPointSnapEnabled(bool enabled)
 void CadViewer::setGridSnapEnabled(bool enabled)
 {
     m_gridSnapEnabled = enabled;
+    updateHoveredWorldPosition(m_cursorScreenPos);
+    update();
+}
+
+void CadViewer::setEndpointSnapEnabled(bool enabled)
+{
+    m_endpointSnapEnabled = enabled;
+    updateHoveredWorldPosition(m_cursorScreenPos);
+    update();
+}
+
+void CadViewer::setMidpointSnapEnabled(bool enabled)
+{
+    m_midpointSnapEnabled = enabled;
+    updateHoveredWorldPosition(m_cursorScreenPos);
+    update();
+}
+
+void CadViewer::setCenterSnapEnabled(bool enabled)
+{
+    m_centerSnapEnabled = enabled;
+    updateHoveredWorldPosition(m_cursorScreenPos);
+    update();
+}
+
+void CadViewer::setIntersectionSnapEnabled(bool enabled)
+{
+    m_intersectionSnapEnabled = enabled;
     updateHoveredWorldPosition(m_cursorScreenPos);
     update();
 }
@@ -2437,16 +2616,33 @@ QVector3D CadViewer::applySnapToGroundPosition
         *objectSnap = false;
     }
 
-    struct SnapCandidate
-    {
-        QVector3D position;
-        float distanceSquared = std::numeric_limits<float>::max();
-        int priority = 1;
-        bool valid = false;
-    };
-
     SnapCandidate bestCandidate;
     const float snapDistanceSquared = kObjectSnapDistancePixels * kObjectSnapDistancePixels;
+    const auto tryConsumeCandidate =
+        [this, &screenPos, &bestCandidate, snapDistanceSquared](const QVector3D& worldCandidate, int priority)
+        {
+            const QPoint candidateScreenPos = worldToScreen(worldCandidate);
+            const float dx = static_cast<float>(candidateScreenPos.x() - screenPos.x());
+            const float dy = static_cast<float>(candidateScreenPos.y() - screenPos.y());
+            const float distanceSquared = dx * dx + dy * dy;
+
+            if (distanceSquared > snapDistanceSquared)
+            {
+                return;
+            }
+
+            const bool sameDistance = std::abs(distanceSquared - bestCandidate.distanceSquared) <= 1.0e-4f;
+
+            if (!bestCandidate.valid
+                || distanceSquared < bestCandidate.distanceSquared
+                || (sameDistance && priority < bestCandidate.priority))
+            {
+                bestCandidate.position = worldCandidate;
+                bestCandidate.distanceSquared = distanceSquared;
+                bestCandidate.priority = priority;
+                bestCandidate.valid = true;
+            }
+        };
 
     if (m_basePointSnapEnabled || m_controlPointSnapEnabled)
     {
@@ -2464,27 +2660,280 @@ QVector3D CadViewer::applySnapToGroundPosition
                     continue;
                 }
 
-                const QPoint handleScreenPos = worldToScreen(handle.position);
-                const float dx = static_cast<float>(handleScreenPos.x() - screenPos.x());
-                const float dy = static_cast<float>(handleScreenPos.y() - screenPos.y());
-                const float distanceSquared = dx * dx + dy * dy;
+                const int priority = handle.isBasePoint ? 0 : 6;
+                tryConsumeCandidate(handle.position, priority);
+            }
+        }
+    }
 
-                if (distanceSquared > snapDistanceSquared)
+    const bool advancedObjectSnapEnabled =
+        m_endpointSnapEnabled || m_midpointSnapEnabled || m_centerSnapEnabled || m_intersectionSnapEnabled;
+
+    if (advancedObjectSnapEnabled)
+    {
+        const CadDocument* scene = m_sceneCoordinator.document();
+
+        if (scene != nullptr)
+        {
+            QVector<SnapSegmentScreenData> nearCursorSegments;
+            const float intersectionCollectDistanceSquared =
+                (kObjectSnapDistancePixels * 1.8f) * (kObjectSnapDistancePixels * 1.8f);
+
+            for (const std::unique_ptr<CadItem>& entity : scene->m_entities)
+            {
+                const CadItem* item = entity.get();
+
+                if (item == nullptr || item->m_nativeEntity == nullptr)
                 {
                     continue;
                 }
 
-                const int priority = handle.isBasePoint ? 0 : 1;
-                const bool sameDistance = std::abs(distanceSquared - bestCandidate.distanceSquared) <= 1.0e-4f;
-
-                if (!bestCandidate.valid
-                    || distanceSquared < bestCandidate.distanceSquared
-                    || (sameDistance && priority < bestCandidate.priority))
+                auto appendEndpoint = [this, &tryConsumeCandidate](const QVector3D& position)
                 {
-                    bestCandidate.position = handle.position;
-                    bestCandidate.distanceSquared = distanceSquared;
-                    bestCandidate.priority = priority;
-                    bestCandidate.valid = true;
+                    tryConsumeCandidate(position, 1);
+                };
+
+                auto appendMidpoint = [this, &tryConsumeCandidate](const QVector3D& position)
+                {
+                    tryConsumeCandidate(position, 4);
+                };
+
+                auto appendCenter = [this, &tryConsumeCandidate](const QVector3D& position)
+                {
+                    tryConsumeCandidate(position, 3);
+                };
+
+                if (m_endpointSnapEnabled)
+                {
+                    switch (item->m_type)
+                    {
+                    case DRW::ETYPE::POINT:
+                    {
+                        const DRW_Point* point = static_cast<const DRW_Point*>(item->m_nativeEntity);
+                        appendEndpoint(QVector3D(point->basePoint.x, point->basePoint.y, point->basePoint.z));
+                        break;
+                    }
+                    case DRW::ETYPE::LINE:
+                    {
+                        const DRW_Line* line = static_cast<const DRW_Line*>(item->m_nativeEntity);
+                        appendEndpoint(QVector3D(line->basePoint.x, line->basePoint.y, line->basePoint.z));
+                        appendEndpoint(QVector3D(line->secPoint.x, line->secPoint.y, line->secPoint.z));
+                        break;
+                    }
+                    case DRW::ETYPE::ARC:
+                    {
+                        const DRW_Arc* arc = static_cast<const DRW_Arc*>(item->m_nativeEntity);
+                        const QVector3D center(arc->basePoint.x, arc->basePoint.y, arc->basePoint.z);
+                        appendEndpoint(circleLikePointAt(center, arc->radious, arc->extPoint, arc->staangle));
+                        appendEndpoint(circleLikePointAt(center, arc->radious, arc->extPoint, arc->endangle));
+                        break;
+                    }
+                    case DRW::ETYPE::ELLIPSE:
+                    {
+                        const DRW_Ellipse* ellipse = static_cast<const DRW_Ellipse*>(item->m_nativeEntity);
+
+                        if (!isFullEllipsePath(ellipse))
+                        {
+                            const QVector3D center(ellipse->basePoint.x, ellipse->basePoint.y, ellipse->basePoint.z);
+                            QVector3D majorAxis(ellipse->secPoint.x, ellipse->secPoint.y, ellipse->secPoint.z);
+                            QVector3D normal = resolveNormal(ellipse->extPoint);
+                            QVector3D minorAxis = QVector3D::crossProduct(normal, majorAxis);
+
+                            if (majorAxis.lengthSquared() > 1.0e-9f
+                                && minorAxis.lengthSquared() > 1.0e-9f
+                                && ellipse->ratio > 0.0)
+                            {
+                                minorAxis.normalize();
+                                minorAxis *= static_cast<float>(majorAxis.length() * ellipse->ratio);
+                                appendEndpoint(center + majorAxis * static_cast<float>(std::cos(ellipse->staparam))
+                                    + minorAxis * static_cast<float>(std::sin(ellipse->staparam)));
+                                appendEndpoint(center + majorAxis * static_cast<float>(std::cos(ellipse->endparam))
+                                    + minorAxis * static_cast<float>(std::sin(ellipse->endparam)));
+                            }
+                        }
+                        break;
+                    }
+                    case DRW::ETYPE::POLYLINE:
+                    {
+                        const DRW_Polyline* polyline = static_cast<const DRW_Polyline*>(item->m_nativeEntity);
+
+                        for (const std::shared_ptr<DRW_Vertex>& vertex : polyline->vertlist)
+                        {
+                            if (vertex != nullptr)
+                            {
+                                appendEndpoint(QVector3D(vertex->basePoint.x, vertex->basePoint.y, vertex->basePoint.z));
+                            }
+                        }
+
+                        break;
+                    }
+                    case DRW::ETYPE::LWPOLYLINE:
+                    {
+                        const DRW_LWPolyline* polyline = static_cast<const DRW_LWPolyline*>(item->m_nativeEntity);
+                        const float z = static_cast<float>(polyline->elevation);
+
+                        for (const std::shared_ptr<DRW_Vertex2D>& vertex : polyline->vertlist)
+                        {
+                            if (vertex != nullptr)
+                            {
+                                appendEndpoint(QVector3D(static_cast<float>(vertex->x), static_cast<float>(vertex->y), z));
+                            }
+                        }
+
+                        break;
+                    }
+                    default:
+                        break;
+                    }
+                }
+
+                if (m_midpointSnapEnabled)
+                {
+                    switch (item->m_type)
+                    {
+                    case DRW::ETYPE::LINE:
+                    {
+                        const DRW_Line* line = static_cast<const DRW_Line*>(item->m_nativeEntity);
+                        const QVector3D start(line->basePoint.x, line->basePoint.y, line->basePoint.z);
+                        const QVector3D end(line->secPoint.x, line->secPoint.y, line->secPoint.z);
+                        appendMidpoint((start + end) * 0.5f);
+                        break;
+                    }
+                    case DRW::ETYPE::ARC:
+                    {
+                        const DRW_Arc* arc = static_cast<const DRW_Arc*>(item->m_nativeEntity);
+                        double endAngle = arc->endangle;
+
+                        while (endAngle <= arc->staangle)
+                        {
+                            endAngle += 6.28318530717958647692;
+                        }
+
+                        const double midAngle = (arc->staangle + endAngle) * 0.5;
+                        const QVector3D center(arc->basePoint.x, arc->basePoint.y, arc->basePoint.z);
+                        appendMidpoint(circleLikePointAt(center, arc->radious, arc->extPoint, midAngle));
+                        break;
+                    }
+                    case DRW::ETYPE::POLYLINE:
+                    case DRW::ETYPE::LWPOLYLINE:
+                    {
+                        const QVector<QVector3D>& vertices = item->m_geometry.vertices;
+
+                        for (int index = 0; index + 1 < vertices.size(); ++index)
+                        {
+                            const QVector3D start = vertices.at(index);
+                            const QVector3D end = vertices.at(index + 1);
+
+                            if ((end - start).lengthSquared() <= 1.0e-9f)
+                            {
+                                continue;
+                            }
+
+                            appendMidpoint((start + end) * 0.5f);
+                        }
+
+                        break;
+                    }
+                    default:
+                        break;
+                    }
+                }
+
+                if (m_centerSnapEnabled)
+                {
+                    switch (item->m_type)
+                    {
+                    case DRW::ETYPE::CIRCLE:
+                    {
+                        const DRW_Circle* circle = static_cast<const DRW_Circle*>(item->m_nativeEntity);
+                        appendCenter(QVector3D(circle->basePoint.x, circle->basePoint.y, circle->basePoint.z));
+                        break;
+                    }
+                    case DRW::ETYPE::ARC:
+                    {
+                        const DRW_Arc* arc = static_cast<const DRW_Arc*>(item->m_nativeEntity);
+                        appendCenter(QVector3D(arc->basePoint.x, arc->basePoint.y, arc->basePoint.z));
+                        break;
+                    }
+                    case DRW::ETYPE::ELLIPSE:
+                    {
+                        const DRW_Ellipse* ellipse = static_cast<const DRW_Ellipse*>(item->m_nativeEntity);
+                        appendCenter(QVector3D(ellipse->basePoint.x, ellipse->basePoint.y, ellipse->basePoint.z));
+                        break;
+                    }
+                    default:
+                        break;
+                    }
+                }
+
+                if (m_intersectionSnapEnabled)
+                {
+                    const QVector<QVector3D>& vertices = item->m_geometry.vertices;
+
+                    if (vertices.size() >= 2)
+                    {
+                        for (int index = 0; index + 1 < vertices.size(); ++index)
+                        {
+                            const QVector3D start = vertices.at(index);
+                            const QVector3D end = vertices.at(index + 1);
+
+                            if ((end - start).lengthSquared() <= 1.0e-9f)
+                            {
+                                continue;
+                            }
+
+                            const QPoint startScreen = worldToScreen(start);
+                            const QPoint endScreen = worldToScreen(end);
+                            const float segmentDistanceSquared = pointToSegmentDistanceSquared(screenPos, startScreen, endScreen);
+
+                            if (segmentDistanceSquared > intersectionCollectDistanceSquared)
+                            {
+                                continue;
+                            }
+
+                            SnapSegmentScreenData segment;
+                            segment.owner = item;
+                            segment.startWorld = start;
+                            segment.endWorld = end;
+                            segment.startScreen = startScreen;
+                            segment.endScreen = endScreen;
+                            nearCursorSegments.push_back(segment);
+                        }
+                    }
+                }
+            }
+
+            if (m_intersectionSnapEnabled && nearCursorSegments.size() >= 2)
+            {
+                for (int left = 0; left < nearCursorSegments.size() - 1; ++left)
+                {
+                    const SnapSegmentScreenData& first = nearCursorSegments.at(left);
+
+                    for (int right = left + 1; right < nearCursorSegments.size(); ++right)
+                    {
+                        const SnapSegmentScreenData& second = nearCursorSegments.at(right);
+
+                        if (first.owner == second.owner)
+                        {
+                            continue;
+                        }
+
+                        QVector3D intersectionPoint;
+
+                        if (!trySegmentIntersection
+                        (
+                            first.startWorld,
+                            first.endWorld,
+                            second.startWorld,
+                            second.endWorld,
+                            intersectionPoint
+                        ))
+                        {
+                            continue;
+                        }
+
+                        tryConsumeCandidate(intersectionPoint, 2);
+                    }
                 }
             }
         }
