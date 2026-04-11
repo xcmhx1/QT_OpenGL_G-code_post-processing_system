@@ -1747,6 +1747,18 @@ Gcode_postprocessing_system::Gcode_postprocessing_system(QWidget* parent)
     connect(m_statusPaneWidget, &CadStatusPaneWidget::midpointSnapToggled, ui->openGLWidget, &CadViewer::setMidpointSnapEnabled);
     connect(m_statusPaneWidget, &CadStatusPaneWidget::centerSnapToggled, ui->openGLWidget, &CadViewer::setCenterSnapEnabled);
     connect(m_statusPaneWidget, &CadStatusPaneWidget::intersectionSnapToggled, ui->openGLWidget, &CadViewer::setIntersectionSnapEnabled);
+    connect
+    (
+        m_statusPaneWidget,
+        &CadStatusPaneWidget::snapOptionMaskChanged,
+        this,
+        [this](quint32 mask)
+        {
+            saveSnapOptionMask(mask);
+        }
+    );
+
+    m_statusPaneWidget->setSnapOptionMask(loadSnapOptionMask());
     connect(ui->openGLWidget, &CadViewer::commandPromptChanged, m_commandLineWidget, &CadCommandLineWidget::setPrompt);
     connect(ui->openGLWidget, &CadViewer::commandMessageAppended, m_commandLineWidget, &CadCommandLineWidget::appendMessage);
     connect
@@ -3068,6 +3080,31 @@ void Gcode_postprocessing_system::saveThemeMode(AppThemeMode mode) const
 {
     QSettings settings(QStringLiteral("GCodePostProcessingSystem"), QStringLiteral("GCodePostProcessingSystem"));
     settings.setValue(QStringLiteral("ui/themeMode"), mode == AppThemeMode::Dark ? QStringLiteral("dark") : QStringLiteral("light"));
+}
+
+quint32 Gcode_postprocessing_system::loadSnapOptionMask() const
+{
+    QSettings settings(QStringLiteral("GCodePostProcessingSystem"), QStringLiteral("GCodePostProcessingSystem"));
+    const quint32 defaultMask = CadStatusPaneWidget::defaultSnapOptionMask();
+    bool converted = false;
+    const quint32 storedMask = settings.value(QStringLiteral("ui/snapModeMask"), defaultMask).toUInt(&converted);
+
+    if (!converted)
+    {
+        return defaultMask;
+    }
+
+    return storedMask & CadStatusPaneWidget::allSnapOptionMask();
+}
+
+void Gcode_postprocessing_system::saveSnapOptionMask(quint32 mask) const
+{
+    QSettings settings(QStringLiteral("GCodePostProcessingSystem"), QStringLiteral("GCodePostProcessingSystem"));
+    settings.setValue
+    (
+        QStringLiteral("ui/snapModeMask"),
+        static_cast<uint>(mask & CadStatusPaneWidget::allSnapOptionMask())
+    );
 }
 
 Gcode_postprocessing_system::GCodeGenerationPreference Gcode_postprocessing_system::loadGenerationPreference() const

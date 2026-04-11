@@ -10,6 +10,7 @@
 #include "GProfile.h"
 
 #include <QtWidgets/QMainWindow>
+#include <QtGlobal>
 
 #include "ui_Gcode_postprocessing_system.h"
 
@@ -41,6 +42,8 @@ private:
     void applyTheme(AppThemeMode mode);
     AppThemeMode loadThemeMode() const;
     void saveThemeMode(AppThemeMode mode) const;
+    quint32 loadSnapOptionMask() const;
+    void saveSnapOptionMask(quint32 mask) const;
     GCodeGenerationPreference loadGenerationPreference() const;
     void saveGenerationPreference(GCodeGenerationPreference preference) const;
     GGenerator::GenerationMode resolveGenerationMode() const;

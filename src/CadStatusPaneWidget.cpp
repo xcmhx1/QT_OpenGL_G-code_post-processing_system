@@ -107,6 +107,11 @@ CadStatusPaneWidget::CadStatusPaneWidget(QWidget* parent)
     const auto updateSummary = [this]()
     {
         refreshSnapSummary();
+
+        if (!m_applyingSnapMask)
+        {
+            emit snapOptionMaskChanged(snapOptionMask());
+        }
     };
 
     for (QAction* action :
@@ -207,6 +212,93 @@ void CadStatusPaneWidget::setTheme(const AppThemeColors& theme)
         .arg(theme.accentColor.name())
         .arg(theme.accentTextColor.name())
     );
+}
+
+quint32 CadStatusPaneWidget::snapOptionMask() const
+{
+    quint32 mask = 0u;
+
+    if (m_basePointSnapAction != nullptr && m_basePointSnapAction->isChecked())
+    {
+        mask |= BasePointSnapBit;
+    }
+
+    if (m_controlPointSnapAction != nullptr && m_controlPointSnapAction->isChecked())
+    {
+        mask |= ControlPointSnapBit;
+    }
+
+    if (m_endpointSnapAction != nullptr && m_endpointSnapAction->isChecked())
+    {
+        mask |= EndpointSnapBit;
+    }
+
+    if (m_midpointSnapAction != nullptr && m_midpointSnapAction->isChecked())
+    {
+        mask |= MidpointSnapBit;
+    }
+
+    if (m_centerSnapAction != nullptr && m_centerSnapAction->isChecked())
+    {
+        mask |= CenterSnapBit;
+    }
+
+    if (m_intersectionSnapAction != nullptr && m_intersectionSnapAction->isChecked())
+    {
+        mask |= IntersectionSnapBit;
+    }
+
+    if (m_gridSnapAction != nullptr && m_gridSnapAction->isChecked())
+    {
+        mask |= GridSnapBit;
+    }
+
+    return mask;
+}
+
+void CadStatusPaneWidget::setSnapOptionMask(quint32 mask)
+{
+    const quint32 normalizedMask = mask & allSnapOptionMask();
+    m_applyingSnapMask = true;
+
+    if (m_basePointSnapAction != nullptr)
+    {
+        m_basePointSnapAction->setChecked((normalizedMask & BasePointSnapBit) != 0u);
+    }
+
+    if (m_controlPointSnapAction != nullptr)
+    {
+        m_controlPointSnapAction->setChecked((normalizedMask & ControlPointSnapBit) != 0u);
+    }
+
+    if (m_endpointSnapAction != nullptr)
+    {
+        m_endpointSnapAction->setChecked((normalizedMask & EndpointSnapBit) != 0u);
+    }
+
+    if (m_midpointSnapAction != nullptr)
+    {
+        m_midpointSnapAction->setChecked((normalizedMask & MidpointSnapBit) != 0u);
+    }
+
+    if (m_centerSnapAction != nullptr)
+    {
+        m_centerSnapAction->setChecked((normalizedMask & CenterSnapBit) != 0u);
+    }
+
+    if (m_intersectionSnapAction != nullptr)
+    {
+        m_intersectionSnapAction->setChecked((normalizedMask & IntersectionSnapBit) != 0u);
+    }
+
+    if (m_gridSnapAction != nullptr)
+    {
+        m_gridSnapAction->setChecked((normalizedMask & GridSnapBit) != 0u);
+    }
+
+    m_applyingSnapMask = false;
+    refreshSnapSummary();
+    emit snapOptionMaskChanged(snapOptionMask());
 }
 
 void CadStatusPaneWidget::refreshSnapSummary()
