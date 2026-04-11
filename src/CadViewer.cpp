@@ -1229,6 +1229,95 @@ void CadViewer::renderDynamicInputOverlay()
     painter.drawText(QRect(contentRect.left(), hintTop, contentRect.width(), hintHeight), Qt::AlignLeft | Qt::AlignVCenter, hintText);
 }
 
+void CadViewer::renderDynamicCommandOverlay()
+{
+    if (interactionMode() != ViewInteractionMode::Idle)
+    {
+        return;
+    }
+
+    const CadDynamicCommandOverlayState overlayState = m_controller.dynamicCommandOverlayState();
+
+    if (!overlayState.visible)
+    {
+        return;
+    }
+
+    QPainter painter(this);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setRenderHint(QPainter::TextAntialiasing, true);
+
+    QFont titleFont = painter.font();
+    titleFont.setPointSize(9);
+    titleFont.setBold(true);
+
+    QFont rowFont = painter.font();
+    rowFont.setPointSize(9);
+
+    const QFontMetrics titleMetrics(titleFont);
+    const QFontMetrics rowMetrics(rowFont);
+    const int horizontalPadding = 8;
+    const int verticalPadding = 6;
+    const int rowHeight = rowMetrics.height() + 6;
+    const int titleHeight = titleMetrics.height();
+    const int maxRows = std::min(6, static_cast<int>(overlayState.candidates.size()));
+    const int panelWidth = 320;
+    const int panelHeight = verticalPadding * 2 + titleHeight + 4 + maxRows * rowHeight + 4 + rowMetrics.height();
+
+    QPoint panelTopLeft = m_cursorScreenPos + QPoint(18, 24);
+
+    if (panelTopLeft.x() + panelWidth > width() - 6)
+    {
+        panelTopLeft.setX(std::max(6, width() - panelWidth - 6));
+    }
+
+    if (panelTopLeft.y() + panelHeight > height() - 6)
+    {
+        panelTopLeft.setY(std::max(6, m_cursorScreenPos.y() - panelHeight - 16));
+    }
+
+    const QRect panelRect(panelTopLeft, QSize(panelWidth, panelHeight));
+    painter.setPen(QPen(QColor(90, 168, 252, 220), 1.0));
+    painter.setBrush(QColor(18, 24, 34, 228));
+    painter.drawRoundedRect(panelRect, 7.0, 7.0);
+
+    const QRect contentRect = panelRect.adjusted(horizontalPadding, verticalPadding, -horizontalPadding, -verticalPadding);
+    painter.setFont(titleFont);
+    painter.setPen(QColor(238, 245, 255, 236));
+    const QString titleText = QStringLiteral("命令: %1").arg(overlayState.inputText);
+    painter.drawText(QRect(contentRect.left(), contentRect.top(), contentRect.width(), titleHeight), Qt::AlignLeft | Qt::AlignVCenter, titleText);
+
+    painter.setFont(rowFont);
+    const int rowsTop = contentRect.top() + titleHeight + 4;
+    const int activeIndex = std::clamp(overlayState.activeCandidateIndex, 0, std::max(0, maxRows - 1));
+
+    for (int row = 0; row < maxRows; ++row)
+    {
+        const QRect rowRect(contentRect.left(), rowsTop + row * rowHeight, contentRect.width(), rowHeight);
+        const bool active = row == activeIndex;
+        const QString rowText = overlayState.candidates.at(row);
+
+        if (active)
+        {
+            painter.setPen(Qt::NoPen);
+            painter.setBrush(QColor(82, 162, 246, 92));
+            painter.drawRoundedRect(rowRect.adjusted(0, 0, 0, -1), 4.0, 4.0);
+        }
+
+        painter.setPen(active ? QColor(252, 253, 255) : QColor(214, 225, 239));
+        painter.drawText(rowRect.adjusted(6, 0, -6, 0), Qt::AlignLeft | Qt::AlignVCenter, rowText);
+    }
+
+    const int hintTop = rowsTop + maxRows * rowHeight + 4;
+    painter.setPen(QColor(156, 178, 202, 228));
+    painter.drawText
+    (
+        QRect(contentRect.left(), hintTop, contentRect.width(), rowMetrics.height()),
+        Qt::AlignLeft | Qt::AlignVCenter,
+        overlayState.hintText
+    );
+}
+
 bool CadViewer::pickSelectedHandle(const QPoint& screenPos, CadSelectionHandleInfo* outHandle) const
 {
     const CadItem* selectedItem = selectedEntity();
@@ -1528,6 +1617,7 @@ void CadViewer::paintGL()
     renderSelectionWindowPreview();
     renderOverlappedHandlePopup();
     renderDynamicInputOverlay();
+    renderDynamicCommandOverlay();
 
     // 性能日志记录
     if constexpr (kEnableViewerPerfLogging)
@@ -1672,8 +1762,11 @@ void CadViewer::wheelEvent(QWheelEvent* event)
 void CadViewer::keyPressEvent(QKeyEvent* event)
 {
     ensureBlankCursor();
+    const bool dynamicCommandOverlayVisible = m_controller.dynamicCommandOverlayState().visible;
 
-    if (event->key() == Qt::Key_Tab && isPopupCycleModifierValid(event->modifiers()))
+    if (!dynamicCommandOverlayVisible
+        && event->key() == Qt::Key_Tab
+        && isPopupCycleModifierValid(event->modifiers()))
     {
         const int step = (event->modifiers() & Qt::ShiftModifier) != 0 ? -1 : 1;
 

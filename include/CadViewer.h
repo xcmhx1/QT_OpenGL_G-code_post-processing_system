@@ -381,6 +381,9 @@ private:
     // 绘制动态输入浮框。
     void renderDynamicInputOverlay();
 
+    // 绘制动态命令浮框。
+    void renderDynamicCommandOverlay();
+
     // 获取当前视口宽高比
     // @return 宽高比（宽度/高度）
     float aspectRatio() const;

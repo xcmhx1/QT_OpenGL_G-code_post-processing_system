@@ -9,6 +9,7 @@
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QString>
+#include <QStringList>
 #include <QVector3D>
 #include <QWheelEvent>
 
@@ -33,6 +34,16 @@ struct CadDynamicInputOverlayState
     bool yActive = false;
     bool expressionMode = false;
     QString expressionText;
+};
+
+// Viewer 动态命令浮框展示数据。
+struct CadDynamicCommandOverlayState
+{
+    bool visible = false;
+    QString inputText;
+    QString hintText;
+    QStringList candidates;
+    int activeCandidateIndex = 0;
 };
 
 // CAD 控制器类：
@@ -109,6 +120,9 @@ public:
 
     // 查询当前动态输入浮框展示状态。
     CadDynamicInputOverlayState dynamicInputOverlayState() const;
+
+    // 查询当前动态命令浮框展示状态。
+    CadDynamicCommandOverlayState dynamicCommandOverlayState() const;
 
 private:
     // 开始空闲态候选框选。
@@ -203,6 +217,33 @@ private:
 
     // 格式化动态输入数值显示。
     static QString formatDynamicInputValue(double value);
+
+    // 是否处于动态命令输入态（空闲态键盘命令匹配）。
+    bool isDynamicCommandModeActive() const;
+
+    // 清空动态命令输入态。
+    void clearDynamicCommandMode();
+
+    // 获取动态命令匹配索引集合。
+    QVector<int> collectDynamicCommandMatchIndices() const;
+
+    // 规范化动态命令候选索引。
+    void normalizeDynamicCommandSelectionIndex();
+
+    // 切换动态命令候选项。
+    bool cycleDynamicCommandSelection(int step);
+
+    // 执行当前选中的动态命令。
+    bool executeSelectedDynamicCommand();
+
+    // 按规范命令名执行空闲态命令。
+    bool executeIdleCommandByCanonical(const QString& canonicalCommand);
+
+    // 删除当前选中图元。
+    bool deleteSelectedEntity();
+
+    // 修改当前选中图元颜色。
+    bool changeSelectedEntityColor();
 
 private:
     // 关联的 CAD 视图对象

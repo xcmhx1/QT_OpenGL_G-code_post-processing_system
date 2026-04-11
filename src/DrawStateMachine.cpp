@@ -59,6 +59,7 @@ void DrawStateMachine::reset()
     dynamicInputXValue = 0.0;
     dynamicInputYValue = 0.0;
     dynamicCommandBuffer.clear();
+    dynamicCommandActiveIndex = 0;
     orthoEnabled = preservedOrthoEnabled;
 }
 

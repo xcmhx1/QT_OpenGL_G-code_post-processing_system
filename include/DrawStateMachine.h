@@ -204,6 +204,7 @@ public:
 
     // 预留：后续“动态命令框”输入缓冲。
     QString dynamicCommandBuffer;
+    int dynamicCommandActiveIndex = 0;
 
     // 正交约束开关（F8）。
     bool orthoEnabled = false;

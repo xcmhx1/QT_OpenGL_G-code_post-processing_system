@@ -104,6 +104,71 @@ namespace
         second = secondValue;
         return true;
     }
+
+    struct DynamicCommandDefinition
+    {
+        QString canonical;
+        QString displayName;
+        QStringList aliases;
+    };
+
+    QString normalizedCommandToken(const QString& token)
+    {
+        return token.trimmed().toLower();
+    }
+
+    bool isDynamicCommandCharacter(QChar character)
+    {
+        return character.isLetterOrNumber()
+            || character == QLatin1Char('_')
+            || character == QLatin1Char('-');
+    }
+
+    const QVector<DynamicCommandDefinition>& dynamicCommandDefinitions()
+    {
+        static const QVector<DynamicCommandDefinition> definitions
+        {
+            { QStringLiteral("line"),       QStringLiteral("LINE  直线"),        { QStringLiteral("l"), QStringLiteral("line"), QStringLiteral("直线") } },
+            { QStringLiteral("point"),      QStringLiteral("POINT 点"),          { QStringLiteral("p"), QStringLiteral("point"), QStringLiteral("点") } },
+            { QStringLiteral("circle"),     QStringLiteral("CIRCLE 圆"),         { QStringLiteral("c"), QStringLiteral("circle"), QStringLiteral("圆") } },
+            { QStringLiteral("arc"),        QStringLiteral("ARC   圆弧"),        { QStringLiteral("a"), QStringLiteral("arc"), QStringLiteral("圆弧") } },
+            { QStringLiteral("ellipse"),    QStringLiteral("ELLIPSE 椭圆"),      { QStringLiteral("e"), QStringLiteral("ellipse"), QStringLiteral("椭圆") } },
+            { QStringLiteral("polyline"),   QStringLiteral("POLYLINE 多段线"),   { QStringLiteral("o"), QStringLiteral("polyline"), QStringLiteral("pline"), QStringLiteral("多段线") } },
+            { QStringLiteral("lwpolyline"), QStringLiteral("LWPOLYLINE 轻量多段线"), { QStringLiteral("w"), QStringLiteral("lwpolyline"), QStringLiteral("轻量多段线") } },
+            { QStringLiteral("move"),       QStringLiteral("MOVE  移动"),        { QStringLiteral("m"), QStringLiteral("move"), QStringLiteral("移动") } },
+            { QStringLiteral("delete"),     QStringLiteral("DELETE 删除"),       { QStringLiteral("del"), QStringLiteral("delete"), QStringLiteral("erase"), QStringLiteral("删除") } },
+            { QStringLiteral("color"),      QStringLiteral("COLOR 改色"),        { QStringLiteral("k"), QStringLiteral("color"), QStringLiteral("改色"), QStringLiteral("颜色") } },
+            { QStringLiteral("fit"),        QStringLiteral("FIT   适配视图"),    { QStringLiteral("f"), QStringLiteral("fit"), QStringLiteral("zoomextents"), QStringLiteral("适配") } },
+            { QStringLiteral("top"),        QStringLiteral("TOP   顶视图"),      { QStringLiteral("t"), QStringLiteral("top"), QStringLiteral("home"), QStringLiteral("顶视图") } },
+            { QStringLiteral("zoomin"),     QStringLiteral("ZOOMIN  放大"),      { QStringLiteral("zoomin"), QStringLiteral("zin"), QStringLiteral("放大") } },
+            { QStringLiteral("zoomout"),    QStringLiteral("ZOOMOUT 缩小"),      { QStringLiteral("zoomout"), QStringLiteral("zout"), QStringLiteral("缩小") } },
+        };
+
+        return definitions;
+    }
+
+    bool commandAliasMatches(const DynamicCommandDefinition& definition, const QString& normalizedInput)
+    {
+        if (normalizedInput.isEmpty())
+        {
+            return true;
+        }
+
+        if (normalizedCommandToken(definition.canonical).startsWith(normalizedInput))
+        {
+            return true;
+        }
+
+        for (const QString& alias : definition.aliases)
+        {
+            if (normalizedCommandToken(alias).startsWith(normalizedInput))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 }
 
 // 设置关联的视图对象
@@ -131,6 +196,7 @@ void CadController::reset()
 
     // 重置绘图状态机
     m_drawState.reset();
+    clearDynamicCommandMode();
     m_idleWindowSelectionTracking = false;
     m_idleWindowSelectionDragging = false;
     m_idleWindowSelectionAnchor = QPoint();
@@ -171,6 +237,7 @@ void CadController::beginDrawing(DrawType drawType, const QColor& color)
     m_drawState.commandBulges.clear();
     m_drawState.polylineArcMode = false;
     m_drawState.lwPolylineArcMode = false;
+    clearDynamicCommandMode();
     resetPointDynamicInputSession();
 
     // 重置子模式
@@ -198,6 +265,7 @@ bool CadController::beginMoveSelected()
 
     if (handled)
     {
+        clearDynamicCommandMode();
         resetPointDynamicInputSession(currentPointInputStageKey());
         m_viewer->appendCommandMessage(QStringLiteral("已进入移动命令"));
         m_viewer->refreshCommandPrompt();
@@ -226,6 +294,7 @@ void CadController::cancelDrawing()
     m_drawState.commandBulges.clear();
     m_drawState.polylineArcMode = false;
     m_drawState.lwPolylineArcMode = false;
+    clearDynamicCommandMode();
     resetPointDynamicInputSession();
 
     // 重置子模式
@@ -537,11 +606,25 @@ bool CadController::handleKeyPress(QKeyEvent* event)
             return true;
         }
 
+        if (isDynamicCommandModeActive())
+        {
+            clearDynamicCommandMode();
+
+            if (m_viewer != nullptr)
+            {
+                m_viewer->refreshCommandPrompt();
+                m_viewer->requestViewUpdate();
+            }
+
+            return true;
+        }
+
         if (m_viewer != nullptr && m_viewer->selectedEntity() != nullptr)
         {
             m_viewer->clearSelection();
             m_viewer->appendCommandMessage(QStringLiteral("已取消选中"));
             m_viewer->refreshCommandPrompt();
+            return true;
         }
 
         return true;
@@ -755,18 +838,141 @@ bool CadController::handleKeyPress(QKeyEvent* event)
         }
     }
 
+    // 空闲态动态命令输入：键入字符后弹出命令匹配，Enter 执行。
+    if (!m_drawState.hasActiveCommand())
+    {
+        const bool plainInput = (event->modifiers() & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier)) == 0;
+
+        if (isDynamicCommandModeActive())
+        {
+            if (event->key() == Qt::Key_Backspace)
+            {
+                if (!m_drawState.dynamicCommandBuffer.isEmpty())
+                {
+                    m_drawState.dynamicCommandBuffer.chop(1);
+
+                    if (m_drawState.dynamicCommandBuffer.trimmed().isEmpty())
+                    {
+                        clearDynamicCommandMode();
+                    }
+                    else
+                    {
+                        normalizeDynamicCommandSelectionIndex();
+                    }
+                }
+
+                if (m_viewer != nullptr)
+                {
+                    m_viewer->refreshCommandPrompt();
+                    m_viewer->requestViewUpdate();
+                }
+
+                return true;
+            }
+
+            if (event->key() == Qt::Key_Delete)
+            {
+                clearDynamicCommandMode();
+
+                if (m_viewer != nullptr)
+                {
+                    m_viewer->refreshCommandPrompt();
+                    m_viewer->requestViewUpdate();
+                }
+
+                return true;
+            }
+
+            if (event->key() == Qt::Key_Tab
+                && (event->modifiers() == Qt::NoModifier || event->modifiers() == Qt::ShiftModifier))
+            {
+                return cycleDynamicCommandSelection((event->modifiers() & Qt::ShiftModifier) != 0 ? -1 : 1);
+            }
+
+            if (event->key() == Qt::Key_Return
+                || event->key() == Qt::Key_Enter
+                || event->key() == Qt::Key_Space)
+            {
+                return executeSelectedDynamicCommand();
+            }
+
+            if (plainInput)
+            {
+                const QString text = event->text();
+                bool consumed = false;
+
+                for (const QChar character : text)
+                {
+                    if (character.isSpace())
+                    {
+                        continue;
+                    }
+
+                    if (!isDynamicCommandCharacter(character))
+                    {
+                        continue;
+                    }
+
+                    m_drawState.dynamicCommandBuffer.append(character);
+                    consumed = true;
+                }
+
+                if (consumed)
+                {
+                    normalizeDynamicCommandSelectionIndex();
+
+                    if (m_viewer != nullptr)
+                    {
+                        m_viewer->refreshCommandPrompt();
+                        m_viewer->requestViewUpdate();
+                    }
+
+                    return true;
+                }
+            }
+        }
+        else if (plainInput)
+        {
+            const QString text = event->text();
+            QString commandText;
+            commandText.reserve(text.size());
+
+            for (const QChar character : text)
+            {
+                if (character.isSpace())
+                {
+                    continue;
+                }
+
+                if (!isDynamicCommandCharacter(character))
+                {
+                    continue;
+                }
+
+                commandText.append(character);
+            }
+
+            if (!commandText.isEmpty())
+            {
+                m_drawState.dynamicCommandBuffer = commandText;
+                m_drawState.dynamicCommandActiveIndex = 0;
+                normalizeDynamicCommandSelectionIndex();
+
+                if (m_viewer != nullptr)
+                {
+                    m_viewer->refreshCommandPrompt();
+                    m_viewer->requestViewUpdate();
+                }
+
+                return true;
+            }
+        }
+    }
+
     // Delete键：删除选中实体
     if (event->key() == Qt::Key_Delete && m_editer != nullptr && m_viewer != nullptr)
     {
-        const bool handled = m_editer->deleteEntity(m_viewer->selectedEntity());
-
-        if (handled)
-        {
-            m_viewer->appendCommandMessage(QStringLiteral("已删除选中图元"));
-            m_viewer->refreshCommandPrompt();
-        }
-
-        return handled;
+        return deleteSelectedEntity();
     }
 
     // M键：开始移动命令
@@ -778,35 +984,7 @@ bool CadController::handleKeyPress(QKeyEvent* event)
     // K键：修改选中实体颜色
     if (event->key() == Qt::Key_K && m_editer != nullptr && m_viewer != nullptr)
     {
-        CadItem* selectedItem = m_viewer->selectedEntity();
-
-        if (selectedItem == nullptr)
-        {
-            return true;
-        }
-
-        // 打开颜色选择对话框
-        const QColor color = QColorDialog::getColor
-        (
-            selectedItem->m_color,
-            m_viewer,
-            QStringLiteral("选择图元颜色")
-        );
-
-        if (!color.isValid())
-        {
-            return true;
-        }
-
-        const bool handled = m_editer->changeEntityColor(selectedItem, color);
-
-        if (handled)
-        {
-            m_viewer->appendCommandMessage(QStringLiteral("已修改图元颜色"));
-            m_viewer->refreshCommandPrompt();
-        }
-
-        return handled;
+        return changeSelectedEntityColor();
     }
 
     // 处理其他功能键
@@ -1070,6 +1248,322 @@ CadDynamicInputOverlayState CadController::dynamicInputOverlayState() const
     }
 
     return state;
+}
+
+CadDynamicCommandOverlayState CadController::dynamicCommandOverlayState() const
+{
+    CadDynamicCommandOverlayState state;
+
+    if (!isDynamicCommandModeActive())
+    {
+        return state;
+    }
+
+    state.visible = true;
+    state.inputText = m_drawState.dynamicCommandBuffer;
+    state.hintText = QStringLiteral("Tab/Shift+Tab 选择，Enter 执行，Esc 取消");
+
+    const QVector<int> matchIndices = collectDynamicCommandMatchIndices();
+
+    if (matchIndices.isEmpty())
+    {
+        state.candidates = { QStringLiteral("无匹配命令") };
+        state.activeCandidateIndex = 0;
+        return state;
+    }
+
+    const QVector<DynamicCommandDefinition>& definitions = dynamicCommandDefinitions();
+    state.candidates.reserve(matchIndices.size());
+
+    for (int matchIndex : matchIndices)
+    {
+        if (matchIndex >= 0 && matchIndex < definitions.size())
+        {
+            state.candidates.append(definitions.at(matchIndex).displayName);
+        }
+    }
+
+    const int maxIndex = std::max(0, static_cast<int>(state.candidates.size()) - 1);
+    state.activeCandidateIndex = std::clamp(m_drawState.dynamicCommandActiveIndex, 0, maxIndex);
+    return state;
+}
+
+bool CadController::isDynamicCommandModeActive() const
+{
+    return !m_drawState.hasActiveCommand() && !m_drawState.dynamicCommandBuffer.trimmed().isEmpty();
+}
+
+void CadController::clearDynamicCommandMode()
+{
+    m_drawState.dynamicCommandBuffer.clear();
+    m_drawState.dynamicCommandActiveIndex = 0;
+}
+
+QVector<int> CadController::collectDynamicCommandMatchIndices() const
+{
+    QVector<int> matches;
+
+    if (m_drawState.hasActiveCommand())
+    {
+        return matches;
+    }
+
+    const QString normalizedInput = normalizedCommandToken(m_drawState.dynamicCommandBuffer);
+    const QVector<DynamicCommandDefinition>& definitions = dynamicCommandDefinitions();
+
+    for (int index = 0; index < definitions.size(); ++index)
+    {
+        if (commandAliasMatches(definitions.at(index), normalizedInput))
+        {
+            matches.append(index);
+        }
+    }
+
+    return matches;
+}
+
+void CadController::normalizeDynamicCommandSelectionIndex()
+{
+    const QVector<int> matchIndices = collectDynamicCommandMatchIndices();
+
+    if (matchIndices.isEmpty())
+    {
+        m_drawState.dynamicCommandActiveIndex = 0;
+        return;
+    }
+
+    const int maxIndex = matchIndices.size() - 1;
+    m_drawState.dynamicCommandActiveIndex = std::clamp(m_drawState.dynamicCommandActiveIndex, 0, maxIndex);
+}
+
+bool CadController::cycleDynamicCommandSelection(int step)
+{
+    if (!isDynamicCommandModeActive())
+    {
+        return false;
+    }
+
+    const QVector<int> matchIndices = collectDynamicCommandMatchIndices();
+
+    if (matchIndices.isEmpty())
+    {
+        return true;
+    }
+
+    const int size = matchIndices.size();
+    const int currentIndex = std::clamp(m_drawState.dynamicCommandActiveIndex, 0, size - 1);
+    const int stepNormalized = step >= 0 ? 1 : -1;
+    const int nextIndex = (currentIndex + stepNormalized + size) % size;
+    m_drawState.dynamicCommandActiveIndex = nextIndex;
+
+    if (m_viewer != nullptr)
+    {
+        m_viewer->refreshCommandPrompt();
+        m_viewer->requestViewUpdate();
+    }
+
+    return true;
+}
+
+bool CadController::executeSelectedDynamicCommand()
+{
+    if (!isDynamicCommandModeActive())
+    {
+        return false;
+    }
+
+    const QVector<int> matchIndices = collectDynamicCommandMatchIndices();
+
+    if (matchIndices.isEmpty())
+    {
+        if (m_viewer != nullptr)
+        {
+            m_viewer->appendCommandMessage(QStringLiteral("未找到可执行命令"));
+            m_viewer->refreshCommandPrompt();
+            m_viewer->requestViewUpdate();
+        }
+
+        return true;
+    }
+
+    const int selectedOrdinal = std::clamp(m_drawState.dynamicCommandActiveIndex, 0, static_cast<int>(matchIndices.size()) - 1);
+    const int selectedIndex = matchIndices.at(selectedOrdinal);
+    const QVector<DynamicCommandDefinition>& definitions = dynamicCommandDefinitions();
+    const QString canonicalCommand = definitions.at(selectedIndex).canonical;
+    clearDynamicCommandMode();
+    const bool handled = executeIdleCommandByCanonical(canonicalCommand);
+
+    if (!handled && m_viewer != nullptr)
+    {
+        m_viewer->appendCommandMessage(QStringLiteral("命令执行失败: %1").arg(canonicalCommand));
+        m_viewer->refreshCommandPrompt();
+        m_viewer->requestViewUpdate();
+    }
+
+    return true;
+}
+
+bool CadController::executeIdleCommandByCanonical(const QString& canonicalCommand)
+{
+    const QString normalized = normalizedCommandToken(canonicalCommand);
+
+    if (normalized == QStringLiteral("point"))
+    {
+        beginDrawing(DrawType::Point, m_drawState.drawingColor);
+        return true;
+    }
+
+    if (normalized == QStringLiteral("line"))
+    {
+        beginDrawing(DrawType::Line, m_drawState.drawingColor);
+        return true;
+    }
+
+    if (normalized == QStringLiteral("circle"))
+    {
+        beginDrawing(DrawType::Circle, m_drawState.drawingColor);
+        return true;
+    }
+
+    if (normalized == QStringLiteral("arc"))
+    {
+        beginDrawing(DrawType::Arc, m_drawState.drawingColor);
+        return true;
+    }
+
+    if (normalized == QStringLiteral("ellipse"))
+    {
+        beginDrawing(DrawType::Ellipse, m_drawState.drawingColor);
+        return true;
+    }
+
+    if (normalized == QStringLiteral("polyline"))
+    {
+        beginDrawing(DrawType::Polyline, m_drawState.drawingColor);
+        return true;
+    }
+
+    if (normalized == QStringLiteral("lwpolyline"))
+    {
+        beginDrawing(DrawType::LWPolyline, m_drawState.drawingColor);
+        return true;
+    }
+
+    if (normalized == QStringLiteral("move"))
+    {
+        return beginMoveSelected();
+    }
+
+    if (normalized == QStringLiteral("delete"))
+    {
+        return deleteSelectedEntity();
+    }
+
+    if (normalized == QStringLiteral("color"))
+    {
+        return changeSelectedEntityColor();
+    }
+
+    if (normalized == QStringLiteral("fit"))
+    {
+        if (m_viewer != nullptr)
+        {
+            m_viewer->fitSceneView();
+            return true;
+        }
+
+        return false;
+    }
+
+    if (normalized == QStringLiteral("top"))
+    {
+        if (m_viewer != nullptr)
+        {
+            m_viewer->resetToTopView();
+            return true;
+        }
+
+        return false;
+    }
+
+    if (normalized == QStringLiteral("zoomin"))
+    {
+        if (m_viewer != nullptr)
+        {
+            m_viewer->zoomIn();
+            return true;
+        }
+
+        return false;
+    }
+
+    if (normalized == QStringLiteral("zoomout"))
+    {
+        if (m_viewer != nullptr)
+        {
+            m_viewer->zoomOut();
+            return true;
+        }
+
+        return false;
+    }
+
+    return false;
+}
+
+bool CadController::deleteSelectedEntity()
+{
+    if (m_editer == nullptr || m_viewer == nullptr)
+    {
+        return false;
+    }
+
+    const bool handled = m_editer->deleteEntity(m_viewer->selectedEntity());
+
+    if (handled)
+    {
+        m_viewer->appendCommandMessage(QStringLiteral("已删除选中图元"));
+        m_viewer->refreshCommandPrompt();
+    }
+
+    return handled;
+}
+
+bool CadController::changeSelectedEntityColor()
+{
+    if (m_editer == nullptr || m_viewer == nullptr)
+    {
+        return false;
+    }
+
+    CadItem* selectedItem = m_viewer->selectedEntity();
+
+    if (selectedItem == nullptr)
+    {
+        return true;
+    }
+
+    const QColor color = QColorDialog::getColor
+    (
+        selectedItem->m_color,
+        m_viewer,
+        QStringLiteral("选择图元颜色")
+    );
+
+    if (!color.isValid())
+    {
+        return true;
+    }
+
+    const bool handled = m_editer->changeEntityColor(selectedItem, color);
+
+    if (handled)
+    {
+        m_viewer->appendCommandMessage(QStringLiteral("已修改图元颜色"));
+        m_viewer->refreshCommandPrompt();
+    }
+
+    return handled;
 }
 
 QString CadController::currentPointInputStageKey() const
@@ -1796,9 +2290,21 @@ QString CadController::appendDynamicInputPromptState(const QString& basePrompt) 
                 .arg(yText);
         }
     }
-    else if (!m_drawState.dynamicInputBuffer.isEmpty())
+    else if (isDynamicCommandModeActive())
     {
-        prompt += QStringLiteral(" | 输入: %1").arg(m_drawState.dynamicInputBuffer);
+        const QVector<int> matchIndices = collectDynamicCommandMatchIndices();
+
+        if (!matchIndices.isEmpty())
+        {
+            const int selectedOrdinal = std::clamp(m_drawState.dynamicCommandActiveIndex, 0, static_cast<int>(matchIndices.size()) - 1);
+            const QVector<DynamicCommandDefinition>& definitions = dynamicCommandDefinitions();
+            const QString selectedDisplay = definitions.at(matchIndices.at(selectedOrdinal)).displayName;
+            prompt += QStringLiteral(" | 命令: %1 | 候选: %2").arg(m_drawState.dynamicCommandBuffer, selectedDisplay);
+        }
+        else
+        {
+            prompt += QStringLiteral(" | 命令: %1 | 无匹配").arg(m_drawState.dynamicCommandBuffer);
+        }
     }
 
     if (m_drawState.orthoEnabled)

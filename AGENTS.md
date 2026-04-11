@@ -19,7 +19,6 @@ devenv .\G-code_post-processing_system.slnx
 
 ## 代码风格与命名规范
 使用 C++17，括号采用 Allman 风格。类名使用 `PascalCase`，函数和局部变量使用 `camelCase`，成员变量使用 `m_` 前缀。保持现有分层，界面与视图逻辑放在 `CadViewer`、`Gcode_postprocessing_system` 一类模块中，数据读取与文档处理逻辑放在 `dx_iface`、`DxfDocument` 等模块中。
-文本文件统一使用 Windows 换行符 `CRLF`，并保留 Windows 风格文件结尾换行。
 
 ## 测试指南
 当前仓库没有独立的自动化测试工程。每次提交前至少完成以下检查：
