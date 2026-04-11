@@ -899,7 +899,8 @@ namespace CadPreviewBuilder
     std::vector<TransientPrimitive> buildTransientPrimitives
     (
         const DrawStateMachine& state,
-        CadItem* selectedItem
+        CadItem* selectedItem,
+        const QVector<CadItem*>& selectedItems
     )
     {
         std::vector<TransientPrimitive> primitives;
@@ -914,34 +915,46 @@ namespace CadPreviewBuilder
         if (state.editType == EditType::Move)
         {
             // Move 命令预览由"整体平移后的实体"加"一条基点到目标点引导线"组成
-            if (selectedItem != nullptr
-                && state.moveSubMode == MoveEditSubMode::AwaitTargetPoint
-                && !state.commandPoints.isEmpty())
+            if (state.moveSubMode == MoveEditSubMode::AwaitTargetPoint
+                && !state.commandPoints.isEmpty()
+                && !selectedItems.isEmpty())
             {
-                const QVector3D basePoint = state.commandPoints.front();
-                const QVector3D delta = state.currentPos - basePoint;
+                const QVector3D basePoint = CadViewerUtils::flattenedToGroundPlane(state.commandPoints.front());
+                const QVector3D currentPoint = CadViewerUtils::flattenedToGroundPlane(state.currentPos);
+                const QVector3D delta = currentPoint - basePoint;
 
-                // 创建移动后的实体预览
-                TransientPrimitive movedEntityPreview;
-                movedEntityPreview.primitiveType = CadViewerUtils::primitiveTypeForEntity(selectedItem);
-                movedEntityPreview.color = QVector3D(0.98f, 0.67f, 0.12f);  // 橙色
-                movedEntityPreview.pointSize = movedEntityPreview.primitiveType == GL_POINTS ? 12.0f : 1.0f;
-                movedEntityPreview.roundPoint = movedEntityPreview.primitiveType == GL_POINTS;
-
-                movedEntityPreview.vertices.reserve(selectedItem->m_geometry.vertices.size());
-
-                for (const QVector3D& vertex : selectedItem->m_geometry.vertices)
+                for (CadItem* item : selectedItems)
                 {
-                    movedEntityPreview.vertices.append(vertex + delta);
-                }
+                    if (item == nullptr || item->m_geometry.vertices.isEmpty())
+                    {
+                        continue;
+                    }
 
-                primitives.push_back(std::move(movedEntityPreview));
+                    // 创建移动后的实体预览
+                    TransientPrimitive movedEntityPreview;
+                    movedEntityPreview.primitiveType = CadViewerUtils::primitiveTypeForEntity(item);
+                    movedEntityPreview.color = QVector3D(0.98f, 0.67f, 0.12f);  // 橙色
+                    movedEntityPreview.pointSize = movedEntityPreview.primitiveType == GL_POINTS ? 12.0f : 1.0f;
+                    movedEntityPreview.roundPoint = movedEntityPreview.primitiveType == GL_POINTS;
+
+                    movedEntityPreview.vertices.reserve(item->m_geometry.vertices.size());
+
+                    for (const QVector3D& vertex : item->m_geometry.vertices)
+                    {
+                        movedEntityPreview.vertices.append(vertex + delta);
+                    }
+
+                    if (!movedEntityPreview.vertices.isEmpty())
+                    {
+                        primitives.push_back(std::move(movedEntityPreview));
+                    }
+                }
 
                 // 创建引导线预览
                 TransientPrimitive guideLine;
                 guideLine.primitiveType = GL_LINES;
                 guideLine.color = QVector3D(0.35f, 0.90f, 1.0f);  // 青色
-                guideLine.vertices = { basePoint, state.currentPos };
+                guideLine.vertices = { basePoint, currentPoint };
                 primitives.push_back(std::move(guideLine));
             }
 
@@ -951,7 +964,14 @@ namespace CadPreviewBuilder
         // 处理控制点编辑命令预览
         if (state.editType == EditType::GripEdit)
         {
-            if (selectedItem != nullptr
+            CadItem* gripTarget = selectedItem;
+
+            if (gripTarget == nullptr && !selectedItems.isEmpty())
+            {
+                gripTarget = selectedItems.front();
+            }
+
+            if (gripTarget != nullptr
                 && state.gripSubMode == GripEditSubMode::AwaitTargetPoint
                 && state.gripPointIndex >= 0
                 && !state.commandPoints.isEmpty())
@@ -961,7 +981,7 @@ namespace CadPreviewBuilder
 
                 TransientPrimitive entityPreview;
 
-                if (buildGripEditedEntityPreview(selectedItem, state.gripPointIndex, targetPoint, entityPreview))
+                if (buildGripEditedEntityPreview(gripTarget, state.gripPointIndex, targetPoint, entityPreview))
                 {
                     primitives.push_back(std::move(entityPreview));
                 }

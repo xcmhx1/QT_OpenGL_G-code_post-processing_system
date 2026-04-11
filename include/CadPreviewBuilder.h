@@ -7,6 +7,9 @@
 // 标准库
 #include <vector>
 
+// Qt
+#include <QVector>
+
 // CAD 模块内部依赖
 #include "CadRenderTypes.h"
 
@@ -28,6 +31,7 @@ namespace CadPreviewBuilder
     std::vector<TransientPrimitive> buildTransientPrimitives
     (
         const DrawStateMachine& state,
-        CadItem* selectedItem
+        CadItem* selectedItem,
+        const QVector<CadItem*>& selectedItems
     );
 }

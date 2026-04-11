@@ -2762,7 +2762,7 @@ CadItem* CadViewer::findEntityById(EntityId id) const
 // @return 临时图元列表
 std::vector<TransientPrimitive> CadViewer::buildTransientPrimitives() const
 {
-    return CadPreviewBuilder::buildTransientPrimitives(m_controller.drawState(), selectedEntity());
+    return CadPreviewBuilder::buildTransientPrimitives(m_controller.drawState(), selectedEntity(), selectedEntities());
 }
 
 std::vector<TransientPrimitive> CadViewer::buildProcessDirectionPrimitives() const
