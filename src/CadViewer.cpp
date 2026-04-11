@@ -617,19 +617,60 @@ void CadViewer::endViewInteraction()
 
 // 在屏幕位置选择实体
 // @param screenPos 屏幕坐标点
-void CadViewer::selectEntityAt(const QPoint& screenPos)
+void CadViewer::selectEntityAt(const QPoint& screenPos, SelectionUpdateMode updateMode)
 {
-    setSelectedEntityId(pickEntity(screenPos));
+    const EntityId pickedId = pickEntity(screenPos);
+
+    if (updateMode == SelectionUpdateMode::Toggle)
+    {
+        if (pickedId != 0)
+        {
+            QSet<EntityId> selectedIds = m_selectedEntityIds;
+            EntityId preferredEntityId = m_selectedEntityId;
+
+            if (selectedIds.contains(pickedId))
+            {
+                selectedIds.remove(pickedId);
+
+                if (preferredEntityId == pickedId)
+                {
+                    preferredEntityId = 0;
+                }
+            }
+            else
+            {
+                selectedIds.insert(pickedId);
+                preferredEntityId = pickedId;
+            }
+
+            setSelectedEntities(selectedIds, preferredEntityId);
+        }
+    }
+    else
+    {
+        setSelectedEntityId(pickedId);
+    }
+
     update();
 }
 
-void CadViewer::selectEntitiesInWindow(const QPoint& startScreenPos, const QPoint& endScreenPos, bool crossingSelection)
+void CadViewer::selectEntitiesInWindow
+(
+    const QPoint& startScreenPos,
+    const QPoint& endScreenPos,
+    bool crossingSelection,
+    SelectionUpdateMode updateMode
+)
 {
     CadDocument* scene = m_sceneCoordinator.document();
 
     if (scene == nullptr)
     {
-        setSelectedEntities(QSet<EntityId>(), 0);
+        if (updateMode == SelectionUpdateMode::Replace)
+        {
+            setSelectedEntities(QSet<EntityId>(), 0);
+        }
+
         update();
         return;
     }
@@ -638,7 +679,11 @@ void CadViewer::selectEntitiesInWindow(const QPoint& startScreenPos, const QPoin
 
     if (selectionRect.width() < kWindowSelectionMinimumPixels || selectionRect.height() < kWindowSelectionMinimumPixels)
     {
-        setSelectedEntities(QSet<EntityId>(), 0);
+        if (updateMode == SelectionUpdateMode::Replace)
+        {
+            setSelectedEntities(QSet<EntityId>(), 0);
+        }
+
         update();
         return;
     }
@@ -664,8 +709,47 @@ void CadViewer::selectEntitiesInWindow(const QPoint& startScreenPos, const QPoin
         }
     }
 
-    const EntityId preferredEntityId = pickedIds.empty() ? 0 : pickedIds.front();
-    setSelectedEntities(selectedIds, preferredEntityId);
+    EntityId preferredEntityId = pickedIds.empty() ? 0 : pickedIds.front();
+
+    if (updateMode == SelectionUpdateMode::Toggle)
+    {
+        QSet<EntityId> mergedSelection = m_selectedEntityIds;
+
+        for (EntityId id : selectedIds)
+        {
+            if (mergedSelection.contains(id))
+            {
+                mergedSelection.remove(id);
+            }
+            else
+            {
+                mergedSelection.insert(id);
+            }
+        }
+
+        preferredEntityId = m_selectedEntityId;
+
+        for (EntityId id : pickedIds)
+        {
+            if (id != 0 && mergedSelection.contains(id))
+            {
+                preferredEntityId = id;
+                break;
+            }
+        }
+
+        if (preferredEntityId != 0 && !mergedSelection.contains(preferredEntityId))
+        {
+            preferredEntityId = 0;
+        }
+
+        setSelectedEntities(mergedSelection, preferredEntityId);
+    }
+    else
+    {
+        setSelectedEntities(selectedIds, preferredEntityId);
+    }
+
     m_windowPreviewEntityIds.clear();
     update();
 }

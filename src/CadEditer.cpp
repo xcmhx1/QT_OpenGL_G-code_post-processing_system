@@ -9,6 +9,8 @@
 #include "CadItem.h"
 #include "DrawStateMachine.h"
 
+#include <QSet>
+
 #include <cmath>
 #include <limits>
 
@@ -1639,6 +1641,61 @@ private:
     QVector3D m_delta;
 };
 
+class MoveEntitiesCommand final : public CadEditer::EditCommand
+{
+public:
+    MoveEntitiesCommand(CadDocument* document, const QVector<CadItem*>& items, const QVector3D& delta)
+        : m_document(document)
+        , m_items(items)
+        , m_delta(delta)
+    {
+    }
+
+    bool execute() override
+    {
+        return applyDelta(m_delta);
+    }
+
+    bool undo() override
+    {
+        return applyDelta(-m_delta);
+    }
+
+private:
+    bool applyDelta(const QVector3D& delta)
+    {
+        if (m_document == nullptr || m_items.isEmpty())
+        {
+            return false;
+        }
+
+        for (CadItem* item : m_items)
+        {
+            if (item == nullptr || !m_document->containsEntity(item))
+            {
+                return false;
+            }
+        }
+
+        for (CadItem* item : m_items)
+        {
+            translateEntity(item->m_nativeEntity, delta);
+
+            if (!m_document->refreshEntity(item))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+private:
+    CadDocument* m_document = nullptr;
+    QVector<CadItem*> m_items;
+    QVector3D m_delta;
+};
+
 class GripPointEditCommand final : public CadEditer::EditCommand
 {
 public:
@@ -2244,6 +2301,7 @@ void CadEditer::clearHistory()
 void CadEditer::cancelTransientCommand()
 {
     m_moveTarget = nullptr;
+    m_moveTargets.clear();
     m_gripTarget = nullptr;
     m_gripPointIndex = -1;
 }
@@ -2421,7 +2479,32 @@ bool CadEditer::finishActivePolyline(DrawStateMachine& drawState, bool closePoly
 // @return 如果命令成功进入活动状态返回 true，否则返回 false
 bool CadEditer::beginMove(DrawStateMachine& drawState, CadItem* item)
 {
-    if (m_document == nullptr || item == nullptr || !m_document->containsEntity(item))
+    return beginMove(drawState, QVector<CadItem*>{ item });
+}
+
+bool CadEditer::beginMove(DrawStateMachine& drawState, const QVector<CadItem*>& items)
+{
+    if (m_document == nullptr || items.isEmpty())
+    {
+        return false;
+    }
+
+    QSet<CadItem*> dedup;
+    QVector<CadItem*> validatedTargets;
+    validatedTargets.reserve(items.size());
+
+    for (CadItem* item : items)
+    {
+        if (item == nullptr || !m_document->containsEntity(item) || dedup.contains(item))
+        {
+            continue;
+        }
+
+        dedup.insert(item);
+        validatedTargets.append(item);
+    }
+
+    if (validatedTargets.isEmpty())
     {
         return false;
     }
@@ -2434,7 +2517,8 @@ bool CadEditer::beginMove(DrawStateMachine& drawState, CadItem* item)
     drawState.moveSubMode = MoveEditSubMode::AwaitBasePoint;
     drawState.gripSubMode = GripEditSubMode::Idle;
     drawState.gripPointIndex = -1;
-    m_moveTarget = item;
+    m_moveTargets = validatedTargets;
+    m_moveTarget = m_moveTargets.front();
     m_gripTarget = nullptr;
     m_gripPointIndex = -1;
     return true;
@@ -2467,6 +2551,7 @@ bool CadEditer::beginGripEdit(DrawStateMachine& drawState, CadItem* item, const 
     drawState.gripSubMode = GripEditSubMode::AwaitTargetPoint;
     drawState.gripPointIndex = handle.pointIndex;
     m_moveTarget = nullptr;
+    m_moveTargets.clear();
     m_gripTarget = item;
     m_gripPointIndex = handle.pointIndex;
     return true;
@@ -2485,6 +2570,13 @@ bool CadEditer::deleteEntity(CadItem* item)
     if (item == m_moveTarget)
     {
         m_moveTarget = nullptr;
+    }
+
+    const int moveIndex = m_moveTargets.indexOf(item);
+
+    if (moveIndex >= 0)
+    {
+        m_moveTargets.removeAt(moveIndex);
     }
 
     if (item == m_gripTarget)
@@ -3033,14 +3125,39 @@ bool CadEditer::handleMoveEditing
 )
 {
     // 目标失效时立刻退出 Move 模式，避免悬空编辑状态
-    if (m_moveTarget == nullptr || m_document == nullptr || !m_document->containsEntity(m_moveTarget))
+    if (m_document == nullptr)
     {
         currentState.commandPoints.clear();
         currentState.editType = EditType::None;
         currentState.moveSubMode = MoveEditSubMode::Idle;
         m_moveTarget = nullptr;
+        m_moveTargets.clear();
         return false;
     }
+
+    QVector<CadItem*> validTargets;
+    validTargets.reserve(m_moveTargets.size());
+
+    for (CadItem* item : m_moveTargets)
+    {
+        if (item != nullptr && m_document->containsEntity(item))
+        {
+            validTargets.append(item);
+        }
+    }
+
+    if (validTargets.isEmpty())
+    {
+        currentState.commandPoints.clear();
+        currentState.editType = EditType::None;
+        currentState.moveSubMode = MoveEditSubMode::Idle;
+        m_moveTarget = nullptr;
+        m_moveTargets.clear();
+        return false;
+    }
+
+    m_moveTargets = validTargets;
+    m_moveTarget = m_moveTargets.front();
 
     if (previousState.moveSubMode == MoveEditSubMode::AwaitBasePoint)
     {
@@ -3057,7 +3174,7 @@ bool CadEditer::handleMoveEditing
 
         if (delta.lengthSquared() > kGeometryEpsilon)
         {
-            if (!executeCommand(std::make_unique<MoveEntityCommand>(m_document, m_moveTarget, delta)))
+            if (!executeCommand(std::make_unique<MoveEntitiesCommand>(m_document, m_moveTargets, delta)))
             {
                 return false;
             }
@@ -3068,6 +3185,7 @@ bool CadEditer::handleMoveEditing
         currentState.editType = EditType::None;
         currentState.moveSubMode = MoveEditSubMode::Idle;
         m_moveTarget = nullptr;
+        m_moveTargets.clear();
         return true;
     }
 

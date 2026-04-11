@@ -7,6 +7,7 @@
 #include <vector>
 
 #include <QColor>
+#include <QVector>
 #include <QVector3D>
 
 #include "CadProcessVisualUtils.h"
@@ -81,6 +82,9 @@ public:
     // @param item 待移动实体
     // @return 如果命令成功进入活动状态返回 true，否则返回 false
     bool beginMove(DrawStateMachine& drawState, CadItem* item);
+
+    // 开始移动编辑命令（多实体）
+    bool beginMove(DrawStateMachine& drawState, const QVector<CadItem*>& items);
 
     // 开始控制点编辑命令
     bool beginGripEdit(DrawStateMachine& drawState, CadItem* item, const CadSelectionHandleInfo& handle);
@@ -190,6 +194,9 @@ private:
 
     // Move 命令当前锁定的目标实体
     CadItem* m_moveTarget = nullptr;
+
+    // Move 命令当前锁定的目标实体集合（用于多选移动）
+    QVector<CadItem*> m_moveTargets;
 
     // 控制点编辑当前锁定的目标实体
     CadItem* m_gripTarget = nullptr;

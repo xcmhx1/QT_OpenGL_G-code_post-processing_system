@@ -51,6 +51,12 @@ class CadViewer : public QOpenGLWidget, protected QOpenGLFunctions_4_5_Core
     Q_OBJECT  // Qt 元对象系统宏，支持信号槽机制
 
 public:
+    enum class SelectionUpdateMode
+    {
+        Replace,
+        Toggle
+    };
+
     // 构造函数，初始化 CAD 视图
     explicit CadViewer(QWidget* parent = nullptr);
 
@@ -135,11 +141,17 @@ public:
 
     // 在屏幕位置选择实体
     // @param screenPos 屏幕坐标点
-    void selectEntityAt(const QPoint& screenPos);
+    void selectEntityAt(const QPoint& screenPos, SelectionUpdateMode updateMode = SelectionUpdateMode::Replace);
 
     // 在屏幕矩形窗口内批量选择实体。
     // crossingSelection=true 为碰选；false 为包含选。
-    void selectEntitiesInWindow(const QPoint& startScreenPos, const QPoint& endScreenPos, bool crossingSelection);
+    void selectEntitiesInWindow
+    (
+        const QPoint& startScreenPos,
+        const QPoint& endScreenPos,
+        bool crossingSelection,
+        SelectionUpdateMode updateMode = SelectionUpdateMode::Replace
+    );
 
     // 获取当前选中的实体集合（按场景遍历顺序）。
     QVector<CadItem*> selectedEntities() const;

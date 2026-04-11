@@ -261,13 +261,19 @@ bool CadController::beginMoveSelected()
         return false;
     }
 
-    const bool handled = m_editer->beginMove(m_drawState, m_viewer->selectedEntity());
+    const QVector<CadItem*> selectedItems = m_viewer->selectedEntities();
+    const bool handled = m_editer->beginMove(m_drawState, selectedItems);
 
     if (handled)
     {
         clearDynamicCommandMode();
         resetPointDynamicInputSession(currentPointInputStageKey());
-        m_viewer->appendCommandMessage(QStringLiteral("已进入移动命令"));
+        m_viewer->appendCommandMessage
+        (
+            selectedItems.size() > 1
+                ? QStringLiteral("已进入移动命令（%1 个图元）").arg(selectedItems.size())
+                : QStringLiteral("已进入移动命令")
+        );
         m_viewer->refreshCommandPrompt();
     }
 
@@ -1518,15 +1524,36 @@ bool CadController::deleteSelectedEntity()
         return false;
     }
 
-    const bool handled = m_editer->deleteEntity(m_viewer->selectedEntity());
+    const QVector<CadItem*> selectedItems = m_viewer->selectedEntities();
 
-    if (handled)
+    if (selectedItems.isEmpty())
     {
-        m_viewer->appendCommandMessage(QStringLiteral("已删除选中图元"));
-        m_viewer->refreshCommandPrompt();
+        return false;
     }
 
-    return handled;
+    int deletedCount = 0;
+
+    for (CadItem* item : selectedItems)
+    {
+        if (item != nullptr && m_editer->deleteEntity(item))
+        {
+            ++deletedCount;
+        }
+    }
+
+    if (deletedCount > 0)
+    {
+        m_viewer->appendCommandMessage
+        (
+            deletedCount > 1
+                ? QStringLiteral("已删除 %1 个图元").arg(deletedCount)
+                : QStringLiteral("已删除选中图元")
+        );
+        m_viewer->refreshCommandPrompt();
+        return true;
+    }
+
+    return false;
 }
 
 bool CadController::changeSelectedEntityColor()
@@ -1536,11 +1563,18 @@ bool CadController::changeSelectedEntityColor()
         return false;
     }
 
+    const QVector<CadItem*> selectedItems = m_viewer->selectedEntities();
+
+    if (selectedItems.isEmpty())
+    {
+        return true;
+    }
+
     CadItem* selectedItem = m_viewer->selectedEntity();
 
     if (selectedItem == nullptr)
     {
-        return true;
+        selectedItem = selectedItems.front();
     }
 
     const QColor color = QColorDialog::getColor
@@ -1555,15 +1589,29 @@ bool CadController::changeSelectedEntityColor()
         return true;
     }
 
-    const bool handled = m_editer->changeEntityColor(selectedItem, color);
+    int changedCount = 0;
 
-    if (handled)
+    for (CadItem* item : selectedItems)
     {
-        m_viewer->appendCommandMessage(QStringLiteral("已修改图元颜色"));
-        m_viewer->refreshCommandPrompt();
+        if (item != nullptr && m_editer->changeEntityColor(item, color))
+        {
+            ++changedCount;
+        }
     }
 
-    return handled;
+    if (changedCount > 0)
+    {
+        m_viewer->appendCommandMessage
+        (
+            changedCount > 1
+                ? QStringLiteral("已修改 %1 个图元颜色").arg(changedCount)
+                : QStringLiteral("已修改图元颜色")
+        );
+        m_viewer->refreshCommandPrompt();
+        return true;
+    }
+
+    return false;
 }
 
 QString CadController::currentPointInputStageKey() const
@@ -2368,23 +2416,34 @@ bool CadController::finishIdleWindowSelection(const QPoint& screenPos)
     m_idleWindowSelectionAnchor = QPoint();
     m_idleWindowSelectionCurrent = QPoint();
     m_viewer->hideSelectionWindowPreview();
+    const bool shiftSelectionToggle = (m_drawState.keyboardModifiers & Qt::ShiftModifier) != 0;
 
     if (draggedSelection)
     {
         const bool crossingSelection = screenPos.x() < selectionAnchor.x();
-        m_viewer->selectEntitiesInWindow(selectionAnchor, screenPos, crossingSelection);
+        m_viewer->selectEntitiesInWindow
+        (
+            selectionAnchor,
+            screenPos,
+            crossingSelection,
+            shiftSelectionToggle ? CadViewer::SelectionUpdateMode::Toggle : CadViewer::SelectionUpdateMode::Replace
+        );
         m_viewer->appendCommandMessage
         (
-            crossingSelection
-                ? QStringLiteral("框选完成（碰选）")
-                : QStringLiteral("框选完成（包含选）")
+            shiftSelectionToggle
+                ? (crossingSelection
+                    ? QStringLiteral("框选增量切换完成（碰选）")
+                    : QStringLiteral("框选增量切换完成（包含选）"))
+                : (crossingSelection
+                    ? QStringLiteral("框选完成（碰选）")
+                    : QStringLiteral("框选完成（包含选）"))
         );
         m_viewer->refreshCommandPrompt();
         return true;
     }
 
     // 空闲状态下优先尝试命中当前主选中图元的可编辑控制点
-    if (m_editer != nullptr)
+    if (m_editer != nullptr && !shiftSelectionToggle)
     {
         CadSelectionHandleInfo handleInfo;
 
@@ -2400,7 +2459,11 @@ bool CadController::finishIdleWindowSelection(const QPoint& screenPos)
         }
     }
 
-    m_viewer->selectEntityAt(screenPos);
+    m_viewer->selectEntityAt
+    (
+        screenPos,
+        shiftSelectionToggle ? CadViewer::SelectionUpdateMode::Toggle : CadViewer::SelectionUpdateMode::Replace
+    );
     m_viewer->refreshCommandPrompt();
     return true;
 }
