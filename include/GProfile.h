@@ -24,6 +24,11 @@ struct GProfileRotaryAxisConfig
     bool invertAAxisDirection = false;
     bool keepContinuousAngle = true;
     bool useSafeZBeforeRapid = true;
+    QString sectionType = QStringLiteral("radial");
+    double sectionHalfWidthY = 0.0;
+    double sectionHalfHeightZ = 0.0;
+    double sectionCornerRadiusY = 0.0;
+    double sectionCornerRadiusZ = 0.0;
 
     QJsonObject toJson() const;
     static GProfileRotaryAxisConfig fromJson(const QJsonObject& object);

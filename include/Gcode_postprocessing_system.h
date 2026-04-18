@@ -58,6 +58,7 @@ private:
     bool importBitmapFile(const QString& filePath);
     bool saveCurrentDocument();
     bool exportDxfDocument(bool safeMode = false);
+    bool exportGCodeDocument();
     bool writeDocumentToDxf(const QString& filePath, bool updateCurrentPath, bool safeMode = false);
     QString ensureDxfSuffix(const QString& filePath) const;
     QString defaultDxfPathForCurrentDocument() const;

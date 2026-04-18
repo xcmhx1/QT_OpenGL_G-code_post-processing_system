@@ -1876,10 +1876,13 @@ Gcode_postprocessing_system::Gcode_postprocessing_system(QWidget* parent)
 
     ui->action_File_Export_G->setText(QStringLiteral("导出为DXF..."));
     QAction* exportSafeDxfAction = new QAction(QStringLiteral("导出为DXF（安全模式）..."), this);
+    QAction* exportGCodeAction = new QAction(QStringLiteral("导出G代码..."), this);
     ui->menuFile->insertAction(ui->action_File_Export_G, exportSafeDxfAction);
+    ui->menuFile->insertAction(ui->action_File_Export_G, exportGCodeAction);
     connect(ui->action_FileExport, &QAction::triggered, this, [this]() { saveCurrentDocument(); });
     connect(ui->action_File_Export_G, &QAction::triggered, this, [this]() { exportDxfDocument(); });
     connect(exportSafeDxfAction, &QAction::triggered, this, [this]() { exportDxfDocument(true); });
+    connect(exportGCodeAction, &QAction::triggered, this, [this]() { exportGCodeDocument(); });
     connect(ui->action_Edit_ReversePeocess, &QAction::triggered, this, [this]() { toggleSelectedEntityReverse(); });
     connect(ui->action_Sort_2D_Assign, &QAction::triggered, this, [this]() { sortEntitiesByCurrentDirection(); });
     connect(ui->action_Sort_2D_Smart, &QAction::triggered, this, [this]() { smartSortEntities(); });
@@ -2068,6 +2071,46 @@ bool Gcode_postprocessing_system::exportDxfDocument(bool safeMode)
             : QStringLiteral("导出完成: %1").arg(QFileInfo(filePath).fileName()),
         5000
     );
+    return true;
+}
+
+bool Gcode_postprocessing_system::exportGCodeDocument()
+{
+    if (m_document.m_entities.empty())
+    {
+        QMessageBox::warning(this, QStringLiteral("导出G代码"), QStringLiteral("当前文档为空，无法导出 G 代码。"));
+        return false;
+    }
+
+    GGenerator generator;
+    generator.setDocument(&m_document);
+    generator.setProfile(&m_activeProfile);
+    generator.setGenerationMode(resolveGenerationMode());
+
+    QString message;
+
+    if (!generator.generate(this, &message))
+    {
+        if (!message.trimmed().isEmpty())
+        {
+            QMessageBox::warning(this, QStringLiteral("导出G代码"), message);
+        }
+
+        return false;
+    }
+
+    if (!message.trimmed().isEmpty())
+    {
+        statusBar()->showMessage(QStringLiteral("G代码导出完成（含提示）"), 5000);
+        ui->openGLWidget->appendCommandMessage(QStringLiteral("G代码导出完成：%1").arg(message));
+    }
+    else
+    {
+        statusBar()->showMessage(QStringLiteral("G代码导出完成"), 5000);
+        ui->openGLWidget->appendCommandMessage(QStringLiteral("G代码导出完成。"));
+    }
+
+    ui->openGLWidget->refreshCommandPrompt();
     return true;
 }
 

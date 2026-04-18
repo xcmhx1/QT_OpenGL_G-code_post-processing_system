@@ -24,6 +24,11 @@ namespace
     constexpr const char* kInvertAAxisDirectionKey = "invertAAxisDirection";
     constexpr const char* kKeepContinuousAngleKey = "keepContinuousAngle";
     constexpr const char* kUseSafeZBeforeRapidKey = "useSafeZBeforeRapid";
+    constexpr const char* kSectionTypeKey = "sectionType";
+    constexpr const char* kSectionHalfWidthYKey = "sectionHalfWidthY";
+    constexpr const char* kSectionHalfHeightZKey = "sectionHalfHeightZ";
+    constexpr const char* kSectionCornerRadiusYKey = "sectionCornerRadiusY";
+    constexpr const char* kSectionCornerRadiusZKey = "sectionCornerRadiusZ";
 }
 
 QJsonObject GProfileCodeBlock::toJson() const
@@ -54,6 +59,11 @@ QJsonObject GProfileRotaryAxisConfig::toJson() const
     object.insert(kInvertAAxisDirectionKey, invertAAxisDirection);
     object.insert(kKeepContinuousAngleKey, keepContinuousAngle);
     object.insert(kUseSafeZBeforeRapidKey, useSafeZBeforeRapid);
+    object.insert(kSectionTypeKey, sectionType);
+    object.insert(kSectionHalfWidthYKey, sectionHalfWidthY);
+    object.insert(kSectionHalfHeightZKey, sectionHalfHeightZ);
+    object.insert(kSectionCornerRadiusYKey, sectionCornerRadiusY);
+    object.insert(kSectionCornerRadiusZKey, sectionCornerRadiusZ);
     return object;
 }
 
@@ -67,6 +77,11 @@ GProfileRotaryAxisConfig GProfileRotaryAxisConfig::fromJson(const QJsonObject& o
     config.invertAAxisDirection = object.value(kInvertAAxisDirectionKey).toBool(config.invertAAxisDirection);
     config.keepContinuousAngle = object.value(kKeepContinuousAngleKey).toBool(config.keepContinuousAngle);
     config.useSafeZBeforeRapid = object.value(kUseSafeZBeforeRapidKey).toBool(config.useSafeZBeforeRapid);
+    config.sectionType = object.value(kSectionTypeKey).toString(config.sectionType).trimmed().toLower();
+    config.sectionHalfWidthY = object.value(kSectionHalfWidthYKey).toDouble(config.sectionHalfWidthY);
+    config.sectionHalfHeightZ = object.value(kSectionHalfHeightZKey).toDouble(config.sectionHalfHeightZ);
+    config.sectionCornerRadiusY = object.value(kSectionCornerRadiusYKey).toDouble(config.sectionCornerRadiusY);
+    config.sectionCornerRadiusZ = object.value(kSectionCornerRadiusZKey).toDouble(config.sectionCornerRadiusZ);
     return config;
 }
 

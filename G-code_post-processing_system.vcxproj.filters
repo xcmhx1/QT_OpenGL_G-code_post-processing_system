@@ -235,6 +235,21 @@
     <ClCompile Include="src\GGenerator.cpp">
       <Filter>Source Files\Document</Filter>
     </ClCompile>
+    <ClCompile Include="src\GCodeGenerator4Axis.cpp">
+      <Filter>Source Files\Document</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Rotary4AxisMath.cpp">
+      <Filter>Source Files\Document</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Rotary4AxisSection.cpp">
+      <Filter>Source Files\Document</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Rotary4AxisPlanner.cpp">
+      <Filter>Source Files\Document</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Rotary4AxisExample.cpp">
+      <Filter>Source Files\Document</Filter>
+    </ClCompile>
     <ClCompile Include="src\dx_iface.cpp">
       <Filter>Source Files\Model\DX IO</Filter>
     </ClCompile>
@@ -421,6 +436,24 @@
       <Filter>Header Files\Document</Filter>
     </ClInclude>
     <ClInclude Include="include\GGenerator.h">
+      <Filter>Header Files\Document</Filter>
+    </ClInclude>
+    <ClInclude Include="include\GCodeGenerator4Axis.h">
+      <Filter>Header Files\Document</Filter>
+    </ClInclude>
+    <ClInclude Include="include\Rotary4AxisTypes.h">
+      <Filter>Header Files\Document</Filter>
+    </ClInclude>
+    <ClInclude Include="include\Rotary4AxisMath.h">
+      <Filter>Header Files\Document</Filter>
+    </ClInclude>
+    <ClInclude Include="include\Rotary4AxisSection.h">
+      <Filter>Header Files\Document</Filter>
+    </ClInclude>
+    <ClInclude Include="include\Rotary4AxisPlanner.h">
+      <Filter>Header Files\Document</Filter>
+    </ClInclude>
+    <ClInclude Include="include\Rotary4AxisExample.h">
       <Filter>Header Files\Document</Filter>
     </ClInclude>
     <ClInclude Include="include\dx_data.h">

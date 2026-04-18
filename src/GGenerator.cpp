@@ -11,16 +11,20 @@
 #include "CadLWPolylineItem.h"
 #include "CadPointItem.h"
 #include "CadPolylineItem.h"
+#include "GCodeGenerator4Axis.h"
+#include "Rotary4AxisPlanner.h"
 
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QStringList>
 #include <QTextStream>
 #include <QVector3D>
 #include <QWidget>
 
 #include <algorithm>
 #include <cmath>
+#include <numeric>
 #include <vector>
 
 namespace
@@ -369,6 +373,208 @@ namespace
         );
 
         return orderedItems;
+    }
+
+    RotaryConfig buildRotaryConfig(const GProfileRotaryAxisConfig& profileConfig)
+    {
+        RotaryConfig rotary;
+        rotary.yCenter = profileConfig.centerY;
+        rotary.zCenter = profileConfig.centerZ;
+        rotary.aOffsetDeg = profileConfig.aAxisOffsetDegrees;
+        rotary.aPositiveCCW = !profileConfig.invertAAxisDirection;
+        rotary.targetNormalYZ = QVector2D(0.0f, 1.0f);
+        return rotary;
+    }
+
+    MachineConfig4Axis buildMachineConfig(const GProfileRotaryAxisConfig& profileConfig)
+    {
+        MachineConfig4Axis machine;
+        machine.safeZ = profileConfig.safeZ;
+        machine.useSafeZBeforeRapid = profileConfig.useSafeZBeforeRapid;
+        machine.emitProgramPreamble = false;
+        machine.emitProgramEnd = false;
+        return machine;
+    }
+
+    QVector<QVector3D> buildPathPointsForItem(const CadItem* item)
+    {
+        QVector<QVector3D> points;
+
+        if (item == nullptr)
+        {
+            return points;
+        }
+
+        points.reserve(item->m_geometry.vertices.size());
+
+        for (const QVector3D& vertex : item->m_geometry.vertices)
+        {
+            if (!points.isEmpty())
+            {
+                const QVector3D delta = vertex - points.back();
+
+                if (delta.lengthSquared() <= 1.0e-12f)
+                {
+                    continue;
+                }
+            }
+
+            points.append(vertex);
+        }
+
+        if (item->m_isReverse && points.size() >= 2)
+        {
+            std::reverse(points.begin(), points.end());
+        }
+
+        return points;
+    }
+
+    bool usesRoundedRectSection(const GProfileRotaryAxisConfig& profileConfig)
+    {
+        const QString sectionType = profileConfig.sectionType.trimmed().toLower();
+        return sectionType == QStringLiteral("rounded_rect")
+            || sectionType == QStringLiteral("rounded-rect")
+            || sectionType == QStringLiteral("roundedrect");
+    }
+
+    QVector<SamplePoint> buildRadialSamples
+    (
+        const QVector<QVector3D>& pathPoints,
+        const RotaryConfig& rotaryConfig
+    )
+    {
+        QVector<SamplePoint> samples;
+        samples.reserve(pathPoints.size());
+
+        for (const QVector3D& point : pathPoints)
+        {
+            const double relativeY = static_cast<double>(point.y()) - rotaryConfig.yCenter;
+            const double relativeZ = static_cast<double>(point.z()) - rotaryConfig.zCenter;
+            const double radius = std::hypot(relativeY, relativeZ);
+
+            SamplePoint sample;
+            sample.pos = point;
+
+            if (radius > 1.0e-12)
+            {
+                sample.normal = QVector3D
+                (
+                    0.0f,
+                    static_cast<float>(relativeY / radius),
+                    static_cast<float>(relativeZ / radius)
+                );
+                sample.hasNormal = true;
+            }
+
+            samples.append(sample);
+        }
+
+        return samples;
+    }
+
+    QVector<ToolpathSegment4Axis> build4AxisSegmentsForItem
+    (
+        const CadItem* item,
+        const GProfileRotaryAxisConfig& profileConfig,
+        const RotaryConfig& rotaryConfig,
+        const ProcessTolerance& tolerance,
+        QStringList& warnings
+    )
+    {
+        QVector<ToolpathSegment4Axis> segments;
+        const QVector<QVector3D> pathPoints = buildPathPointsForItem(item);
+
+        if (pathPoints.size() < 2)
+        {
+            return segments;
+        }
+
+        QVector<SamplePoint> samples;
+
+        if (usesRoundedRectSection(profileConfig)
+            && profileConfig.sectionHalfWidthY > tolerance.normalEps
+            && profileConfig.sectionHalfHeightZ > tolerance.normalEps)
+        {
+            RoundedRectSection2D section
+            (
+                profileConfig.sectionHalfWidthY,
+                profileConfig.sectionHalfHeightZ,
+                profileConfig.sectionCornerRadiusY,
+                profileConfig.sectionCornerRadiusZ
+            );
+
+            if (!section.isValid()
+                || !buildSamplesFromSectionByNearestProjection(pathPoints, section, samples, &warnings))
+            {
+                warnings.append(QStringLiteral("图元 %1 截面法向构建失败，已回退为径向法向。").arg(entityTypeKey(item)));
+                samples = buildRadialSamples(pathPoints, rotaryConfig);
+            }
+        }
+        else
+        {
+            samples = buildRadialSamples(pathPoints, rotaryConfig);
+        }
+
+        if (samples.size() < 2)
+        {
+            return segments;
+        }
+
+        ReachabilityResult reachability;
+        ModeStatistics statistics;
+        FeatureClassifier classifier;
+        const ProcessMode processMode = classifier.classify(samples, rotaryConfig, tolerance, &reachability, &statistics);
+        QVector<double> continuousA = computeContinuousAAngles(samples, rotaryConfig, tolerance, &reachability);
+
+        if (continuousA.size() != samples.size())
+        {
+            return segments;
+        }
+
+        if (!reachability.aOnlyReachable)
+        {
+            warnings.append
+            (
+                QStringLiteral("图元 %1 的 |nx|max=%2，超过阈值 %3，仅靠 A 轴无法理想对正，已降级为固定姿态。")
+                    .arg(entityTypeKey(item))
+                    .arg(reachability.nxAbsMax, 0, 'f', 4)
+                    .arg(tolerance.nxThreshold, 0, 'f', 4)
+            );
+        }
+
+        if (processMode == ProcessMode::XYZ_3Axis)
+        {
+            const double a0 = commandAngleFromMathDeg(0.0, rotaryConfig);
+            continuousA.fill(a0, continuousA.size());
+        }
+        else if (processMode == ProcessMode::A_Indexed_XYZ)
+        {
+            const double averageA = std::accumulate(continuousA.cbegin(), continuousA.cend(), 0.0) / static_cast<double>(continuousA.size());
+            continuousA.fill(averageA, continuousA.size());
+        }
+
+        const QVector<ToolpathPoint4Axis> resampled = resampleForRotaryMotion
+        (
+            samples,
+            continuousA,
+            rotaryConfig,
+            tolerance,
+            1200.0,
+            100.0
+        );
+
+        segments = segmentByAMode(resampled, rotaryConfig, tolerance);
+
+        if (processMode == ProcessMode::A_Indexed_XYZ)
+        {
+            for (ToolpathSegment4Axis& segment : segments)
+            {
+                segment.mode = SegmentMotionMode::AFixed;
+            }
+        }
+
+        return segments;
     }
 
     bool writeLineEntity(QTextStream& stream, const CadLineItem* item)
@@ -790,16 +996,6 @@ bool GGenerator::generateToFile(const QString& filePath, QString* errorMessage) 
         return false;
     }
 
-    if (m_generationMode == GenerationMode::Mode3D)
-    {
-        if (errorMessage != nullptr)
-        {
-            *errorMessage = QStringLiteral("当前 3D 刀路 G 代码生成链路已清理，等待按新的工艺模型重写。");
-        }
-
-        return false;
-    }
-
     QFile file(filePath);
 
     if (!file.open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate))
@@ -818,6 +1014,90 @@ bool GGenerator::generateToFile(const QString& filePath, QString* errorMessage) 
     writeTextBlock(stream, m_profile->fileCode().header);
 
     const QVector<CadItem*> orderedItems = collectOrderedItems(m_document);
+
+    if (m_generationMode == GenerationMode::Mode3D)
+    {
+        const GProfileRotaryAxisConfig& profileRotaryConfig = m_profile->rotaryAxisConfig();
+        const RotaryConfig rotaryConfig = buildRotaryConfig(profileRotaryConfig);
+        ProcessTolerance tolerance;
+        MachineConfig4Axis machineConfig = buildMachineConfig(profileRotaryConfig);
+        machineConfig.fixedASwitchThresholdDeg = tolerance.fixedASwitchThresholdDeg;
+        QStringList warnings;
+        QVector<ToolpathSegment4Axis> allSegments;
+
+        for (CadItem* item : orderedItems)
+        {
+            if (item == nullptr || item->m_nativeEntity == nullptr)
+            {
+                continue;
+            }
+
+            const QVector<ToolpathSegment4Axis> itemSegments = build4AxisSegmentsForItem
+            (
+                item,
+                profileRotaryConfig,
+                rotaryConfig,
+                tolerance,
+                warnings
+            );
+
+            if (itemSegments.isEmpty())
+            {
+                continue;
+            }
+
+            for (const ToolpathSegment4Axis& segment : itemSegments)
+            {
+                allSegments.append(segment);
+            }
+        }
+
+        if (allSegments.isEmpty())
+        {
+            file.close();
+
+            if (errorMessage != nullptr)
+            {
+                *errorMessage = QStringLiteral("未生成有效 4 轴路径：请检查图元几何、回转中心与截面配置。");
+            }
+
+            return false;
+        }
+
+        GCodeGenerator4Axis rotaryGenerator;
+        const QString geometryText = rotaryGenerator.generate(allSegments, rotaryConfig, machineConfig, &warnings);
+
+        if (geometryText.trimmed().isEmpty())
+        {
+            file.close();
+
+            if (errorMessage != nullptr)
+            {
+                *errorMessage = QStringLiteral("4 轴 G 代码生成失败：几何输出为空。");
+            }
+
+            return false;
+        }
+
+        for (const QString& warning : warnings)
+        {
+            if (!warning.trimmed().isEmpty())
+            {
+                stream << "; WARN: " << warning << "\r\n";
+            }
+        }
+
+        stream << geometryText;
+        writeTextBlock(stream, m_profile->fileCode().footer);
+        file.close();
+
+        if (errorMessage != nullptr)
+        {
+            *errorMessage = warnings.join('\n');
+        }
+
+        return true;
+    }
 
     for (CadItem* item : orderedItems)
     {
