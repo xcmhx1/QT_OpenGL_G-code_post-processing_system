@@ -251,9 +251,27 @@ namespace
             || localFile.endsWith(QStringLiteral(".jpeg"), Qt::CaseInsensitive);
     }
 
-    QVector3D buildPerpendicularDirection(const QVector3D& direction)
+    QVector3D buildPerpendicularDirection
+    (
+        const QVector3D& direction,
+        const QVector3D& viewForward,
+        const QVector3D& viewUp
+    )
     {
-        QVector3D perpendicular(-direction.y(), direction.x(), 0.0f);
+        QVector3D perpendicular = QVector3D::crossProduct(direction, viewForward);
+
+        if (perpendicular.lengthSquared() <= 1.0e-8f)
+        {
+            perpendicular = QVector3D::crossProduct(direction, viewUp);
+        }
+
+        if (perpendicular.lengthSquared() <= 1.0e-8f)
+        {
+            const QVector3D helper = std::abs(direction.z()) < 0.999f
+                ? QVector3D(0.0f, 0.0f, 1.0f)
+                : QVector3D(0.0f, 1.0f, 0.0f);
+            perpendicular = QVector3D::crossProduct(direction, helper);
+        }
 
         if (!qFuzzyIsNull(perpendicular.lengthSquared()))
         {
@@ -3358,6 +3376,9 @@ std::vector<TransientPrimitive> CadViewer::buildProcessDirectionPrimitives() con
     const float pixelScale = std::max(pixelToWorldScale(), 1.0e-4f);
     const float headLength = pixelScale * 9.2f;
     const float headHalfWidth = pixelScale * 4.4f;
+    const QVector3D viewForward = m_camera.forwardDirection();
+    const QVector3D viewUp = m_camera.upDirection();
+    const QVector3D viewRight = m_camera.rightDirection();
 
     for (const std::unique_ptr<CadItem>& entity : scene->m_entities)
     {
@@ -3368,21 +3389,47 @@ std::vector<TransientPrimitive> CadViewer::buildProcessDirectionPrimitives() con
 
         const CadProcessVisualInfo info = buildProcessVisualInfo(entity.get());
 
-        if (!info.valid || info.direction.lengthSquared() <= 1.0e-6f)
+        if (!info.valid)
         {
             continue;
         }
 
-        const QVector3D perpendicular = buildPerpendicularDirection(info.direction);
+        QVector3D direction = info.direction;
+
+        if (direction.lengthSquared() <= 1.0e-6f)
+        {
+            direction = info.endPoint - info.startPoint;
+        }
+
+        if (direction.lengthSquared() <= 1.0e-6f)
+        {
+            direction = viewRight;
+        }
+        else
+        {
+            direction.normalize();
+        }
+
+        QVector3D perpendicular = buildPerpendicularDirection(direction, viewForward, viewUp);
 
         if (perpendicular.lengthSquared() <= 1.0e-6f)
         {
-            continue;
+            perpendicular = buildPerpendicularDirection(viewRight, viewForward, viewUp);
         }
 
         // 按用户要求：箭头尖端直接锚定在加工起始点（不做前向偏移）。
+        const QPoint startScreen = worldToScreen(info.startPoint);
+        const QPoint endScreen = worldToScreen(info.endPoint);
+        const int dxScreen = endScreen.x() - startScreen.x();
+        const int dyScreen = endScreen.y() - startScreen.y();
+        const bool shortScreenSegment = (dxScreen * dxScreen + dyScreen * dyScreen) < 25;
+        const float effectiveHeadLength = shortScreenSegment ? headLength * 1.35f : headLength;
+        const float effectiveHeadHalfWidth = shortScreenSegment ? headHalfWidth * 1.45f : headHalfWidth;
         const QVector3D tip = info.startPoint;
-        const QVector3D headBase = tip - info.direction * headLength;
+        const QVector3D headBase = tip - direction * effectiveHeadLength;
+        const QVector3D endMarkerPosition = ((info.endPoint - info.startPoint).lengthSquared() <= 1.0e-10f)
+            ? (info.endPoint + perpendicular * (pixelScale * 5.0f))
+            : info.endPoint;
 
         QVector3D arrowColor;
         if (entity->m_isSelected)
@@ -3398,15 +3445,50 @@ std::vector<TransientPrimitive> CadViewer::buildProcessDirectionPrimitives() con
             arrowColor = info.isReverse ? QVector3D(0.82f, 0.34f, 0.26f) : QVector3D(0.34f, 0.78f, 0.58f);
         }
 
-        // 仅保留小实心三角箭头头
+        TransientPrimitive startPointPrimitive;
+        startPointPrimitive.primitiveType = GL_POINTS;
+        startPointPrimitive.roundPoint = true;
+        startPointPrimitive.pointSize = entity->m_isSelected ? 11.5f : 9.5f;
+        startPointPrimitive.color = entity->m_isSelected
+            ? QVector3D(1.0f, 0.90f, 0.35f)
+            : QVector3D(0.08f, 0.90f, 0.78f);
+        startPointPrimitive.vertices = { info.startPoint };
+        primitives.push_back(std::move(startPointPrimitive));
+
+        TransientPrimitive endPointPrimitive;
+        endPointPrimitive.primitiveType = GL_POINTS;
+        endPointPrimitive.roundPoint = true;
+        endPointPrimitive.pointSize = entity->m_isSelected ? 10.0f : 8.0f;
+        endPointPrimitive.color = entity->m_isSelected
+            ? QVector3D(1.0f, 0.62f, 0.30f)
+            : QVector3D(0.98f, 0.56f, 0.30f);
+        endPointPrimitive.vertices = { endMarkerPosition };
+        primitives.push_back(std::move(endPointPrimitive));
+
+        TransientPrimitive stemPrimitive;
+        stemPrimitive.primitiveType = GL_LINES;
+        stemPrimitive.color = arrowColor;
+        const QVector3D segmentVector = info.endPoint - info.startPoint;
+
+        if (segmentVector.lengthSquared() > 1.0e-8f)
+        {
+            stemPrimitive.vertices = { info.startPoint, info.endPoint };
+        }
+        else
+        {
+            stemPrimitive.vertices = { info.startPoint, info.startPoint + direction * (effectiveHeadLength * 0.9f) };
+        }
+
+        primitives.push_back(std::move(stemPrimitive));
+
         TransientPrimitive headPrimitive;
         headPrimitive.primitiveType = GL_TRIANGLES;
         headPrimitive.color = arrowColor;
         headPrimitive.vertices =
         {
             tip,
-            headBase + perpendicular * headHalfWidth,
-            headBase - perpendicular * headHalfWidth
+            headBase + perpendicular * effectiveHeadHalfWidth,
+            headBase - perpendicular * effectiveHeadHalfWidth
         };
         primitives.push_back(std::move(headPrimitive));
     }

@@ -2,7 +2,7 @@
 
 [G/M 代码参考](./technical_file/G-M_Code.md)
 
-本项目是一个基于 Qt 6 Widgets、OpenGL 4.5 Core Profile、Visual Studio 2026 的 Windows 桌面 CAD / G-code 后处理程序。当前代码主线已经具备 CAD 文件导入、位图矢量化导入、二维图元显示、基础交互、简单绘图与编辑命令，并提供 `2D` G 代码生成后端与 JSON Profile 配置能力；主窗口已接通导入文件、导入 `DXF`、导入 `DWG`、导入图片、保存文件（`Ctrl+S`）、导出为 `DXF`、导出为 `DXF`（安全模式）、反向加工以及按 `2D / 3D` 分类的排序菜单，其中 `2D` 下提供“排序（保留方向）”与“智能排序”，`3D` 排序逻辑保留，`3D` G 代码生成链路已整体清理并停用，等待按新的工艺模型重写。同时增加了仿 AutoCAD 风格的紧凑 Ribbon 工具面板，用于统一承载绘图、修改、图层与特性入口；其中“修改”面板现已接通 `移动`、`删除`、`旋转`、`复制`、`缩放`、`矩形阵列` 六类图元编辑操作，并提供显式的浅色 / 深色主题切换。当前“用户设置”菜单下也已接通 `G代码配置` 对话框，可按文件级、实体类型、图层规则、颜色规则四个层级定制导出行为，其中颜色规则已切换为以 AutoCAD 基础索引颜色为主的配置模型；Viewer 层也已支持加工方向箭头、加工顺序编号、选中图元基点/控制点手柄显示、AutoCAD 风格窗口框选（向左拖拽碰选、向右拖拽包含选）与框选过程实时候选高亮，底部状态栏已收束为单一“捕捉设置”下拉入口，支持 `基点`、`控制点`、`端点`、`中点`、`圆心/中心`、`交点`、`网格` 七类捕捉开关，并已接入第一阶段控制点编辑（选中后点控点再点目标点，已覆盖 `Point`、`Line`、`Circle`、`Arc`、`Ellipse`、`Polyline`、`LWPolyline`）；夹点编辑现已支持实时几何预览，重叠夹点支持悬停 `1s` 弹出候选选择栏并可用 `Tab / Shift+Tab` 循环切换，候选项文案已改为夹点类型名且宽度自适应显示；近期又对方向箭头样式、主次网格对比和选中角标样式做了进一步优化。
+本项目是一个基于 Qt 6 Widgets、OpenGL 4.5 Core Profile、Visual Studio 2026 的 Windows 桌面 CAD / G-code 后处理程序。当前代码主线已经具备 CAD 文件导入、位图矢量化导入、二维图元显示、基础交互、简单绘图与编辑命令，并提供 `2D` 与 `4轴（Mode3D）` G 代码生成后端与 JSON Profile 配置能力；主窗口已接通导入文件、导入 `DXF`、导入 `DWG`、导入图片、保存文件（`Ctrl+S`）、导出为 `DXF`、导出为 `DXF`（安全模式）、反向加工以及按 `2D / 3D` 分类的排序菜单，其中 `2D` 下提供“排序（保留方向）”与“智能排序”，`3D` 下用于回转类工件的 4 轴排序与导出。当前 4 轴链路采用“主轴沿 X、A 绕 X、法向驱动 A”的工艺模型，并对 rounded-rect / 椭圆角矩形截面实现“直边固定 A、圆角连续 A”。同时增加了仿 AutoCAD 风格的紧凑 Ribbon 工具面板，用于统一承载绘图、修改、图层与特性入口；其中“修改”面板现已接通 `移动`、`删除`、`旋转`、`复制`、`缩放`、`矩形阵列` 六类图元编辑操作，并提供显式的浅色 / 深色主题切换。当前“用户设置”菜单下也已接通 `G代码配置` 对话框，可按文件级、实体类型、图层规则、颜色规则四个层级定制导出行为，其中颜色规则已切换为以 AutoCAD 基础索引颜色为主的配置模型；Viewer 层也已支持加工方向箭头、加工顺序编号、选中图元基点/控制点手柄显示、AutoCAD 风格窗口框选（向左拖拽碰选、向右拖拽包含选）与框选过程实时候选高亮，底部状态栏已收束为单一“捕捉设置”下拉入口，支持 `基点`、`控制点`、`端点`、`中点`、`圆心/中心`、`交点`、`网格` 七类捕捉开关，并已接入第一阶段控制点编辑（选中后点控点再点目标点，已覆盖 `Point`、`Line`、`Circle`、`Arc`、`Ellipse`、`Polyline`、`LWPolyline`）；夹点编辑现已支持实时几何预览，重叠夹点支持悬停 `1s` 弹出候选选择栏并可用 `Tab / Shift+Tab` 循环切换，候选项文案已改为夹点类型名且宽度自适应显示；近期又对方向箭头样式、主次网格对比和选中角标样式做了进一步优化。
 
 ## 项目现状
 
@@ -45,8 +45,18 @@
 - 提供 `GProfile` JSON 配置读写，支持文件级、实体类型、图层规则、颜色规则四类配置
 - 提供 `用户设置 -> G代码配置...` 对话框，并已纳入当前浅色 / 深色主题
 - 颜色规则默认内置 `BYLAYER`、`BYBLOCK` 与 AutoCAD 基础 `ACI:1` 至 `ACI:9` 索引颜色项，同时兼容真彩色扩展
-- 提供 `GGenerator` 纯 `2D` G 代码生成后端，支持 `Line`、`Arc`、`Circle`、`Ellipse`、`Polyline`、`LWPolyline`
-- `GProfile` 已新增 `A` 轴中心、角度偏移、连续展开、方向翻转、安全 `Z` 等旋转轴配置字段，并保留 JSON 读写
+- 提供 `GGenerator` 的 `2D + 4轴（Mode3D）` G 代码生成后端，支持 `Line`、`Arc`、`Circle`、`Ellipse`、`Polyline`、`LWPolyline`
+- `GProfile` 已新增 `A` 轴中心、角度偏移、方向翻转、安全 `Z`、截面半宽半高、圆角半径等回转配置字段，并保留 JSON 读写
+- 已接通 4 轴主链路：`图元路径采样 -> 宿主法向/截面外法向 -> A 解算 -> unwrap -> 分段 -> XYZ+A 输出`
+- 4 轴 A 解算基于法向在 `YZ` 平面的投影，不使用路径切向直接驱动
+- 4 轴路径点已同步执行绕 `X` 轴旋转坐标变换（输出机床坐标 `X/Y/Z` 与 `A` 一致）
+- 对 rounded-rect / 椭圆角矩形截面已实现分区语义：`FlatSide` 与 `CornerTransition`
+- `FlatSide` 已支持象限锁定（按 90° 步进），用于稳定固定姿态段；`CornerTransition` 保持连续 A 过渡
+- `FeatureClassifier` 与分段逻辑已支持 `XYZ_3Axis / A_Indexed_XYZ / XYZA_Continuous` 三种模式
+- 仅对 `requiresA=true` 的段输出显式 `A`，中性段优先按 `XYZ` 输出，避免无意义 `A0`
+- 固定 A 段切换默认包含安全过程：激光关 -> 安全高度 -> 定位 A -> 回加工高度 -> 激光开
+- 图元首尾相邻时已增加连续拼接判定，减少无意义抬刀/落刀与多余 rapid
+- 导出链路会回写图元导出真源点序，预览箭头、起终点标记与导出方向保持一致
 - 已接通主窗口“导入文件”“导入DXF...”“导入DWG...”“导入图片”“保存文件（Ctrl+S）”“导出为DXF...”“导出为DXF（安全模式）...”“反向加工”以及 `排序 -> 2D / 3D` 分类菜单动作
 - 保存与导出统一写出 `.dxf`；保存在已有文档路径时会直接覆盖同名文件
 - 提供基于 `CadItem::m_processOrder`、`CadItem::m_isReverse`、闭合路径起刀缝点参数的加工顺序与方向控制
@@ -57,11 +67,20 @@
 
 当前未完成或未接线：
 
-- `3D` G 代码生成链路已从 `GGenerator` 中整体清理，当前导出 `Mode3D` 会直接提示待按新工艺模型重写
-- `3D` 排序相关逻辑暂时保留，未随本次 `3D` G 代码生成清理一起移除
-- 当前不提供可用的 `3D` G 代码导出，不提供完整 3D 建模/编辑工作流
-- `3D` 导出的旋转轴参数当前仅纳入 `GProfile` 数据模型和 JSON 读写，配置对话框暂未暴露专门编辑界面
+- 4 轴当前聚焦“主轴沿 X、A 绕 X”的截面型外表面（如 rounded-rect / 椭圆角矩形 / 类柱体），不覆盖任意自由曲面
+- 当前不处理通用 5 轴问题，不引入 RTCP、刀轴倾斜和复杂机床运动学
+- 4 轴导出仍依赖 DXF 图元及截面参数推断宿主法向，复杂多分叉拓扑和双转轴场景暂不支持
+- 回转轴参数仍主要通过 `GProfile` JSON 维护，配置对话框暂无完整的 4 轴工艺向导
 - 普通 DXF 导出会尽量保留原始实体；若包含兼容性较弱的普通 `POLYLINE`，建议改用“导出为DXF（安全模式）”
+
+### 本次更新（2026-04，4 轴链路）
+
+- 增加 `Rotary4AxisTypes` / `Rotary4AxisMath` / `Rotary4AxisSection` / `Rotary4AxisPlanner` 与 `GCodeGenerator4Axis` 模块
+- `Rotary4AxisSection` 已实现 rounded-rect 解析采样与 `FlatSide` / `CornerTransition` 区域判定
+- `Rotary4AxisPlanner` 已实现逐采样点法向驱动 A、unwrap 连续化、A 变化约束细分与按模式分段
+- `GCodeGenerator4Axis` 已实现段间安全切换、按需输出 A、短距离无抬刀拼接与激光开关控制
+- `CadItem` / `CadDocument` / `CadProcessVisualUtils` / `CadViewer` 已接入导出真源点序，保证预览方向与导出一致
+- `GGenerator::Mode3D` 已打通 4 轴导出，并输出实体级调试注释（mode/requiresA/reversed/A range/region）
 
 ## 技术栈
 
@@ -134,6 +153,12 @@ G-code_post-processing_system/
 |   |-- GProfile.h                          # G 代码 Profile 配置模型
 |   |-- GProfileDialog.h                    # G 代码 Profile 配置对话框
 |   |-- GGenerator.h                        # G 代码生成器
+|   |-- GCodeGenerator4Axis.h               # 4 轴 G 代码行输出器
+|   |-- Rotary4AxisTypes.h                  # 4 轴类型/配置/路径结构
+|   |-- Rotary4AxisMath.h                   # A 轴解算、unwrap 与坐标变换
+|   |-- Rotary4AxisSection.h                # 截面模型与区域类型判定
+|   |-- Rotary4AxisPlanner.h                # 4 轴采样、分类、分段规划
+|   |-- Rotary4AxisExample.h                # 4 轴最小示例
 |   |-- CadItem.h			               # 图元基类
 |   |-- CadLineItem.h                       # 直线图元
 |   |-- CadCircleItem.h                     # 圆图元
@@ -179,7 +204,12 @@ G-code_post-processing_system/
 |   |-- CadBitmapVectorizer.cpp             # 位图预处理、轮廓提取、图元拟合
 |   |-- GProfile.cpp                        # G 代码 Profile 配置读写
 |   |-- GProfileDialog.cpp                  # G 代码 Profile 配置对话框实现
-|   |-- GGenerator.cpp                      # 纯 2D G 代码生成，3D 生成链路已清理
+|   |-- GGenerator.cpp                      # 2D + 4轴（Mode3D）G 代码生成主入口
+|   |-- GCodeGenerator4Axis.cpp             # 4 轴 G 代码输出实现
+|   |-- Rotary4AxisMath.cpp                 # 4 轴数学实现
+|   |-- Rotary4AxisSection.cpp              # 截面采样与区域判定实现
+|   |-- Rotary4AxisPlanner.cpp              # 4 轴路径规划实现
+|   |-- Rotary4AxisExample.cpp              # 4 轴最小示例实现
 |   |-- CadItem.cpp						  # 图元基类
 |   |-- CadProcessVisualUtils.cpp           # 加工方向/顺序显示共用语义实现
 |   |-- CadToolPanelWidget.cpp              # Ribbon 工具面板实现
@@ -261,7 +291,7 @@ CadDocument                                (Model)
                         v
                      libdxfrw
         |
-        `------> GGenerator + GProfile      (2D 后处理 / Profile 配置)
+        `------> GGenerator + GProfile      (2D + 4轴后处理 / Profile 配置)
 ```
 
 ### 分层职责
@@ -344,7 +374,8 @@ CadDocument                                (Model)
 - `GProfileDialog` 负责提供用户侧可编辑配置界面，并显式跟随应用浅色 / 深色主题
 - `GGenerator` 直接解析现有 `CadItem` 子类和原始 `DRW_Entity` 参数生成 G 代码
 - 导出时会跟随排序阶段写回的加工方向与闭合路径起刀缝点
-- 当前仅实现纯 `2D` 激光加工输出，`3D` 模式暂未实现
+- `Mode2D` 输出保持二维激光后处理；`Mode3D` 已接通 4 轴回转后处理
+- 4 轴导出采用“法向驱动 A + 分段模式（XYZ / AFixed / XYZA 连续）”策略
 
 `CadSceneCoordinator` + `CadGraphicsCoordinator`
 
@@ -395,15 +426,19 @@ CadDocument                                (Model)
 1. `GGenerator` 绑定当前 `CadDocument`
 2. 生成时通过 `GProfile` 读取文件级、图层规则、颜色规则、实体类型配置
 3. `GGenerator` 直接解析 `CadItem` 对应的原始实体参数，包括图层名和颜色键
-4. 当前 `2D` 输出支持：
+4. `Mode2D` 输出支持：
    `Line -> G01`
    `Arc/Circle -> G02/G03 + I/J`
    `Polyline/LWPolyline -> 直线段 + bulge 圆弧段`
    `Ellipse -> 离散为 G01`
-5. 导出时会按“文件级 -> 图层规则 -> 颜色规则 -> 实体类型”的顺序组合头尾代码块
-6. 对 `Circle` 默认以顶部为起刀点；对完整 `Ellipse` 与闭合 `Polyline/LWPolyline`，会按排序阶段确定的缝点导出
-7. 导出时会跳过空白代码块中的无意义空行，减少对机床无效的文本噪声
-8. 生成器在导出时弹出文件保存对话框并输出 `.nc/.gcode/.txt`
+5. `Mode3D`（4 轴）输出流程：
+   路径采样 -> 法向求 A -> unwrap -> 按区域/角度分段 -> `G0/G1 X Y Z A F` + 激光开关
+6. rounded-rect 场景按区域输出：`FlatSide` 优先固定 A，`CornerTransition` 连续 A
+7. 4 轴段间切换支持安全动作与短距离连续拼接，减少无意义抬刀
+8. 导出时会按“文件级 -> 图层规则 -> 颜色规则 -> 实体类型”的顺序组合头尾代码块
+9. 对 `Circle` 默认以顶部为起刀点；对完整 `Ellipse` 与闭合 `Polyline/LWPolyline`，会按排序阶段确定的缝点导出
+10. 导出时会跳过空白代码块中的无意义空行，减少对机床无效的文本噪声
+11. 生成器在导出时弹出文件保存对话框并输出 `.nc/.gcode/.txt`
 
 ### 排序与方向控制
 
@@ -574,7 +609,7 @@ CadDocument                                (Model)
 - 编辑 -> `反向加工`：切换当前选中图元的加工方向
 - 排序 -> `2D -> 排序（保留方向）`：保留当前方向设置，仅重排加工顺序
 - 排序 -> `2D -> 智能排序`：同时优化加工顺序、图元方向和闭合路径起刀缝点
-- 排序 -> `3D -> 排序（保留方向） / 智能排序`：排序相关代码保留，未随本次 `3D` G 代码生成清理一起移除
+- 排序 -> `3D -> 排序（保留方向） / 智能排序`：用于 4 轴链路的加工顺序与方向优化
 - 用户设置 -> `主题 -> 浅色模式 / 深色模式`：切换整套界面主题
 - 用户设置 -> `G代码配置...`：打开当前活动 Profile 配置对话框
 
@@ -587,12 +622,16 @@ CadDocument                                (Model)
 
 当前后处理后端已经具备以下能力：
 
-- 支持纯 `2D` G 代码生成
+- 支持 `2D` 与 `4轴（Mode3D）` G 代码生成
 - 支持 `Line`、`Arc`、`Circle`、`Ellipse`、`Polyline`、`LWPolyline`
 - 支持读取 `CadItem::m_processOrder` 作为导出顺序
 - 支持读取 `CadItem::m_isReverse` 作为反向加工标记
 - 支持读取闭合图元的起刀缝点参数，并与 Viewer / 排序共用同一套路径语义
 - 支持按 `GProfile` 套用文件级、图层规则、颜色规则、实体类型规则
+- 4 轴支持逐点法向解算 A、角度连续化（unwrap）与按模式分段输出
+- 4 轴支持 `requiresA` 按段启用，非必要段可省略 A 字段
+- 4 轴支持实体间连接优化、可反转接续和固定 A 段安全切换
+- 导出会写入实体级 `; DEBUG:` 注释，便于核对 `mode/reversed/requiresA/A range/region`
 
 `G代码配置` 对话框当前支持：
 
@@ -615,8 +654,8 @@ CadDocument                                (Model)
 - `Point` 当前不会输出加工轨迹
 - `Ellipse` 当前通过折线离散输出，不使用专门椭圆插补指令
 - 闭合 `Polyline/LWPolyline` 的缝点优化当前以顶点为候选集合，不做边中点或弧长连续参数搜索
-- `3D` G 代码生成链路已从 `GGenerator` 中整体清理，当前不会输出任何三维刀路代码
-- `Mode3D` 当前会直接返回“待按新的工艺模型重写”
+- 4 轴当前聚焦 X 主轴回转场景，不覆盖任意自由曲面与通用 5 轴
+- 复杂多拓扑宿主面与双转轴问题当前不在本链路内
 
 ### 位图导入说明
 
@@ -647,10 +686,10 @@ CadDocument                                (Model)
 - 浅色主题下 Viewer 会对低对比度线色做显示补偿；这是显示层行为，不会改写文档中的真实颜色数据
 - `GProfile` 颜色规则当前以基础索引颜色与真彩色键混合管理，后续如需扩展完整 AutoCAD ACI 颜色表，还需要继续补齐 UI 与预设
 - 位图导入依赖 OpenCV 运行时 DLL 拷贝到输出目录
-- `GGenerator` 当前仅实现纯 `2D` 输出，原有 `3D` 生成代码已整体清理
+- `GGenerator` 已实现 `Mode2D` 与 `Mode3D(4轴)` 双链路；当前 4 轴重点仍是截面型回转工件
 - `排序 -> 2D -> 排序（保留方向）` 当前尊重用户已设置的加工方向与闭合路径缝点，不承担手动点选排序职责；手动排序接口代码已保留但暂未暴露到 UI
 - `2D` 智能排序当前采用“局部最近邻 + 整体扫掠方向偏好 + 切线连续性惩罚”的启发式策略，目标是减少回头与顿挫，但不是严格全局最优解
-- 加工方向箭头当前按世界坐标中的二维方向绘制，样式已简化为起点锚定的小实心三角；编号气泡会在屏幕空间做简单避让，但密集图元场景下仍可能出现局部遮挡
+- 加工方向箭头优先使用导出真源点序（`m_exportPathPoints`）；图元若在导出阶段因拼接被反转，预览会同步方向
 - 当前吸附主要作用于命令取点和状态栏坐标显示，普通空闲态拾取/选择仍按原始屏幕位置进行
 - 基点/控制点吸附仅在图元已选中、且对应手柄可见时才会生效；端点/中点/圆心(中心)/交点不要求图元先选中
 - 当前对象捕捉已覆盖基点、控制点、端点、中点、圆心(中心)、交点；暂不包含切点、垂足、象限点锁定等更完整 CAD 捕捉类型

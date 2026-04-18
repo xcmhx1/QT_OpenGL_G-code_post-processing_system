@@ -274,6 +274,32 @@ namespace
         const QColor indexColor = colorFromAci(item->m_nativeEntity->color);
         return indexColor.isValid() ? indexColor : item->m_color;
     }
+
+    void clearExportPreviewState(CadItem* item)
+    {
+        if (item == nullptr)
+        {
+            return;
+        }
+
+        item->m_exportPathPoints.clear();
+        item->m_hasExportPathPoints = false;
+        item->m_exportDirectionReversed = false;
+        item->m_exportProcessMode.clear();
+        item->m_exportRequiresA = false;
+        item->m_exportAStartDeg = 0.0;
+        item->m_exportAEndDeg = 0.0;
+        item->m_exportARangeDeg = 0.0;
+        item->m_exportRegionSummary.clear();
+    }
+
+    void clearAllExportPreviewStates(CadDocument& document)
+    {
+        for (const std::unique_ptr<CadItem>& item : document.m_entities)
+        {
+            clearExportPreviewState(item.get());
+        }
+    }
 }
 
 std::unique_ptr<CadItem> CadDocument::createCadItemForEntity(DRW_Entity* entity)
@@ -441,6 +467,7 @@ CadItem* CadDocument::appendEntity(std::unique_ptr<DRW_Entity> entity, std::uniq
     rawItem->m_color = resolveEntityDisplayColor(*this, rawItem);
     m_data->mBlock->ent.push_back(nativeEntity);
     m_entities.push_back(std::move(item));
+    clearExportPreviewState(rawItem);
 
     emit sceneChanged();
     return rawItem;
@@ -471,6 +498,7 @@ int CadDocument::appendEntities(std::vector<std::unique_ptr<DRW_Entity>> entitie
 
         ensureLayerExists(QString::fromUtf8(entity->layer.c_str()));
         item->m_color = resolveEntityDisplayColor(*this, item.get());
+        clearExportPreviewState(item.get());
         m_data->mBlock->ent.push_back(entity.release());
         m_entities.push_back(std::move(item));
         ++appendedCount;
@@ -518,6 +546,7 @@ std::pair<std::unique_ptr<DRW_Entity>, std::unique_ptr<CadItem>> CadDocument::ta
     // 这里把原始指针重新包装回 unique_ptr，便于后续命令对象接管所有权。
     std::unique_ptr<DRW_Entity> entity(*nativeIt);
     std::unique_ptr<CadItem> removedItem = std::move(*itemIt);
+    clearExportPreviewState(removedItem.get());
 
     m_data->mBlock->ent.erase(nativeIt);
     m_entities.erase(itemIt);
@@ -537,6 +566,7 @@ bool CadDocument::refreshEntity(CadItem* item)
     item->buildGeometryDatay();
     item->buildProcessDirection();
     item->m_color = resolveEntityDisplayColor(*this, item);
+    clearAllExportPreviewStates(*this);
 
     emit sceneChanged();
     return true;
@@ -544,6 +574,7 @@ bool CadDocument::refreshEntity(CadItem* item)
 
 void CadDocument::notifySceneChanged()
 {
+    clearAllExportPreviewStates(*this);
     emit sceneChanged();
 }
 

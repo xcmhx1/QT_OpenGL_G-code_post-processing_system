@@ -31,7 +31,7 @@ QString buildRoundedRect4AxisDemoGCode(QStringList* warnings)
     const ProcessMode mode = classifier.classify(samples, rotary, tolerance, &reachability, &statistics);
     const QVector<double> continuousA = computeContinuousAAngles(samples, rotary, tolerance, &reachability);
     const QVector<ToolpathPoint4Axis> resampled = resampleForRotaryMotion(samples, continuousA, rotary, tolerance, 1200.0, 100.0);
-    QVector<ToolpathSegment4Axis> segments = segmentByAMode(resampled, rotary, tolerance);
+    QVector<ToolpathSegment4Axis> segments = segmentByAMode(resampled, samples, rotary, tolerance);
 
     if (mode == ProcessMode::A_Indexed_XYZ && !segments.isEmpty())
     {
@@ -64,4 +64,3 @@ QString buildRoundedRect4AxisDemoGCode(QStringList* warnings)
     GCodeGenerator4Axis generator;
     return generator.generate(segments, rotary, machine, warnings);
 }
-

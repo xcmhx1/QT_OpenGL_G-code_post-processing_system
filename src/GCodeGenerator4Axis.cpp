@@ -200,121 +200,207 @@ QString GCodeGenerator4Axis::generate
         const ToolpathPoint4Axis& startPoint = segment.points.front();
         const ToolpathPoint4Axis& endPoint = segment.points.back();
         const bool isFixedASegment = segment.mode == SegmentMotionMode::AFixed;
+        const bool segmentRequiresA = segment.requiresA;
+        const double connectionDistance = hasCurrentPoint
+            ? static_cast<double>((startPoint.machinePos - currentPoint.machinePos).length())
+            : std::numeric_limits<double>::infinity();
+        const double deltaAForJoin = hasCurrentPoint ? std::abs(startPoint.aDeg - currentPoint.aDeg) : 0.0;
+        const bool transitionNeedsA = hasCurrentPoint
+            ? std::abs(startPoint.aDeg - currentPoint.aDeg) > machine.aNeutralToleranceDeg
+            : segmentRequiresA;
+        const bool processCompatible = segmentIndex > 0
+            && segment.processKey == segments.at(segmentIndex - 1).processKey
+            && segment.mode == segments.at(segmentIndex - 1).mode
+            && segment.requiresA == segments.at(segmentIndex - 1).requiresA
+            && std::abs(startPoint.feed - currentPoint.feed) <= machine.feedTolerance
+            && std::abs(startPoint.power - currentPoint.power) <= machine.powerTolerance;
+        const bool canDirectJoin = hasCurrentPoint
+            && processCompatible
+            && connectionDistance <= machine.connectionTolerance
+            && deltaAForJoin <= machine.aJoinToleranceDeg;
+        const bool nearTransitionWithoutLift = hasCurrentPoint
+            && machine.allowLaserOffNoLiftTransition
+            && connectionDistance <= machine.connectionTolerance
+            && deltaAForJoin <= machine.aJoinToleranceDeg;
+        bool needSafeSwitch = false;
 
-        emitLaserOff(lines, machine, laserOn);
-
-        const bool needSafeSwitch = hasCurrentPoint
-            && isFixedASegment
-            && std::abs(startPoint.aDeg - currentPoint.aDeg) > machine.fixedASwitchThresholdDeg;
-
-        if (hasCurrentPoint && isFixedASegment)
+        if (canDirectJoin)
         {
-            const double deltaA = std::abs(startPoint.aDeg - currentPoint.aDeg);
+            emitLaserOn(lines, machine, laserOn);
 
-            if (deltaA > machine.fixedASwitchThresholdDeg && machine.useSafeZBeforeRapid)
+            if (connectionDistance > 1.0e-9 || deltaAForJoin > 1.0e-9)
             {
-                ToolpathPoint4Axis safeCurrent = buildSafeZPoint(currentPoint, machine);
-                if (emitRapid(lines, safeCurrent, machine, true))
+                ToolpathPoint4Axis transitionPoint = startPoint;
+
+                if (almostEqual(transitionPoint.machinePos.x(), currentPoint.machinePos.x()))
                 {
-                    currentPoint = safeCurrent;
+                    transitionPoint.machinePos.setX(qnan);
                 }
 
-                ToolpathPoint4Axis safeTarget = buildSafeZPoint(startPoint, machine);
-                if (emitRapid(lines, safeTarget, machine, true))
+                if (almostEqual(transitionPoint.machinePos.y(), currentPoint.machinePos.y()))
                 {
-                    currentPoint = safeTarget;
+                    transitionPoint.machinePos.setY(qnan);
                 }
 
-                if (emitRapid(lines, startPoint, machine, true))
+                if (almostEqual(transitionPoint.machinePos.z(), currentPoint.machinePos.z()))
                 {
-                    currentPoint = startPoint;
-                }
-            }
-            else
-            {
-                ToolpathPoint4Axis rapidPoint = startPoint;
-
-                if (almostEqual(rapidPoint.machinePos.x(), currentPoint.machinePos.x()))
-                {
-                    rapidPoint.machinePos.setX(qnan);
+                    transitionPoint.machinePos.setZ(qnan);
                 }
 
-                if (almostEqual(rapidPoint.machinePos.y(), currentPoint.machinePos.y()))
+                if (almostEqual(transitionPoint.aDeg, currentPoint.aDeg))
                 {
-                    rapidPoint.machinePos.setY(qnan);
+                    transitionPoint.aDeg = dnan;
                 }
 
-                if (almostEqual(rapidPoint.machinePos.z(), currentPoint.machinePos.z()))
-                {
-                    rapidPoint.machinePos.setZ(qnan);
-                }
-
-                if (almostEqual(rapidPoint.aDeg, currentPoint.aDeg))
-                {
-                    rapidPoint.aDeg = dnan;
-                }
-
-                if (emitRapid(lines, rapidPoint, machine, true))
-                {
-                    currentPoint = startPoint;
-                }
+                transitionPoint.feed = dnan;
+                emitLinear4Axis(lines, transitionPoint, machine, transitionNeedsA, false);
+                currentPoint = startPoint;
             }
         }
         else
         {
-            if (hasCurrentPoint
-                && machine.useSafeZBeforeRapid
-                && (!almostEqual(currentPoint.machinePos.x(), startPoint.machinePos.x())
-                    || !almostEqual(currentPoint.machinePos.y(), startPoint.machinePos.y())
-                    || !almostEqual(currentPoint.machinePos.z(), startPoint.machinePos.z())
-                    || !almostEqual(currentPoint.aDeg, startPoint.aDeg)))
+            emitLaserOff(lines, machine, laserOn);
+            needSafeSwitch = hasCurrentPoint
+                && isFixedASegment
+                && std::abs(startPoint.aDeg - currentPoint.aDeg) > machine.fixedASwitchThresholdDeg;
+
+            if (nearTransitionWithoutLift)
             {
-                ToolpathPoint4Axis safeCurrent = buildSafeZPoint(currentPoint, machine);
-                if (emitRapid(lines, safeCurrent, machine, true))
-                {
-                    currentPoint = safeCurrent;
-                }
-            }
+                ToolpathPoint4Axis transitionPoint = startPoint;
 
-            ToolpathPoint4Axis rapidPoint = startPoint;
-
-            if (hasCurrentPoint)
-            {
-                if (almostEqual(rapidPoint.machinePos.x(), currentPoint.machinePos.x()))
+                if (almostEqual(transitionPoint.machinePos.x(), currentPoint.machinePos.x()))
                 {
-                    rapidPoint.machinePos.setX(qnan);
+                    transitionPoint.machinePos.setX(qnan);
                 }
 
-                if (almostEqual(rapidPoint.machinePos.y(), currentPoint.machinePos.y()))
+                if (almostEqual(transitionPoint.machinePos.y(), currentPoint.machinePos.y()))
                 {
-                    rapidPoint.machinePos.setY(qnan);
+                    transitionPoint.machinePos.setY(qnan);
                 }
 
-                if (almostEqual(rapidPoint.machinePos.z(), currentPoint.machinePos.z()))
+                if (almostEqual(transitionPoint.machinePos.z(), currentPoint.machinePos.z()))
                 {
-                    rapidPoint.machinePos.setZ(qnan);
+                    transitionPoint.machinePos.setZ(qnan);
                 }
 
-                if (almostEqual(rapidPoint.aDeg, currentPoint.aDeg))
+                if (almostEqual(transitionPoint.aDeg, currentPoint.aDeg))
                 {
-                    rapidPoint.aDeg = dnan;
+                    transitionPoint.aDeg = dnan;
                 }
-            }
 
-            if (emitRapid(lines, rapidPoint, machine, true))
-            {
+                transitionPoint.feed = dnan;
+                emitLinear4Axis(lines, transitionPoint, machine, transitionNeedsA, false);
                 currentPoint = startPoint;
             }
-        }
+            else if (hasCurrentPoint && isFixedASegment)
+            {
+                const double deltaA = std::abs(startPoint.aDeg - currentPoint.aDeg);
 
-        emitLaserOn(lines, machine, laserOn);
+                if (deltaA > machine.fixedASwitchThresholdDeg && machine.useSafeZBeforeRapid)
+                {
+                    ToolpathPoint4Axis safeCurrent = buildSafeZPoint(currentPoint, machine);
+                    if (emitRapid(lines, safeCurrent, machine, transitionNeedsA))
+                    {
+                        currentPoint = safeCurrent;
+                    }
+
+                    ToolpathPoint4Axis safeTarget = buildSafeZPoint(startPoint, machine);
+                    if (emitRapid(lines, safeTarget, machine, transitionNeedsA))
+                    {
+                        currentPoint = safeTarget;
+                    }
+
+                    if (emitRapid(lines, startPoint, machine, transitionNeedsA))
+                    {
+                        currentPoint = startPoint;
+                    }
+                }
+                else
+                {
+                    ToolpathPoint4Axis rapidPoint = startPoint;
+
+                    if (almostEqual(rapidPoint.machinePos.x(), currentPoint.machinePos.x()))
+                    {
+                        rapidPoint.machinePos.setX(qnan);
+                    }
+
+                    if (almostEqual(rapidPoint.machinePos.y(), currentPoint.machinePos.y()))
+                    {
+                        rapidPoint.machinePos.setY(qnan);
+                    }
+
+                    if (almostEqual(rapidPoint.machinePos.z(), currentPoint.machinePos.z()))
+                    {
+                        rapidPoint.machinePos.setZ(qnan);
+                    }
+
+                    if (almostEqual(rapidPoint.aDeg, currentPoint.aDeg))
+                    {
+                        rapidPoint.aDeg = dnan;
+                    }
+
+                    if (emitRapid(lines, rapidPoint, machine, transitionNeedsA))
+                    {
+                        currentPoint = startPoint;
+                    }
+                }
+            }
+            else
+            {
+                if (hasCurrentPoint
+                    && machine.useSafeZBeforeRapid
+                    && (!almostEqual(currentPoint.machinePos.x(), startPoint.machinePos.x())
+                        || !almostEqual(currentPoint.machinePos.y(), startPoint.machinePos.y())
+                        || !almostEqual(currentPoint.machinePos.z(), startPoint.machinePos.z())
+                        || !almostEqual(currentPoint.aDeg, startPoint.aDeg)))
+                {
+                    ToolpathPoint4Axis safeCurrent = buildSafeZPoint(currentPoint, machine);
+                    if (emitRapid(lines, safeCurrent, machine, transitionNeedsA))
+                    {
+                        currentPoint = safeCurrent;
+                    }
+                }
+
+                ToolpathPoint4Axis rapidPoint = startPoint;
+
+                if (hasCurrentPoint)
+                {
+                    if (almostEqual(rapidPoint.machinePos.x(), currentPoint.machinePos.x()))
+                    {
+                        rapidPoint.machinePos.setX(qnan);
+                    }
+
+                    if (almostEqual(rapidPoint.machinePos.y(), currentPoint.machinePos.y()))
+                    {
+                        rapidPoint.machinePos.setY(qnan);
+                    }
+
+                    if (almostEqual(rapidPoint.machinePos.z(), currentPoint.machinePos.z()))
+                    {
+                        rapidPoint.machinePos.setZ(qnan);
+                    }
+
+                    if (almostEqual(rapidPoint.aDeg, currentPoint.aDeg))
+                    {
+                        rapidPoint.aDeg = dnan;
+                    }
+                }
+
+                if (emitRapid(lines, rapidPoint, machine, transitionNeedsA))
+                {
+                    currentPoint = startPoint;
+                }
+            }
+
+            emitLaserOn(lines, machine, laserOn);
+        }
 
         bool feedEmitted = false;
 
         for (int pointIndex = 1; pointIndex < segment.points.size(); ++pointIndex)
         {
             const ToolpathPoint4Axis& point = segment.points.at(pointIndex);
-            const bool includeA = !isFixedASegment || pointIndex == 1;
+            const bool includeA = segmentRequiresA && segment.emitAInEachLine;
             ToolpathPoint4Axis linearPoint = point;
 
             if (hasCurrentPoint)

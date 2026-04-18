@@ -4,11 +4,13 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace
 {
     constexpr double kPi = 3.14159265358979323846;
     constexpr double kEpsilon = 1.0e-9;
+    constexpr double kProjectionBias = 1.0e-6;
 
     double clamp01(double value)
     {
@@ -42,6 +44,23 @@ namespace
         const double perimeter = kPi * (3.0 * (a + b) - std::sqrt((3.0 * a + b) * (a + 3.0 * b)));
         return perimeter * 0.25;
     }
+
+    double squaredLength(const QVector2D& value)
+    {
+        return static_cast<double>(value.lengthSquared());
+    }
+}
+
+SectionRegionType CrossSection2D::regionTypeAt(double u) const
+{
+    Q_UNUSED(u);
+    return SectionRegionType::Unknown;
+}
+
+int CrossSection2D::sideIndexAt(double u) const
+{
+    Q_UNUSED(u);
+    return -1;
 }
 
 RoundedRectSection2D::RoundedRectSection2D
@@ -89,6 +108,8 @@ RoundedRectSection2D::SegmentSample RoundedRectSection2D::sampleByArcLength(doub
     sample.point = QVector2D();
     sample.tangent = QVector2D(1.0f, 0.0f);
     sample.normal = QVector2D(0.0f, 1.0f);
+    sample.regionType = SectionRegionType::Unknown;
+    sample.sideIndex = -1;
 
     if (!isValid())
     {
@@ -114,6 +135,8 @@ RoundedRectSection2D::SegmentSample RoundedRectSection2D::sampleByArcLength(doub
         sample.point = QVector2D(static_cast<float>(y), static_cast<float>(m_halfHeightZ));
         sample.tangent = QVector2D(-1.0f, 0.0f);
         sample.normal = QVector2D(0.0f, 1.0f);
+        sample.regionType = SectionRegionType::FlatSide;
+        sample.sideIndex = 0;
         return sample;
     }
 
@@ -139,6 +162,7 @@ RoundedRectSection2D::SegmentSample RoundedRectSection2D::sampleByArcLength(doub
         sample.point = QVector2D(static_cast<float>(y), static_cast<float>(z));
         sample.tangent = normalizedOrFallback(tangent, QVector2D(0.0f, -1.0f));
         sample.normal = normalizedOrFallback(normal, QVector2D(-1.0f, 0.0f));
+        sample.regionType = SectionRegionType::CornerTransition;
         return sample;
     }
 
@@ -149,6 +173,8 @@ RoundedRectSection2D::SegmentSample RoundedRectSection2D::sampleByArcLength(doub
         sample.point = QVector2D(static_cast<float>(-m_halfWidthY), static_cast<float>(z));
         sample.tangent = QVector2D(0.0f, -1.0f);
         sample.normal = QVector2D(-1.0f, 0.0f);
+        sample.regionType = SectionRegionType::FlatSide;
+        sample.sideIndex = 1;
         return sample;
     }
 
@@ -174,6 +200,7 @@ RoundedRectSection2D::SegmentSample RoundedRectSection2D::sampleByArcLength(doub
         sample.point = QVector2D(static_cast<float>(y), static_cast<float>(z));
         sample.tangent = normalizedOrFallback(tangent, QVector2D(1.0f, 0.0f));
         sample.normal = normalizedOrFallback(normal, QVector2D(0.0f, -1.0f));
+        sample.regionType = SectionRegionType::CornerTransition;
         return sample;
     }
 
@@ -184,6 +211,8 @@ RoundedRectSection2D::SegmentSample RoundedRectSection2D::sampleByArcLength(doub
         sample.point = QVector2D(static_cast<float>(y), static_cast<float>(-m_halfHeightZ));
         sample.tangent = QVector2D(1.0f, 0.0f);
         sample.normal = QVector2D(0.0f, -1.0f);
+        sample.regionType = SectionRegionType::FlatSide;
+        sample.sideIndex = 2;
         return sample;
     }
 
@@ -209,6 +238,7 @@ RoundedRectSection2D::SegmentSample RoundedRectSection2D::sampleByArcLength(doub
         sample.point = QVector2D(static_cast<float>(y), static_cast<float>(z));
         sample.tangent = normalizedOrFallback(tangent, QVector2D(0.0f, 1.0f));
         sample.normal = normalizedOrFallback(normal, QVector2D(1.0f, 0.0f));
+        sample.regionType = SectionRegionType::CornerTransition;
         return sample;
     }
 
@@ -219,6 +249,8 @@ RoundedRectSection2D::SegmentSample RoundedRectSection2D::sampleByArcLength(doub
         sample.point = QVector2D(static_cast<float>(m_halfWidthY), static_cast<float>(z));
         sample.tangent = QVector2D(0.0f, 1.0f);
         sample.normal = QVector2D(1.0f, 0.0f);
+        sample.regionType = SectionRegionType::FlatSide;
+        sample.sideIndex = 3;
         return sample;
     }
 
@@ -242,6 +274,7 @@ RoundedRectSection2D::SegmentSample RoundedRectSection2D::sampleByArcLength(doub
     sample.point = QVector2D(static_cast<float>(y), static_cast<float>(z));
     sample.tangent = normalizedOrFallback(tangent, QVector2D(-1.0f, 0.0f));
     sample.normal = normalizedOrFallback(normal, QVector2D(0.0f, 1.0f));
+    sample.regionType = SectionRegionType::CornerTransition;
     return sample;
 }
 
@@ -281,3 +314,188 @@ QVector2D RoundedRectSection2D::outwardNormalAt(double u) const
     return sampleByArcLength(arcLength).normal;
 }
 
+SectionRegionType RoundedRectSection2D::regionTypeAt(double u) const
+{
+    if (!isValid())
+    {
+        return SectionRegionType::Unknown;
+    }
+
+    const double normalized = normalizeUnit(u);
+    const double arcLength = normalized * m_totalLength;
+    return sampleByArcLength(arcLength).regionType;
+}
+
+int RoundedRectSection2D::sideIndexAt(double u) const
+{
+    if (!isValid())
+    {
+        return -1;
+    }
+
+    const double normalized = normalizeUnit(u);
+    const double arcLength = normalized * m_totalLength;
+    return sampleByArcLength(arcLength).sideIndex;
+}
+
+QVector2D RoundedRectSection2D::flatSideNormal(int sideIndex) const
+{
+    switch (sideIndex)
+    {
+    case 0:
+        return QVector2D(0.0f, 1.0f);
+    case 1:
+        return QVector2D(-1.0f, 0.0f);
+    case 2:
+        return QVector2D(0.0f, -1.0f);
+    case 3:
+        return QVector2D(1.0f, 0.0f);
+    default:
+        return QVector2D(0.0f, 0.0f);
+    }
+}
+
+bool RoundedRectSection2D::projectPoint(const QVector2D& yzPoint, ProjectionResult& result) const
+{
+    result = ProjectionResult();
+
+    if (!isValid())
+    {
+        return false;
+    }
+
+    const double innerY = std::max(0.0, m_halfWidthY - m_cornerRadiusY);
+    const double innerZ = std::max(0.0, m_halfHeightZ - m_cornerRadiusZ);
+    const double y = yzPoint.x();
+    const double z = yzPoint.y();
+    const double absY = std::abs(y);
+    const double absZ = std::abs(z);
+    const double sideGateTol = 1.0e-5;
+
+    auto assignFlatSide = [&](int sideIndex, double clampedY, double clampedZ)
+    {
+        result.point = QVector2D(static_cast<float>(clampedY), static_cast<float>(clampedZ));
+        result.normal = flatSideNormal(sideIndex);
+        result.regionType = SectionRegionType::FlatSide;
+        result.sideIndex = sideIndex;
+    };
+
+    double bestSideDistance = std::numeric_limits<double>::max();
+    int bestSideIndex = -1;
+
+    if (absY <= innerY + sideGateTol)
+    {
+        const double topDistance = std::abs(z - m_halfHeightZ);
+        const double bottomDistance = std::abs(z + m_halfHeightZ);
+
+        if (topDistance < bestSideDistance)
+        {
+            bestSideDistance = topDistance;
+            bestSideIndex = 0;
+        }
+
+        if (bottomDistance < bestSideDistance)
+        {
+            bestSideDistance = bottomDistance;
+            bestSideIndex = 2;
+        }
+    }
+
+    if (absZ <= innerZ + sideGateTol)
+    {
+        const double leftDistance = std::abs(y + m_halfWidthY);
+        const double rightDistance = std::abs(y - m_halfWidthY);
+
+        if (leftDistance < bestSideDistance)
+        {
+            bestSideDistance = leftDistance;
+            bestSideIndex = 1;
+        }
+
+        if (rightDistance < bestSideDistance)
+        {
+            bestSideDistance = rightDistance;
+            bestSideIndex = 3;
+        }
+    }
+
+    RoundedRectSection2D::ProjectionResult bestCorner;
+    double bestCornerDistance = std::numeric_limits<double>::max();
+
+    const auto evaluateCorner =
+        [&](double centerY, double centerZ, double angleStart, double angleEnd)
+    {
+        if (m_cornerRadiusY <= kEpsilon || m_cornerRadiusZ <= kEpsilon)
+        {
+            return;
+        }
+
+        const double scaledY = (y - centerY) / std::max(kEpsilon, m_cornerRadiusY);
+        const double scaledZ = (z - centerZ) / std::max(kEpsilon, m_cornerRadiusZ);
+        double theta = std::atan2(scaledZ, scaledY);
+
+        while (theta < angleStart)
+        {
+            theta += 2.0 * kPi;
+        }
+
+        while (theta > angleEnd)
+        {
+            theta -= 2.0 * kPi;
+        }
+
+        theta = std::max(angleStart, std::min(angleEnd, theta));
+
+        ProjectionResult candidate;
+        candidate.point = QVector2D
+        (
+            static_cast<float>(centerY + m_cornerRadiusY * std::cos(theta)),
+            static_cast<float>(centerZ + m_cornerRadiusZ * std::sin(theta))
+        );
+        const QVector2D normal
+        (
+            static_cast<float>((candidate.point.x() - centerY) / std::max(kEpsilon, m_cornerRadiusY * m_cornerRadiusY)),
+            static_cast<float>((candidate.point.y() - centerZ) / std::max(kEpsilon, m_cornerRadiusZ * m_cornerRadiusZ))
+        );
+        candidate.normal = normalizedOrFallback(normal, QVector2D(0.0f, 1.0f));
+        candidate.regionType = SectionRegionType::CornerTransition;
+        candidate.sideIndex = -1;
+
+        const double distance = squaredLength(yzPoint - candidate.point);
+
+        if (distance < bestCornerDistance)
+        {
+            bestCornerDistance = distance;
+            bestCorner = candidate;
+        }
+    };
+
+    evaluateCorner(-innerY, innerZ, kPi * 0.5, kPi);
+    evaluateCorner(-innerY, -innerZ, kPi, kPi * 1.5);
+    evaluateCorner(innerY, -innerZ, kPi * 1.5, kPi * 2.0);
+    evaluateCorner(innerY, innerZ, 0.0, kPi * 0.5);
+
+    if (bestSideIndex >= 0 && (bestSideDistance * bestSideDistance) <= bestCornerDistance + kProjectionBias)
+    {
+        switch (bestSideIndex)
+        {
+        case 0:
+            assignFlatSide(0, std::max(-innerY, std::min(innerY, y)), m_halfHeightZ);
+            return true;
+        case 1:
+            assignFlatSide(1, -m_halfWidthY, std::max(-innerZ, std::min(innerZ, z)));
+            return true;
+        case 2:
+            assignFlatSide(2, std::max(-innerY, std::min(innerY, y)), -m_halfHeightZ);
+            return true;
+        case 3:
+            assignFlatSide(3, m_halfWidthY, std::max(-innerZ, std::min(innerZ, z)));
+            return true;
+        default:
+            break;
+        }
+    }
+
+    result = bestCorner;
+    return result.regionType != SectionRegionType::Unknown;
+}

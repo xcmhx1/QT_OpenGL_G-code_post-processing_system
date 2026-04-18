@@ -4,6 +4,7 @@
 // 图元基类模块，定义原生实体绑定、几何缓存和公共图元行为。
 #include <QColor>
 #include <QObject>
+#include <QString>
 #include <QVector>
 #include <QVector3D>
 
@@ -66,4 +67,15 @@ public:
     QVector3D m_processDirection;
     // 当前图元的最终显示颜色缓存。
     QColor m_color;
+
+    // 最近一次 4 轴导出规划得到的最终点序（单一真源：导出与预览共用）。
+    QVector<QVector3D> m_exportPathPoints;
+    bool m_hasExportPathPoints = false;
+    bool m_exportDirectionReversed = false;
+    QString m_exportProcessMode;
+    bool m_exportRequiresA = false;
+    double m_exportAStartDeg = 0.0;
+    double m_exportAEndDeg = 0.0;
+    double m_exportARangeDeg = 0.0;
+    QString m_exportRegionSummary;
 };

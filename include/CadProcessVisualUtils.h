@@ -2,6 +2,7 @@
 
 #include <QVector>
 #include <QVector3D>
+#include <QString>
 
 class CadItem;
 
@@ -17,6 +18,14 @@ struct CadProcessVisualInfo
     QVector3D endPoint;
     QVector3D direction;
     QVector3D labelAnchor;
+    bool usesExportPath = false;
+    bool exportDirectionReversed = false;
+    QString exportProcessMode;
+    bool exportRequiresA = false;
+    double exportAStartDeg = 0.0;
+    double exportAEndDeg = 0.0;
+    double exportARangeDeg = 0.0;
+    QString exportRegionSummary;
 };
 
 enum class CadSelectionHandleShape

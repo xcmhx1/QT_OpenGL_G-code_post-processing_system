@@ -2111,6 +2111,7 @@ bool Gcode_postprocessing_system::exportGCodeDocument()
     }
 
     ui->openGLWidget->refreshCommandPrompt();
+    ui->openGLWidget->requestViewUpdate();
     return true;
 }
 

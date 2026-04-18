@@ -396,7 +396,69 @@ namespace
         return machine;
     }
 
-    QVector<QVector3D> buildPathPointsForItem(const CadItem* item)
+    bool isClosedItemGeometry(const CadItem* item)
+    {
+        if (item == nullptr)
+        {
+            return false;
+        }
+
+        switch (item->m_type)
+        {
+        case DRW::ETYPE::CIRCLE:
+            return true;
+        case DRW::ETYPE::ELLIPSE:
+        {
+            const CadEllipseItem* ellipseItem = static_cast<const CadEllipseItem*>(item);
+            return ellipseItem != nullptr && isFullEllipsePath(ellipseItem->m_data);
+        }
+        case DRW::ETYPE::POLYLINE:
+        {
+            const CadPolylineItem* polylineItem = static_cast<const CadPolylineItem*>(item);
+            return polylineItem != nullptr && polylineItem->m_data != nullptr && ((polylineItem->m_data->flags & 1) != 0);
+        }
+        case DRW::ETYPE::LWPOLYLINE:
+        {
+            const CadLWPolylineItem* lwpolylineItem = static_cast<const CadLWPolylineItem*>(item);
+            return lwpolylineItem != nullptr && lwpolylineItem->m_data != nullptr && ((lwpolylineItem->m_data->flags & 1) != 0);
+        }
+        default:
+            return false;
+        }
+    }
+
+    bool canReverseEntityForJoin(const CadItem* item, const ProcessTolerance& tolerance)
+    {
+        return tolerance.allowReverseEntityForJoin
+            && item != nullptr
+            && !item->m_hasCustomProcessStart
+            && !isClosedItemGeometry(item);
+    }
+
+    QString buildProcessKey(const CadItem* item)
+    {
+        return QStringLiteral("%1|%2|%3")
+            .arg(entityTypeKey(item))
+            .arg(entityLayerKey(item))
+            .arg(entityColorKey(item));
+    }
+
+    QString processModeToString(ProcessMode mode)
+    {
+        switch (mode)
+        {
+        case ProcessMode::XYZ_3Axis:
+            return QStringLiteral("XYZ_3Axis");
+        case ProcessMode::A_Indexed_XYZ:
+            return QStringLiteral("A_Indexed_XYZ");
+        case ProcessMode::XYZA_Continuous:
+            return QStringLiteral("XYZA_Continuous");
+        default:
+            return QStringLiteral("Unknown");
+        }
+    }
+
+    QVector<QVector3D> buildPathPointsForItem(const CadItem* item, bool reverseDirection)
     {
         QVector<QVector3D> points;
 
@@ -422,7 +484,7 @@ namespace
             points.append(vertex);
         }
 
-        if (item->m_isReverse && points.size() >= 2)
+        if (reverseDirection && points.size() >= 2)
         {
             std::reverse(points.begin(), points.end());
         }
@@ -435,7 +497,11 @@ namespace
         const QString sectionType = profileConfig.sectionType.trimmed().toLower();
         return sectionType == QStringLiteral("rounded_rect")
             || sectionType == QStringLiteral("rounded-rect")
-            || sectionType == QStringLiteral("roundedrect");
+            || sectionType == QStringLiteral("roundedrect")
+            || sectionType == QStringLiteral("ellipse_corner_rect")
+            || sectionType == QStringLiteral("ellipse-corner-rect")
+            || sectionType == QStringLiteral("ellipsecornerrect")
+            || sectionType == QStringLiteral("rounded_rectangle");
     }
 
     QVector<SamplePoint> buildRadialSamples
@@ -455,6 +521,14 @@ namespace
 
             SamplePoint sample;
             sample.pos = point;
+            sample.hasRawA = false;
+            sample.rawA = 0.0;
+            sample.hasSnappedA = false;
+            sample.snappedA = 0.0;
+            sample.regionType = SectionRegionType::Unknown;
+            sample.sideIndex = -1;
+            sample.hasTargetA = false;
+            sample.targetA = 0.0;
 
             if (radius > 1.0e-12)
             {
@@ -473,24 +547,305 @@ namespace
         return samples;
     }
 
-    QVector<ToolpathSegment4Axis> build4AxisSegmentsForItem
+    QVector<QVector3D> densifyPathPointsLinear(const QVector<QVector3D>& pathPoints, double maxLinearStep)
+    {
+        QVector<QVector3D> densePoints;
+
+        if (pathPoints.isEmpty())
+        {
+            return densePoints;
+        }
+
+        const double safeMaxStep = std::max(maxLinearStep, 1.0e-6);
+        densePoints.reserve(pathPoints.size() * 2);
+        densePoints.append(pathPoints.front());
+
+        for (int index = 1; index < pathPoints.size(); ++index)
+        {
+            const QVector3D startPoint = pathPoints.at(index - 1);
+            const QVector3D endPoint = pathPoints.at(index);
+            const double segmentLength = static_cast<double>((endPoint - startPoint).length());
+            const int stepCount = std::max(1, static_cast<int>(std::ceil(segmentLength / safeMaxStep)));
+
+            for (int step = 1; step <= stepCount; ++step)
+            {
+                const double t = static_cast<double>(step) / static_cast<double>(stepCount);
+                densePoints.append
+                (
+                    QVector3D
+                    (
+                        static_cast<float>(startPoint.x() + (endPoint.x() - startPoint.x()) * t),
+                        static_cast<float>(startPoint.y() + (endPoint.y() - startPoint.y()) * t),
+                        static_cast<float>(startPoint.z() + (endPoint.z() - startPoint.z()) * t)
+                    )
+                );
+            }
+        }
+
+        return densePoints;
+    }
+
+    QString sampleRegionDebugString(const SamplePoint& sample)
+    {
+        QString regionLabel = QStringLiteral("Unknown");
+
+        if (sample.regionType == SectionRegionType::FlatSide)
+        {
+            regionLabel = sample.sideIndex >= 0
+                ? QStringLiteral("FlatSide(side=%1)").arg(sample.sideIndex)
+                : QStringLiteral("FlatSide");
+        }
+        else if (sample.regionType == SectionRegionType::CornerTransition)
+        {
+            regionLabel = QStringLiteral("CornerTransition");
+        }
+
+        const QString rawAText = sample.hasRawA
+            ? QString::number(sample.rawA, 'f', 3)
+            : QStringLiteral("NA");
+        const QString snappedAText = sample.hasSnappedA
+            ? QString::number(sample.snappedA, 'f', 3)
+            : QStringLiteral("NA");
+
+        return QStringLiteral("%1,rawA=%2,snapA=%3")
+            .arg(regionLabel)
+            .arg(rawAText)
+            .arg(snappedAText);
+    }
+
+    QString buildLineSampleDebug(const QVector<SamplePoint>& samples)
+    {
+        QStringList parts;
+        parts.reserve(samples.size());
+
+        for (const SamplePoint& sample : samples)
+        {
+            parts.append(sampleRegionDebugString(sample));
+        }
+
+        return QStringLiteral("[%1]").arg(parts.join(QStringLiteral("; ")));
+    }
+
+    void resetExportDebugState(CadItem* item)
+    {
+        if (item == nullptr)
+        {
+            return;
+        }
+
+        item->m_exportPathPoints.clear();
+        item->m_hasExportPathPoints = false;
+        item->m_exportDirectionReversed = false;
+        item->m_exportProcessMode.clear();
+        item->m_exportRequiresA = false;
+        item->m_exportAStartDeg = 0.0;
+        item->m_exportAEndDeg = 0.0;
+        item->m_exportARangeDeg = 0.0;
+        item->m_exportRegionSummary.clear();
+    }
+
+    QVector<QVector3D> buildExportPathFromSegments(const QVector<ToolpathSegment4Axis>& segments)
+    {
+        QVector<QVector3D> pathPoints;
+
+        for (const ToolpathSegment4Axis& segment : segments)
+        {
+            for (int pointIndex = 0; pointIndex < segment.points.size(); ++pointIndex)
+            {
+                const QVector3D localPoint = segment.points.at(pointIndex).localPos;
+
+                if (!pathPoints.isEmpty() && (pathPoints.back() - localPoint).lengthSquared() <= 1.0e-12f)
+                {
+                    continue;
+                }
+
+                pathPoints.append(localPoint);
+            }
+        }
+
+        return pathPoints;
+    }
+
+    QString summarizeProcessModeFromSegments(const QVector<ToolpathSegment4Axis>& segments)
+    {
+        bool hasAContinuous = false;
+        bool hasARequired = false;
+
+        for (const ToolpathSegment4Axis& segment : segments)
+        {
+            hasAContinuous = hasAContinuous || segment.mode == SegmentMotionMode::AContinuous;
+            hasARequired = hasARequired || segment.requiresA;
+        }
+
+        if (!hasARequired)
+        {
+            return QStringLiteral("XYZ_3Axis");
+        }
+
+        return hasAContinuous ? QStringLiteral("XYZA_Continuous") : QStringLiteral("A_Indexed_XYZ");
+    }
+
+    QString summarizeRegionFromSegments(const QVector<ToolpathSegment4Axis>& segments)
+    {
+        bool hasFlat = false;
+        bool hasCorner = false;
+        bool hasUnknown = false;
+        bool hasMixed = false;
+        int firstSide = -1;
+        bool sameSide = true;
+
+        for (const ToolpathSegment4Axis& segment : segments)
+        {
+            const QString summary = segment.regionSummary.trimmed();
+
+            if (summary.startsWith(QStringLiteral("Mixed")))
+            {
+                hasMixed = true;
+                continue;
+            }
+
+            if (summary.startsWith(QStringLiteral("CornerTransition")))
+            {
+                hasCorner = true;
+                continue;
+            }
+
+            if (summary.startsWith(QStringLiteral("FlatSide")))
+            {
+                hasFlat = true;
+                const int sidePos = summary.indexOf(QStringLiteral("side="));
+
+                if (sidePos >= 0)
+                {
+                    const int valueStart = sidePos + 5;
+                    int valueEnd = valueStart;
+
+                    while (valueEnd < summary.size() && summary.at(valueEnd).isDigit())
+                    {
+                        ++valueEnd;
+                    }
+
+                    bool ok = false;
+                    const int sideValue = summary.mid(valueStart, valueEnd - valueStart).toInt(&ok);
+
+                    if (ok)
+                    {
+                        if (firstSide < 0)
+                        {
+                            firstSide = sideValue;
+                        }
+                        else if (firstSide != sideValue)
+                        {
+                            sameSide = false;
+                        }
+                    }
+                }
+
+                continue;
+            }
+
+            hasUnknown = true;
+        }
+
+        if (hasMixed)
+        {
+            return QStringLiteral("Mixed");
+        }
+
+        if (hasFlat && !hasCorner && !hasUnknown && sameSide && firstSide >= 0)
+        {
+            return QStringLiteral("FlatSide(side=%1)").arg(firstSide);
+        }
+
+        if (hasFlat && !hasCorner && !hasUnknown)
+        {
+            return QStringLiteral("FlatSide");
+        }
+
+        if (hasCorner && !hasFlat && !hasUnknown)
+        {
+            return QStringLiteral("CornerTransition");
+        }
+
+        if (hasUnknown && !hasFlat && !hasCorner)
+        {
+            return QStringLiteral("Unknown");
+        }
+
+        return QStringLiteral("Mixed");
+    }
+
+    void writeExportDebugStateToItem
     (
-        const CadItem* item,
+        CadItem* item,
+        const QVector<ToolpathSegment4Axis>& segments,
+        bool reversedByJoin
+    )
+    {
+        if (item == nullptr)
+        {
+            return;
+        }
+
+        resetExportDebugState(item);
+        item->m_exportPathPoints = buildExportPathFromSegments(segments);
+        item->m_hasExportPathPoints = item->m_exportPathPoints.size() >= 2;
+        item->m_exportDirectionReversed = reversedByJoin;
+        item->m_exportProcessMode = summarizeProcessModeFromSegments(segments);
+        item->m_exportRegionSummary = summarizeRegionFromSegments(segments);
+
+        bool requiresA = false;
+        bool firstA = true;
+        double minA = 0.0;
+        double maxA = 0.0;
+        double startA = 0.0;
+        double endA = 0.0;
+
+        for (const ToolpathSegment4Axis& segment : segments)
+        {
+            if (segment.points.isEmpty())
+            {
+                continue;
+            }
+
+            requiresA = requiresA || segment.requiresA;
+
+            for (const ToolpathPoint4Axis& point : segment.points)
+            {
+                if (firstA)
+                {
+                    minA = maxA = startA = point.aDeg;
+                    firstA = false;
+                }
+
+                minA = std::min(minA, point.aDeg);
+                maxA = std::max(maxA, point.aDeg);
+                endA = point.aDeg;
+            }
+        }
+
+        item->m_exportRequiresA = requiresA;
+        item->m_exportAStartDeg = firstA ? 0.0 : startA;
+        item->m_exportAEndDeg = firstA ? 0.0 : endA;
+        item->m_exportARangeDeg = firstA ? 0.0 : (maxA - minA);
+    }
+
+    bool buildSamplesForPathPoints
+    (
+        const QVector<QVector3D>& pathPoints,
         const GProfileRotaryAxisConfig& profileConfig,
         const RotaryConfig& rotaryConfig,
         const ProcessTolerance& tolerance,
-        QStringList& warnings
+        QStringList& warnings,
+        QVector<SamplePoint>& outSamples
     )
     {
-        QVector<ToolpathSegment4Axis> segments;
-        const QVector<QVector3D> pathPoints = buildPathPointsForItem(item);
+        outSamples.clear();
 
         if (pathPoints.size() < 2)
         {
-            return segments;
+            return false;
         }
-
-        QVector<SamplePoint> samples;
 
         if (usesRoundedRectSection(profileConfig)
             && profileConfig.sectionHalfWidthY > tolerance.normalEps
@@ -504,33 +859,170 @@ namespace
                 profileConfig.sectionCornerRadiusZ
             );
 
-            if (!section.isValid()
-                || !buildSamplesFromSectionByNearestProjection(pathPoints, section, samples, &warnings))
+            if (section.isValid()
+                && buildSamplesFromSectionByNearestProjection(pathPoints, section, rotaryConfig, tolerance, outSamples, &warnings))
             {
-                warnings.append(QStringLiteral("图元 %1 截面法向构建失败，已回退为径向法向。").arg(entityTypeKey(item)));
-                samples = buildRadialSamples(pathPoints, rotaryConfig);
+                return true;
             }
-        }
-        else
-        {
-            samples = buildRadialSamples(pathPoints, rotaryConfig);
+
+            warnings.append(QStringLiteral("截面法向构建失败，已回退为径向法向。"));
         }
 
-        if (samples.size() < 2)
+        outSamples = buildRadialSamples(pathPoints, rotaryConfig);
+        return outSamples.size() >= 2;
+    }
+
+    bool refineSamplesAndAAngles
+    (
+        const QVector<QVector3D>& inputPathPoints,
+        const GProfileRotaryAxisConfig& profileConfig,
+        const RotaryConfig& rotaryConfig,
+        const ProcessTolerance& tolerance,
+        QStringList& warnings,
+        QVector<SamplePoint>& outSamples,
+        QVector<double>& outContinuousA,
+        ReachabilityResult& outReachability
+    )
+    {
+        QVector<QVector3D> pathPoints = inputPathPoints;
+        constexpr int kMaxRefineIterations = 8;
+
+        for (int iteration = 0; iteration < kMaxRefineIterations; ++iteration)
+        {
+            QVector<SamplePoint> samples;
+
+            if (!buildSamplesForPathPoints(pathPoints, profileConfig, rotaryConfig, tolerance, warnings, samples))
+            {
+                return false;
+            }
+
+            ReachabilityResult reachability;
+            const QVector<double> continuousA = computeContinuousAAngles(samples, rotaryConfig, tolerance, &reachability);
+
+            if (continuousA.size() != samples.size() || continuousA.size() < 2)
+            {
+                return false;
+            }
+
+            bool needSplit = false;
+            QVector<QVector3D> refinedPathPoints;
+            refinedPathPoints.reserve(pathPoints.size() * 2);
+            refinedPathPoints.append(pathPoints.front());
+            const double maxDeltaA = std::max(tolerance.maxDeltaADegPerStep, 1.0e-6);
+
+            for (int index = 1; index < pathPoints.size(); ++index)
+            {
+                const QVector3D startPoint = pathPoints.at(index - 1);
+                const QVector3D endPoint = pathPoints.at(index);
+                const SamplePoint& leftSample = samples.at(index - 1);
+                const SamplePoint& rightSample = samples.at(index);
+                const bool preserveFixedA = leftSample.regionType == SectionRegionType::FlatSide
+                    && rightSample.regionType == SectionRegionType::FlatSide
+                    && leftSample.sideIndex >= 0
+                    && leftSample.sideIndex == rightSample.sideIndex
+                    && leftSample.hasTargetA
+                    && rightSample.hasTargetA
+                    && std::abs(leftSample.targetA - rightSample.targetA) <= 1.0e-9;
+                const double deltaA = preserveFixedA
+                    ? 0.0
+                    : std::abs(continuousA.at(index) - continuousA.at(index - 1));
+                const int splitCount = preserveFixedA
+                    ? 1
+                    : std::max(1, static_cast<int>(std::ceil(deltaA / maxDeltaA)));
+
+                if (splitCount > 1)
+                {
+                    needSplit = true;
+                }
+
+                for (int split = 1; split <= splitCount; ++split)
+                {
+                    const double t = static_cast<double>(split) / static_cast<double>(splitCount);
+                    refinedPathPoints.append
+                    (
+                        QVector3D
+                        (
+                            static_cast<float>(startPoint.x() + (endPoint.x() - startPoint.x()) * t),
+                            static_cast<float>(startPoint.y() + (endPoint.y() - startPoint.y()) * t),
+                            static_cast<float>(startPoint.z() + (endPoint.z() - startPoint.z()) * t)
+                        )
+                    );
+                }
+            }
+
+            if (!needSplit)
+            {
+                outSamples = samples;
+                outContinuousA = continuousA;
+                outReachability = reachability;
+                return true;
+            }
+
+            pathPoints = refinedPathPoints;
+        }
+
+        QVector<SamplePoint> samples;
+
+        if (!buildSamplesForPathPoints(pathPoints, profileConfig, rotaryConfig, tolerance, warnings, samples))
+        {
+            return false;
+        }
+
+        outContinuousA = computeContinuousAAngles(samples, rotaryConfig, tolerance, &outReachability);
+        outSamples = samples;
+        return outContinuousA.size() == outSamples.size() && outContinuousA.size() >= 2;
+    }
+
+    QVector<ToolpathSegment4Axis> build4AxisSegmentsForItem
+    (
+        const CadItem* item,
+        const GProfileRotaryAxisConfig& profileConfig,
+        const RotaryConfig& rotaryConfig,
+        const ProcessTolerance& tolerance,
+        bool reverseDirection,
+        const QString& processKey,
+        QStringList& warnings,
+        QStringList* lineDebugLines = nullptr
+    )
+    {
+        QVector<ToolpathSegment4Axis> segments;
+        const bool isLineGeometry = item != nullptr && item->m_type == DRW::ETYPE::LINE;
+        const QVector<QVector3D> pathPoints = densifyPathPointsLinear
+        (
+            buildPathPointsForItem(item, reverseDirection),
+            tolerance.maxLinearStep
+        );
+
+        if (pathPoints.size() < 2)
         {
             return segments;
         }
 
+        QVector<SamplePoint> samples;
+        QVector<double> continuousA;
         ReachabilityResult reachability;
-        ModeStatistics statistics;
-        FeatureClassifier classifier;
-        const ProcessMode processMode = classifier.classify(samples, rotaryConfig, tolerance, &reachability, &statistics);
-        QVector<double> continuousA = computeContinuousAAngles(samples, rotaryConfig, tolerance, &reachability);
 
-        if (continuousA.size() != samples.size())
+        if (!refineSamplesAndAAngles
+        (
+            pathPoints,
+            profileConfig,
+            rotaryConfig,
+            tolerance,
+            warnings,
+            samples,
+            continuousA,
+            reachability
+        ))
         {
             return segments;
         }
+
+        FeatureClassifier classifier;
+        const ProcessMode processMode = classifier.classify(samples, rotaryConfig, tolerance, &reachability, nullptr);
+        const double neutralA = commandAngleFromMathDeg(0.0, rotaryConfig);
+        warnings.append(QStringLiteral("图元 %1 分类为 %2。")
+            .arg(entityTypeKey(item))
+            .arg(processModeToString(processMode)));
 
         if (!reachability.aOnlyReachable)
         {
@@ -545,8 +1037,7 @@ namespace
 
         if (processMode == ProcessMode::XYZ_3Axis)
         {
-            const double a0 = commandAngleFromMathDeg(0.0, rotaryConfig);
-            continuousA.fill(a0, continuousA.size());
+            continuousA.fill(neutralA, continuousA.size());
         }
         else if (processMode == ProcessMode::A_Indexed_XYZ)
         {
@@ -564,13 +1055,129 @@ namespace
             100.0
         );
 
-        segments = segmentByAMode(resampled, rotaryConfig, tolerance);
+        segments = segmentByAMode(resampled, samples, rotaryConfig, tolerance);
 
         if (processMode == ProcessMode::A_Indexed_XYZ)
         {
             for (ToolpathSegment4Axis& segment : segments)
             {
                 segment.mode = SegmentMotionMode::AFixed;
+            }
+        }
+
+        for (ToolpathSegment4Axis& segment : segments)
+        {
+            double minA = segment.points.isEmpty() ? neutralA : segment.points.front().aDeg;
+            double maxA = minA;
+            double sumA = 0.0;
+
+            for (const ToolpathPoint4Axis& point : segment.points)
+            {
+                minA = std::min(minA, point.aDeg);
+                maxA = std::max(maxA, point.aDeg);
+                sumA += point.aDeg;
+            }
+
+            const double rangeA = maxA - minA;
+            const double averageA = segment.points.isEmpty() ? neutralA : (sumA / static_cast<double>(segment.points.size()));
+            const bool nearNeutral = std::abs(averageA - neutralA) <= tolerance.aNeutralToleranceDeg;
+            const bool isCornerSegment = segment.regionSummary.startsWith(QStringLiteral("CornerTransition"));
+            const bool isFlatSegment = segment.regionSummary.startsWith(QStringLiteral("FlatSide"));
+            const bool requiresA = processMode != ProcessMode::XYZ_3Axis
+                && (isCornerSegment
+                    || (isFlatSegment && (!nearNeutral || rangeA > tolerance.aEnableThresholdDeg))
+                    || (!isCornerSegment && !isFlatSegment
+                        && (rangeA > tolerance.aNeutralToleranceDeg
+                            || std::abs(averageA - neutralA) > tolerance.aEnableThresholdDeg)));
+
+            if (!requiresA)
+            {
+                segment.mode = SegmentMotionMode::AFixed;
+                segment.hasFixedA = true;
+                segment.fixedADeg = neutralA;
+                segment.emitAInEachLine = false;
+                segment.prePositionAOnly = false;
+
+                for (ToolpathPoint4Axis& point : segment.points)
+                {
+                    point.aDeg = neutralA;
+                    point.machinePos = rotatePointByA(point.localPos, point.aDeg, rotaryConfig);
+                }
+            }
+            else if (segment.mode == SegmentMotionMode::AFixed)
+            {
+                segment.hasFixedA = true;
+                segment.fixedADeg = segment.points.isEmpty() ? neutralA : segment.points.front().aDeg;
+                segment.emitAInEachLine = false;
+                segment.prePositionAOnly = true;
+            }
+            else
+            {
+                segment.hasFixedA = false;
+                segment.fixedADeg = 0.0;
+                segment.emitAInEachLine = true;
+                segment.prePositionAOnly = false;
+            }
+
+            segment.processKey = processKey;
+            segment.processMode = !requiresA
+                ? ProcessMode::XYZ_3Axis
+                : (segment.mode == SegmentMotionMode::AFixed ? ProcessMode::A_Indexed_XYZ : ProcessMode::XYZA_Continuous);
+            segment.requiresA = requiresA;
+
+            if (!segment.points.isEmpty())
+            {
+                segment.startADeg = segment.points.front().aDeg;
+                segment.endADeg = segment.points.back().aDeg;
+                double rangeMin = segment.startADeg;
+                double rangeMax = segment.startADeg;
+
+                for (const ToolpathPoint4Axis& point : segment.points)
+                {
+                    rangeMin = std::min(rangeMin, point.aDeg);
+                    rangeMax = std::max(rangeMax, point.aDeg);
+                }
+
+                segment.aRangeDeg = rangeMax - rangeMin;
+
+                if (segment.mode == SegmentMotionMode::AFixed && segment.hasFixedA)
+                {
+                    segment.fixedADeg = segment.startADeg;
+                    segment.aRangeDeg = 0.0;
+                }
+            }
+            else
+            {
+                segment.startADeg = 0.0;
+                segment.endADeg = 0.0;
+                segment.aRangeDeg = 0.0;
+            }
+        }
+
+        if (isLineGeometry && lineDebugLines != nullptr)
+        {
+            lineDebugLines->append
+            (
+                QStringLiteral("DEBUG_LINE: entity=%1 isLine=Y sampleCount=%2")
+                    .arg(entityTypeKey(item))
+                    .arg(samples.size())
+            );
+            lineDebugLines->append(QStringLiteral("DEBUG_LINE: samples=%1").arg(buildLineSampleDebug(samples)));
+
+            for (const ToolpathSegment4Axis& segment : segments)
+            {
+                lineDebugLines->append
+                (
+                    QStringLiteral("DEBUG_LINE: final mode=%1 requiresA=%2 fixedA=%3 startA=%4 endA=%5 range=%6 emitAInEachLine=%7 prePositionAOnly=%8")
+                        .arg(processModeToString(segment.processMode))
+                        .arg(segment.requiresA ? QStringLiteral("Y") : QStringLiteral("N"))
+                        .arg(segment.hasFixedA ? QString::number(segment.fixedADeg, 'f', 3) : QStringLiteral("NA"))
+                        .arg(segment.startADeg, 0, 'f', 3)
+                        .arg(segment.endADeg, 0, 'f', 3)
+                        .arg(segment.aRangeDeg, 0, 'f', 3)
+                        .arg(segment.emitAInEachLine ? QStringLiteral("Y") : QStringLiteral("N"))
+                        .arg(segment.prePositionAOnly ? QStringLiteral("Y") : QStringLiteral("N"))
+                );
             }
         }
 
@@ -1021,9 +1628,25 @@ bool GGenerator::generateToFile(const QString& filePath, QString* errorMessage) 
         const RotaryConfig rotaryConfig = buildRotaryConfig(profileRotaryConfig);
         ProcessTolerance tolerance;
         MachineConfig4Axis machineConfig = buildMachineConfig(profileRotaryConfig);
+        machineConfig.aNeutralDeg = commandAngleFromMathDeg(0.0, rotaryConfig);
+        machineConfig.aNeutralToleranceDeg = tolerance.aNeutralToleranceDeg;
         machineConfig.fixedASwitchThresholdDeg = tolerance.fixedASwitchThresholdDeg;
+        machineConfig.connectionTolerance = tolerance.connectionTolerance;
+        machineConfig.aJoinToleranceDeg = tolerance.aJoinToleranceDeg;
+        machineConfig.feedTolerance = tolerance.feedTolerance;
+        machineConfig.powerTolerance = tolerance.powerTolerance;
+        machineConfig.allowLaserOffNoLiftTransition = tolerance.allowLaserOffNoLiftTransition;
         QStringList warnings;
+        QStringList debugLines;
+        QStringList lineDebugLines;
         QVector<ToolpathSegment4Axis> allSegments;
+        bool hasPreviousEndPoint = false;
+        ToolpathPoint4Axis previousEndPoint;
+
+        for (CadItem* item : orderedItems)
+        {
+            resetExportDebugState(item);
+        }
 
         for (CadItem* item : orderedItems)
         {
@@ -1032,24 +1655,99 @@ bool GGenerator::generateToFile(const QString& filePath, QString* errorMessage) 
                 continue;
             }
 
-            const QVector<ToolpathSegment4Axis> itemSegments = build4AxisSegmentsForItem
+            const QString processKey = buildProcessKey(item);
+            QStringList forwardWarnings;
+            QStringList selectedItemLineDebug;
+            const bool defaultReverse = item->m_isReverse;
+            QVector<ToolpathSegment4Axis> selectedSegments = build4AxisSegmentsForItem
             (
                 item,
                 profileRotaryConfig,
                 rotaryConfig,
                 tolerance,
-                warnings
+                defaultReverse,
+                processKey,
+                forwardWarnings,
+                &selectedItemLineDebug
             );
+            QStringList selectedWarnings = forwardWarnings;
+            bool selectedReverse = defaultReverse;
 
-            if (itemSegments.isEmpty())
+            if (canReverseEntityForJoin(item, tolerance) && hasPreviousEndPoint)
+            {
+                QStringList reverseWarnings;
+                QStringList reverseLineDebug;
+                const QVector<ToolpathSegment4Axis> reverseSegments = build4AxisSegmentsForItem
+                (
+                    item,
+                    profileRotaryConfig,
+                    rotaryConfig,
+                    tolerance,
+                    !defaultReverse,
+                    processKey,
+                    reverseWarnings,
+                    &reverseLineDebug
+                );
+
+                if (!selectedSegments.isEmpty() && !reverseSegments.isEmpty())
+                {
+                    const QVector3D forwardStart = selectedSegments.front().points.front().machinePos;
+                    const QVector3D reverseStart = reverseSegments.front().points.front().machinePos;
+                    const double forwardDistance = static_cast<double>((forwardStart - previousEndPoint.machinePos).length());
+                    const double reverseDistance = static_cast<double>((reverseStart - previousEndPoint.machinePos).length());
+
+                    if (reverseDistance + 1.0e-9 < forwardDistance)
+                    {
+                        selectedSegments = reverseSegments;
+                        selectedWarnings = reverseWarnings;
+                        selectedReverse = !defaultReverse;
+                        selectedItemLineDebug = reverseLineDebug;
+                    }
+                }
+                else if (selectedSegments.isEmpty() && !reverseSegments.isEmpty())
+                {
+                    selectedSegments = reverseSegments;
+                    selectedWarnings = reverseWarnings;
+                    selectedReverse = !defaultReverse;
+                    selectedItemLineDebug = reverseLineDebug;
+                }
+            }
+
+            if (selectedSegments.isEmpty())
             {
                 continue;
             }
 
-            for (const ToolpathSegment4Axis& segment : itemSegments)
+            warnings.append(selectedWarnings);
+            lineDebugLines.append(selectedItemLineDebug);
+            writeExportDebugStateToItem(item, selectedSegments, selectedReverse != defaultReverse);
+
+            if (selectedReverse != defaultReverse)
+            {
+                warnings.append(QStringLiteral("图元 %1 为减少空行程已自动反转加工方向。").arg(entityTypeKey(item)));
+            }
+
+            debugLines.append
+            (
+                QStringLiteral("ENTITY[%1|order=%2] mode=%3 reversed=%4 requiresA=%5 region=%6 A(start=%7,end=%8,range=%9) previewUsesExportPath=Y")
+                    .arg(entityTypeKey(item))
+                    .arg(item->m_processOrder)
+                    .arg(item->m_exportProcessMode)
+                    .arg(item->m_exportDirectionReversed ? QStringLiteral("Y") : QStringLiteral("N"))
+                    .arg(item->m_exportRequiresA ? QStringLiteral("Y") : QStringLiteral("N"))
+                    .arg(item->m_exportRegionSummary.isEmpty() ? QStringLiteral("Unknown") : item->m_exportRegionSummary)
+                    .arg(item->m_exportAStartDeg, 0, 'f', 3)
+                    .arg(item->m_exportAEndDeg, 0, 'f', 3)
+                    .arg(item->m_exportARangeDeg, 0, 'f', 3)
+            );
+
+            for (const ToolpathSegment4Axis& segment : selectedSegments)
             {
                 allSegments.append(segment);
             }
+
+            previousEndPoint = allSegments.back().points.back();
+            hasPreviousEndPoint = true;
         }
 
         if (allSegments.isEmpty())
@@ -1087,6 +1785,22 @@ bool GGenerator::generateToFile(const QString& filePath, QString* errorMessage) 
             }
         }
 
+        for (const QString& debugLine : debugLines)
+        {
+            if (!debugLine.trimmed().isEmpty())
+            {
+                stream << "; DEBUG: " << debugLine << "\r\n";
+            }
+        }
+
+        for (const QString& lineDebug : lineDebugLines)
+        {
+            if (!lineDebug.trimmed().isEmpty())
+            {
+                stream << "; " << lineDebug << "\r\n";
+            }
+        }
+
         stream << geometryText;
         writeTextBlock(stream, m_profile->fileCode().footer);
         file.close();
@@ -1097,6 +1811,11 @@ bool GGenerator::generateToFile(const QString& filePath, QString* errorMessage) 
         }
 
         return true;
+    }
+
+    for (CadItem* item : orderedItems)
+    {
+        resetExportDebugState(item);
     }
 
     for (CadItem* item : orderedItems)

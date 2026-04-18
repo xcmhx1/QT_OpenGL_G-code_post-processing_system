@@ -28,6 +28,8 @@ bool buildSamplesFromSectionByNearestProjection
 (
     const QVector<QVector3D>& pathPoints,
     const CrossSection2D& section,
+    const RotaryConfig& rotary,
+    const ProcessTolerance& tolerance,
     QVector<SamplePoint>& outSamples,
     QStringList* warnings = nullptr
 );
@@ -45,6 +47,7 @@ QVector<ToolpathPoint4Axis> resampleForRotaryMotion
 QVector<ToolpathSegment4Axis> segmentByAMode
 (
     const QVector<ToolpathPoint4Axis>& points,
+    const QVector<SamplePoint>& samples,
     const RotaryConfig& rotary,
     const ProcessTolerance& tolerance
 );
@@ -55,4 +58,3 @@ QVector<SamplePoint> buildRoundedRectSectionDemoSamples
     double xValue,
     int sampleCount
 );
-

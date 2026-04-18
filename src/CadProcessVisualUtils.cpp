@@ -660,6 +660,39 @@ namespace
         handle.direction = normalizeOrZero(direction);
         handles.push_back(std::move(handle));
     }
+
+    bool buildDirectionFromPathPoints
+    (
+        const QVector<QVector3D>& pathPoints,
+        QVector3D& startPoint,
+        QVector3D& endPoint,
+        QVector3D& direction,
+        QVector3D& anchor
+    )
+    {
+        if (pathPoints.size() < 2)
+        {
+            return false;
+        }
+
+        startPoint = pathPoints.front();
+        endPoint = pathPoints.back();
+        anchor = (startPoint + endPoint) * 0.5f;
+
+        for (int index = 1; index < pathPoints.size(); ++index)
+        {
+            const QVector3D candidate = normalizeOrZero(pathPoints.at(index) - pathPoints.at(index - 1));
+
+            if (candidate.lengthSquared() > kVisualEpsilon)
+            {
+                direction = candidate;
+                return true;
+            }
+        }
+
+        direction = normalizeOrZero(endPoint - startPoint);
+        return direction.lengthSquared() > kVisualEpsilon;
+    }
 }
 
 bool isProcessVisualizable(const CadItem* item)
@@ -694,6 +727,36 @@ CadProcessVisualInfo buildProcessVisualInfo(const CadItem* item)
 
     info.processOrder = item->m_processOrder;
     info.isReverse = item->m_isReverse;
+    info.usesExportPath = item->m_hasExportPathPoints;
+    info.exportDirectionReversed = item->m_exportDirectionReversed;
+    info.exportProcessMode = item->m_exportProcessMode;
+    info.exportRequiresA = item->m_exportRequiresA;
+    info.exportAStartDeg = item->m_exportAStartDeg;
+    info.exportAEndDeg = item->m_exportAEndDeg;
+    info.exportARangeDeg = item->m_exportARangeDeg;
+    info.exportRegionSummary = item->m_exportRegionSummary;
+
+    if (item->m_hasExportPathPoints && item->m_exportPathPoints.size() >= 2)
+    {
+        QVector3D startPoint;
+        QVector3D endPoint;
+        QVector3D direction;
+        QVector3D anchor;
+
+        if (buildDirectionFromPathPoints(item->m_exportPathPoints, startPoint, endPoint, direction, anchor))
+        {
+            info.startPoint = startPoint;
+            info.endPoint = endPoint;
+            info.forwardStartPoint = startPoint;
+            info.forwardEndPoint = endPoint;
+            info.direction = direction;
+            info.labelAnchor = anchor;
+            info.isReverse = item->m_exportDirectionReversed ? !item->m_isReverse : item->m_isReverse;
+            info.closedPath = (startPoint - endPoint).lengthSquared() <= kVisualEpsilon;
+            info.valid = true;
+            return info;
+        }
+    }
 
     if (!isProcessVisualizable(item) || item->m_nativeEntity == nullptr)
     {

@@ -144,7 +144,14 @@ QVector<double> computeContinuousAAngles
         }
 
         bool valid = false;
-        const double angle = computeTargetAFromNormal(sample.normal, config, &valid);
+        const double angle = sample.hasTargetA
+            ? sample.targetA
+            : computeTargetAFromNormal(sample.normal, config, &valid);
+
+        if (sample.hasTargetA)
+        {
+            valid = true;
+        }
 
         if (!valid)
         {
@@ -203,4 +210,3 @@ QVector3D rotatePointByA
         static_cast<float>(machineZ)
     );
 }
-

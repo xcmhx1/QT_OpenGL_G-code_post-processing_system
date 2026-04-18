@@ -18,6 +18,13 @@ enum class SegmentMotionMode
     AContinuous
 };
 
+enum class SectionRegionType
+{
+    Unknown,
+    FlatSide,
+    CornerTransition
+};
+
 struct RotaryConfig
 {
     double yCenter = 0.0;
@@ -38,9 +45,20 @@ struct ProcessTolerance
     double nxThreshold = 0.25;
     double normalEps = 1.0e-6;
     double aConstTolDeg = 0.5;
+    double aEnableThresholdDeg = 1.0;
+    double aNeutralToleranceDeg = 0.6;
+    double aRangeForContinuousDeg = 3.0;
+    bool enableFlatSideQuadrantSnap = true;
+    double flatSideSnapStepDeg = 90.0;
     double maxDeltaADegPerStep = 5.0;
     double maxLinearStep = 1.0;
     double fixedASwitchThresholdDeg = 0.5;
+    double connectionTolerance = 0.05;
+    double aJoinToleranceDeg = 0.5;
+    double feedTolerance = 1.0;
+    double powerTolerance = 1.0;
+    bool allowReverseEntityForJoin = true;
+    bool allowLaserOffNoLiftTransition = true;
 };
 
 struct SamplePoint
@@ -48,7 +66,14 @@ struct SamplePoint
     QVector3D pos;
     QVector3D normal;
     bool hasNormal = false;
+    bool hasRawA = false;
+    double rawA = 0.0;
+    bool hasSnappedA = false;
+    double snappedA = 0.0;
+    bool hasTargetA = false;
     double targetA = 0.0;
+    SectionRegionType regionType = SectionRegionType::Unknown;
+    int sideIndex = -1;
 };
 
 struct ReachabilityResult
@@ -78,7 +103,18 @@ struct ToolpathPoint4Axis
 struct ToolpathSegment4Axis
 {
     SegmentMotionMode mode = SegmentMotionMode::AContinuous;
+    ProcessMode processMode = ProcessMode::XYZA_Continuous;
     QVector<ToolpathPoint4Axis> points;
+    QString processKey;
+    bool requiresA = true;
+    bool hasFixedA = false;
+    double fixedADeg = 0.0;
+    double startADeg = 0.0;
+    double endADeg = 0.0;
+    double aRangeDeg = 0.0;
+    bool emitAInEachLine = true;
+    bool prePositionAOnly = false;
+    QString regionSummary;
 };
 
 struct AttachedCurveSample
@@ -106,5 +142,12 @@ struct MachineConfig4Axis
     bool emitProgramEnd = true;
     bool useSafeZBeforeRapid = true;
     double safeZ = 50.0;
+    double aNeutralDeg = 0.0;
+    double aNeutralToleranceDeg = 0.6;
     double fixedASwitchThresholdDeg = 0.5;
+    double connectionTolerance = 0.05;
+    double aJoinToleranceDeg = 0.5;
+    double feedTolerance = 1.0;
+    double powerTolerance = 1.0;
+    bool allowLaserOffNoLiftTransition = true;
 };
