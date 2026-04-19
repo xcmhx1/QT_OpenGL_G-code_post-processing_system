@@ -253,20 +253,39 @@ namespace
 
     QVector3D buildPerpendicularDirection(const QVector3D& direction)
     {
-        QVector3D perpendicular(-direction.y(), direction.x(), 0.0f);
+        QVector3D normalizedDirection = direction;
 
-        if (!qFuzzyIsNull(perpendicular.lengthSquared()))
+        if (normalizedDirection.lengthSquared() <= 1.0e-6f)
         {
-            perpendicular.normalize();
+            return QVector3D(1.0f, 0.0f, 0.0f);
         }
 
+        normalizedDirection.normalize();
+
+        QVector3D referenceAxis =
+            std::abs(QVector3D::dotProduct(normalizedDirection, QVector3D(0.0f, 0.0f, 1.0f))) < 0.95f
+            ? QVector3D(0.0f, 0.0f, 1.0f)
+            : QVector3D(1.0f, 0.0f, 0.0f);
+
+        QVector3D perpendicular = QVector3D::crossProduct(normalizedDirection, referenceAxis);
+
+        if (perpendicular.lengthSquared() <= 1.0e-6f)
+        {
+            referenceAxis = QVector3D(0.0f, 1.0f, 0.0f);
+            perpendicular = QVector3D::crossProduct(normalizedDirection, referenceAxis);
+        }
+
+        if (perpendicular.lengthSquared() <= 1.0e-6f)
+        {
+            return QVector3D(1.0f, 0.0f, 0.0f);
+        }
+
+        perpendicular.normalize();
         return perpendicular;
     }
 
     QVector<QVector3D> buildTriangleVertices(const QVector3D& center, QVector3D direction, float size)
     {
-        direction.setZ(0.0f);
-
         if (direction.lengthSquared() <= 1.0e-6f)
         {
             direction = QVector3D(0.0f, 1.0f, 0.0f);
@@ -276,16 +295,7 @@ namespace
             direction.normalize();
         }
 
-        QVector3D perpendicular(-direction.y(), direction.x(), 0.0f);
-
-        if (perpendicular.lengthSquared() <= 1.0e-6f)
-        {
-            perpendicular = QVector3D(1.0f, 0.0f, 0.0f);
-        }
-        else
-        {
-            perpendicular.normalize();
-        }
+        const QVector3D perpendicular = buildPerpendicularDirection(direction);
 
         const QVector3D tip = center + direction * size;
         const QVector3D baseCenter = center - direction * (size * 0.8f);
