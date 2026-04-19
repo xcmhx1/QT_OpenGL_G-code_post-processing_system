@@ -51,7 +51,7 @@ public:
     // 按当前加工语义重建图元的原始三维路径点集。
     virtual void rebuildRawPathPoints3D() = 0;
 
-    // 基于原始三维路径点集统一解算 4 轴控制点。
+    // 基于原始三维路径点集解算 4 轴控制点；默认由派生类覆写实现。
     virtual bool rebuildControlPoints4Axis
     (
         double axisY = 0.0,
@@ -108,16 +108,6 @@ public:
 
 protected:
     void clearPathCaches();
-
-    bool build4AxisControlPointsFromRawSamples
-    (
-        double axisY = 0.0,
-        double axisZ = 0.0,
-        bool invertAAxisDirection = false,
-        double aAxisOffsetDegrees = 0.0,
-        bool keepContinuousAngle = true,
-        QString* errorMessage = nullptr
-    );
 
     static double normalizeAngle180(double angleDeg);
 

@@ -14,6 +14,16 @@ public:
 
     void rebuildRawPathPoints3D() override;
 
+    bool rebuildControlPoints4Axis
+    (
+        double axisY = 0.0,
+        double axisZ = 0.0,
+        bool invertAAxisDirection = false,
+        double aAxisOffsetDegrees = 0.0,
+        bool keepContinuousAngle = true,
+        QString* errorMessage = nullptr
+    ) override;
+
     // 缓存强类型原生实体，避免重复 static_cast。
     DRW_Line* m_data = nullptr;
 };

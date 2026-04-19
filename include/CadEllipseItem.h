@@ -14,6 +14,16 @@ public:
 
     void rebuildRawPathPoints3D() override;
 
+    bool rebuildControlPoints4Axis
+    (
+        double axisY = 0.0,
+        double axisZ = 0.0,
+        bool invertAAxisDirection = false,
+        double aAxisOffsetDegrees = 0.0,
+        bool keepContinuousAngle = true,
+        QString* errorMessage = nullptr
+    ) override;
+
     // 指向原生椭圆实体，长轴向量、法向和参数区间都由它提供。
     DRW_Ellipse* m_data = nullptr;
 };

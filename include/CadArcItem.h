@@ -14,6 +14,16 @@ public:
 
     void rebuildRawPathPoints3D() override;
 
+    bool rebuildControlPoints4Axis
+    (
+        double axisY = 0.0,
+        double axisZ = 0.0,
+        bool invertAAxisDirection = false,
+        double aAxisOffsetDegrees = 0.0,
+        bool keepContinuousAngle = true,
+        QString* errorMessage = nullptr
+    ) override;
+
     // 指向原生圆弧实体，负责提供圆心、半径、法向和角度范围。
     DRW_Arc* m_data = nullptr;
 };

@@ -14,6 +14,16 @@ public:
 
     void rebuildRawPathPoints3D() override;
 
+    bool rebuildControlPoints4Axis
+    (
+        double axisY = 0.0,
+        double axisZ = 0.0,
+        bool invertAAxisDirection = false,
+        double aAxisOffsetDegrees = 0.0,
+        bool keepContinuousAngle = true,
+        QString* errorMessage = nullptr
+    ) override;
+
     // 指向原生多段线实体，顶点列表和闭合标记都从这里读取。
     DRW_Polyline* m_data = nullptr;
 };

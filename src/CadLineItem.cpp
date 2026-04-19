@@ -4,6 +4,14 @@
 
 #include "CadLineItem.h"
 
+#include <cmath>
+
+namespace
+{
+constexpr double kAxisEps = 1.0e-8;
+constexpr double kRadToDeg = 57.2957795130823208768;
+}
+
 CadLineItem::CadLineItem(DRW_Entity* entity, QObject* parent)
     : CadItem(entity, parent)
 {
@@ -47,4 +55,70 @@ void CadLineItem::rebuildRawPathPoints3D()
 
     m_rawPathPoints3D.push_back({ startPoint.x, startPoint.y, startPoint.z });
     m_rawPathPoints3D.push_back({ endPoint.x, endPoint.y, endPoint.z });
+}
+
+bool CadLineItem::rebuildControlPoints4Axis
+(
+    double axisY,
+    double axisZ,
+    bool invertAAxisDirection,
+    double aAxisOffsetDegrees,
+    bool keepContinuousAngle,
+    QString* errorMessage
+)
+{
+    clearPathCaches();
+    rebuildRawPathPoints3D();
+
+    if (m_rawPathPoints3D.empty())
+    {
+        if (errorMessage != nullptr)
+        {
+            *errorMessage = QStringLiteral("直线原始路径点集为空。");
+        }
+
+        return false;
+    }
+
+    m_controlPoints4Axis.reserve(m_rawPathPoints3D.size());
+
+    bool hasPrevious = false;
+    double previousA = 0.0;
+
+    for (const RawPathPoint3D& point : m_rawPathPoints3D)
+    {
+        const double dy = point.y - axisY;
+        const double dz = point.z - axisZ;
+
+        double aDeg = 0.0;
+
+        if (dy * dy + dz * dz < kAxisEps * kAxisEps)
+        {
+            aDeg = hasPrevious ? previousA : 0.0;
+        }
+        else
+        {
+            double rawA = std::atan2(dy, dz) * kRadToDeg;
+
+            if (invertAAxisDirection)
+            {
+                rawA = -rawA;
+            }
+
+            rawA += aAxisOffsetDegrees;
+            rawA = normalizeAngle180(rawA);
+            aDeg = (hasPrevious && keepContinuousAngle) ? unwrapAngleNear(previousA, rawA) : rawA;
+        }
+
+        m_controlPoints4Axis.push_back({ point.x, point.y, point.z, aDeg });
+        previousA = aDeg;
+        hasPrevious = true;
+    }
+
+    if (errorMessage != nullptr)
+    {
+        errorMessage->clear();
+    }
+
+    return true;
 }

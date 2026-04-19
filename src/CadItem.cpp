@@ -4,14 +4,7 @@
 // 图元基类模块，定义原生实体绑定、几何缓存和公共图元行为。
 #include "CadItem.h"
 
-#include <QtMath>
-
 #include <cmath>
-
-namespace
-{
-constexpr double kAxisEps = 1.0e-8;
-}
 
 CadItem::CadItem(DRW_Entity* entity, QObject* parent)
     : QObject(parent)
@@ -161,17 +154,20 @@ bool CadItem::rebuildControlPoints4Axis
     QString* errorMessage
 )
 {
+    Q_UNUSED(axisY);
+    Q_UNUSED(axisZ);
+    Q_UNUSED(invertAAxisDirection);
+    Q_UNUSED(aAxisOffsetDegrees);
+    Q_UNUSED(keepContinuousAngle);
+
     clearPathCaches();
-    rebuildRawPathPoints3D();
-    return build4AxisControlPointsFromRawSamples
-    (
-        axisY,
-        axisZ,
-        invertAAxisDirection,
-        aAxisOffsetDegrees,
-        keepContinuousAngle,
-        errorMessage
-    );
+
+    if (errorMessage != nullptr)
+    {
+        *errorMessage = QStringLiteral("当前图元未实现 4 轴控制点解算。");
+    }
+
+    return false;
 }
 
 const std::vector<RawPathPoint3D>& CadItem::rawPathPoints3D() const
@@ -188,76 +184,6 @@ void CadItem::clearPathCaches()
 {
     m_rawPathPoints3D.clear();
     m_controlPoints4Axis.clear();
-}
-
-bool CadItem::build4AxisControlPointsFromRawSamples
-(
-    double axisY,
-    double axisZ,
-    bool invertAAxisDirection,
-    double aAxisOffsetDegrees,
-    bool keepContinuousAngle,
-    QString* errorMessage
-)
-{
-    m_controlPoints4Axis.clear();
-
-    if (m_rawPathPoints3D.empty())
-    {
-        if (errorMessage != nullptr)
-        {
-            *errorMessage = QStringLiteral("原始路径点集为空。");
-        }
-
-        return false;
-    }
-
-    m_controlPoints4Axis.reserve(m_rawPathPoints3D.size());
-
-    bool hasPrevious = false;
-    double previousA = 0.0;
-
-    for (const RawPathPoint3D& point : m_rawPathPoints3D)
-    {
-        const double dy = point.y - axisY;
-        const double dz = point.z - axisZ;
-
-        double aDeg = 0.0;
-
-        if (dy * dy + dz * dz < kAxisEps * kAxisEps)
-        {
-            aDeg = hasPrevious ? previousA : 0.0;
-        }
-        else
-        {
-            double rawA = qRadiansToDegrees(std::atan2(dy, dz));
-            if (invertAAxisDirection)
-            {
-                rawA = -rawA;
-            }
-
-            rawA += aAxisOffsetDegrees;
-            rawA = normalizeAngle180(rawA);
-            aDeg = (hasPrevious && keepContinuousAngle) ? unwrapAngleNear(previousA, rawA) : rawA;
-        }
-
-        ControlPoint4Axis controlPoint;
-        controlPoint.x = point.x;
-        controlPoint.y = point.y;
-        controlPoint.z = point.z;
-        controlPoint.aDeg = aDeg;
-        m_controlPoints4Axis.push_back(controlPoint);
-
-        previousA = aDeg;
-        hasPrevious = true;
-    }
-
-    if (errorMessage != nullptr)
-    {
-        errorMessage->clear();
-    }
-
-    return true;
 }
 
 double CadItem::normalizeAngle180(double angleDeg)
