@@ -43,6 +43,7 @@ namespace
     constexpr double kRotaryNextDistanceWeight = 0.12;
     constexpr double kRotaryBacktrackPenaltyWeight = 1.35;
     constexpr double kRotaryDirectionPenaltyWeight = 0.2;
+    constexpr double kSortConnectionEpsilon = 1.0e-6;
     const QVector3D kSortOrigin(0.0f, 0.0f, 0.0f);
 
     enum class SortStrategy
@@ -57,6 +58,7 @@ namespace
         bool reverse = false;
         bool hasCustomStart = false;
         double processStartParameter = 0.0;
+        double connectionDistance = std::numeric_limits<double>::max();
         double priorityDistance = std::numeric_limits<double>::max();
         double score = std::numeric_limits<double>::max();
         QVector3D startPoint;
@@ -78,6 +80,12 @@ namespace
     {
         double axis = 0.0;
         double angleDegrees = 0.0;
+    };
+
+    struct ProcessConnectionSegment
+    {
+        QVector3D startPoint;
+        QVector3D endPoint;
     };
 
     std::vector<ProcessPathOption> buildPathOptionsForItem(const CadItem* item, SortStrategy strategy);
@@ -372,6 +380,214 @@ namespace
         }
 
         return std::abs(dx) + spatialDistance + angleDistance * kRotaryAngleDistanceWeight;
+    }
+
+    QVector3D flattenToSortPlane(const QVector3D& point)
+    {
+        return QVector3D(point.x(), point.y(), 0.0f);
+    }
+
+    double pointToSegmentDistanceSquared(const QVector3D& point, const QVector3D& segmentStart, const QVector3D& segmentEnd)
+    {
+        const QVector3D segment = segmentEnd - segmentStart;
+        const double segmentLengthSquared = static_cast<double>(QVector3D::dotProduct(segment, segment));
+
+        if (segmentLengthSquared <= kSortEpsilon)
+        {
+            return static_cast<double>((point - segmentStart).lengthSquared());
+        }
+
+        const double t = std::clamp
+        (
+            static_cast<double>(QVector3D::dotProduct(point - segmentStart, segment)) / segmentLengthSquared,
+            0.0,
+            1.0
+        );
+        const QVector3D projection = segmentStart + segment * static_cast<float>(t);
+        return static_cast<double>((point - projection).lengthSquared());
+    }
+
+    double segmentToSegmentDistanceSquared(const QVector3D& firstStart, const QVector3D& firstEnd, const QVector3D& secondStart, const QVector3D& secondEnd)
+    {
+        const QVector3D u = firstEnd - firstStart;
+        const QVector3D v = secondEnd - secondStart;
+        const QVector3D w = firstStart - secondStart;
+        const double a = static_cast<double>(QVector3D::dotProduct(u, u));
+        const double b = static_cast<double>(QVector3D::dotProduct(u, v));
+        const double c = static_cast<double>(QVector3D::dotProduct(v, v));
+
+        if (a <= kSortEpsilon && c <= kSortEpsilon)
+        {
+            return static_cast<double>((firstStart - secondStart).lengthSquared());
+        }
+
+        if (a <= kSortEpsilon)
+        {
+            return pointToSegmentDistanceSquared(firstStart, secondStart, secondEnd);
+        }
+
+        if (c <= kSortEpsilon)
+        {
+            return pointToSegmentDistanceSquared(secondStart, firstStart, firstEnd);
+        }
+
+        const double d = static_cast<double>(QVector3D::dotProduct(u, w));
+        const double e = static_cast<double>(QVector3D::dotProduct(v, w));
+        const double denominator = a * c - b * b;
+
+        double sNumerator = 0.0;
+        double sDenominator = denominator;
+        double tNumerator = 0.0;
+        double tDenominator = denominator;
+
+        if (denominator <= kSortEpsilon)
+        {
+            sNumerator = 0.0;
+            sDenominator = 1.0;
+            tNumerator = e;
+            tDenominator = c;
+        }
+        else
+        {
+            sNumerator = b * e - c * d;
+            tNumerator = a * e - b * d;
+
+            if (sNumerator < 0.0)
+            {
+                sNumerator = 0.0;
+                tNumerator = e;
+                tDenominator = c;
+            }
+            else if (sNumerator > sDenominator)
+            {
+                sNumerator = sDenominator;
+                tNumerator = e + b;
+                tDenominator = c;
+            }
+        }
+
+        if (tNumerator < 0.0)
+        {
+            tNumerator = 0.0;
+
+            if (-d < 0.0)
+            {
+                sNumerator = 0.0;
+            }
+            else if (-d > a)
+            {
+                sNumerator = sDenominator;
+            }
+            else
+            {
+                sNumerator = -d;
+                sDenominator = a;
+            }
+        }
+        else if (tNumerator > tDenominator)
+        {
+            tNumerator = tDenominator;
+
+            if ((-d + b) < 0.0)
+            {
+                sNumerator = 0.0;
+            }
+            else if ((-d + b) > a)
+            {
+                sNumerator = sDenominator;
+            }
+            else
+            {
+                sNumerator = -d + b;
+                sDenominator = a;
+            }
+        }
+
+        const double s = std::abs(sNumerator) <= kSortEpsilon ? 0.0 : sNumerator / sDenominator;
+        const double t = std::abs(tNumerator) <= kSortEpsilon ? 0.0 : tNumerator / tDenominator;
+        const QVector3D delta = w + u * static_cast<float>(s) - v * static_cast<float>(t);
+        return static_cast<double>(QVector3D::dotProduct(delta, delta));
+    }
+
+    double planarSegmentToSegmentDistance(const QVector3D& firstStart, const QVector3D& firstEnd, const QVector3D& secondStart, const QVector3D& secondEnd)
+    {
+        return std::sqrt
+        (
+            segmentToSegmentDistanceSquared
+            (
+                flattenToSortPlane(firstStart),
+                flattenToSortPlane(firstEnd),
+                flattenToSortPlane(secondStart),
+                flattenToSortPlane(secondEnd)
+            )
+        );
+    }
+
+    double spatialSegmentToSegmentDistance(const QVector3D& firstStart, const QVector3D& firstEnd, const QVector3D& secondStart, const QVector3D& secondEnd)
+    {
+        return std::sqrt(segmentToSegmentDistanceSquared(firstStart, firstEnd, secondStart, secondEnd));
+    }
+
+    double computeClosestConnectionDistance2D
+    (
+        const std::vector<ProcessConnectionSegment>& processedSegments,
+        const QVector3D& candidateStartPoint,
+        const QVector3D& candidateEndPoint
+    )
+    {
+        if (processedSegments.empty())
+        {
+            return std::numeric_limits<double>::max();
+        }
+
+        double bestDistance = std::numeric_limits<double>::max();
+
+        for (const ProcessConnectionSegment& segment : processedSegments)
+        {
+            bestDistance = std::min
+            (
+                bestDistance,
+                planarSegmentToSegmentDistance(segment.startPoint, segment.endPoint, candidateStartPoint, candidateEndPoint)
+            );
+
+            if (bestDistance <= kSortConnectionEpsilon)
+            {
+                return 0.0;
+            }
+        }
+
+        return bestDistance;
+    }
+
+    double computeClosestConnectionDistance3D
+    (
+        const std::vector<ProcessConnectionSegment>& processedSegments,
+        const QVector3D& candidateStartPoint,
+        const QVector3D& candidateEndPoint
+    )
+    {
+        if (processedSegments.empty())
+        {
+            return std::numeric_limits<double>::max();
+        }
+
+        double bestDistance = std::numeric_limits<double>::max();
+
+        for (const ProcessConnectionSegment& segment : processedSegments)
+        {
+            bestDistance = std::min
+            (
+                bestDistance,
+                spatialSegmentToSegmentDistance(segment.startPoint, segment.endPoint, candidateStartPoint, candidateEndPoint)
+            );
+
+            if (bestDistance <= kSortConnectionEpsilon)
+            {
+                return 0.0;
+            }
+        }
+
+        return bestDistance;
     }
 
     QVector3D normalizeOrZero(QVector3D vector)
@@ -1540,6 +1756,7 @@ namespace
     (
         const std::vector<CadItem*>& sortableItems,
         const std::vector<bool>& visited,
+        const std::vector<ProcessConnectionSegment>& processedSegments,
         SortStrategy strategy,
         bool hasCurrentEndPoint,
         const QVector3D& currentEndPoint,
@@ -1562,6 +1779,9 @@ namespace
 
             for (const ProcessPathOption& option : options)
             {
+                const double connectionDistance = computeClosestConnectionDistance2D(processedSegments, option.startPoint, option.endPoint);
+                const bool directlyConnected = connectionDistance <= kSortConnectionEpsilon;
+                const bool bestDirectlyConnected = bestCandidate.connectionDistance <= kSortConnectionEpsilon;
                 const double entryDistance = std::sqrt(planarDistanceSquared(option.startPoint, referencePoint));
                 QVector3D nextStartPoint;
                 const bool hasNextStartPoint = tryFindNearestNextStartPoint
@@ -1590,11 +1810,15 @@ namespace
                     + continuityScale * kDirectionPenaltyWeight * continuityPenalty;
 
                 const bool shouldReplace = bestCandidate.index < 0
-                    || optionScore < bestCandidate.score - kSortEpsilon
-                    || (std::abs(optionScore - bestCandidate.score) <= kSortEpsilon
-                        && (entryDistance < bestCandidate.priorityDistance - kSortEpsilon
-                            || (std::abs(entryDistance - bestCandidate.priorityDistance) <= kSortEpsilon
-                                && isPointLexicographicallyLess(option.startPoint, bestCandidate.startPoint))));
+                    || (directlyConnected && !bestDirectlyConnected)
+                    || (directlyConnected == bestDirectlyConnected
+                        && (connectionDistance < bestCandidate.connectionDistance - kSortEpsilon
+                            || (std::abs(connectionDistance - bestCandidate.connectionDistance) <= kSortEpsilon
+                                && (optionScore < bestCandidate.score - kSortEpsilon
+                                    || (std::abs(optionScore - bestCandidate.score) <= kSortEpsilon
+                                        && (entryDistance < bestCandidate.priorityDistance - kSortEpsilon
+                                            || (std::abs(entryDistance - bestCandidate.priorityDistance) <= kSortEpsilon
+                                                && isPointLexicographicallyLess(option.startPoint, bestCandidate.startPoint))))))));
 
                 if (!shouldReplace)
                 {
@@ -1605,6 +1829,7 @@ namespace
                 bestCandidate.reverse = option.reverse;
                 bestCandidate.hasCustomStart = option.hasCustomStart;
                 bestCandidate.processStartParameter = option.processStartParameter;
+                bestCandidate.connectionDistance = connectionDistance;
                 bestCandidate.priorityDistance = entryDistance;
                 bestCandidate.score = optionScore;
                 bestCandidate.startPoint = option.startPoint;
@@ -1619,6 +1844,7 @@ namespace
     (
         const std::vector<CadItem*>& sortableItems,
         const std::vector<bool>& visited,
+        const std::vector<ProcessConnectionSegment>& processedSegments,
         SortStrategy strategy,
         bool hasCurrentEndPoint,
         const QVector3D& currentEndPoint,
@@ -1647,6 +1873,9 @@ namespace
 
             for (const ProcessPathOption& option : options)
             {
+                const double connectionDistance = computeClosestConnectionDistance3D(processedSegments, option.startPoint, option.endPoint);
+                const bool directlyConnected = connectionDistance <= kSortConnectionEpsilon;
+                const bool bestDirectlyConnected = bestCandidate.connectionDistance <= kSortConnectionEpsilon;
                 double resolvedCandidateAngle = 0.0;
                 const double entryDistance = rotarySortTravelDistance(referencePoint, option.startPoint, config, &resolvedCandidateAngle);
                 QVector3D nextStartPoint;
@@ -1678,11 +1907,15 @@ namespace
                     + continuityScale * kRotaryDirectionPenaltyWeight * continuityPenalty;
 
                 const bool shouldReplace = bestCandidate.index < 0
-                    || optionScore < bestCandidate.score - kSortEpsilon
-                    || (std::abs(optionScore - bestCandidate.score) <= kSortEpsilon
-                        && (entryDistance < bestCandidate.priorityDistance - kSortEpsilon
-                            || (std::abs(entryDistance - bestCandidate.priorityDistance) <= kSortEpsilon
-                                && isPointLexicographicallyLess(option.startPoint, bestCandidate.startPoint))));
+                    || (directlyConnected && !bestDirectlyConnected)
+                    || (directlyConnected == bestDirectlyConnected
+                        && (connectionDistance < bestCandidate.connectionDistance - kSortEpsilon
+                            || (std::abs(connectionDistance - bestCandidate.connectionDistance) <= kSortEpsilon
+                                && (optionScore < bestCandidate.score - kSortEpsilon
+                                    || (std::abs(optionScore - bestCandidate.score) <= kSortEpsilon
+                                        && (entryDistance < bestCandidate.priorityDistance - kSortEpsilon
+                                            || (std::abs(entryDistance - bestCandidate.priorityDistance) <= kSortEpsilon
+                                                && isPointLexicographicallyLess(option.startPoint, bestCandidate.startPoint))))))));
 
                 if (!shouldReplace)
                 {
@@ -1693,6 +1926,7 @@ namespace
                 bestCandidate.reverse = option.reverse;
                 bestCandidate.hasCustomStart = option.hasCustomStart;
                 bestCandidate.processStartParameter = option.processStartParameter;
+                bestCandidate.connectionDistance = connectionDistance;
                 bestCandidate.priorityDistance = entryDistance;
                 bestCandidate.score = optionScore;
                 bestCandidate.startPoint = option.startPoint;
@@ -2531,9 +2765,11 @@ bool Gcode_postprocessing_system::sortEntitiesByCurrentDirection()
 
     const QVector3D sweepDirection = computeSweepDirection(sortableItems);
     std::vector<CadEditer::ProcessStateUpdate> processUpdates;
+    std::vector<ProcessConnectionSegment> processedSegments;
     std::vector<bool> visited(sortableItems.size(), false);
 
     processUpdates.reserve(sortableItems.size());
+    processedSegments.reserve(sortableItems.size());
 
     bool hasCurrentEndPoint = false;
     QVector3D currentEndPoint;
@@ -2544,6 +2780,7 @@ bool Gcode_postprocessing_system::sortEntitiesByCurrentDirection()
         (
             sortableItems,
             visited,
+            processedSegments,
             SortStrategy::KeepDirection,
             hasCurrentEndPoint,
             currentEndPoint,
@@ -2567,6 +2804,7 @@ bool Gcode_postprocessing_system::sortEntitiesByCurrentDirection()
         });
         hasCurrentEndPoint = true;
         currentEndPoint = bestCandidate.endPoint;
+        processedSegments.push_back({ bestCandidate.startPoint, bestCandidate.endPoint });
     }
 
     if (!m_editer.applyEntityProcessStates(processUpdates))
@@ -2649,9 +2887,11 @@ bool Gcode_postprocessing_system::smartSortEntities()
 
     const QVector3D sweepDirection = computeSweepDirection(sortableItems);
     std::vector<CadEditer::ProcessStateUpdate> processUpdates;
+    std::vector<ProcessConnectionSegment> processedSegments;
     std::vector<bool> visited(sortableItems.size(), false);
 
     processUpdates.reserve(sortableItems.size());
+    processedSegments.reserve(sortableItems.size());
 
     bool hasCurrentEndPoint = false;
     QVector3D currentEndPoint;
@@ -2662,6 +2902,7 @@ bool Gcode_postprocessing_system::smartSortEntities()
         (
             sortableItems,
             visited,
+            processedSegments,
             SortStrategy::Smart,
             hasCurrentEndPoint,
             currentEndPoint,
@@ -2685,6 +2926,7 @@ bool Gcode_postprocessing_system::smartSortEntities()
         });
         hasCurrentEndPoint = true;
         currentEndPoint = bestCandidate.endPoint;
+        processedSegments.push_back({ bestCandidate.startPoint, bestCandidate.endPoint });
     }
 
     if (!m_editer.applyEntityProcessStates(processUpdates))
@@ -2744,9 +2986,11 @@ bool Gcode_postprocessing_system::sortEntitiesByCurrentDirection3D()
     const GProfileRotaryAxisConfig& rotaryAxisConfig = m_activeProfile.rotaryAxisConfig();
     const QVector3D sweepDirection = computeRotarySweepDirection(sortableItems, rotaryAxisConfig);
     std::vector<CadEditer::ProcessStateUpdate> processUpdates;
+    std::vector<ProcessConnectionSegment> processedSegments;
     std::vector<bool> visited(sortableItems.size(), false);
 
     processUpdates.reserve(sortableItems.size());
+    processedSegments.reserve(sortableItems.size());
 
     bool hasCurrentEndPoint = false;
     QVector3D currentEndPoint;
@@ -2757,6 +3001,7 @@ bool Gcode_postprocessing_system::sortEntitiesByCurrentDirection3D()
         (
             sortableItems,
             visited,
+            processedSegments,
             SortStrategy::KeepDirection,
             hasCurrentEndPoint,
             currentEndPoint,
@@ -2781,6 +3026,7 @@ bool Gcode_postprocessing_system::sortEntitiesByCurrentDirection3D()
         });
         hasCurrentEndPoint = true;
         currentEndPoint = bestCandidate.endPoint;
+        processedSegments.push_back({ bestCandidate.startPoint, bestCandidate.endPoint });
     }
 
     if (!m_editer.applyEntityProcessStates(processUpdates))
@@ -2840,9 +3086,11 @@ bool Gcode_postprocessing_system::smartSortEntities3D()
     const GProfileRotaryAxisConfig& rotaryAxisConfig = m_activeProfile.rotaryAxisConfig();
     const QVector3D sweepDirection = computeRotarySweepDirection(sortableItems, rotaryAxisConfig);
     std::vector<CadEditer::ProcessStateUpdate> processUpdates;
+    std::vector<ProcessConnectionSegment> processedSegments;
     std::vector<bool> visited(sortableItems.size(), false);
 
     processUpdates.reserve(sortableItems.size());
+    processedSegments.reserve(sortableItems.size());
 
     bool hasCurrentEndPoint = false;
     QVector3D currentEndPoint;
@@ -2853,6 +3101,7 @@ bool Gcode_postprocessing_system::smartSortEntities3D()
         (
             sortableItems,
             visited,
+            processedSegments,
             SortStrategy::Smart,
             hasCurrentEndPoint,
             currentEndPoint,
@@ -2877,6 +3126,7 @@ bool Gcode_postprocessing_system::smartSortEntities3D()
         });
         hasCurrentEndPoint = true;
         currentEndPoint = bestCandidate.endPoint;
+        processedSegments.push_back({ bestCandidate.startPoint, bestCandidate.endPoint });
     }
 
     if (!m_editer.applyEntityProcessStates(processUpdates))
