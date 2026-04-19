@@ -151,11 +151,27 @@ QColor CadItem::colorFromLayer()
     return QColor(Qt::white);
 }
 
-bool CadItem::rebuildControlPoints4Axis(double axisY, double axisZ, QString* errorMessage)
+bool CadItem::rebuildControlPoints4Axis
+(
+    double axisY,
+    double axisZ,
+    bool invertAAxisDirection,
+    double aAxisOffsetDegrees,
+    bool keepContinuousAngle,
+    QString* errorMessage
+)
 {
     clearPathCaches();
     rebuildRawPathPoints3D();
-    return build4AxisControlPointsFromRawSamples(axisY, axisZ, errorMessage);
+    return build4AxisControlPointsFromRawSamples
+    (
+        axisY,
+        axisZ,
+        invertAAxisDirection,
+        aAxisOffsetDegrees,
+        keepContinuousAngle,
+        errorMessage
+    );
 }
 
 const std::vector<RawPathPoint3D>& CadItem::rawPathPoints3D() const
@@ -174,7 +190,15 @@ void CadItem::clearPathCaches()
     m_controlPoints4Axis.clear();
 }
 
-bool CadItem::build4AxisControlPointsFromRawSamples(double axisY, double axisZ, QString* errorMessage)
+bool CadItem::build4AxisControlPointsFromRawSamples
+(
+    double axisY,
+    double axisZ,
+    bool invertAAxisDirection,
+    double aAxisOffsetDegrees,
+    bool keepContinuousAngle,
+    QString* errorMessage
+)
 {
     m_controlPoints4Axis.clear();
 
@@ -207,8 +231,14 @@ bool CadItem::build4AxisControlPointsFromRawSamples(double axisY, double axisZ, 
         else
         {
             double rawA = qRadiansToDegrees(std::atan2(dy, dz));
+            if (invertAAxisDirection)
+            {
+                rawA = -rawA;
+            }
+
+            rawA += aAxisOffsetDegrees;
             rawA = normalizeAngle180(rawA);
-            aDeg = hasPrevious ? unwrapAngleNear(previousA, rawA) : rawA;
+            aDeg = (hasPrevious && keepContinuousAngle) ? unwrapAngleNear(previousA, rawA) : rawA;
         }
 
         ControlPoint4Axis controlPoint;

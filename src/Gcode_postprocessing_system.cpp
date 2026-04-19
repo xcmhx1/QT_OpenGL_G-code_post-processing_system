@@ -2108,12 +2108,43 @@ Gcode_postprocessing_system::Gcode_postprocessing_system(QWidget* parent)
     ui->action_FileExport->setShortcutContext(Qt::ApplicationShortcut);
     ui->menuFile->insertAction(ui->action_File_Export_G, ui->action_FileExport);
 
-    ui->action_File_Export_G->setText(QStringLiteral("导出为DXF..."));
+    QAction* exportDxfAction = new QAction(QStringLiteral("导出为DXF..."), this);
     QAction* exportSafeDxfAction = new QAction(QStringLiteral("导出为DXF（安全模式）..."), this);
+    QAction* exportGCode2DAction = new QAction(QStringLiteral("导出G代码（2D）..."), this);
+    QAction* exportGCode3DAction = new QAction(QStringLiteral("导出G代码（3D/A轴）..."), this);
+
+    ui->menuFile->insertAction(ui->action_File_Export_G, exportDxfAction);
     ui->menuFile->insertAction(ui->action_File_Export_G, exportSafeDxfAction);
+    ui->menuFile->insertSeparator(ui->action_File_Export_G);
+
+    ui->action_File_Export_G->setText(QStringLiteral("导出G代码（按当前模式）..."));
+
     connect(ui->action_FileExport, &QAction::triggered, this, [this]() { saveCurrentDocument(); });
-    connect(ui->action_File_Export_G, &QAction::triggered, this, [this]() { exportDxfDocument(); });
+    connect(exportDxfAction, &QAction::triggered, this, [this]() { exportDxfDocument(); });
     connect(exportSafeDxfAction, &QAction::triggered, this, [this]() { exportDxfDocument(true); });
+    connect(ui->action_File_Export_G, &QAction::triggered, this, [this]() { exportGCode(); });
+    connect
+    (
+        exportGCode2DAction,
+        &QAction::triggered,
+        this,
+        [this]()
+        {
+            exportGCode(GGenerator::GenerationMode::Mode2D, QStringLiteral("2D"));
+        }
+    );
+    connect
+    (
+        exportGCode3DAction,
+        &QAction::triggered,
+        this,
+        [this]()
+        {
+            exportGCode(GGenerator::GenerationMode::Mode3D, QStringLiteral("3D(A轴)"));
+        }
+    );
+    ui->menuFile->addAction(exportGCode2DAction);
+    ui->menuFile->addAction(exportGCode3DAction);
     connect(ui->action_Edit_ReversePeocess, &QAction::triggered, this, [this]() { toggleSelectedEntityReverse(); });
     connect(ui->action_Sort_2D_Assign, &QAction::triggered, this, [this]() { sortEntitiesByCurrentDirection(); });
     connect(ui->action_Sort_2D_Smart, &QAction::triggered, this, [this]() { smartSortEntities(); });
@@ -2302,6 +2333,54 @@ bool Gcode_postprocessing_system::exportDxfDocument(bool safeMode)
             : QStringLiteral("导出完成: %1").arg(QFileInfo(filePath).fileName()),
         5000
     );
+    return true;
+}
+
+bool Gcode_postprocessing_system::exportGCode()
+{
+    const GGenerator::GenerationMode generationMode = resolveGenerationMode();
+    const QString modeDisplayName = generationMode == GGenerator::GenerationMode::Mode3D
+        ? QStringLiteral("当前模式 3D(A轴)")
+        : QStringLiteral("当前模式 2D");
+
+    return exportGCode(generationMode, modeDisplayName);
+}
+
+bool Gcode_postprocessing_system::exportGCode
+(
+    GGenerator::GenerationMode generationMode,
+    const QString& modeDisplayName
+)
+{
+    GGenerator generator;
+    generator.setDocument(&m_document);
+    generator.setProfile(&m_activeProfile);
+    generator.setGenerationMode(generationMode);
+
+    QString errorMessage;
+
+    if (!generator.generate(this, &errorMessage))
+    {
+        if (!errorMessage.trimmed().isEmpty())
+        {
+            QMessageBox::warning(this, QStringLiteral("导出G代码失败"), errorMessage);
+        }
+
+        return false;
+    }
+
+    const QString resolvedModeDisplayName = modeDisplayName.trimmed().isEmpty()
+        ? (generationMode == GGenerator::GenerationMode::Mode3D
+            ? QStringLiteral("3D(A轴)")
+            : QStringLiteral("2D"))
+        : modeDisplayName;
+
+    ui->openGLWidget->appendCommandMessage
+    (
+        QStringLiteral("G代码已导出（%1）。").arg(resolvedModeDisplayName)
+    );
+    ui->openGLWidget->refreshCommandPrompt();
+    statusBar()->showMessage(QStringLiteral("G代码导出完成（%1）").arg(resolvedModeDisplayName), 5000);
     return true;
 }
 

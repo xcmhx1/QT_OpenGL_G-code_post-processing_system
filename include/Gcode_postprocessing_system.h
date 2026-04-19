@@ -58,6 +58,8 @@ private:
     bool importBitmapFile(const QString& filePath);
     bool saveCurrentDocument();
     bool exportDxfDocument(bool safeMode = false);
+    bool exportGCode();
+    bool exportGCode(GGenerator::GenerationMode generationMode, const QString& modeDisplayName);
     bool writeDocumentToDxf(const QString& filePath, bool updateCurrentPath, bool safeMode = false);
     QString ensureDxfSuffix(const QString& filePath) const;
     QString defaultDxfPathForCurrentDocument() const;

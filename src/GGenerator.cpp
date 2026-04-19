@@ -29,8 +29,14 @@ namespace
     constexpr double kTwoPi = 6.28318530717958647692;
     constexpr double kCircleTolerance = 1.0e-8;
     constexpr int kFullEllipseSegments = 128;
+    constexpr double kLiftDirectionEpsilon = 1.0e-8;
 
     QString formatCoord(double value)
+    {
+        return QString::number(value, 'f', 5);
+    }
+
+    QString formatAngle(double value)
     {
         return QString::number(value, 'f', 5);
     }
@@ -284,6 +290,26 @@ namespace
     void writeLinearMove(QTextStream& stream, const QVector3D& point)
     {
         stream << "G01 X" << formatCoord(point.x()) << " Y" << formatCoord(point.y()) << "\r\n";
+    }
+
+    void writeRapidMove4Axis(QTextStream& stream, double x, double y, double z, double aDeg)
+    {
+        stream
+            << "G00 X" << formatCoord(x)
+            << " Y" << formatCoord(y)
+            << " Z" << formatCoord(z)
+            << " A" << formatAngle(aDeg)
+            << "\r\n";
+    }
+
+    void writeLinearMove4Axis(QTextStream& stream, double x, double y, double z, double aDeg)
+    {
+        stream
+            << "G01 X" << formatCoord(x)
+            << " Y" << formatCoord(y)
+            << " Z" << formatCoord(z)
+            << " A" << formatAngle(aDeg)
+            << "\r\n";
     }
 
     void writeBulgeSegment(QTextStream& stream, const QVector3D& startPoint, const QVector3D& endPoint, double bulge)
@@ -700,6 +726,155 @@ namespace
         }
     }
 
+    QVector3D radialLiftDirection(const ControlPoint4Axis& point, double axisY, double axisZ)
+    {
+        QVector3D direction(0.0f, static_cast<float>(point.y - axisY), static_cast<float>(point.z - axisZ));
+
+        if (direction.lengthSquared() <= kLiftDirectionEpsilon * kLiftDirectionEpsilon)
+        {
+            return QVector3D();
+        }
+
+        direction.normalize();
+        return direction;
+    }
+
+    ControlPoint4Axis safeApproachPoint
+    (
+        const ControlPoint4Axis& point,
+        double safeDistance,
+        double axisY,
+        double axisZ,
+        QVector3D* ioPreviousLiftDirection
+    )
+    {
+        QVector3D liftDirection = radialLiftDirection(point, axisY, axisZ);
+
+        if (liftDirection.lengthSquared() <= kLiftDirectionEpsilon * kLiftDirectionEpsilon)
+        {
+            if (ioPreviousLiftDirection != nullptr
+                && ioPreviousLiftDirection->lengthSquared() > kLiftDirectionEpsilon * kLiftDirectionEpsilon)
+            {
+                liftDirection = *ioPreviousLiftDirection;
+            }
+            else
+            {
+                liftDirection = QVector3D(0.0f, 0.0f, 1.0f);
+            }
+        }
+
+        if (ioPreviousLiftDirection != nullptr)
+        {
+            *ioPreviousLiftDirection = liftDirection;
+        }
+
+        ControlPoint4Axis safePoint = point;
+        safePoint.x += static_cast<double>(liftDirection.x()) * safeDistance;
+        safePoint.y += static_cast<double>(liftDirection.y()) * safeDistance;
+        safePoint.z += static_cast<double>(liftDirection.z()) * safeDistance;
+        return safePoint;
+    }
+
+    bool writeControlPointPath4Axis
+    (
+        QTextStream& stream,
+        const std::vector<ControlPoint4Axis>& controlPoints,
+        const GProfileRotaryAxisConfig& config
+    )
+    {
+        if (controlPoints.empty())
+        {
+            return false;
+        }
+
+        const double safeDistance = std::max(0.0, config.safeZ);
+        QVector3D previousLiftDirection;
+        bool hasPreviousLiftDirection = false;
+
+        const ControlPoint4Axis& firstPoint = controlPoints.front();
+
+        if (config.useSafeZBeforeRapid && safeDistance > 0.0)
+        {
+            QVector3D cachedLiftDirection;
+            if (hasPreviousLiftDirection)
+            {
+                cachedLiftDirection = previousLiftDirection;
+            }
+
+            ControlPoint4Axis approachPoint = safeApproachPoint
+            (
+                firstPoint,
+                safeDistance,
+                config.centerY,
+                config.centerZ,
+                &cachedLiftDirection
+            );
+            writeRapidMove4Axis(stream, approachPoint.x, approachPoint.y, approachPoint.z, approachPoint.aDeg);
+            previousLiftDirection = cachedLiftDirection;
+            hasPreviousLiftDirection = true;
+            writeLinearMove4Axis(stream, firstPoint.x, firstPoint.y, firstPoint.z, firstPoint.aDeg);
+        }
+        else
+        {
+            writeRapidMove4Axis(stream, firstPoint.x, firstPoint.y, firstPoint.z, firstPoint.aDeg);
+        }
+
+        for (size_t index = 1; index < controlPoints.size(); ++index)
+        {
+            const ControlPoint4Axis& point = controlPoints[index];
+            writeLinearMove4Axis(stream, point.x, point.y, point.z, point.aDeg);
+        }
+
+        return true;
+    }
+
+    bool writeItemGeometry4Axis
+    (
+        QTextStream& stream,
+        const CadItem* item,
+        const GProfileRotaryAxisConfig& config,
+        QString* errorMessage
+    )
+    {
+        if (item == nullptr)
+        {
+            if (errorMessage != nullptr)
+            {
+                *errorMessage = QStringLiteral("空图元无法生成 4 轴 G 代码。");
+            }
+
+            return false;
+        }
+
+        if (item->m_type == DRW::ETYPE::POINT)
+        {
+            if (errorMessage != nullptr)
+            {
+                errorMessage->clear();
+            }
+
+            return false;
+        }
+
+        CadItem* writableItem = const_cast<CadItem*>(item);
+        const bool rebuilt = writableItem->rebuildControlPoints4Axis
+        (
+            config.centerY,
+            config.centerZ,
+            config.invertAAxisDirection,
+            config.aAxisOffsetDegrees,
+            config.keepContinuousAngle,
+            errorMessage
+        );
+
+        if (!rebuilt)
+        {
+            return false;
+        }
+
+        return writeControlPointPath4Axis(stream, writableItem->controlPoints4Axis(), config);
+    }
+
 }
 
 GGenerator::GGenerator()
@@ -790,16 +965,6 @@ bool GGenerator::generateToFile(const QString& filePath, QString* errorMessage) 
         return false;
     }
 
-    if (m_generationMode == GenerationMode::Mode3D)
-    {
-        if (errorMessage != nullptr)
-        {
-            *errorMessage = QStringLiteral("当前 3D 刀路 G 代码生成链路已清理，等待按新的工艺模型重写。");
-        }
-
-        return false;
-    }
-
     QFile file(filePath);
 
     if (!file.open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate))
@@ -818,6 +983,7 @@ bool GGenerator::generateToFile(const QString& filePath, QString* errorMessage) 
     writeTextBlock(stream, m_profile->fileCode().header);
 
     const QVector<CadItem*> orderedItems = collectOrderedItems(m_document);
+    const GProfileRotaryAxisConfig& rotaryAxisConfig = m_profile->rotaryAxisConfig();
 
     for (CadItem* item : orderedItems)
     {
@@ -837,10 +1003,25 @@ bool GGenerator::generateToFile(const QString& filePath, QString* errorMessage) 
         QTextStream geometryStream(&geometryText);
         geometryStream.setEncoding(QStringConverter::Utf8);
 
-        const bool geometryWritten = writeItemGeometry(geometryStream, item);
+        QString geometryError;
+        const bool geometryWritten = m_generationMode == GenerationMode::Mode3D
+            ? writeItemGeometry4Axis(geometryStream, item, rotaryAxisConfig, &geometryError)
+            : writeItemGeometry(geometryStream, item);
 
         if (!geometryWritten)
         {
+            if (m_generationMode == GenerationMode::Mode3D
+                && !geometryError.trimmed().isEmpty()
+                && item->m_type != DRW::ETYPE::POINT)
+            {
+                if (errorMessage != nullptr)
+                {
+                    *errorMessage = geometryError;
+                }
+
+                return false;
+            }
+
             continue;
         }
 
