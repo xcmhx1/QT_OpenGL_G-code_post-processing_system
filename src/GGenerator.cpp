@@ -29,7 +29,7 @@ namespace
     constexpr double kTwoPi = 6.28318530717958647692;
     constexpr double kCircleTolerance = 1.0e-8;
     constexpr int kFullEllipseSegments = 128;
-    constexpr double kLiftDirectionEpsilon = 1.0e-8;
+    constexpr double kControlPointTolerance = 1.0e-5;
 
     QString formatCoord(double value)
     {
@@ -726,52 +726,28 @@ namespace
         }
     }
 
-    QVector3D radialLiftDirection(const ControlPoint4Axis& point, double axisY, double axisZ)
-    {
-        QVector3D direction(0.0f, static_cast<float>(point.y - axisY), static_cast<float>(point.z - axisZ));
-
-        if (direction.lengthSquared() <= kLiftDirectionEpsilon * kLiftDirectionEpsilon)
-        {
-            return QVector3D();
-        }
-
-        direction.normalize();
-        return direction;
-    }
-
-    ControlPoint4Axis safeApproachPoint
+    bool areControlPointsCoincident
     (
-        const ControlPoint4Axis& point,
-        double safeDistance,
-        double axisY,
-        double axisZ,
-        QVector3D* ioPreviousLiftDirection
+        const ControlPoint4Axis& left,
+        const ControlPoint4Axis& right,
+        double tolerance = kControlPointTolerance
     )
     {
-        QVector3D liftDirection = radialLiftDirection(point, axisY, axisZ);
+        const double dx = left.x - right.x;
+        const double dy = left.y - right.y;
+        const double dz = left.z - right.z;
+        const double da = left.aDeg - right.aDeg;
+        return dx * dx + dy * dy + dz * dz + da * da <= tolerance * tolerance;
+    }
 
-        if (liftDirection.lengthSquared() <= kLiftDirectionEpsilon * kLiftDirectionEpsilon)
-        {
-            if (ioPreviousLiftDirection != nullptr
-                && ioPreviousLiftDirection->lengthSquared() > kLiftDirectionEpsilon * kLiftDirectionEpsilon)
-            {
-                liftDirection = *ioPreviousLiftDirection;
-            }
-            else
-            {
-                liftDirection = QVector3D(0.0f, 0.0f, 1.0f);
-            }
-        }
-
-        if (ioPreviousLiftDirection != nullptr)
-        {
-            *ioPreviousLiftDirection = liftDirection;
-        }
-
+    ControlPoint4Axis machineSafeApproachPoint
+    (
+        const ControlPoint4Axis& point,
+        double safeDistance
+    )
+    {
         ControlPoint4Axis safePoint = point;
-        safePoint.x += static_cast<double>(liftDirection.x()) * safeDistance;
-        safePoint.y += static_cast<double>(liftDirection.y()) * safeDistance;
-        safePoint.z += static_cast<double>(liftDirection.z()) * safeDistance;
+        safePoint.z += safeDistance;
         return safePoint;
     }
 
@@ -779,7 +755,9 @@ namespace
     (
         QTextStream& stream,
         const std::vector<ControlPoint4Axis>& controlPoints,
-        const GProfileRotaryAxisConfig& config
+        const GProfileRotaryAxisConfig& config,
+        const ControlPoint4Axis* previousEndPoint,
+        ControlPoint4Axis* writtenEndPoint
     )
     {
         if (controlPoints.empty())
@@ -788,41 +766,72 @@ namespace
         }
 
         const double safeDistance = std::max(0.0, config.safeZ);
-        QVector3D previousLiftDirection;
-        bool hasPreviousLiftDirection = false;
-
         const ControlPoint4Axis& firstPoint = controlPoints.front();
+        const bool hasPreviousEndPoint = previousEndPoint != nullptr;
+        const bool directlyContinuous = hasPreviousEndPoint
+            && areControlPointsCoincident(*previousEndPoint, firstPoint);
 
-        if (config.useSafeZBeforeRapid && safeDistance > 0.0)
+        if (!hasPreviousEndPoint)
         {
-            QVector3D cachedLiftDirection;
-            if (hasPreviousLiftDirection)
+            if (config.useSafeZBeforeRapid && safeDistance > 0.0)
             {
-                cachedLiftDirection = previousLiftDirection;
-            }
+                const ControlPoint4Axis approachPoint = machineSafeApproachPoint(firstPoint, safeDistance);
+                writeRapidMove4Axis(stream, approachPoint.x, approachPoint.y, approachPoint.z, approachPoint.aDeg);
 
-            ControlPoint4Axis approachPoint = safeApproachPoint
-            (
-                firstPoint,
-                safeDistance,
-                config.centerY,
-                config.centerZ,
-                &cachedLiftDirection
-            );
-            writeRapidMove4Axis(stream, approachPoint.x, approachPoint.y, approachPoint.z, approachPoint.aDeg);
-            previousLiftDirection = cachedLiftDirection;
-            hasPreviousLiftDirection = true;
-            writeLinearMove4Axis(stream, firstPoint.x, firstPoint.y, firstPoint.z, firstPoint.aDeg);
+                if (!areControlPointsCoincident(approachPoint, firstPoint))
+                {
+                    writeLinearMove4Axis(stream, firstPoint.x, firstPoint.y, firstPoint.z, firstPoint.aDeg);
+                }
+            }
+            else
+            {
+                writeRapidMove4Axis(stream, firstPoint.x, firstPoint.y, firstPoint.z, firstPoint.aDeg);
+            }
         }
-        else
+        else if (!directlyContinuous)
         {
-            writeRapidMove4Axis(stream, firstPoint.x, firstPoint.y, firstPoint.z, firstPoint.aDeg);
+            if (config.useSafeZBeforeRapid && safeDistance > 0.0)
+            {
+                const ControlPoint4Axis departureSafePoint = machineSafeApproachPoint(*previousEndPoint, safeDistance);
+                const ControlPoint4Axis approachPoint = machineSafeApproachPoint(firstPoint, safeDistance);
+
+                if (!areControlPointsCoincident(*previousEndPoint, departureSafePoint))
+                {
+                    writeLinearMove4Axis
+                    (
+                        stream,
+                        departureSafePoint.x,
+                        departureSafePoint.y,
+                        departureSafePoint.z,
+                        departureSafePoint.aDeg
+                    );
+                }
+
+                if (!areControlPointsCoincident(departureSafePoint, approachPoint))
+                {
+                    writeRapidMove4Axis(stream, approachPoint.x, approachPoint.y, approachPoint.z, approachPoint.aDeg);
+                }
+
+                if (!areControlPointsCoincident(approachPoint, firstPoint))
+                {
+                    writeLinearMove4Axis(stream, firstPoint.x, firstPoint.y, firstPoint.z, firstPoint.aDeg);
+                }
+            }
+            else
+            {
+                writeRapidMove4Axis(stream, firstPoint.x, firstPoint.y, firstPoint.z, firstPoint.aDeg);
+            }
         }
 
         for (size_t index = 1; index < controlPoints.size(); ++index)
         {
             const ControlPoint4Axis& point = controlPoints[index];
             writeLinearMove4Axis(stream, point.x, point.y, point.z, point.aDeg);
+        }
+
+        if (writtenEndPoint != nullptr)
+        {
+            *writtenEndPoint = controlPoints.back();
         }
 
         return true;
@@ -833,6 +842,8 @@ namespace
         QTextStream& stream,
         const CadItem* item,
         const GProfileRotaryAxisConfig& config,
+        const ControlPoint4Axis* previousEndPoint,
+        ControlPoint4Axis* writtenEndPoint,
         QString* errorMessage
     )
     {
@@ -872,7 +883,14 @@ namespace
             return false;
         }
 
-        return writeControlPointPath4Axis(stream, writableItem->controlPoints4Axis(), config);
+        return writeControlPointPath4Axis
+        (
+            stream,
+            writableItem->controlPoints4Axis(),
+            config,
+            previousEndPoint,
+            writtenEndPoint
+        );
     }
 
 }
@@ -984,6 +1002,8 @@ bool GGenerator::generateToFile(const QString& filePath, QString* errorMessage) 
 
     const QVector<CadItem*> orderedItems = collectOrderedItems(m_document);
     const GProfileRotaryAxisConfig& rotaryAxisConfig = m_profile->rotaryAxisConfig();
+    bool hasPrevious4AxisEndPoint = false;
+    ControlPoint4Axis previous4AxisEndPoint;
 
     for (CadItem* item : orderedItems)
     {
@@ -1004,8 +1024,17 @@ bool GGenerator::generateToFile(const QString& filePath, QString* errorMessage) 
         geometryStream.setEncoding(QStringConverter::Utf8);
 
         QString geometryError;
+        ControlPoint4Axis currentItemEndPoint;
         const bool geometryWritten = m_generationMode == GenerationMode::Mode3D
-            ? writeItemGeometry4Axis(geometryStream, item, rotaryAxisConfig, &geometryError)
+            ? writeItemGeometry4Axis
+            (
+                geometryStream,
+                item,
+                rotaryAxisConfig,
+                hasPrevious4AxisEndPoint ? &previous4AxisEndPoint : nullptr,
+                &currentItemEndPoint,
+                &geometryError
+            )
             : writeItemGeometry(geometryStream, item);
 
         if (!geometryWritten)
@@ -1034,6 +1063,12 @@ bool GGenerator::generateToFile(const QString& filePath, QString* errorMessage) 
             writeTextBlock(stream, typeCode.footer);
             writeTextBlock(stream, colorCode.footer);
             writeTextBlock(stream, layerCode.footer);
+        }
+
+        if (m_generationMode == GenerationMode::Mode3D)
+        {
+            previous4AxisEndPoint = currentItemEndPoint;
+            hasPrevious4AxisEndPoint = true;
         }
     }
 

@@ -26,6 +26,7 @@ struct RawPathPoint3D
     double z = 0.0;
 };
 
+// 机床输出控制点
 struct ControlPoint4Axis
 {
     double x = 0.0;

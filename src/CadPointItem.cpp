@@ -70,26 +70,14 @@ bool CadPointItem::rebuildControlPoints4Axis
         return false;
     }
 
+    m_controlPoints4Axis.clear();
     m_controlPoints4Axis.reserve(m_rawPathPoints3D.size());
 
     bool hasPrevious = false;
     double previousA = 0.0;
 
-    for (const RawPathPoint3D& point : m_rawPathPoints3D)
-    {
-        const double dy = point.y - axisY;
-        const double dz = point.z - axisZ;
-
-        double aDeg = 0.0;
-
-        if (dy * dy + dz * dz < kAxisEps * kAxisEps)
+    auto applyAnglePolicy = [&](double rawA) -> double
         {
-            aDeg = hasPrevious ? previousA : 0.0;
-        }
-        else
-        {
-            double rawA = std::atan2(dy, dz) * kRadToDeg;
-
             if (invertAAxisDirection)
             {
                 rawA = -rawA;
@@ -97,10 +85,46 @@ bool CadPointItem::rebuildControlPoints4Axis
 
             rawA += aAxisOffsetDegrees;
             rawA = normalizeAngle180(rawA);
-            aDeg = (hasPrevious && keepContinuousAngle) ? unwrapAngleNear(previousA, rawA) : rawA;
+
+            if (hasPrevious && keepContinuousAngle)
+            {
+                rawA = unwrapAngleNear(previousA, rawA);
+            }
+
+            return rawA;
+        };
+
+    for (const RawPathPoint3D& point : m_rawPathPoints3D)
+    {
+        const double dy = point.y - axisY;
+        const double dz = point.z - axisZ;
+        const double radiusSquared = dy * dy + dz * dz;
+        const double radius = std::sqrt(radiusSquared);
+
+        double aDeg = 0.0;
+
+        if (radiusSquared < kAxisEps * kAxisEps)
+        {
+            if (hasPrevious)
+            {
+                aDeg = previousA;
+            }
+            else
+            {
+                aDeg = applyAnglePolicy(0.0);
+            }
+        }
+        else
+        {
+            const double rawA = std::atan2(dy, dz) * kRadToDeg;
+            aDeg = applyAnglePolicy(rawA);
         }
 
-        m_controlPoints4Axis.push_back({ point.x, point.y, point.z, aDeg });
+        const double machineX = point.x;
+        const double machineY = axisY;
+        const double machineZ = axisZ + radius;
+
+        m_controlPoints4Axis.push_back({ machineX, machineY, machineZ, aDeg });
         previousA = aDeg;
         hasPrevious = true;
     }
