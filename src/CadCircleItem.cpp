@@ -1,4 +1,4 @@
-// 实现 CadCircleItem 模块，对应头文件中声明的主要行为和协作流程。
+﻿// 实现 CadCircleItem 模块，对应头文件中声明的主要行为和协作流程。
 // 圆图元模块，负责圆实体的离散显示数据和加工方向生成。
 #include "pch.h"
 
@@ -200,8 +200,24 @@ bool CadCircleItem::rebuildControlPoints4Axis
         return false;
     }
 
+    if (m_data == nullptr)
+    {
+        if (errorMessage != nullptr)
+        {
+            *errorMessage = QStringLiteral("圆原始实体为空。");
+        }
+
+        return false;
+    }
+
     m_controlPoints4Axis.clear();
     m_controlPoints4Axis.reserve(m_rawPathPoints3D.size());
+
+    const QVector3D normal = resolveNormal(m_data->extPoint);
+
+    const double centerX = m_data->basePoint.x;
+    const double centerY = m_data->basePoint.y;
+    const double centerZ = m_data->basePoint.z;
 
     bool hasPrevious = false;
     double previousA = 0.0;
@@ -224,39 +240,121 @@ bool CadCircleItem::rebuildControlPoints4Axis
             return rawA;
         };
 
-    for (const RawPathPoint3D& point : m_rawPathPoints3D)
+    constexpr double kNormalEps = 1.0e-8;
+    constexpr double kSideEps = 1.0e-8;
+
+    bool useFixedA = false;
+    double fixedRawA = 0.0;
+
+    // 规则 1：圆平面平行于 XY 平面（法向约等于 ±Z）
+    // A 由圆心位于 +Z / -Z 决定，而不是由 normal.z 决定。
+    if (std::abs(normal.x()) < kNormalEps && std::abs(normal.y()) < kNormalEps)
     {
-        const double dy = point.y - axisY;
-        const double dz = point.z - axisZ;
-        const double radiusSquared = dy * dy + dz * dz;
-        const double radius = std::sqrt(radiusSquared);
+        const double relativeZ = centerZ - axisZ;
 
-        double aDeg = 0.0;
-
-        if (radiusSquared < kAxisEps * kAxisEps)
+        if (relativeZ > kSideEps)
         {
-            if (hasPrevious)
-            {
-                aDeg = previousA;
-            }
-            else
-            {
-                aDeg = applyAnglePolicy(0.0);
-            }
+            fixedRawA = 0.0;      // +Z
+        }
+        else if (relativeZ < -kSideEps)
+        {
+            fixedRawA = 180.0;    // -Z
         }
         else
         {
-            const double rawA = std::atan2(dy, dz) * kRadToDeg;
-            aDeg = applyAnglePolicy(rawA);
+            // 圆心恰好落在 axisZ 上时，退化到看法向
+            fixedRawA = (normal.z() >= 0.0) ? 0.0 : 180.0;
         }
 
-        const double machineX = point.x;
-        const double machineY = axisY;
-        const double machineZ = axisZ + radius;
+        useFixedA = true;
+    }
+    // 规则 2：圆平面平行于 XZ 平面（法向约等于 ±Y）
+    // A 由圆心位于 +Y / -Y 决定，而不是由 normal.y 决定。
+    else if (std::abs(normal.x()) < kNormalEps && std::abs(normal.z()) < kNormalEps)
+    {
+        const double relativeY = centerY - axisY;
 
-        m_controlPoints4Axis.push_back({ machineX, machineY, machineZ, aDeg });
-        previousA = aDeg;
-        hasPrevious = true;
+        if (relativeY > kSideEps)
+        {
+            fixedRawA = 90.0;     // +Y
+        }
+        else if (relativeY < -kSideEps)
+        {
+            fixedRawA = -90.0;    // -Y
+        }
+        else
+        {
+            // 圆心恰好落在 axisY 上时，退化到看法向
+            fixedRawA = (normal.y() >= 0.0) ? 90.0 : -90.0;
+        }
+
+        useFixedA = true;
+    }
+
+    if (useFixedA)
+    {
+        const double fixedA = applyAnglePolicy(fixedRawA);
+
+        const double angleRad = fixedA / kRadToDeg;
+        const double c = std::cos(angleRad);
+        const double s = std::sin(angleRad);
+
+        for (const RawPathPoint3D& point : m_rawPathPoints3D)
+        {
+            const double dy = point.y - axisY;
+            const double dz = point.z - axisZ;
+
+            const double machineX = point.x;
+            const double machineY = axisY + dy * c - dz * s;
+            const double machineZ = axisZ + dy * s + dz * c;
+
+            m_controlPoints4Axis.push_back({ machineX, machineY, machineZ, fixedA });
+        }
+    }
+    else
+    {
+        // 其它姿态：回退到“刀头指向圆心”的逐点 A 模型
+        for (const RawPathPoint3D& point : m_rawPathPoints3D)
+        {
+            const double dirY = point.y - centerY;
+            const double dirZ = point.z - centerZ;
+            const double dirLenSquared = dirY * dirY + dirZ * dirZ;
+
+            double aDeg = 0.0;
+
+            if (dirLenSquared < kAxisEps * kAxisEps)
+            {
+                if (hasPrevious)
+                {
+                    aDeg = previousA;
+                }
+                else
+                {
+                    aDeg = applyAnglePolicy(0.0);
+                }
+            }
+            else
+            {
+                const double rawA = std::atan2(dirY, dirZ) * kRadToDeg;
+                aDeg = applyAnglePolicy(rawA);
+            }
+
+            const double angleRad = aDeg / kRadToDeg;
+            const double c = std::cos(angleRad);
+            const double s = std::sin(angleRad);
+
+            const double dy = point.y - axisY;
+            const double dz = point.z - axisZ;
+
+            const double machineX = point.x;
+            const double machineY = axisY + dy * c - dz * s;
+            const double machineZ = axisZ + dy * s + dz * c;
+
+            m_controlPoints4Axis.push_back({ machineX, machineY, machineZ, aDeg });
+
+            previousA = aDeg;
+            hasPrevious = true;
+        }
     }
 
     if (errorMessage != nullptr)
