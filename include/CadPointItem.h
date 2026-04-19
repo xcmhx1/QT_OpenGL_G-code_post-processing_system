@@ -12,6 +12,8 @@ public:
     // 点图元的离散结果只包含一个顶点。
     void buildGeometryDatay() override;
 
+    void rebuildRawPathPoints3D() override;
+
     // 指向原生点实体，直接读取 basePoint 作为显示位置。
     DRW_Point* m_data = nullptr;
 };

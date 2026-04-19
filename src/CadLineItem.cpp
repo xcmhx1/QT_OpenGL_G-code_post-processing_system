@@ -18,6 +18,7 @@ void CadLineItem::buildGeometryDatay()
 {
     // 重建前先清空旧几何，避免刷新实体时残留历史顶点。
     m_geometry.vertices.clear();
+    clearPathCaches();
 
     if (m_data == nullptr)
     {
@@ -28,4 +29,22 @@ void CadLineItem::buildGeometryDatay()
     m_geometry.vertices.reserve(2);
     m_geometry.vertices.append(QVector3D(m_data->basePoint.x, m_data->basePoint.y, m_data->basePoint.z));
     m_geometry.vertices.append(QVector3D(m_data->secPoint.x, m_data->secPoint.y, m_data->secPoint.z));
+}
+
+void CadLineItem::rebuildRawPathPoints3D()
+{
+    m_rawPathPoints3D.clear();
+
+    if (m_data == nullptr)
+    {
+        return;
+    }
+
+    m_rawPathPoints3D.reserve(2);
+
+    const DRW_Coord& startPoint = m_isReverse ? m_data->secPoint : m_data->basePoint;
+    const DRW_Coord& endPoint = m_isReverse ? m_data->basePoint : m_data->secPoint;
+
+    m_rawPathPoints3D.push_back({ startPoint.x, startPoint.y, startPoint.z });
+    m_rawPathPoints3D.push_back({ endPoint.x, endPoint.y, endPoint.z });
 }

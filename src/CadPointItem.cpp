@@ -16,6 +16,7 @@ CadPointItem::CadPointItem(DRW_Entity* entity, QObject* parent)
 void CadPointItem::buildGeometryDatay()
 {
     m_geometry.vertices.clear();
+    clearPathCaches();
 
     if (m_data == nullptr)
     {
@@ -24,4 +25,16 @@ void CadPointItem::buildGeometryDatay()
 
     // 点图元没有边，只保留一个位置顶点供渲染层绘制。
     m_geometry.vertices.append(QVector3D(m_data->basePoint.x, m_data->basePoint.y, m_data->basePoint.z));
+}
+
+void CadPointItem::rebuildRawPathPoints3D()
+{
+    m_rawPathPoints3D.clear();
+
+    if (m_data == nullptr)
+    {
+        return;
+    }
+
+    m_rawPathPoints3D.push_back({ m_data->basePoint.x, m_data->basePoint.y, m_data->basePoint.z });
 }

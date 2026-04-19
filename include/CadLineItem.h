@@ -12,6 +12,8 @@ public:
     // 直线只需要两个端点即可完成离散。
     void buildGeometryDatay() override;
 
+    void rebuildRawPathPoints3D() override;
+
     // 缓存强类型原生实体，避免重复 static_cast。
     DRW_Line* m_data = nullptr;
 };

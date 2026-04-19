@@ -9,8 +9,10 @@
 namespace
 {
 constexpr double kTwoPi = 6.28318530717958647692;
+constexpr double kMaxArcStep = 5.0 * kTwoPi / 360.0;
 // 圆弧与整圆共用采样密度，再按弧长比例折算最终段数。
 constexpr int kFullCircleSegments = 128;
+constexpr int kMinRawArcSegments = 8;
 
 QVector3D resolveNormal(const DRW_Coord& extPoint)
 {
@@ -87,6 +89,7 @@ CadArcItem::CadArcItem(DRW_Entity* entity, QObject* parent)
 void CadArcItem::buildGeometryDatay()
 {
     m_geometry.vertices.clear();
+    clearPathCaches();
 
     if (m_data == nullptr || m_data->radious <= 0.0)
     {
@@ -125,5 +128,59 @@ void CadArcItem::buildGeometryDatay()
             axisY * static_cast<float>(std::sin(t) * m_data->radious);
 
         m_geometry.vertices.append(center + offset);
+    }
+}
+
+void CadArcItem::rebuildRawPathPoints3D()
+{
+    m_rawPathPoints3D.clear();
+
+    if (m_data == nullptr || m_data->radious <= 0.0)
+    {
+        return;
+    }
+
+    const QVector3D center(m_data->basePoint.x, m_data->basePoint.y, m_data->basePoint.z);
+    const QVector3D normal = resolveNormal(m_data->extPoint);
+
+    QVector3D axisX;
+    QVector3D axisY;
+    buildPlaneBasis(normal, axisX, axisY);
+
+    double startAngle = m_isReverse ? m_data->endangle : m_data->staangle;
+    double endAngle = m_isReverse ? m_data->staangle : m_data->endangle;
+
+    if (m_isReverse)
+    {
+        while (endAngle >= startAngle)
+        {
+            endAngle -= kTwoPi;
+        }
+    }
+    else
+    {
+        while (endAngle <= startAngle)
+        {
+            endAngle += kTwoPi;
+        }
+    }
+
+    const double span = endAngle - startAngle;
+    const int segments = std::max
+    (
+        kMinRawArcSegments,
+        static_cast<int>(std::ceil(std::abs(span) / kMaxArcStep))
+    );
+
+    m_rawPathPoints3D.reserve(static_cast<size_t>(segments) + 1);
+
+    for (int index = 0; index <= segments; ++index)
+    {
+        const double angle = startAngle + span * static_cast<double>(index) / static_cast<double>(segments);
+        const QVector3D offset =
+            axisX * static_cast<float>(std::cos(angle) * m_data->radious) +
+            axisY * static_cast<float>(std::sin(angle) * m_data->radious);
+        const QVector3D point = center + offset;
+        m_rawPathPoints3D.push_back({ point.x(), point.y(), point.z() });
     }
 }

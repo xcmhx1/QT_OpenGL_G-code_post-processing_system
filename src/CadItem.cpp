@@ -4,6 +4,15 @@
 // 图元基类模块，定义原生实体绑定、几何缓存和公共图元行为。
 #include "CadItem.h"
 
+#include <QtMath>
+
+#include <cmath>
+
+namespace
+{
+constexpr double kAxisEps = 1.0e-8;
+}
+
 CadItem::CadItem(DRW_Entity* entity, QObject* parent)
     : QObject(parent)
     , m_nativeEntity(entity)
@@ -140,5 +149,114 @@ QColor CadItem::colorFromLayer()
     // 当前 CadItem 不持有图层表，无法在此解析图层颜色。
     // 后续若文档层向图元注入图层信息，可在这里改成真实解析逻辑。
     return QColor(Qt::white);
+}
+
+bool CadItem::rebuildControlPoints4Axis(double axisY, double axisZ, QString* errorMessage)
+{
+    clearPathCaches();
+    rebuildRawPathPoints3D();
+    return build4AxisControlPointsFromRawSamples(axisY, axisZ, errorMessage);
+}
+
+const std::vector<RawPathPoint3D>& CadItem::rawPathPoints3D() const
+{
+    return m_rawPathPoints3D;
+}
+
+const std::vector<ControlPoint4Axis>& CadItem::controlPoints4Axis() const
+{
+    return m_controlPoints4Axis;
+}
+
+void CadItem::clearPathCaches()
+{
+    m_rawPathPoints3D.clear();
+    m_controlPoints4Axis.clear();
+}
+
+bool CadItem::build4AxisControlPointsFromRawSamples(double axisY, double axisZ, QString* errorMessage)
+{
+    m_controlPoints4Axis.clear();
+
+    if (m_rawPathPoints3D.empty())
+    {
+        if (errorMessage != nullptr)
+        {
+            *errorMessage = QStringLiteral("原始路径点集为空。");
+        }
+
+        return false;
+    }
+
+    m_controlPoints4Axis.reserve(m_rawPathPoints3D.size());
+
+    bool hasPrevious = false;
+    double previousA = 0.0;
+
+    for (const RawPathPoint3D& point : m_rawPathPoints3D)
+    {
+        const double dy = point.y - axisY;
+        const double dz = point.z - axisZ;
+
+        double aDeg = 0.0;
+
+        if (dy * dy + dz * dz < kAxisEps * kAxisEps)
+        {
+            aDeg = hasPrevious ? previousA : 0.0;
+        }
+        else
+        {
+            double rawA = qRadiansToDegrees(std::atan2(dy, dz));
+            rawA = normalizeAngle180(rawA);
+            aDeg = hasPrevious ? unwrapAngleNear(previousA, rawA) : rawA;
+        }
+
+        ControlPoint4Axis controlPoint;
+        controlPoint.x = point.x;
+        controlPoint.y = point.y;
+        controlPoint.z = point.z;
+        controlPoint.aDeg = aDeg;
+        m_controlPoints4Axis.push_back(controlPoint);
+
+        previousA = aDeg;
+        hasPrevious = true;
+    }
+
+    if (errorMessage != nullptr)
+    {
+        errorMessage->clear();
+    }
+
+    return true;
+}
+
+double CadItem::normalizeAngle180(double angleDeg)
+{
+    while (angleDeg > 180.0)
+    {
+        angleDeg -= 360.0;
+    }
+
+    while (angleDeg <= -180.0)
+    {
+        angleDeg += 360.0;
+    }
+
+    return angleDeg;
+}
+
+double CadItem::unwrapAngleNear(double previousDeg, double currentDeg)
+{
+    while (currentDeg - previousDeg > 180.0)
+    {
+        currentDeg -= 360.0;
+    }
+
+    while (currentDeg - previousDeg < -180.0)
+    {
+        currentDeg += 360.0;
+    }
+
+    return currentDeg;
 }
 

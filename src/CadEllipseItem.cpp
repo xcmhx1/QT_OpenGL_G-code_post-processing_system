@@ -12,6 +12,18 @@ constexpr double kTwoPi = 6.28318530717958647692;
 // 整椭圆的基础采样密度，局部弧段会按参数跨度缩放。
 constexpr int kFullEllipseSegments = 128;
 
+double normalizeAnglePositive(double angle)
+{
+    double normalized = std::fmod(angle, kTwoPi);
+
+    if (normalized < 0.0)
+    {
+        normalized += kTwoPi;
+    }
+
+    return normalized;
+}
+
 QVector3D resolveNormal(const DRW_Coord& extPoint)
 {
     // 椭圆所在平面同样由 extrusion direction 给出。
@@ -49,6 +61,30 @@ QVector3D buildMinorAxis(const QVector3D& normal, const QVector3D& majorAxis, do
     minorDirection.normalize();
     return minorDirection * static_cast<float>(majorAxis.length() * ratio);
 }
+
+bool isFullEllipsePath(const DRW_Ellipse* ellipse)
+{
+    if (ellipse == nullptr)
+    {
+        return false;
+    }
+
+    const double span = ellipse->endparam - ellipse->staparam;
+    return std::abs(span) < 1.0e-10
+        || std::abs(std::abs(span) - kTwoPi) < 1.0e-10;
+}
+
+double effectiveClosedEllipseStartParameter(const CadEllipseItem* item)
+{
+    if (item != nullptr && item->m_hasCustomProcessStart)
+    {
+        return normalizeAnglePositive(item->m_processStartParameter);
+    }
+
+    return (item != nullptr && item->m_data != nullptr)
+        ? normalizeAnglePositive(item->m_data->staparam)
+        : 0.0;
+}
 }
 
 CadEllipseItem::CadEllipseItem(DRW_Entity* entity, QObject* parent)
@@ -63,6 +99,7 @@ CadEllipseItem::CadEllipseItem(DRW_Entity* entity, QObject* parent)
 void CadEllipseItem::buildGeometryDatay()
 {
     m_geometry.vertices.clear();
+    clearPathCaches();
 
     if (m_data == nullptr)
     {
@@ -119,5 +156,73 @@ void CadEllipseItem::buildGeometryDatay()
             minorAxis * static_cast<float>(std::sin(t));
 
         m_geometry.vertices.append(point);
+    }
+}
+
+void CadEllipseItem::rebuildRawPathPoints3D()
+{
+    m_rawPathPoints3D.clear();
+
+    if (m_data == nullptr)
+    {
+        return;
+    }
+
+    const QVector3D center(m_data->basePoint.x, m_data->basePoint.y, m_data->basePoint.z);
+    const QVector3D majorAxis(m_data->secPoint.x, m_data->secPoint.y, m_data->secPoint.z);
+
+    if (majorAxis.lengthSquared() <= 1.0e-12f || m_data->ratio <= 0.0)
+    {
+        return;
+    }
+
+    const QVector3D normal = resolveNormal(m_data->extPoint);
+    const QVector3D minorAxis = buildMinorAxis(normal, majorAxis, m_data->ratio);
+
+    if (minorAxis.lengthSquared() <= 1.0e-12f)
+    {
+        return;
+    }
+
+    const bool closedPath = isFullEllipsePath(m_data);
+    double startParam = m_data->staparam;
+    double endParam = m_data->endparam;
+
+    if (closedPath)
+    {
+        startParam = effectiveClosedEllipseStartParameter(this);
+        endParam = startParam + (m_isReverse ? -kTwoPi : kTwoPi);
+    }
+    else if (m_isReverse)
+    {
+        startParam = m_data->endparam;
+        endParam = m_data->staparam;
+
+        while (endParam >= startParam)
+        {
+            endParam -= kTwoPi;
+        }
+    }
+    else
+    {
+        while (endParam <= startParam)
+        {
+            endParam += kTwoPi;
+        }
+    }
+
+    const double span = endParam - startParam;
+    const int segments = std::max(16, static_cast<int>(std::ceil(std::abs(span) / kTwoPi * kFullEllipseSegments)));
+
+    m_rawPathPoints3D.reserve(static_cast<size_t>(segments) + 1);
+
+    for (int index = 0; index <= segments; ++index)
+    {
+        const double parameter = startParam + span * static_cast<double>(index) / static_cast<double>(segments);
+        const QVector3D point =
+            center +
+            majorAxis * static_cast<float>(std::cos(parameter)) +
+            minorAxis * static_cast<float>(std::sin(parameter));
+        m_rawPathPoints3D.push_back({ point.x(), point.y(), point.z() });
     }
 }

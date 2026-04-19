@@ -12,6 +12,8 @@ public:
     // 圆弧会按起止角离散为折线，不会保留曲线原语到渲染层。
     void buildGeometryDatay() override;
 
+    void rebuildRawPathPoints3D() override;
+
     // 指向原生圆弧实体，负责提供圆心、半径、法向和角度范围。
     DRW_Arc* m_data = nullptr;
 };

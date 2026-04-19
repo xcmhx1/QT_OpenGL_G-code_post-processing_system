@@ -4,8 +4,10 @@
 // 图元基类模块，定义原生实体绑定、几何缓存和公共图元行为。
 #include <QColor>
 #include <QObject>
+#include <QString>
 #include <QVector>
 #include <QVector3D>
+#include <vector>
 
 #include <libdxfrw.h>
 
@@ -15,6 +17,21 @@ struct GeometryData
     // 按渲染顺序存放离散后的三维顶点。
     // 对线段类图元通常是关键点，对圆弧/椭圆/多段线则是采样后的折线点列。
     QVector<QVector3D> vertices;      
+};
+
+struct RawPathPoint3D
+{
+    double x = 0.0;
+    double y = 0.0;
+    double z = 0.0;
+};
+
+struct ControlPoint4Axis
+{
+    double x = 0.0;
+    double y = 0.0;
+    double z = 0.0;
+    double aDeg = 0.0;
 };
 
 // Cad图元基类
@@ -30,6 +47,21 @@ public:
     // 从原生 DXF 实体重建当前图元的离散几何。
     // 每个派生类都需要把自身实体转换为适合 OpenGL 绘制的顶点序列。
     virtual void buildGeometryDatay() = 0;
+
+    // 按当前加工语义重建图元的原始三维路径点集。
+    virtual void rebuildRawPathPoints3D() = 0;
+
+    // 基于原始三维路径点集统一解算 4 轴控制点。
+    virtual bool rebuildControlPoints4Axis
+    (
+        double axisY = 0.0,
+        double axisZ = 0.0,
+        QString* errorMessage = nullptr
+    );
+
+    const std::vector<RawPathPoint3D>& rawPathPoints3D() const;
+
+    const std::vector<ControlPoint4Axis>& controlPoints4Axis() const;
 
     // 根据离散后的几何顶点推导一个加工方向向量。
     // 当前实现取首个有效边方向，并按 m_isReverse 决定是否翻转。
@@ -62,8 +94,26 @@ public:
     bool m_isSelected = false;
     // 渲染层直接消费的离散几何缓存。
     GeometryData m_geometry;
+    // 图元按当前加工顺序离散后的原始三维点集缓存。
+    std::vector<RawPathPoint3D> m_rawPathPoints3D;
+    // 基于原始路径点集解算出的 4 轴控制点缓存。
+    std::vector<ControlPoint4Axis> m_controlPoints4Axis;
     // 由几何推导出的标准化加工方向。
     QVector3D m_processDirection;
     // 当前图元的最终显示颜色缓存。
     QColor m_color;
+
+protected:
+    void clearPathCaches();
+
+    bool build4AxisControlPointsFromRawSamples
+    (
+        double axisY = 0.0,
+        double axisZ = 0.0,
+        QString* errorMessage = nullptr
+    );
+
+    static double normalizeAngle180(double angleDeg);
+
+    static double unwrapAngleNear(double previousDeg, double currentDeg);
 };
