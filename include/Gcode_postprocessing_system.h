@@ -60,9 +60,11 @@ private:
     bool exportDxfDocument(bool safeMode = false);
     bool exportGCode();
     bool exportGCode(GGenerator::GenerationMode generationMode, const QString& modeDisplayName);
+    bool sortEntitiesByCurrentMode(bool smartSort);
     bool writeDocumentToDxf(const QString& filePath, bool updateCurrentPath, bool safeMode = false);
     QString ensureDxfSuffix(const QString& filePath) const;
     QString defaultDxfPathForCurrentDocument() const;
+    QString generationModeDisplayName(GGenerator::GenerationMode generationMode) const;
     bool toggleSelectedEntityReverse();
     bool deleteSelectedEntity();
     bool copySelectedEntity();

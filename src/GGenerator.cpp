@@ -30,6 +30,7 @@ namespace
     constexpr double kCircleTolerance = 1.0e-8;
     constexpr int kFullEllipseSegments = 128;
     constexpr double kControlPointTolerance = 1.0e-5;
+    constexpr double kSafeClearanceExtra = 50.0; // 5 cm
 
     QString formatCoord(double value)
     {
@@ -740,14 +741,93 @@ namespace
         return dx * dx + dy * dy + dz * dz + da * da <= tolerance * tolerance;
     }
 
+    double unwrapAngleNear(double previousDeg, double currentDeg)
+    {
+        while (currentDeg - previousDeg > 180.0)
+        {
+            currentDeg -= 360.0;
+        }
+
+        while (currentDeg - previousDeg < -180.0)
+        {
+            currentDeg += 360.0;
+        }
+
+        return currentDeg;
+    }
+
+    void alignControlPointsToPreviousA(std::vector<ControlPoint4Axis>& controlPoints, double previousADeg)
+    {
+        if (controlPoints.empty())
+        {
+            return;
+        }
+
+        const double alignedStartA = unwrapAngleNear(previousADeg, controlPoints.front().aDeg);
+        const double shift = alignedStartA - controlPoints.front().aDeg;
+
+        if (std::abs(shift) <= 1.0e-9)
+        {
+            return;
+        }
+
+        for (ControlPoint4Axis& point : controlPoints)
+        {
+            point.aDeg += shift;
+        }
+    }
+
+    double distanceToXAxis(const QVector3D& point, double axisY, double axisZ)
+    {
+        const double dy = point.y() - axisY;
+        const double dz = point.z() - axisZ;
+        return std::sqrt(dy * dy + dz * dz);
+    }
+
+    double computeGlobalSafeMachineZ(const CadDocument* document, double axisY, double axisZ)
+    {
+        double maxRadius = 0.0;
+
+        if (document != nullptr)
+        {
+            for (const std::unique_ptr<CadItem>& entity : document->m_entities)
+            {
+                if (entity == nullptr)
+                {
+                    continue;
+                }
+
+                for (const QVector3D& vertex : entity->m_geometry.vertices)
+                {
+                    maxRadius = std::max(maxRadius, distanceToXAxis(vertex, axisY, axisZ));
+                }
+
+                for (const RawPathPoint3D& point : entity->rawPathPoints3D())
+                {
+                    maxRadius = std::max
+                    (
+                        maxRadius,
+                        std::sqrt
+                        (
+                            (point.y - axisY) * (point.y - axisY)
+                            + (point.z - axisZ) * (point.z - axisZ)
+                        )
+                    );
+                }
+            }
+        }
+
+        return axisZ + maxRadius + kSafeClearanceExtra;
+    }
+
     ControlPoint4Axis machineSafeApproachPoint
     (
         const ControlPoint4Axis& point,
-        double safeDistance
+        double safeMachineZ
     )
     {
         ControlPoint4Axis safePoint = point;
-        safePoint.z += safeDistance;
+        safePoint.z = std::max(point.z, safeMachineZ);
         return safePoint;
     }
 
@@ -755,7 +835,7 @@ namespace
     (
         QTextStream& stream,
         const std::vector<ControlPoint4Axis>& controlPoints,
-        const GProfileRotaryAxisConfig& config,
+        double safeMachineZ,
         const ControlPoint4Axis* previousEndPoint,
         ControlPoint4Axis* writtenEndPoint
     )
@@ -765,7 +845,6 @@ namespace
             return false;
         }
 
-        const double safeDistance = std::max(0.0, config.safeZ);
         const ControlPoint4Axis& firstPoint = controlPoints.front();
         const bool hasPreviousEndPoint = previousEndPoint != nullptr;
         const bool directlyContinuous = hasPreviousEndPoint
@@ -773,14 +852,14 @@ namespace
 
         if (!hasPreviousEndPoint)
         {
-            if (config.useSafeZBeforeRapid && safeDistance > 0.0)
+            if (safeMachineZ > firstPoint.z + kControlPointTolerance)
             {
-                const ControlPoint4Axis approachPoint = machineSafeApproachPoint(firstPoint, safeDistance);
+                const ControlPoint4Axis approachPoint = machineSafeApproachPoint(firstPoint, safeMachineZ);
                 writeRapidMove4Axis(stream, approachPoint.x, approachPoint.y, approachPoint.z, approachPoint.aDeg);
 
                 if (!areControlPointsCoincident(approachPoint, firstPoint))
                 {
-                    writeLinearMove4Axis(stream, firstPoint.x, firstPoint.y, firstPoint.z, firstPoint.aDeg);
+                    writeRapidMove4Axis(stream, firstPoint.x, firstPoint.y, firstPoint.z, firstPoint.aDeg);
                 }
             }
             else
@@ -790,14 +869,14 @@ namespace
         }
         else if (!directlyContinuous)
         {
-            if (config.useSafeZBeforeRapid && safeDistance > 0.0)
+            if (safeMachineZ > std::min(previousEndPoint->z, firstPoint.z) + kControlPointTolerance)
             {
-                const ControlPoint4Axis departureSafePoint = machineSafeApproachPoint(*previousEndPoint, safeDistance);
-                const ControlPoint4Axis approachPoint = machineSafeApproachPoint(firstPoint, safeDistance);
+                const ControlPoint4Axis departureSafePoint = machineSafeApproachPoint(*previousEndPoint, safeMachineZ);
+                const ControlPoint4Axis approachPoint = machineSafeApproachPoint(firstPoint, safeMachineZ);
 
                 if (!areControlPointsCoincident(*previousEndPoint, departureSafePoint))
                 {
-                    writeLinearMove4Axis
+                    writeRapidMove4Axis
                     (
                         stream,
                         departureSafePoint.x,
@@ -814,7 +893,7 @@ namespace
 
                 if (!areControlPointsCoincident(approachPoint, firstPoint))
                 {
-                    writeLinearMove4Axis(stream, firstPoint.x, firstPoint.y, firstPoint.z, firstPoint.aDeg);
+                    writeRapidMove4Axis(stream, firstPoint.x, firstPoint.y, firstPoint.z, firstPoint.aDeg);
                 }
             }
             else
@@ -842,6 +921,7 @@ namespace
         QTextStream& stream,
         const CadItem* item,
         const GProfileRotaryAxisConfig& config,
+        double safeMachineZ,
         const ControlPoint4Axis* previousEndPoint,
         ControlPoint4Axis* writtenEndPoint,
         QString* errorMessage
@@ -883,11 +963,18 @@ namespace
             return false;
         }
 
+        std::vector<ControlPoint4Axis>& controlPoints = writableItem->controlPoints4AxisMutable();
+
+        if (previousEndPoint != nullptr)
+        {
+            alignControlPointsToPreviousA(controlPoints, previousEndPoint->aDeg);
+        }
+
         return writeControlPointPath4Axis
         (
             stream,
-            writableItem->controlPoints4Axis(),
-            config,
+            controlPoints,
+            safeMachineZ,
             previousEndPoint,
             writtenEndPoint
         );
@@ -1002,6 +1089,12 @@ bool GGenerator::generateToFile(const QString& filePath, QString* errorMessage) 
 
     const QVector<CadItem*> orderedItems = collectOrderedItems(m_document);
     const GProfileRotaryAxisConfig& rotaryAxisConfig = m_profile->rotaryAxisConfig();
+    const double safeMachineZ = computeGlobalSafeMachineZ
+    (
+        m_document,
+        rotaryAxisConfig.centerY,
+        rotaryAxisConfig.centerZ
+    );
     bool hasPrevious4AxisEndPoint = false;
     ControlPoint4Axis previous4AxisEndPoint;
 
@@ -1031,6 +1124,7 @@ bool GGenerator::generateToFile(const QString& filePath, QString* errorMessage) 
                 geometryStream,
                 item,
                 rotaryAxisConfig,
+                safeMachineZ,
                 hasPrevious4AxisEndPoint ? &previous4AxisEndPoint : nullptr,
                 &currentItemEndPoint,
                 &geometryError

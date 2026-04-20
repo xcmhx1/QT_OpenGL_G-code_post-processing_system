@@ -2110,46 +2110,23 @@ Gcode_postprocessing_system::Gcode_postprocessing_system(QWidget* parent)
 
     QAction* exportDxfAction = new QAction(QStringLiteral("导出为DXF..."), this);
     QAction* exportSafeDxfAction = new QAction(QStringLiteral("导出为DXF（安全模式）..."), this);
-    QAction* exportGCode2DAction = new QAction(QStringLiteral("导出G代码（2D）..."), this);
-    QAction* exportGCode3DAction = new QAction(QStringLiteral("导出G代码（3D/A轴）..."), this);
 
     ui->menuFile->insertAction(ui->action_File_Export_G, exportDxfAction);
     ui->menuFile->insertAction(ui->action_File_Export_G, exportSafeDxfAction);
     ui->menuFile->insertSeparator(ui->action_File_Export_G);
 
-    ui->action_File_Export_G->setText(QStringLiteral("导出G代码（按当前模式）..."));
+    ui->action_File_Export_G->setText(QStringLiteral("导出G代码"));
 
     connect(ui->action_FileExport, &QAction::triggered, this, [this]() { saveCurrentDocument(); });
     connect(exportDxfAction, &QAction::triggered, this, [this]() { exportDxfDocument(); });
     connect(exportSafeDxfAction, &QAction::triggered, this, [this]() { exportDxfDocument(true); });
     connect(ui->action_File_Export_G, &QAction::triggered, this, [this]() { exportGCode(); });
-    connect
-    (
-        exportGCode2DAction,
-        &QAction::triggered,
-        this,
-        [this]()
-        {
-            exportGCode(GGenerator::GenerationMode::Mode2D, QStringLiteral("2D"));
-        }
-    );
-    connect
-    (
-        exportGCode3DAction,
-        &QAction::triggered,
-        this,
-        [this]()
-        {
-            exportGCode(GGenerator::GenerationMode::Mode3D, QStringLiteral("3D(A轴)"));
-        }
-    );
-    ui->menuFile->addAction(exportGCode2DAction);
-    ui->menuFile->addAction(exportGCode3DAction);
     connect(ui->action_Edit_ReversePeocess, &QAction::triggered, this, [this]() { toggleSelectedEntityReverse(); });
-    connect(ui->action_Sort_2D_Assign, &QAction::triggered, this, [this]() { sortEntitiesByCurrentDirection(); });
-    connect(ui->action_Sort_2D_Smart, &QAction::triggered, this, [this]() { smartSortEntities(); });
-    connect(ui->action_Sort_3D_Assign, &QAction::triggered, this, [this]() { sortEntitiesByCurrentDirection3D(); });
-    connect(ui->action_Sort_3D_Smart, &QAction::triggered, this, [this]() { smartSortEntities3D(); });
+    connect(ui->action_Sort_2D_Assign, &QAction::triggered, this, [this]() { sortEntitiesByCurrentMode(false); });
+    connect(ui->action_Sort_2D_Smart, &QAction::triggered, this, [this]() { sortEntitiesByCurrentMode(true); });
+
+    ui->action_Sort_3D_Assign->setVisible(false);
+    ui->action_Sort_3D_Smart->setVisible(false);
 
     m_generationPreference = loadGenerationPreference();
     initializeThemeMenu();
@@ -2339,11 +2316,21 @@ bool Gcode_postprocessing_system::exportDxfDocument(bool safeMode)
 bool Gcode_postprocessing_system::exportGCode()
 {
     const GGenerator::GenerationMode generationMode = resolveGenerationMode();
-    const QString modeDisplayName = generationMode == GGenerator::GenerationMode::Mode3D
-        ? QStringLiteral("当前模式 3D(A轴)")
-        : QStringLiteral("当前模式 2D");
+    const QString modeDisplayName = QStringLiteral("当前模式 %1").arg(generationModeDisplayName(generationMode));
 
     return exportGCode(generationMode, modeDisplayName);
+}
+
+bool Gcode_postprocessing_system::sortEntitiesByCurrentMode(bool smartSort)
+{
+    const GGenerator::GenerationMode generationMode = resolveGenerationMode();
+    return smartSort
+        ? (generationMode == GGenerator::GenerationMode::Mode3D
+            ? smartSortEntities3D()
+            : smartSortEntities())
+        : (generationMode == GGenerator::GenerationMode::Mode3D
+            ? sortEntitiesByCurrentDirection3D()
+            : sortEntitiesByCurrentDirection());
 }
 
 bool Gcode_postprocessing_system::exportGCode
@@ -2370,9 +2357,7 @@ bool Gcode_postprocessing_system::exportGCode
     }
 
     const QString resolvedModeDisplayName = modeDisplayName.trimmed().isEmpty()
-        ? (generationMode == GGenerator::GenerationMode::Mode3D
-            ? QStringLiteral("3D(A轴)")
-            : QStringLiteral("2D"))
+        ? generationModeDisplayName(generationMode)
         : modeDisplayName;
 
     ui->openGLWidget->appendCommandMessage
@@ -2813,7 +2798,7 @@ bool Gcode_postprocessing_system::sortEntitiesByCurrentDirection()
 {
     if (m_document.m_entities.empty())
     {
-        QMessageBox::warning(this, QStringLiteral("2D排序"), QStringLiteral("当前文档为空，无法执行排序。"));
+        QMessageBox::warning(this, QStringLiteral("3轴排序"), QStringLiteral("当前文档为空，无法执行排序。"));
         return false;
     }
 
@@ -2838,7 +2823,7 @@ bool Gcode_postprocessing_system::sortEntitiesByCurrentDirection()
 
     if (sortableItems.empty())
     {
-        QMessageBox::warning(this, QStringLiteral("2D排序"), QStringLiteral("当前文档中没有可参与 G 代码排序的图元。"));
+        QMessageBox::warning(this, QStringLiteral("3轴排序"), QStringLiteral("当前文档中没有可参与 G 代码排序的图元。"));
         return false;
     }
 
@@ -2868,7 +2853,7 @@ bool Gcode_postprocessing_system::sortEntitiesByCurrentDirection()
 
         if (bestCandidate.index < 0)
         {
-            QMessageBox::warning(this, QStringLiteral("2D排序"), QStringLiteral("排序过程中出现无效图元，排序已中止。"));
+            QMessageBox::warning(this, QStringLiteral("3轴排序"), QStringLiteral("排序过程中出现无效图元，排序已中止。"));
             return false;
         }
 
@@ -2888,16 +2873,16 @@ bool Gcode_postprocessing_system::sortEntitiesByCurrentDirection()
 
     if (!m_editer.applyEntityProcessStates(processUpdates))
     {
-        QMessageBox::warning(this, QStringLiteral("2D排序"), QStringLiteral("排序结果写入失败。"));
+        QMessageBox::warning(this, QStringLiteral("3轴排序"), QStringLiteral("排序结果写入失败。"));
         return false;
     }
 
     ui->openGLWidget->appendCommandMessage
     (
-        QStringLiteral("2D排序完成，共更新 %1 个图元的加工顺序，首件已按最接近原点的当前起点选取，并保留当前加工方向设置。").arg(processUpdates.size())
+        QStringLiteral("3轴排序完成，共更新 %1 个图元的加工顺序，首件已按最接近原点的当前起点选取，并保留当前加工方向设置。").arg(processUpdates.size())
     );
     ui->openGLWidget->refreshCommandPrompt();
-    statusBar()->showMessage(QStringLiteral("2D排序完成，共更新 %1 个图元").arg(processUpdates.size()), 5000);
+    statusBar()->showMessage(QStringLiteral("3轴排序完成，共更新 %1 个图元").arg(processUpdates.size()), 5000);
     return true;
 }
 
@@ -2935,7 +2920,7 @@ bool Gcode_postprocessing_system::smartSortEntities()
 {
     if (m_document.m_entities.empty())
     {
-        QMessageBox::warning(this, QStringLiteral("2D智能排序"), QStringLiteral("当前文档为空，无法执行智能排序。"));
+        QMessageBox::warning(this, QStringLiteral("3轴智能排序"), QStringLiteral("当前文档为空，无法执行智能排序。"));
         return false;
     }
 
@@ -2960,7 +2945,7 @@ bool Gcode_postprocessing_system::smartSortEntities()
 
     if (sortableItems.empty())
     {
-        QMessageBox::warning(this, QStringLiteral("2D智能排序"), QStringLiteral("当前文档中没有可参与 G 代码排序的图元。"));
+        QMessageBox::warning(this, QStringLiteral("3轴智能排序"), QStringLiteral("当前文档中没有可参与 G 代码排序的图元。"));
         return false;
     }
 
@@ -2990,7 +2975,7 @@ bool Gcode_postprocessing_system::smartSortEntities()
 
         if (bestCandidate.index < 0)
         {
-            QMessageBox::warning(this, QStringLiteral("2D智能排序"), QStringLiteral("智能排序过程中出现无效图元，排序已中止。"));
+            QMessageBox::warning(this, QStringLiteral("3轴智能排序"), QStringLiteral("智能排序过程中出现无效图元，排序已中止。"));
             return false;
         }
 
@@ -3010,16 +2995,16 @@ bool Gcode_postprocessing_system::smartSortEntities()
 
     if (!m_editer.applyEntityProcessStates(processUpdates))
     {
-        QMessageBox::warning(this, QStringLiteral("2D智能排序"), QStringLiteral("智能排序结果写入失败。"));
+        QMessageBox::warning(this, QStringLiteral("3轴智能排序"), QStringLiteral("智能排序结果写入失败。"));
         return false;
     }
 
     ui->openGLWidget->appendCommandMessage
     (
-        QStringLiteral("2D智能排序完成，共更新 %1 个图元的加工顺序，并已对闭合图元的方向/起刀缝点做连续性优化。").arg(processUpdates.size())
+        QStringLiteral("3轴智能排序完成，共更新 %1 个图元的加工顺序，并已对闭合图元的方向/起刀缝点做连续性优化。").arg(processUpdates.size())
     );
     ui->openGLWidget->refreshCommandPrompt();
-    statusBar()->showMessage(QStringLiteral("2D智能排序完成，共更新 %1 个图元").arg(processUpdates.size()), 5000);
+    statusBar()->showMessage(QStringLiteral("3轴智能排序完成，共更新 %1 个图元").arg(processUpdates.size()), 5000);
     return true;
 }
 
@@ -3027,13 +3012,13 @@ bool Gcode_postprocessing_system::sortEntitiesByCurrentDirection3D()
 {
     if (m_document.m_entities.empty())
     {
-        QMessageBox::warning(this, QStringLiteral("3D排序"), QStringLiteral("当前文档为空，无法执行排序。"));
+        QMessageBox::warning(this, QStringLiteral("4轴(绕A)排序"), QStringLiteral("当前文档为空，无法执行排序。"));
         return false;
     }
 
     if (!documentContainsThreeDimensionalGeometry(m_document))
     {
-        QMessageBox::warning(this, QStringLiteral("3D排序"), QStringLiteral("当前文档未检测到真实 3D 路径，3D 排序仅适用于导入后的三维图元。"));
+        QMessageBox::warning(this, QStringLiteral("4轴(绕A)排序"), QStringLiteral("当前文档未检测到可用于4轴排序的有效路径。"));
         return false;
     }
 
@@ -3058,7 +3043,7 @@ bool Gcode_postprocessing_system::sortEntitiesByCurrentDirection3D()
 
     if (sortableItems.empty())
     {
-        QMessageBox::warning(this, QStringLiteral("3D排序"), QStringLiteral("当前文档中没有可参与 3D G 代码排序的图元。"));
+        QMessageBox::warning(this, QStringLiteral("4轴(绕A)排序"), QStringLiteral("当前文档中没有可参与 4 轴 G 代码排序的图元。"));
         return false;
     }
 
@@ -3090,7 +3075,7 @@ bool Gcode_postprocessing_system::sortEntitiesByCurrentDirection3D()
 
         if (bestCandidate.index < 0)
         {
-            QMessageBox::warning(this, QStringLiteral("3D排序"), QStringLiteral("3D 排序过程中出现无效图元，排序已中止。"));
+            QMessageBox::warning(this, QStringLiteral("4轴(绕A)排序"), QStringLiteral("4轴排序过程中出现无效图元，排序已中止。"));
             return false;
         }
 
@@ -3110,16 +3095,16 @@ bool Gcode_postprocessing_system::sortEntitiesByCurrentDirection3D()
 
     if (!m_editer.applyEntityProcessStates(processUpdates))
     {
-        QMessageBox::warning(this, QStringLiteral("3D排序"), QStringLiteral("3D 排序结果写入失败。"));
+        QMessageBox::warning(this, QStringLiteral("4轴(绕A)排序"), QStringLiteral("4轴排序结果写入失败。"));
         return false;
     }
 
     ui->openGLWidget->appendCommandMessage
     (
-        QStringLiteral("3D排序完成，共更新 %1 个图元的加工顺序，排序已按 X 与 A 轴联动连续性重新整理。").arg(processUpdates.size())
+        QStringLiteral("4轴(绕A)排序完成，共更新 %1 个图元的加工顺序，排序已按 X 与 A 轴联动连续性重新整理。").arg(processUpdates.size())
     );
     ui->openGLWidget->refreshCommandPrompt();
-    statusBar()->showMessage(QStringLiteral("3D排序完成，共更新 %1 个图元").arg(processUpdates.size()), 5000);
+    statusBar()->showMessage(QStringLiteral("4轴(绕A)排序完成，共更新 %1 个图元").arg(processUpdates.size()), 5000);
     return true;
 }
 
@@ -3127,13 +3112,13 @@ bool Gcode_postprocessing_system::smartSortEntities3D()
 {
     if (m_document.m_entities.empty())
     {
-        QMessageBox::warning(this, QStringLiteral("3D智能排序"), QStringLiteral("当前文档为空，无法执行智能排序。"));
+        QMessageBox::warning(this, QStringLiteral("4轴(绕A)智能排序"), QStringLiteral("当前文档为空，无法执行智能排序。"));
         return false;
     }
 
     if (!documentContainsThreeDimensionalGeometry(m_document))
     {
-        QMessageBox::warning(this, QStringLiteral("3D智能排序"), QStringLiteral("当前文档未检测到真实 3D 路径，3D 智能排序仅适用于导入后的三维图元。"));
+        QMessageBox::warning(this, QStringLiteral("4轴(绕A)智能排序"), QStringLiteral("当前文档未检测到可用于4轴智能排序的有效路径。"));
         return false;
     }
 
@@ -3158,7 +3143,7 @@ bool Gcode_postprocessing_system::smartSortEntities3D()
 
     if (sortableItems.empty())
     {
-        QMessageBox::warning(this, QStringLiteral("3D智能排序"), QStringLiteral("当前文档中没有可参与 3D G 代码排序的图元。"));
+        QMessageBox::warning(this, QStringLiteral("4轴(绕A)智能排序"), QStringLiteral("当前文档中没有可参与 4 轴 G 代码排序的图元。"));
         return false;
     }
 
@@ -3190,7 +3175,7 @@ bool Gcode_postprocessing_system::smartSortEntities3D()
 
         if (bestCandidate.index < 0)
         {
-            QMessageBox::warning(this, QStringLiteral("3D智能排序"), QStringLiteral("3D 智能排序过程中出现无效图元，排序已中止。"));
+            QMessageBox::warning(this, QStringLiteral("4轴(绕A)智能排序"), QStringLiteral("4轴智能排序过程中出现无效图元，排序已中止。"));
             return false;
         }
 
@@ -3210,22 +3195,25 @@ bool Gcode_postprocessing_system::smartSortEntities3D()
 
     if (!m_editer.applyEntityProcessStates(processUpdates))
     {
-        QMessageBox::warning(this, QStringLiteral("3D智能排序"), QStringLiteral("3D 智能排序结果写入失败。"));
+        QMessageBox::warning(this, QStringLiteral("4轴(绕A)智能排序"), QStringLiteral("4轴智能排序结果写入失败。"));
         return false;
     }
 
     ui->openGLWidget->appendCommandMessage
     (
-        QStringLiteral("3D智能排序完成，共更新 %1 个图元的加工顺序，并已按 A 轴连续性优化方向与闭合图元缝点。").arg(processUpdates.size())
+        QStringLiteral("4轴(绕A)智能排序完成，共更新 %1 个图元的加工顺序，并已按 A 轴连续性优化方向与闭合图元缝点。").arg(processUpdates.size())
     );
     ui->openGLWidget->refreshCommandPrompt();
-    statusBar()->showMessage(QStringLiteral("3D智能排序完成，共更新 %1 个图元").arg(processUpdates.size()), 5000);
+    statusBar()->showMessage(QStringLiteral("4轴(绕A)智能排序完成，共更新 %1 个图元").arg(processUpdates.size()), 5000);
     return true;
 }
 
 void Gcode_postprocessing_system::initializeThemeMenu()
 {
     ui->menuSet->setTitle(QStringLiteral("用户设置"));
+    ui->menuSort->setTitle(QStringLiteral("排序"));
+    ui->action_Sort_2D_Assign->setText(QStringLiteral("排序（保留方向）"));
+    ui->action_Sort_2D_Smart->setText(QStringLiteral("智能排序"));
 
     QMenu* generationMenu = ui->menuSet->addMenu(QStringLiteral("G代码模式"));
     QActionGroup* generationModeActionGroup = new QActionGroup(this);
@@ -3235,11 +3223,11 @@ void Gcode_postprocessing_system::initializeThemeMenu()
     m_generationModeAutoAction->setCheckable(true);
     generationModeActionGroup->addAction(m_generationModeAutoAction);
 
-    m_generationMode2DAction = generationMenu->addAction(QStringLiteral("强制2D"));
+    m_generationMode2DAction = generationMenu->addAction(QStringLiteral("3轴"));
     m_generationMode2DAction->setCheckable(true);
     generationModeActionGroup->addAction(m_generationMode2DAction);
 
-    m_generationMode3DAction = generationMenu->addAction(QStringLiteral("强制3D(A轴)"));
+    m_generationMode3DAction = generationMenu->addAction(QStringLiteral("4轴(绕A)"));
     m_generationMode3DAction->setCheckable(true);
     generationModeActionGroup->addAction(m_generationMode3DAction);
 
@@ -3268,7 +3256,7 @@ void Gcode_postprocessing_system::initializeThemeMenu()
         {
             m_generationPreference = GCodeGenerationPreference::Force2D;
             saveGenerationPreference(m_generationPreference);
-            statusBar()->showMessage(QStringLiteral("G 代码输出模式已切换为强制2D"), 3000);
+            statusBar()->showMessage(QStringLiteral("G 代码输出模式已切换为3轴"), 3000);
         }
     );
     connect
@@ -3280,7 +3268,7 @@ void Gcode_postprocessing_system::initializeThemeMenu()
         {
             m_generationPreference = GCodeGenerationPreference::Force3D;
             saveGenerationPreference(m_generationPreference);
-            statusBar()->showMessage(QStringLiteral("G 代码输出模式已切换为强制3D(A轴)"), 3000);
+            statusBar()->showMessage(QStringLiteral("G 代码输出模式已切换为4轴(绕A)"), 3000);
         }
     );
 
@@ -3434,6 +3422,13 @@ void Gcode_postprocessing_system::saveSnapOptionMask(quint32 mask) const
         QStringLiteral("ui/snapModeMask"),
         static_cast<uint>(mask & CadStatusPaneWidget::allSnapOptionMask())
     );
+}
+
+QString Gcode_postprocessing_system::generationModeDisplayName(GGenerator::GenerationMode generationMode) const
+{
+    return generationMode == GGenerator::GenerationMode::Mode3D
+        ? QStringLiteral("4轴(绕A)")
+        : QStringLiteral("3轴");
 }
 
 Gcode_postprocessing_system::GCodeGenerationPreference Gcode_postprocessing_system::loadGenerationPreference() const

@@ -180,6 +180,11 @@ const std::vector<ControlPoint4Axis>& CadItem::controlPoints4Axis() const
     return m_controlPoints4Axis;
 }
 
+std::vector<ControlPoint4Axis>& CadItem::controlPoints4AxisMutable()
+{
+    return m_controlPoints4Axis;
+}
+
 void CadItem::clearPathCaches()
 {
     m_rawPathPoints3D.clear();

@@ -66,6 +66,7 @@ public:
     const std::vector<RawPathPoint3D>& rawPathPoints3D() const;
 
     const std::vector<ControlPoint4Axis>& controlPoints4Axis() const;
+    std::vector<ControlPoint4Axis>& controlPoints4AxisMutable();
 
     // 根据离散后的几何顶点推导一个加工方向向量。
     // 当前实现取首个有效边方向，并按 m_isReverse 决定是否翻转。
