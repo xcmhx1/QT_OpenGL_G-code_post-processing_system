@@ -30,8 +30,6 @@ namespace
     constexpr double kCircleTolerance = 1.0e-8;
     constexpr int kFullEllipseSegments = 128;
     constexpr double kControlPointTolerance = 1.0e-5;
-    constexpr double kSafeClearanceExtra = 50.0; // 5 cm
-
     QString formatCoord(double value)
     {
         return QString::number(value, 'f', 5);
@@ -741,6 +739,11 @@ namespace
         return dx * dx + dy * dy + dz * dz + da * da <= tolerance * tolerance;
     }
 
+    bool hasInitialMachinePoint(const GProfileRotaryAxisConfig& config)
+    {
+        return config.useInitialMachinePoint;
+    }
+
     double unwrapAngleNear(double previousDeg, double currentDeg)
     {
         while (currentDeg - previousDeg > 180.0)
@@ -784,7 +787,13 @@ namespace
         return std::sqrt(dy * dy + dz * dz);
     }
 
-    double computeGlobalSafeMachineZ(const CadDocument* document, double axisY, double axisZ)
+    double computeGlobalSafeMachineZ
+    (
+        const CadDocument* document,
+        double axisY,
+        double axisZ,
+        double extraRadialClearance
+    )
     {
         double maxRadius = 0.0;
 
@@ -817,7 +826,7 @@ namespace
             }
         }
 
-        return axisZ + maxRadius + kSafeClearanceExtra;
+        return axisZ + maxRadius + extraRadialClearance;
     }
 
     ControlPoint4Axis machineSafeApproachPoint
@@ -835,6 +844,7 @@ namespace
     (
         QTextStream& stream,
         const std::vector<ControlPoint4Axis>& controlPoints,
+        const GProfileRotaryAxisConfig& config,
         double safeMachineZ,
         const ControlPoint4Axis* previousEndPoint,
         ControlPoint4Axis* writtenEndPoint
@@ -852,6 +862,20 @@ namespace
 
         if (!hasPreviousEndPoint)
         {
+            if (hasInitialMachinePoint(config))
+            {
+                ControlPoint4Axis initialPoint;
+                initialPoint.x = config.initialMachineX;
+                initialPoint.y = config.initialMachineY;
+                initialPoint.z = config.initialMachineZ;
+                initialPoint.aDeg = firstPoint.aDeg;
+
+                if (!areControlPointsCoincident(initialPoint, firstPoint))
+                {
+                    writeRapidMove4Axis(stream, initialPoint.x, initialPoint.y, initialPoint.z, initialPoint.aDeg);
+                }
+            }
+
             if (safeMachineZ > firstPoint.z + kControlPointTolerance)
             {
                 const ControlPoint4Axis approachPoint = machineSafeApproachPoint(firstPoint, safeMachineZ);
@@ -974,6 +998,7 @@ namespace
         (
             stream,
             controlPoints,
+            config,
             safeMachineZ,
             previousEndPoint,
             writtenEndPoint
@@ -1093,7 +1118,8 @@ bool GGenerator::generateToFile(const QString& filePath, QString* errorMessage) 
     (
         m_document,
         rotaryAxisConfig.centerY,
-        rotaryAxisConfig.centerZ
+        rotaryAxisConfig.centerZ,
+        rotaryAxisConfig.safeZ
     );
     bool hasPrevious4AxisEndPoint = false;
     ControlPoint4Axis previous4AxisEndPoint;

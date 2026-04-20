@@ -10,6 +10,7 @@
 
 class QComboBox;
 class QDialogButtonBox;
+class QDoubleSpinBox;
 class QLineEdit;
 class QListWidget;
 class QListWidgetItem;
@@ -82,6 +83,7 @@ private:
     QPlainTextEdit* m_fileHeaderEdit = nullptr;
     QPlainTextEdit* m_fileFooterEdit = nullptr;
     QPlainTextEdit* m_fileCommentEdit = nullptr;
+    QDoubleSpinBox* m_rotaryClearanceSpinBox = nullptr;
 
     QComboBox* m_entityTypeComboBox = nullptr;
     QPlainTextEdit* m_entityTypeHeaderEdit = nullptr;

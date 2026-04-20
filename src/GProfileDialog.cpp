@@ -5,6 +5,7 @@
 #include <QColorDialog>
 #include <QComboBox>
 #include <QDialogButtonBox>
+#include <QDoubleSpinBox>
 #include <QFileDialog>
 #include <QFormLayout>
 #include <QHBoxLayout>
@@ -378,6 +379,25 @@ void GProfileDialog::buildUi()
     colorLayout->addWidget(colorEditorPanel, 1);
     tabWidget->addTab(colorTab, QStringLiteral("颜色规则"));
 
+    QWidget* rotaryTab = new QWidget(tabWidget);
+    QVBoxLayout* rotaryLayout = new QVBoxLayout(rotaryTab);
+    rotaryLayout->setContentsMargins(8, 8, 8, 8);
+    rotaryLayout->setSpacing(8);
+
+    QFormLayout* rotaryFormLayout = new QFormLayout();
+    rotaryFormLayout->setContentsMargins(0, 0, 0, 0);
+    rotaryFormLayout->setSpacing(8);
+
+    m_rotaryClearanceSpinBox = new QDoubleSpinBox(rotaryTab);
+    m_rotaryClearanceSpinBox->setDecimals(3);
+    m_rotaryClearanceSpinBox->setRange(0.0, 1000000.0);
+    m_rotaryClearanceSpinBox->setSingleStep(1.0);
+    rotaryFormLayout->addRow(QStringLiteral("离轴额外距离"), m_rotaryClearanceSpinBox);
+
+    rotaryLayout->addLayout(rotaryFormLayout);
+    rotaryLayout->addStretch(1);
+    tabWidget->addTab(rotaryTab, QStringLiteral("四轴加工"));
+
     m_buttonBox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
     rootLayout->addWidget(m_buttonBox);
 
@@ -535,6 +555,7 @@ void GProfileDialog::applyProfile(const GProfile& profile)
     setBlockText(m_fileHeaderEdit, profile.fileCode().header);
     setBlockText(m_fileFooterEdit, profile.fileCode().footer);
     setBlockText(m_fileCommentEdit, profile.fileCode().comment);
+    m_rotaryClearanceSpinBox->setValue(profile.rotaryAxisConfig().safeZ);
 
     if (m_entityTypeComboBox->count() > 0)
     {
@@ -550,7 +571,9 @@ void GProfileDialog::applyProfile(const GProfile& profile)
 GProfile GProfileDialog::collectProfile() const
 {
     GProfile profile;
-    profile.setRotaryAxisConfig(m_profile.rotaryAxisConfig());
+    GProfileRotaryAxisConfig rotaryConfig = m_profile.rotaryAxisConfig();
+    rotaryConfig.safeZ = m_rotaryClearanceSpinBox != nullptr ? m_rotaryClearanceSpinBox->value() : rotaryConfig.safeZ;
+    profile.setRotaryAxisConfig(rotaryConfig);
     profile.setProfileName(m_profileNameEdit->text().trimmed());
     profile.setFileCode
     (

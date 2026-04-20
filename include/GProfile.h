@@ -20,10 +20,14 @@ struct GProfileRotaryAxisConfig
     double centerY = 0.0;
     double centerZ = 0.0;
     double aAxisOffsetDegrees = 0.0;
-    double safeZ = 50.0;
+    double safeZ = 50.0; // 四轴离轴额外距离
     bool invertAAxisDirection = false;
     bool keepContinuousAngle = true;
     bool useSafeZBeforeRapid = true;
+    bool useInitialMachinePoint = false;
+    double initialMachineX = 0.0;
+    double initialMachineY = 0.0;
+    double initialMachineZ = 0.0;
 
     QJsonObject toJson() const;
     static GProfileRotaryAxisConfig fromJson(const QJsonObject& object);
