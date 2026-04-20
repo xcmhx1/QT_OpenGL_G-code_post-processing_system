@@ -475,11 +475,11 @@ void CadToolPanelWidget::applyTheme()
             "}"
             "QToolButton[machiningButton=\"true\"] {"
             " border: 1px solid %4;"
-            " border-radius: 6px;"
-            " padding: 6px 10px;"
+            " border-radius: 4px;"
+            " padding: 2px 8px;"
             " background: %7;"
             " color: %1;"
-            " min-height: 28px;"
+            " font-size: 9px;"
             "}"
             "QToolButton[machiningButton=\"true\"]:hover {"
             " border-color: %6;"
@@ -907,14 +907,9 @@ QWidget* CadToolPanelWidget::buildPropertyPanel()
 QWidget* CadToolPanelWidget::buildMachiningPanel()
 {
     QWidget* panel = new QWidget(this);
-    QVBoxLayout* rootLayout = new QVBoxLayout(panel);
-    rootLayout->setContentsMargins(10, 8, 10, 8);
-    rootLayout->setSpacing(10);
-
-    QGridLayout* actionLayout = new QGridLayout();
-    actionLayout->setContentsMargins(0, 0, 0, 0);
-    actionLayout->setHorizontalSpacing(8);
-    actionLayout->setVerticalSpacing(8);
+    QHBoxLayout* rootLayout = new QHBoxLayout(panel);
+    rootLayout->setContentsMargins(0, 0, 0, 0);
+    rootLayout->setSpacing(0);
 
     auto buildMachiningButton =
         [panel](const QString& text)
@@ -923,7 +918,7 @@ QWidget* CadToolPanelWidget::buildMachiningPanel()
             button->setText(text);
             button->setToolButtonStyle(Qt::ToolButtonTextOnly);
             button->setProperty("machiningButton", true);
-            button->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+            button->setFixedSize(92, 28);
             return button;
         };
 
@@ -933,28 +928,53 @@ QWidget* CadToolPanelWidget::buildMachiningPanel()
     m_smartSortButton = buildMachiningButton(QStringLiteral("智能排序"));
     m_profileSettingsButton = buildMachiningButton(QStringLiteral("G代码配置"));
 
-    actionLayout->addWidget(m_importFileButton, 0, 0);
-    actionLayout->addWidget(m_exportGCodeButton, 0, 1);
-    actionLayout->addWidget(m_sortKeepDirectionButton, 1, 0);
-    actionLayout->addWidget(m_smartSortButton, 1, 1);
-    actionLayout->addWidget(m_profileSettingsButton, 2, 1);
+    QWidget* importPanel = new QWidget(panel);
+    QGridLayout* importLayout = new QGridLayout(importPanel);
+    importLayout->setContentsMargins(1, 6, 1, 2);
+    importLayout->setHorizontalSpacing(6);
+    importLayout->setVerticalSpacing(6);
+    importLayout->setSizeConstraint(QLayout::SetFixedSize);
+    importLayout->addWidget(m_importFileButton, 0, 0);
+    importLayout->addWidget(m_exportGCodeButton, 0, 1);
 
-    QWidget* modeRow = new QWidget(panel);
+    QWidget* sortPanel = new QWidget(panel);
+    QGridLayout* sortLayout = new QGridLayout(sortPanel);
+    sortLayout->setContentsMargins(1, 6, 1, 2);
+    sortLayout->setHorizontalSpacing(6);
+    sortLayout->setVerticalSpacing(6);
+    sortLayout->setSizeConstraint(QLayout::SetFixedSize);
+    sortLayout->addWidget(m_sortKeepDirectionButton, 0, 0);
+    sortLayout->addWidget(m_smartSortButton, 0, 1);
+
+    QWidget* configPanel = new QWidget(panel);
+    QVBoxLayout* configLayout = new QVBoxLayout(configPanel);
+    configLayout->setContentsMargins(2, 6, 2, 2);
+    configLayout->setSpacing(6);
+
+    QWidget* modeRow = new QWidget(configPanel);
     QHBoxLayout* modeLayout = new QHBoxLayout(modeRow);
     modeLayout->setContentsMargins(0, 0, 0, 0);
-    modeLayout->setSpacing(8);
+    modeLayout->setSpacing(6);
 
     QLabel* modeLabel = new QLabel(QStringLiteral("G代码模式"), modeRow);
+    modeLabel->setFixedWidth(54);
     m_gcodeModeComboBox = new QComboBox(modeRow);
     m_gcodeModeComboBox->setEditable(false);
+    m_gcodeModeComboBox->setFixedHeight(kComboHeight);
     m_gcodeModeComboBox->addItem(QStringLiteral("自动"), static_cast<int>(GCodeModeSelection::Auto));
     m_gcodeModeComboBox->addItem(QStringLiteral("3轴"), static_cast<int>(GCodeModeSelection::ThreeAxis));
     m_gcodeModeComboBox->addItem(QStringLiteral("4轴(绕A)"), static_cast<int>(GCodeModeSelection::FourAxisAroundA));
     modeLayout->addWidget(modeLabel, 0);
     modeLayout->addWidget(m_gcodeModeComboBox, 1);
+    configLayout->addWidget(modeRow);
+    configLayout->addWidget(m_profileSettingsButton, 0, Qt::AlignLeft);
+    configLayout->addStretch(1);
 
-    rootLayout->addLayout(actionLayout);
-    rootLayout->addWidget(modeRow);
+    rootLayout->addWidget(buildPanelFrame(QStringLiteral("导入导出"), importPanel, 214), 0, Qt::AlignLeft | Qt::AlignTop);
+    rootLayout->addWidget(buildDivider(), 0, Qt::AlignLeft | Qt::AlignVCenter);
+    rootLayout->addWidget(buildPanelFrame(QStringLiteral("排序"), sortPanel, 214), 0, Qt::AlignLeft | Qt::AlignTop);
+    rootLayout->addWidget(buildDivider(), 0, Qt::AlignLeft | Qt::AlignVCenter);
+    rootLayout->addWidget(buildPanelFrame(QStringLiteral("配置"), configPanel, 208), 0, Qt::AlignLeft | Qt::AlignTop);
     rootLayout->addStretch(1);
 
     connect(m_importFileButton, &QToolButton::clicked, this, [this]() { emit importFileRequested(); });
