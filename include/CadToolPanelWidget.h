@@ -14,6 +14,7 @@ class QComboBox;
 class QFrame;
 class QLabel;
 class QMenu;
+class QTabWidget;
 class QToolButton;
 
 class CadToolPanelWidget : public QWidget
@@ -21,6 +22,13 @@ class CadToolPanelWidget : public QWidget
     Q_OBJECT
 
 public:
+    enum class GCodeModeSelection
+    {
+        Auto,
+        ThreeAxis,
+        FourAxisAroundA
+    };
+
     explicit CadToolPanelWidget(QWidget* parent = nullptr);
 
     void setLayerNames(const QStringList& layerNames, const QMap<QString, QColor>& layerColors);
@@ -31,6 +39,7 @@ public:
     void setMoveEnabled(bool enabled);
     void setModifyActionsEnabled(bool enabled);
     void setTheme(const AppThemeColors& theme);
+    void setGCodeModeSelection(GCodeModeSelection selection);
 
 signals:
     void drawRequested(DrawType drawType);
@@ -42,6 +51,12 @@ signals:
     void arrayRequested();
     void layerChangeRequested(const QString& layerName);
     void colorChangeRequested(int colorIndex);
+    void importFileRequested();
+    void exportGCodeRequested();
+    void sortKeepDirectionRequested();
+    void smartSortRequested();
+    void gcodeModeSelectionChanged(CadToolPanelWidget::GCodeModeSelection selection);
+    void profileSettingsRequested();
 
 private:
     void buildUi();
@@ -52,6 +67,7 @@ private:
     QWidget* buildModifyPanel();
     QWidget* buildLayerPanel();
     QWidget* buildPropertyPanel();
+    QWidget* buildMachiningPanel();
     void addDrawButton(QWidget* parent, const QString& text, DrawType drawType, int row, int column);
     void commitLayerChange(QComboBox* comboBox);
     void updateLayerComboIcons();
@@ -70,8 +86,15 @@ private:
     QComboBox* m_layerComboBox = nullptr;
     QComboBox* m_propertyLayerComboBox = nullptr;
     QComboBox* m_colorComboBox = nullptr;
+    QComboBox* m_gcodeModeComboBox = nullptr;
     QMenu* m_drawMoreMenu = nullptr;
     QAction* m_drawPointAction = nullptr;
+    QToolButton* m_importFileButton = nullptr;
+    QToolButton* m_exportGCodeButton = nullptr;
+    QToolButton* m_sortKeepDirectionButton = nullptr;
+    QToolButton* m_smartSortButton = nullptr;
+    QToolButton* m_profileSettingsButton = nullptr;
+    QTabWidget* m_tabWidget = nullptr;
     QMap<QString, QColor> m_layerColors;
     QVector<QToolButton*> m_drawButtons;
     QVector<QFrame*> m_dividers;

@@ -15,6 +15,7 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QSizePolicy>
+#include <QTabWidget>
 #include <QToolButton>
 #include <QVBoxLayout>
 
@@ -386,24 +387,46 @@ void CadToolPanelWidget::setTheme(const AppThemeColors& theme)
     applyTheme();
 }
 
+void CadToolPanelWidget::setGCodeModeSelection(GCodeModeSelection selection)
+{
+    if (m_gcodeModeComboBox == nullptr)
+    {
+        return;
+    }
+
+    m_updatingUi = true;
+    m_gcodeModeComboBox->setCurrentIndex(static_cast<int>(selection));
+    m_updatingUi = false;
+}
+
 void CadToolPanelWidget::buildUi()
 {
     m_drawMoreMenu = new QMenu(this);
     m_drawPointAction = m_drawMoreMenu->addAction(QStringLiteral("点"));
     connect(m_drawPointAction, &QAction::triggered, this, [this]() { emit drawRequested(DrawType::Point); });
 
-    QHBoxLayout* rootLayout = new QHBoxLayout(this);
+    QVBoxLayout* rootLayout = new QVBoxLayout(this);
     rootLayout->setContentsMargins(0, 0, 0, 0);
     rootLayout->setSpacing(0);
 
-    rootLayout->addWidget(buildPanelFrame(QStringLiteral("绘图"), buildDrawPanel(), -1, m_drawMoreMenu), 0, Qt::AlignLeft | Qt::AlignTop);
-    rootLayout->addWidget(buildDivider(), 0, Qt::AlignLeft | Qt::AlignVCenter);
-    rootLayout->addWidget(buildPanelFrame(QStringLiteral("修改"), buildModifyPanel()), 0, Qt::AlignLeft | Qt::AlignTop);
-    rootLayout->addWidget(buildDivider(), 0, Qt::AlignLeft | Qt::AlignVCenter);
-    rootLayout->addWidget(buildPanelFrame(QStringLiteral("图层"), buildLayerPanel(), 176), 0, Qt::AlignLeft | Qt::AlignTop);
-    rootLayout->addWidget(buildDivider(), 0, Qt::AlignLeft | Qt::AlignVCenter);
-    rootLayout->addWidget(buildPanelFrame(QStringLiteral("特性"), buildPropertyPanel(), 226), 0, Qt::AlignLeft | Qt::AlignTop);
-    rootLayout->addStretch(1);
+    m_tabWidget = new QTabWidget(this);
+    rootLayout->addWidget(m_tabWidget);
+
+    QWidget* defaultTab = new QWidget(m_tabWidget);
+    QHBoxLayout* defaultLayout = new QHBoxLayout(defaultTab);
+    defaultLayout->setContentsMargins(0, 0, 0, 0);
+    defaultLayout->setSpacing(0);
+    defaultLayout->addWidget(buildPanelFrame(QStringLiteral("绘图"), buildDrawPanel(), -1, m_drawMoreMenu), 0, Qt::AlignLeft | Qt::AlignTop);
+    defaultLayout->addWidget(buildDivider(), 0, Qt::AlignLeft | Qt::AlignVCenter);
+    defaultLayout->addWidget(buildPanelFrame(QStringLiteral("修改"), buildModifyPanel()), 0, Qt::AlignLeft | Qt::AlignTop);
+    defaultLayout->addWidget(buildDivider(), 0, Qt::AlignLeft | Qt::AlignVCenter);
+    defaultLayout->addWidget(buildPanelFrame(QStringLiteral("图层"), buildLayerPanel(), 176), 0, Qt::AlignLeft | Qt::AlignTop);
+    defaultLayout->addWidget(buildDivider(), 0, Qt::AlignLeft | Qt::AlignVCenter);
+    defaultLayout->addWidget(buildPanelFrame(QStringLiteral("特性"), buildPropertyPanel(), 226), 0, Qt::AlignLeft | Qt::AlignTop);
+    defaultLayout->addStretch(1);
+    m_tabWidget->addTab(defaultTab, QStringLiteral("默认"));
+
+    m_tabWidget->addTab(buildMachiningPanel(), QStringLiteral("机加工"));
 }
 
 void CadToolPanelWidget::applyTheme()
@@ -413,6 +436,10 @@ void CadToolPanelWidget::applyTheme()
         QStringLiteral
         (
             "#cadToolPanelRoot { background: transparent; }"
+            "QTabWidget::pane { border: none; background: transparent; margin-top: 2px; }"
+            "QTabBar::tab { background: %7; color: %2; border: 1px solid %4; border-bottom: none; padding: 5px 14px; min-width: 64px; }"
+            "QTabBar::tab:selected { background: %5; color: %9; }"
+            "QTabBar::tab:!selected { margin-top: 2px; }"
             "QLabel { color: %1; }"
             "QLabel[panelTitle=\"true\"] {"
             " color: %2;"
@@ -443,6 +470,22 @@ void CadToolPanelWidget::applyTheme()
             " background: %5;"
             "}"
             "QToolButton[ribbonButton=\"true\"]:pressed {"
+            " border-color: %6;"
+            " background: %3;"
+            "}"
+            "QToolButton[machiningButton=\"true\"] {"
+            " border: 1px solid %4;"
+            " border-radius: 6px;"
+            " padding: 6px 10px;"
+            " background: %7;"
+            " color: %1;"
+            " min-height: 28px;"
+            "}"
+            "QToolButton[machiningButton=\"true\"]:hover {"
+            " border-color: %6;"
+            " background: %5;"
+            "}"
+            "QToolButton[machiningButton=\"true\"]:pressed {"
             " border-color: %6;"
             " background: %3;"
             "}"
@@ -855,6 +898,83 @@ QWidget* CadToolPanelWidget::buildPropertyPanel()
             }
 
             emit colorChangeRequested(m_colorComboBox->itemData(index).toInt());
+        }
+    );
+
+    return panel;
+}
+
+QWidget* CadToolPanelWidget::buildMachiningPanel()
+{
+    QWidget* panel = new QWidget(this);
+    QVBoxLayout* rootLayout = new QVBoxLayout(panel);
+    rootLayout->setContentsMargins(10, 8, 10, 8);
+    rootLayout->setSpacing(10);
+
+    QGridLayout* actionLayout = new QGridLayout();
+    actionLayout->setContentsMargins(0, 0, 0, 0);
+    actionLayout->setHorizontalSpacing(8);
+    actionLayout->setVerticalSpacing(8);
+
+    auto buildMachiningButton =
+        [panel](const QString& text)
+        {
+            QToolButton* button = new QToolButton(panel);
+            button->setText(text);
+            button->setToolButtonStyle(Qt::ToolButtonTextOnly);
+            button->setProperty("machiningButton", true);
+            button->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+            return button;
+        };
+
+    m_importFileButton = buildMachiningButton(QStringLiteral("文件导入"));
+    m_exportGCodeButton = buildMachiningButton(QStringLiteral("G代码导出"));
+    m_sortKeepDirectionButton = buildMachiningButton(QStringLiteral("排序(保留方向)"));
+    m_smartSortButton = buildMachiningButton(QStringLiteral("智能排序"));
+    m_profileSettingsButton = buildMachiningButton(QStringLiteral("G代码配置"));
+
+    actionLayout->addWidget(m_importFileButton, 0, 0);
+    actionLayout->addWidget(m_exportGCodeButton, 0, 1);
+    actionLayout->addWidget(m_sortKeepDirectionButton, 1, 0);
+    actionLayout->addWidget(m_smartSortButton, 1, 1);
+    actionLayout->addWidget(m_profileSettingsButton, 2, 1);
+
+    QWidget* modeRow = new QWidget(panel);
+    QHBoxLayout* modeLayout = new QHBoxLayout(modeRow);
+    modeLayout->setContentsMargins(0, 0, 0, 0);
+    modeLayout->setSpacing(8);
+
+    QLabel* modeLabel = new QLabel(QStringLiteral("G代码模式"), modeRow);
+    m_gcodeModeComboBox = new QComboBox(modeRow);
+    m_gcodeModeComboBox->setEditable(false);
+    m_gcodeModeComboBox->addItem(QStringLiteral("自动"), static_cast<int>(GCodeModeSelection::Auto));
+    m_gcodeModeComboBox->addItem(QStringLiteral("3轴"), static_cast<int>(GCodeModeSelection::ThreeAxis));
+    m_gcodeModeComboBox->addItem(QStringLiteral("4轴(绕A)"), static_cast<int>(GCodeModeSelection::FourAxisAroundA));
+    modeLayout->addWidget(modeLabel, 0);
+    modeLayout->addWidget(m_gcodeModeComboBox, 1);
+
+    rootLayout->addLayout(actionLayout);
+    rootLayout->addWidget(modeRow);
+    rootLayout->addStretch(1);
+
+    connect(m_importFileButton, &QToolButton::clicked, this, [this]() { emit importFileRequested(); });
+    connect(m_exportGCodeButton, &QToolButton::clicked, this, [this]() { emit exportGCodeRequested(); });
+    connect(m_sortKeepDirectionButton, &QToolButton::clicked, this, [this]() { emit sortKeepDirectionRequested(); });
+    connect(m_smartSortButton, &QToolButton::clicked, this, [this]() { emit smartSortRequested(); });
+    connect(m_profileSettingsButton, &QToolButton::clicked, this, [this]() { emit profileSettingsRequested(); });
+    connect
+    (
+        m_gcodeModeComboBox,
+        &QComboBox::currentIndexChanged,
+        this,
+        [this](int index)
+        {
+            if (m_updatingUi || index < 0)
+            {
+                return;
+            }
+
+            emit gcodeModeSelectionChanged(static_cast<GCodeModeSelection>(index));
         }
     );
 

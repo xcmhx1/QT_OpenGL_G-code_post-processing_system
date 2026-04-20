@@ -46,6 +46,7 @@ private:
     void saveSnapOptionMask(quint32 mask) const;
     GCodeGenerationPreference loadGenerationPreference() const;
     void saveGenerationPreference(GCodeGenerationPreference preference) const;
+    void applyGenerationPreference(GCodeGenerationPreference preference);
     GGenerator::GenerationMode resolveGenerationMode() const;
     void initializeToolPanel();
     void syncToolPanelState();

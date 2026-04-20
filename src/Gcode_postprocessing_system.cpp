@@ -3242,9 +3242,7 @@ void Gcode_postprocessing_system::initializeThemeMenu()
         this,
         [this]()
         {
-            m_generationPreference = GCodeGenerationPreference::Auto;
-            saveGenerationPreference(m_generationPreference);
-            statusBar()->showMessage(QStringLiteral("G 代码输出模式已切换为自动"), 3000);
+            applyGenerationPreference(GCodeGenerationPreference::Auto);
         }
     );
     connect
@@ -3254,9 +3252,7 @@ void Gcode_postprocessing_system::initializeThemeMenu()
         this,
         [this]()
         {
-            m_generationPreference = GCodeGenerationPreference::Force2D;
-            saveGenerationPreference(m_generationPreference);
-            statusBar()->showMessage(QStringLiteral("G 代码输出模式已切换为3轴"), 3000);
+            applyGenerationPreference(GCodeGenerationPreference::Force2D);
         }
     );
     connect
@@ -3266,9 +3262,7 @@ void Gcode_postprocessing_system::initializeThemeMenu()
         this,
         [this]()
         {
-            m_generationPreference = GCodeGenerationPreference::Force3D;
-            saveGenerationPreference(m_generationPreference);
-            statusBar()->showMessage(QStringLiteral("G 代码输出模式已切换为4轴(绕A)"), 3000);
+            applyGenerationPreference(GCodeGenerationPreference::Force3D);
         }
     );
 
@@ -3466,6 +3460,52 @@ void Gcode_postprocessing_system::saveGenerationPreference(GCodeGenerationPrefer
     settings.setValue(QStringLiteral("gcode/outputMode"), modeValue);
 }
 
+void Gcode_postprocessing_system::applyGenerationPreference(GCodeGenerationPreference preference)
+{
+    m_generationPreference = preference;
+    saveGenerationPreference(m_generationPreference);
+
+    if (m_generationModeAutoAction != nullptr)
+    {
+        m_generationModeAutoAction->setChecked(m_generationPreference == GCodeGenerationPreference::Auto);
+    }
+
+    if (m_generationMode2DAction != nullptr)
+    {
+        m_generationMode2DAction->setChecked(m_generationPreference == GCodeGenerationPreference::Force2D);
+    }
+
+    if (m_generationMode3DAction != nullptr)
+    {
+        m_generationMode3DAction->setChecked(m_generationPreference == GCodeGenerationPreference::Force3D);
+    }
+
+    if (m_toolPanelWidget != nullptr)
+    {
+        switch (m_generationPreference)
+        {
+        case GCodeGenerationPreference::Auto:
+            m_toolPanelWidget->setGCodeModeSelection(CadToolPanelWidget::GCodeModeSelection::Auto);
+            break;
+        case GCodeGenerationPreference::Force2D:
+            m_toolPanelWidget->setGCodeModeSelection(CadToolPanelWidget::GCodeModeSelection::ThreeAxis);
+            break;
+        case GCodeGenerationPreference::Force3D:
+            m_toolPanelWidget->setGCodeModeSelection(CadToolPanelWidget::GCodeModeSelection::FourAxisAroundA);
+            break;
+        default:
+            break;
+        }
+    }
+
+    const QString modeText = m_generationPreference == GCodeGenerationPreference::Force3D
+        ? QStringLiteral("4轴(绕A)")
+        : (m_generationPreference == GCodeGenerationPreference::Force2D
+            ? QStringLiteral("3轴")
+            : QStringLiteral("自动"));
+    statusBar()->showMessage(QStringLiteral("G 代码输出模式已切换为%1").arg(modeText), 3000);
+}
+
 GGenerator::GenerationMode Gcode_postprocessing_system::resolveGenerationMode() const
 {
     switch (m_generationPreference)
@@ -3523,6 +3563,34 @@ void Gcode_postprocessing_system::initializeToolPanel()
     connect(m_toolPanelWidget, &CadToolPanelWidget::rotateRequested, this, [this]() { rotateSelectedEntity(); });
     connect(m_toolPanelWidget, &CadToolPanelWidget::scaleRequested, this, [this]() { scaleSelectedEntity(); });
     connect(m_toolPanelWidget, &CadToolPanelWidget::arrayRequested, this, [this]() { arraySelectedEntity(); });
+    connect(m_toolPanelWidget, &CadToolPanelWidget::importFileRequested, this, [this]() { ui->action_File_Import_Dxf->trigger(); });
+    connect(m_toolPanelWidget, &CadToolPanelWidget::exportGCodeRequested, this, [this]() { ui->action_File_Export_G->trigger(); });
+    connect(m_toolPanelWidget, &CadToolPanelWidget::sortKeepDirectionRequested, this, [this]() { ui->action_Sort_2D_Assign->trigger(); });
+    connect(m_toolPanelWidget, &CadToolPanelWidget::smartSortRequested, this, [this]() { ui->action_Sort_2D_Smart->trigger(); });
+    connect(m_toolPanelWidget, &CadToolPanelWidget::profileSettingsRequested, this, [this]() { openProfileSettingsDialog(); });
+    connect
+    (
+        m_toolPanelWidget,
+        &CadToolPanelWidget::gcodeModeSelectionChanged,
+        this,
+        [this](CadToolPanelWidget::GCodeModeSelection selection)
+        {
+            switch (selection)
+            {
+            case CadToolPanelWidget::GCodeModeSelection::Auto:
+                applyGenerationPreference(GCodeGenerationPreference::Auto);
+                break;
+            case CadToolPanelWidget::GCodeModeSelection::ThreeAxis:
+                applyGenerationPreference(GCodeGenerationPreference::Force2D);
+                break;
+            case CadToolPanelWidget::GCodeModeSelection::FourAxisAroundA:
+                applyGenerationPreference(GCodeGenerationPreference::Force3D);
+                break;
+            default:
+                break;
+            }
+        }
+    );
 
     connect
     (
@@ -3623,6 +3691,21 @@ void Gcode_postprocessing_system::initializeToolPanel()
             syncToolPanelState();
         }
     );
+
+    switch (m_generationPreference)
+    {
+    case GCodeGenerationPreference::Auto:
+        m_toolPanelWidget->setGCodeModeSelection(CadToolPanelWidget::GCodeModeSelection::Auto);
+        break;
+    case GCodeGenerationPreference::Force2D:
+        m_toolPanelWidget->setGCodeModeSelection(CadToolPanelWidget::GCodeModeSelection::ThreeAxis);
+        break;
+    case GCodeGenerationPreference::Force3D:
+        m_toolPanelWidget->setGCodeModeSelection(CadToolPanelWidget::GCodeModeSelection::FourAxisAroundA);
+        break;
+    default:
+        break;
+    }
 }
 
 void Gcode_postprocessing_system::syncToolPanelState()
