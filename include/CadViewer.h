@@ -260,6 +260,10 @@ protected:
     // @param event 鼠标事件
     void mouseMoveEvent(QMouseEvent* event) override;
 
+    // 鼠标双击事件处理
+    // @param event 鼠标事件
+    void mouseDoubleClickEvent(QMouseEvent* event) override;
+
     // 鼠标离开事件处理
     // @param event 离开事件
     void leaveEvent(QEvent* event) override;
@@ -322,6 +326,28 @@ private:
 
     // 绘制加工顺序编号
     void renderProcessOrderLabels();
+
+    struct ProcessOrderLabelOverlay
+    {
+        CadItem* item = nullptr;
+        int order = -1;
+        bool selected = false;
+        QPoint center;
+        QRect bubbleRect;
+        QString text;
+    };
+
+    // 构建当前可见的加工顺序标签覆盖信息。
+    std::vector<ProcessOrderLabelOverlay> buildProcessOrderLabelOverlays() const;
+
+    // 命中加工顺序标签。
+    bool hitTestProcessOrderLabel(const QPoint& screenPos, ProcessOrderLabelOverlay* outLabel = nullptr) const;
+
+    // 处理加工顺序标签单击。
+    bool handleProcessOrderLabelClick(const QPoint& screenPos);
+
+    // 处理加工顺序标签双击。
+    bool handleProcessOrderLabelDoubleClick(const QPoint& screenPos);
 
     // 绘制选中/框选候选图元的叠加高亮（AutoCAD 风格）。
     void renderEntitySelectionOverlays();
@@ -471,8 +497,14 @@ private:
     // 控制器，负责接收 Viewer 输入并维护绘图状态
     CadController m_controller;
 
+    // 当前编辑器，供 Viewer 侧的顺序标签交互直接提交可撤销命令。
+    CadEditer* m_editer = nullptr;
+
     // 当前主题颜色
     AppThemeColors m_theme = buildAppThemeColors(AppThemeMode::Light);
+
+    // 顺序标签交换的首个候选实体 ID。
+    EntityId m_pendingProcessOrderSwapEntityId = 0;
 
     // 基点吸附开关
     bool m_basePointSnapEnabled = false;

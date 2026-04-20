@@ -9,6 +9,7 @@
 // CAD 模块内部依赖
 #include "CadCrosshairBuilder.h"
 #include "CadDocument.h"
+#include "CadEditer.h"
 #include "CadEntityPicker.h"
 #include "CadEntityRenderer.h"
 #include "CadInteractionConstants.h"
@@ -647,6 +648,7 @@ void CadViewer::setDocument(CadDocument* document)
     invalidateSnapCache();
     // 清除选中实体
     setSelectedEntityId(0);
+    m_pendingProcessOrderSwapEntityId = 0;
     resetOverlappedHandleHoverState();
     hideSelectionWindowPreview();
 
@@ -668,6 +670,7 @@ void CadViewer::setDocument(CadDocument* document)
 // @param editer 编辑器指针
 void CadViewer::setEditer(CadEditer* editer)
 {
+    m_editer = editer;
     m_controller.setEditer(editer);
 }
 
@@ -1956,6 +1959,15 @@ void CadViewer::mousePressEvent(QMouseEvent* event)
         return;
     }
 
+    if (event->button() == Qt::LeftButton && handleProcessOrderLabelClick(event->pos()))
+    {
+        event->accept();
+        updateHoveredWorldPosition(event->pos());
+        refreshCommandPrompt();
+        update();
+        return;
+    }
+
     // 尝试由控制器处理鼠标按下事件
     if (!m_controller.handleMousePress(event))
     {
@@ -1970,6 +1982,24 @@ void CadViewer::mousePressEvent(QMouseEvent* event)
     refreshCommandPrompt();
     // 请求更新
     update();
+}
+
+void CadViewer::mouseDoubleClickEvent(QMouseEvent* event)
+{
+    ensureBlankCursor();
+    m_cursorScreenPos = event->pos();
+    m_showCrosshairOverlay = rect().contains(event->pos());
+
+    if (event->button() == Qt::LeftButton && handleProcessOrderLabelDoubleClick(event->pos()))
+    {
+        event->accept();
+        updateHoveredWorldPosition(event->pos());
+        refreshCommandPrompt();
+        update();
+        return;
+    }
+
+    QOpenGLWidget::mouseDoubleClickEvent(event);
 }
 
 // 鼠标移动事件处理
@@ -2303,23 +2333,63 @@ void CadViewer::renderTransientPrimitives(const QMatrix4x4& viewProjection)
 
 void CadViewer::renderProcessOrderLabels()
 {
-    CadDocument* scene = m_sceneCoordinator.document();
+    const std::vector<ProcessOrderLabelOverlay> labels = buildProcessOrderLabelOverlays();
 
-    if (scene == nullptr || interactionMode() != ViewInteractionMode::Idle)
+    if (labels.empty())
     {
         return;
     }
 
-    struct ProcessOrderLabel
-    {
-        int order = -1;
-        bool selected = false;
-        QPoint center;
-        QString text;
-    };
+    QPainter painter(this);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setRenderHint(QPainter::TextAntialiasing, true);
 
-    std::vector<ProcessOrderLabel> labels;
+    QFont labelFont = painter.font();
+    labelFont.setPointSize(9);
+    labelFont.setBold(true);
+    painter.setFont(labelFont);
+
+    for (const ProcessOrderLabelOverlay& label : labels)
+    {
+        const bool pendingSwap = label.item != nullptr
+            && CadViewerUtils::toEntityId(label.item) == m_pendingProcessOrderSwapEntityId;
+
+        const QColor fillColor = pendingSwap
+            ? m_theme.selectedProcessLabelFillColor
+            : (label.selected ? m_theme.selectedProcessLabelFillColor : m_theme.processLabelFillColor);
+        const QColor borderColor = pendingSwap
+            ? m_theme.selectedProcessLabelBorderColor
+            : (label.selected ? m_theme.selectedProcessLabelBorderColor : m_theme.processLabelBorderColor);
+        const QColor textColor = pendingSwap
+            ? m_theme.selectedProcessLabelTextColor
+            : (label.selected ? m_theme.selectedProcessLabelTextColor : m_theme.processLabelTextColor);
+
+        painter.setPen(QPen(borderColor, pendingSwap ? 1.4 : 1.0));
+        painter.setBrush(fillColor);
+        painter.drawRoundedRect(label.bubbleRect, 6.0, 6.0);
+        painter.setPen(textColor);
+        painter.drawText(label.bubbleRect, Qt::AlignCenter, label.text);
+    }
+}
+
+std::vector<CadViewer::ProcessOrderLabelOverlay> CadViewer::buildProcessOrderLabelOverlays() const
+{
+    CadDocument* scene = m_sceneCoordinator.document();
+
+    if (scene == nullptr || interactionMode() != ViewInteractionMode::Idle)
+    {
+        return {};
+    }
+
+    std::vector<ProcessOrderLabelOverlay> labels;
     labels.reserve(scene->m_entities.size());
+
+    QFont labelFont = font();
+    labelFont.setPointSize(9);
+    labelFont.setBold(true);
+    const QFontMetrics metrics(labelFont);
+    std::vector<QRect> occupiedRects;
+    occupiedRects.reserve(scene->m_entities.size());
 
     for (const std::unique_ptr<CadItem>& entity : scene->m_entities)
     {
@@ -2343,51 +2413,15 @@ void CadViewer::renderProcessOrderLabels()
             continue;
         }
 
-        ProcessOrderLabel label;
+        ProcessOrderLabelOverlay label;
+        label.item = entity.get();
         label.order = info.processOrder;
         label.selected = entity->m_isSelected;
         label.center = screenPoint;
         label.text = QString::number(info.processOrder + 1);
-        labels.push_back(std::move(label));
-    }
 
-    if (labels.empty())
-    {
-        return;
-    }
-
-    std::sort
-    (
-        labels.begin(),
-        labels.end(),
-        [](const ProcessOrderLabel& left, const ProcessOrderLabel& right)
-        {
-            if (left.selected != right.selected)
-            {
-                return left.selected && !right.selected;
-            }
-
-            return left.order < right.order;
-        }
-    );
-
-    QPainter painter(this);
-    painter.setRenderHint(QPainter::Antialiasing, true);
-    painter.setRenderHint(QPainter::TextAntialiasing, true);
-
-    QFont labelFont = painter.font();
-    labelFont.setPointSize(9);
-    labelFont.setBold(true);
-    painter.setFont(labelFont);
-
-    const QFontMetrics metrics(labelFont);
-    std::vector<QRect> occupiedRects;
-    occupiedRects.reserve(labels.size());
-
-    for (const ProcessOrderLabel& label : labels)
-    {
         const QRect textRect = metrics.boundingRect(label.text);
-        QRect bubbleRect
+        label.bubbleRect = QRect
         (
             label.center.x() - textRect.width() / 2 - 7,
             label.center.y() - textRect.height() / 2 - 4,
@@ -2401,7 +2435,7 @@ void CadViewer::renderProcessOrderLabels()
 
             for (const QRect& occupiedRect : occupiedRects)
             {
-                if (bubbleRect.adjusted(-2, -2, 2, 2).intersects(occupiedRect))
+                if (label.bubbleRect.adjusted(-2, -2, 2, 2).intersects(occupiedRect))
                 {
                     overlaps = true;
                     break;
@@ -2414,18 +2448,129 @@ void CadViewer::renderProcessOrderLabels()
             }
         }
 
-        occupiedRects.push_back(bubbleRect);
-
-        const QColor fillColor = label.selected ? m_theme.selectedProcessLabelFillColor : m_theme.processLabelFillColor;
-        const QColor borderColor = label.selected ? m_theme.selectedProcessLabelBorderColor : m_theme.processLabelBorderColor;
-        const QColor textColor = label.selected ? m_theme.selectedProcessLabelTextColor : m_theme.processLabelTextColor;
-
-        painter.setPen(QPen(borderColor, 1.0));
-        painter.setBrush(fillColor);
-        painter.drawRoundedRect(bubbleRect, 6.0, 6.0);
-        painter.setPen(textColor);
-        painter.drawText(bubbleRect, Qt::AlignCenter, label.text);
+        occupiedRects.push_back(label.bubbleRect);
+        labels.push_back(std::move(label));
     }
+
+    std::sort
+    (
+        labels.begin(),
+        labels.end(),
+        [](const ProcessOrderLabelOverlay& left, const ProcessOrderLabelOverlay& right)
+        {
+            if (left.selected != right.selected)
+            {
+                return left.selected && !right.selected;
+            }
+
+            return left.order < right.order;
+        }
+    );
+
+    return labels;
+}
+
+bool CadViewer::hitTestProcessOrderLabel(const QPoint& screenPos, ProcessOrderLabelOverlay* outLabel) const
+{
+    const std::vector<ProcessOrderLabelOverlay> labels = buildProcessOrderLabelOverlays();
+
+    for (const ProcessOrderLabelOverlay& label : labels)
+    {
+        if (label.bubbleRect.adjusted(-2, -2, 2, 2).contains(screenPos))
+        {
+            if (outLabel != nullptr)
+            {
+                *outLabel = label;
+            }
+
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool CadViewer::handleProcessOrderLabelClick(const QPoint& screenPos)
+{
+    ProcessOrderLabelOverlay clickedLabel;
+
+    if (!hitTestProcessOrderLabel(screenPos, &clickedLabel) || clickedLabel.item == nullptr || m_editer == nullptr)
+    {
+        if (m_pendingProcessOrderSwapEntityId != 0)
+        {
+            m_pendingProcessOrderSwapEntityId = 0;
+            update();
+        }
+
+        return false;
+    }
+
+    const EntityId clickedId = CadViewerUtils::toEntityId(clickedLabel.item);
+    setSelectedEntityId(clickedId);
+
+    if (m_pendingProcessOrderSwapEntityId == 0 || m_pendingProcessOrderSwapEntityId == clickedId)
+    {
+        m_pendingProcessOrderSwapEntityId = clickedId;
+        appendCommandMessage(QStringLiteral("已选中加工顺序 %1，点击另一个顺序框可交换两者顺序。").arg(clickedLabel.order + 1));
+        return true;
+    }
+
+    CadItem* firstItem = findEntityById(m_pendingProcessOrderSwapEntityId);
+    CadItem* secondItem = clickedLabel.item;
+
+    if (firstItem == nullptr || secondItem == nullptr)
+    {
+        m_pendingProcessOrderSwapEntityId = 0;
+        return true;
+    }
+
+    std::vector<CadEditer::ProcessStateUpdate> updates;
+    updates.push_back({ firstItem, secondItem->m_processOrder, firstItem->m_isReverse, firstItem->m_hasCustomProcessStart, firstItem->m_processStartParameter });
+    updates.push_back({ secondItem, firstItem->m_processOrder, secondItem->m_isReverse, secondItem->m_hasCustomProcessStart, secondItem->m_processStartParameter });
+
+    const bool swapped = m_editer->applyEntityProcessStates(updates);
+    m_pendingProcessOrderSwapEntityId = 0;
+
+    if (swapped)
+    {
+        appendCommandMessage
+        (
+            QStringLiteral("已交换加工顺序 %1 与 %2。")
+            .arg(firstItem->m_processOrder + 1)
+            .arg(secondItem->m_processOrder + 1)
+        );
+    }
+    else
+    {
+        appendCommandMessage(QStringLiteral("交换加工顺序失败。"));
+    }
+
+    return true;
+}
+
+bool CadViewer::handleProcessOrderLabelDoubleClick(const QPoint& screenPos)
+{
+    ProcessOrderLabelOverlay clickedLabel;
+
+    if (!hitTestProcessOrderLabel(screenPos, &clickedLabel) || clickedLabel.item == nullptr || m_editer == nullptr)
+    {
+        return false;
+    }
+
+    const EntityId clickedId = CadViewerUtils::toEntityId(clickedLabel.item);
+    setSelectedEntityId(clickedId);
+    m_pendingProcessOrderSwapEntityId = 0;
+
+    if (m_editer->toggleEntityReverse(clickedLabel.item))
+    {
+        appendCommandMessage(QStringLiteral("已切换图元 %1 的加工方向。").arg(clickedLabel.order + 1));
+    }
+    else
+    {
+        appendCommandMessage(QStringLiteral("切换加工方向失败。"));
+    }
+
+    return true;
 }
 
 void CadViewer::renderEntitySelectionOverlays()
@@ -2605,6 +2750,7 @@ void CadViewer::renderSelectionWindowPreview()
 void CadViewer::handleDocumentSceneChanged()
 {
     invalidateSnapCache();
+    m_pendingProcessOrderSwapEntityId = 0;
     // 标记缓冲脏
     m_sceneCoordinator.markBuffersDirty();
     // 刷新场景边界
