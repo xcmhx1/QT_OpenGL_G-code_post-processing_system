@@ -40,6 +40,7 @@ public:
     GProfile() = default;
 
     static GProfile createDefaultLaserProfile();
+    static GProfile createDefaultRotaryProfile();
     static GProfile loadFromFile(const QString& filePath, QString* errorMessage = nullptr);
 
     bool saveToFile(const QString& filePath, QString* errorMessage = nullptr) const;

@@ -30,6 +30,7 @@ public:
     );
 
     GProfile profile() const;
+    QString importedProfilePath() const;
 
 protected:
     void accept() override;
@@ -58,7 +59,8 @@ private:
 
     void importProfileFromFile();
     void exportProfileToFile();
-    void resetToDefaultProfile();
+    void resetToDefaultLaserProfile();
+    void resetToDefaultRotaryProfile();
 
     QString currentEntityTypeKey() const;
     QString currentLayerKey() const;
@@ -78,6 +80,7 @@ private:
     QMap<QString, GProfileCodeBlock> m_entityTypeBlocks;
     QMap<QString, GProfileCodeBlock> m_layerBlocks;
     QMap<QString, GProfileCodeBlock> m_colorBlocks;
+    QString m_importedProfilePath;
 
     QLineEdit* m_profileNameEdit = nullptr;
     QPlainTextEdit* m_fileHeaderEdit = nullptr;

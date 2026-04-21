@@ -88,13 +88,13 @@ GProfileRotaryAxisConfig GProfileRotaryAxisConfig::fromJson(const QJsonObject& o
 GProfile GProfile::createDefaultLaserProfile()
 {
     GProfile profile;
-    profile.setProfileName(QStringLiteral("默认激光二维配置"));
+    profile.setProfileName(QStringLiteral("默认3轴G代码配置"));
     profile.setFileCode
     (
         {
             QStringLiteral("%\r\nG90\r\nG17\r\nG21\r\nG54"),
             QStringLiteral("M05\r\nG00 X0.000 Y0.000\r\nM30\r\n%"),
-            QStringLiteral("文件整体头尾")
+            QStringLiteral("3轴G加工默认文件配置")
         }
     );
 
@@ -128,6 +128,45 @@ GProfile GProfile::createDefaultLaserProfile()
             QStringLiteral("M03"),
             QStringLiteral("M05"),
             QStringLiteral("红色实体加工头尾示例")
+        }
+    );
+
+    return profile;
+}
+
+GProfile GProfile::createDefaultRotaryProfile()
+{
+    GProfile profile;
+    profile.setProfileName(QStringLiteral("默认4轴G代码配置"));
+    profile.setFileCode
+    (
+        {
+            QStringLiteral("%\r\nG90\r\nG21\r\nG17\r\nM8\r\nM7\r\nG00 Z50\r\nG80 G40 G49 G17 G90\r\nM05"),
+            QStringLiteral("G00 Z50\r\nM05\r\nM30\r\n%"),
+            QStringLiteral("4轴G加工默认文件配置")
+        }
+    );
+
+    const GProfileCodeBlock cuttingCode
+    {
+        QStringLiteral("M03"),
+        QStringLiteral("M05"),
+        QStringLiteral("实体类型默认加工头尾")
+    };
+
+    profile.setEntityTypeCode(QStringLiteral("LINE"), cuttingCode);
+    profile.setEntityTypeCode(QStringLiteral("ARC"), cuttingCode);
+    profile.setEntityTypeCode(QStringLiteral("CIRCLE"), cuttingCode);
+    profile.setEntityTypeCode(QStringLiteral("ELLIPSE"), cuttingCode);
+    profile.setEntityTypeCode(QStringLiteral("POLYLINE"), cuttingCode);
+    profile.setEntityTypeCode(QStringLiteral("LWPOLYLINE"), cuttingCode);
+    profile.setEntityTypeCode
+    (
+        QStringLiteral("POINT"),
+        {
+            QString(),
+            QString(),
+            QStringLiteral("点图元默认不出加工启停指令")
         }
     );
 

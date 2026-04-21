@@ -10,6 +10,8 @@
 
 #include <QActionGroup>
 #include <QApplication>
+#include <QCoreApplication>
+#include <QDir>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QInputDialog>
@@ -32,6 +34,8 @@
 
 namespace
 {
+    constexpr const char* kBuiltinThreeAxisProfileId = "builtin:3axis";
+    constexpr const char* kBuiltinFourAxisProfileId = "builtin:4axis";
     constexpr double kSortEpsilon = 1.0e-9;
     constexpr double kPi = 3.14159265358979323846;
     constexpr double kTwoPi = 6.28318530717958647692;
@@ -2240,6 +2244,7 @@ Gcode_postprocessing_system::Gcode_postprocessing_system(QWidget* parent)
     , ui(new Ui::Gcode_postprocessing_systemClass())
 {
     ui->setupUi(this);
+    loadAvailableProfiles();
 
     m_commandLineWidget = new CadCommandLineWidget(this);
     m_statusPaneWidget = new CadStatusPaneWidget(this);
@@ -3592,13 +3597,178 @@ void Gcode_postprocessing_system::openProfileSettingsDialog()
         return;
     }
 
-    m_activeProfile = dialog.profile();
+    const GProfile updatedProfile = dialog.profile();
+    const QString importedProfilePath = dialog.importedProfilePath().trimmed();
+
+    if (!importedProfilePath.isEmpty())
+    {
+        const QString runtimeDirectory = runtimeProfileDirectoryPath();
+        const QFileInfo importedFileInfo(importedProfilePath);
+        const QString absoluteImportedPath = importedFileInfo.absoluteFilePath();
+        const QString displayName = updatedProfile.profileName().trimmed().isEmpty()
+            ? importedFileInfo.completeBaseName()
+            : updatedProfile.profileName().trimmed();
+
+        if (QFileInfo(absoluteImportedPath).dir().absolutePath().compare(runtimeDirectory, Qt::CaseInsensitive) == 0)
+        {
+            const QString profileId = QStringLiteral("file:%1").arg(QDir::toNativeSeparators(absoluteImportedPath));
+            m_loadedProfiles.insert(profileId, updatedProfile);
+            m_loadedProfileNames.insert(profileId, displayName);
+
+            if (!m_loadedProfileOrder.contains(profileId))
+            {
+                m_loadedProfileOrder.append(profileId);
+            }
+
+            m_activeProfile = updatedProfile;
+            m_activeProfileId = profileId;
+        }
+        else
+        {
+            const QString profileId = QStringLiteral("session:%1").arg(++m_sessionImportedProfileSerial);
+            m_loadedProfiles.insert(profileId, updatedProfile);
+            m_loadedProfileNames.insert(profileId, displayName);
+            m_loadedProfileOrder.append(profileId);
+            m_activeProfile = updatedProfile;
+            m_activeProfileId = profileId;
+        }
+    }
+    else
+    {
+        m_activeProfile = updatedProfile;
+
+        if (!m_activeProfileId.isEmpty() && m_loadedProfiles.contains(m_activeProfileId))
+        {
+            m_loadedProfiles[m_activeProfileId] = updatedProfile;
+            const QString displayName = updatedProfile.profileName().trimmed().isEmpty()
+                ? m_loadedProfileNames.value(m_activeProfileId, QStringLiteral("未命名配置"))
+                : updatedProfile.profileName().trimmed();
+            m_loadedProfileNames[m_activeProfileId] = displayName;
+        }
+    }
+
+    refreshAvailableProfilesUi();
+    saveSelectedProfileId(m_activeProfileId);
 
     const QString profileName = m_activeProfile.profileName().trimmed().isEmpty()
         ? QStringLiteral("未命名配置")
         : m_activeProfile.profileName().trimmed();
 
     statusBar()->showMessage(QStringLiteral("当前 G 代码配置已更新为: %1").arg(profileName), 4000);
+}
+
+void Gcode_postprocessing_system::loadAvailableProfiles()
+{
+    m_loadedProfiles.clear();
+    m_loadedProfileNames.clear();
+    m_loadedProfileOrder.clear();
+    m_sessionImportedProfileSerial = 0;
+
+    const QString builtinThreeAxisProfileId = QString::fromLatin1(kBuiltinThreeAxisProfileId);
+    const QString builtinFourAxisProfileId = QString::fromLatin1(kBuiltinFourAxisProfileId);
+
+    m_loadedProfiles.insert(builtinThreeAxisProfileId, GProfile::createDefaultLaserProfile());
+    m_loadedProfileNames.insert(builtinThreeAxisProfileId, QStringLiteral("内置3轴默认"));
+    m_loadedProfileOrder.append(builtinThreeAxisProfileId);
+
+    m_loadedProfiles.insert(builtinFourAxisProfileId, GProfile::createDefaultRotaryProfile());
+    m_loadedProfileNames.insert(builtinFourAxisProfileId, QStringLiteral("内置4轴默认"));
+    m_loadedProfileOrder.append(builtinFourAxisProfileId);
+
+    const QDir runtimeDirectory(runtimeProfileDirectoryPath());
+    const QFileInfoList profileFiles = runtimeDirectory.entryInfoList(QStringList() << QStringLiteral("*.json"), QDir::Files | QDir::Readable, QDir::Name);
+
+    for (const QFileInfo& profileFileInfo : profileFiles)
+    {
+        QString errorMessage;
+        const GProfile profile = GProfile::loadFromFile(profileFileInfo.absoluteFilePath(), &errorMessage);
+
+        if (!errorMessage.trimmed().isEmpty())
+        {
+            continue;
+        }
+
+        const QString profileId = QStringLiteral("file:%1").arg(QDir::toNativeSeparators(profileFileInfo.absoluteFilePath()));
+        const QString displayName = profile.profileName().trimmed().isEmpty()
+            ? profileFileInfo.completeBaseName()
+            : profile.profileName().trimmed();
+
+        m_loadedProfiles.insert(profileId, profile);
+        m_loadedProfileNames.insert(profileId, displayName);
+        m_loadedProfileOrder.append(profileId);
+    }
+
+    const QString preferredProfileId = loadSelectedProfileId();
+
+    if (!preferredProfileId.isEmpty() && m_loadedProfiles.contains(preferredProfileId))
+    {
+        m_activeProfileId = preferredProfileId;
+        m_activeProfile = m_loadedProfiles.value(preferredProfileId, GProfile::createDefaultLaserProfile());
+        return;
+    }
+
+    m_activeProfileId = builtinThreeAxisProfileId;
+    m_activeProfile = m_loadedProfiles.value(m_activeProfileId, GProfile::createDefaultLaserProfile());
+}
+
+void Gcode_postprocessing_system::refreshAvailableProfilesUi()
+{
+    if (m_toolPanelWidget == nullptr)
+    {
+        return;
+    }
+
+    QList<QPair<QString, QString>> profiles;
+    profiles.reserve(m_loadedProfileOrder.size());
+
+    for (const QString& profileId : m_loadedProfileOrder)
+    {
+        profiles.append(qMakePair(profileId, m_loadedProfileNames.value(profileId, QStringLiteral("未命名配置"))));
+    }
+
+    m_toolPanelWidget->setAvailableProfiles(profiles);
+    m_toolPanelWidget->setCurrentProfileSelection(m_activeProfileId);
+}
+
+bool Gcode_postprocessing_system::applyLoadedProfileById(const QString& profileId, bool announceChange)
+{
+    if (profileId.trimmed().isEmpty() || !m_loadedProfiles.contains(profileId))
+    {
+        return false;
+    }
+
+    m_activeProfileId = profileId;
+    m_activeProfile = m_loadedProfiles.value(profileId, GProfile::createDefaultLaserProfile());
+    saveSelectedProfileId(m_activeProfileId);
+    refreshAvailableProfilesUi();
+
+    if (announceChange)
+    {
+        statusBar()->showMessage
+        (
+            QStringLiteral("当前 G 代码配置已切换为: %1").arg(m_loadedProfileNames.value(profileId, QStringLiteral("未命名配置"))),
+            4000
+        );
+    }
+
+    return true;
+}
+
+QString Gcode_postprocessing_system::runtimeProfileDirectoryPath() const
+{
+    return QCoreApplication::applicationDirPath();
+}
+
+QString Gcode_postprocessing_system::loadSelectedProfileId() const
+{
+    QSettings settings(QStringLiteral("GCodePostProcessingSystem"), QStringLiteral("GCodePostProcessingSystem"));
+    return settings.value(QStringLiteral("gcode/selectedProfileId"), QString::fromLatin1(kBuiltinThreeAxisProfileId)).toString().trimmed();
+}
+
+void Gcode_postprocessing_system::saveSelectedProfileId(const QString& profileId) const
+{
+    QSettings settings(QStringLiteral("GCodePostProcessingSystem"), QStringLiteral("GCodePostProcessingSystem"));
+    settings.setValue(QStringLiteral("gcode/selectedProfileId"), profileId.trimmed());
 }
 
 void Gcode_postprocessing_system::applyTheme(AppThemeMode mode)
@@ -3906,6 +4076,16 @@ void Gcode_postprocessing_system::initializeToolPanel()
     connect(m_toolPanelWidget, &CadToolPanelWidget::deduplicateRequested, this, [this]() { removeDuplicateEntities(); });
     connect(m_toolPanelWidget, &CadToolPanelWidget::sortKeepDirectionRequested, this, [this]() { ui->action_Sort_2D_Assign->trigger(); });
     connect(m_toolPanelWidget, &CadToolPanelWidget::smartSortRequested, this, [this]() { ui->action_Sort_2D_Smart->trigger(); });
+    connect
+    (
+        m_toolPanelWidget,
+        &CadToolPanelWidget::profileSelectionChanged,
+        this,
+        [this](const QString& profileId)
+        {
+            applyLoadedProfileById(profileId);
+        }
+    );
     connect(m_toolPanelWidget, &CadToolPanelWidget::profileSettingsRequested, this, [this]() { openProfileSettingsDialog(); });
     connect
     (
@@ -4045,6 +4225,8 @@ void Gcode_postprocessing_system::initializeToolPanel()
     default:
         break;
     }
+
+    refreshAvailableProfilesUi();
 }
 
 void Gcode_postprocessing_system::syncToolPanelState()

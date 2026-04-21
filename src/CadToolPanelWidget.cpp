@@ -400,6 +400,51 @@ void CadToolPanelWidget::setGCodeModeSelection(GCodeModeSelection selection)
     m_updatingUi = false;
 }
 
+void CadToolPanelWidget::setAvailableProfiles(const QList<QPair<QString, QString>>& profiles)
+{
+    if (m_profileComboBox == nullptr)
+    {
+        return;
+    }
+
+    const QString currentProfileId = m_profileComboBox->currentData().toString();
+    m_updatingUi = true;
+    m_profileComboBox->clear();
+
+    for (const QPair<QString, QString>& profile : profiles)
+    {
+        m_profileComboBox->addItem(profile.second, profile.first);
+    }
+
+    const int currentIndex = m_profileComboBox->findData(currentProfileId);
+
+    if (currentIndex >= 0)
+    {
+        m_profileComboBox->setCurrentIndex(currentIndex);
+    }
+
+    m_updatingUi = false;
+}
+
+void CadToolPanelWidget::setCurrentProfileSelection(const QString& profileId)
+{
+    if (m_profileComboBox == nullptr)
+    {
+        return;
+    }
+
+    const int index = m_profileComboBox->findData(profileId);
+
+    if (index < 0)
+    {
+        return;
+    }
+
+    m_updatingUi = true;
+    m_profileComboBox->setCurrentIndex(index);
+    m_updatingUi = false;
+}
+
 void CadToolPanelWidget::buildUi()
 {
     m_drawMoreMenu = new QMenu(this);
@@ -970,6 +1015,21 @@ QWidget* CadToolPanelWidget::buildMachiningPanel()
     configLayout->setContentsMargins(2, 6, 2, 2);
     configLayout->setSpacing(6);
 
+    QWidget* profileRow = new QWidget(configPanel);
+    QHBoxLayout* profileLayout = new QHBoxLayout(profileRow);
+    profileLayout->setContentsMargins(0, 0, 0, 0);
+    profileLayout->setSpacing(6);
+
+    QLabel* profileLabel = new QLabel(QStringLiteral("当前配置"), profileRow);
+    profileLabel->setMinimumWidth(54);
+    m_profileComboBox = new QComboBox(profileRow);
+    m_profileComboBox->setEditable(false);
+    m_profileComboBox->setFixedHeight(kComboHeight);
+    m_profileComboBox->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    profileLayout->addWidget(profileLabel, 0);
+    profileLayout->addWidget(m_profileComboBox, 1);
+    configLayout->addWidget(profileRow);
+
     QWidget* modeRow = new QWidget(configPanel);
     QHBoxLayout* modeLayout = new QHBoxLayout(modeRow);
     modeLayout->setContentsMargins(0, 0, 0, 0);
@@ -1002,6 +1062,21 @@ QWidget* CadToolPanelWidget::buildMachiningPanel()
     connect(m_sortKeepDirectionButton, &QToolButton::clicked, this, [this]() { emit sortKeepDirectionRequested(); });
     connect(m_smartSortButton, &QToolButton::clicked, this, [this]() { emit smartSortRequested(); });
     connect(m_profileSettingsButton, &QToolButton::clicked, this, [this]() { emit profileSettingsRequested(); });
+    connect
+    (
+        m_profileComboBox,
+        &QComboBox::currentIndexChanged,
+        this,
+        [this](int index)
+        {
+            if (m_updatingUi || index < 0)
+            {
+                return;
+            }
+
+            emit profileSelectionChanged(m_profileComboBox->itemData(index).toString());
+        }
+    );
     connect
     (
         m_gcodeModeComboBox,

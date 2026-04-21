@@ -203,6 +203,11 @@ GProfile GProfileDialog::profile() const
     return m_profile;
 }
 
+QString GProfileDialog::importedProfilePath() const
+{
+    return m_importedProfilePath;
+}
+
 void GProfileDialog::accept()
 {
     updateCurrentEntityTypeBlock();
@@ -221,11 +226,13 @@ void GProfileDialog::buildUi()
     QHBoxLayout* actionLayout = new QHBoxLayout();
     QPushButton* importButton = new QPushButton(QStringLiteral("导入JSON..."), this);
     QPushButton* exportButton = new QPushButton(QStringLiteral("导出JSON..."), this);
-    QPushButton* resetButton = new QPushButton(QStringLiteral("恢复默认"), this);
+    QPushButton* reset3AxisButton = new QPushButton(QStringLiteral("恢复3轴默认"), this);
+    QPushButton* reset4AxisButton = new QPushButton(QStringLiteral("恢复4轴默认"), this);
 
     actionLayout->addWidget(importButton);
     actionLayout->addWidget(exportButton);
-    actionLayout->addWidget(resetButton);
+    actionLayout->addWidget(reset3AxisButton);
+    actionLayout->addWidget(reset4AxisButton);
     actionLayout->addStretch(1);
     rootLayout->addLayout(actionLayout);
 
@@ -409,7 +416,8 @@ void GProfileDialog::buildUi()
 
     connect(importButton, &QPushButton::clicked, this, [this]() { importProfileFromFile(); });
     connect(exportButton, &QPushButton::clicked, this, [this]() { exportProfileToFile(); });
-    connect(resetButton, &QPushButton::clicked, this, [this]() { resetToDefaultProfile(); });
+    connect(reset3AxisButton, &QPushButton::clicked, this, [this]() { resetToDefaultLaserProfile(); });
+    connect(reset4AxisButton, &QPushButton::clicked, this, [this]() { resetToDefaultRotaryProfile(); });
     connect(m_buttonBox, &QDialogButtonBox::accepted, this, &GProfileDialog::accept);
     connect(m_buttonBox, &QDialogButtonBox::rejected, this, &GProfileDialog::reject);
 
@@ -958,6 +966,7 @@ void GProfileDialog::importProfileFromFile()
         return;
     }
 
+    m_importedProfilePath = QFileInfo(filePath).absoluteFilePath();
     applyProfile(profile);
 }
 
@@ -996,9 +1005,16 @@ void GProfileDialog::exportProfileToFile()
     QMessageBox::information(this, QStringLiteral("导出完成"), QStringLiteral("配置已导出到: %1").arg(filePath));
 }
 
-void GProfileDialog::resetToDefaultProfile()
+void GProfileDialog::resetToDefaultLaserProfile()
 {
+    m_importedProfilePath.clear();
     applyProfile(GProfile::createDefaultLaserProfile());
+}
+
+void GProfileDialog::resetToDefaultRotaryProfile()
+{
+    m_importedProfilePath.clear();
+    applyProfile(GProfile::createDefaultRotaryProfile());
 }
 
 QString GProfileDialog::currentEntityTypeKey() const

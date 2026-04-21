@@ -41,6 +41,8 @@ public:
     void setModifyActionsEnabled(bool enabled);
     void setTheme(const AppThemeColors& theme);
     void setGCodeModeSelection(GCodeModeSelection selection);
+    void setAvailableProfiles(const QList<QPair<QString, QString>>& profiles);
+    void setCurrentProfileSelection(const QString& profileId);
 
 signals:
     void drawRequested(DrawType drawType);
@@ -58,6 +60,7 @@ signals:
     void sortKeepDirectionRequested();
     void smartSortRequested();
     void gcodeModeSelectionChanged(CadToolPanelWidget::GCodeModeSelection selection);
+    void profileSelectionChanged(const QString& profileId);
     void profileSettingsRequested();
 
 private:
@@ -89,6 +92,7 @@ private:
     QComboBox* m_propertyLayerComboBox = nullptr;
     QComboBox* m_colorComboBox = nullptr;
     QComboBox* m_gcodeModeComboBox = nullptr;
+    QComboBox* m_profileComboBox = nullptr;
     QMenu* m_drawMoreMenu = nullptr;
     QAction* m_drawPointAction = nullptr;
     QToolButton* m_importFileButton = nullptr;

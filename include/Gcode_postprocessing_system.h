@@ -11,6 +11,7 @@
 
 #include <QtWidgets/QMainWindow>
 #include <QtGlobal>
+#include <QMap>
 
 #include "ui_Gcode_postprocessing_system.h"
 
@@ -48,6 +49,12 @@ private:
     void saveGenerationPreference(GCodeGenerationPreference preference) const;
     void applyGenerationPreference(GCodeGenerationPreference preference);
     GGenerator::GenerationMode resolveGenerationMode() const;
+    void loadAvailableProfiles();
+    void refreshAvailableProfilesUi();
+    bool applyLoadedProfileById(const QString& profileId, bool announceChange = true);
+    QString runtimeProfileDirectoryPath() const;
+    QString loadSelectedProfileId() const;
+    void saveSelectedProfileId(const QString& profileId) const;
     void initializeToolPanel();
     void syncToolPanelState();
     void applyDefaultDrawingProperties();
@@ -99,4 +106,9 @@ private:
     AppThemeMode m_themeMode = AppThemeMode::Light;
     GCodeGenerationPreference m_generationPreference = GCodeGenerationPreference::Auto;
     QString m_currentDocumentPath;
+    QMap<QString, GProfile> m_loadedProfiles;
+    QMap<QString, QString> m_loadedProfileNames;
+    QStringList m_loadedProfileOrder;
+    QString m_activeProfileId = QStringLiteral("builtin:3axis");
+    int m_sessionImportedProfileSerial = 0;
 };
