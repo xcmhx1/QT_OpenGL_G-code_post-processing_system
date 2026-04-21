@@ -20,7 +20,8 @@ struct GProfileRotaryAxisConfig
     double centerY = 0.0;
     double centerZ = 0.0;
     double aAxisOffsetDegrees = 0.0;
-    double safeZ = 50.0; // 四轴离轴额外距离
+    double safeZ = 5.0; // 四轴离轴额外距离
+    double machiningPlaneZOffset = 0.0; // 相对实时加工平面的 Z 修正
     bool invertAAxisDirection = false;
     bool keepContinuousAngle = true;
     bool useSafeZBeforeRapid = true;

@@ -789,6 +789,19 @@ namespace
         }
     }
 
+    void applyMachiningPlaneZOffset(std::vector<ControlPoint4Axis>& controlPoints, double zOffset)
+    {
+        if (controlPoints.empty() || std::abs(zOffset) <= 1.0e-9)
+        {
+            return;
+        }
+
+        for (ControlPoint4Axis& point : controlPoints)
+        {
+            point.z += zOffset;
+        }
+    }
+
     double distanceToXAxis(const QVector3D& point, double axisY, double axisZ)
     {
         const double dy = point.y() - axisY;
@@ -997,6 +1010,7 @@ namespace
         }
 
         std::vector<ControlPoint4Axis>& controlPoints = writableItem->controlPoints4AxisMutable();
+        applyMachiningPlaneZOffset(controlPoints, config.machiningPlaneZOffset);
 
         if (previousEndPoint != nullptr)
         {

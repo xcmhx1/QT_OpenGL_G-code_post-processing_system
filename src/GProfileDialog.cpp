@@ -394,6 +394,12 @@ void GProfileDialog::buildUi()
     m_rotaryClearanceSpinBox->setSingleStep(1.0);
     rotaryFormLayout->addRow(QStringLiteral("离轴额外距离"), m_rotaryClearanceSpinBox);
 
+    m_rotaryPlaneZOffsetSpinBox = new QDoubleSpinBox(rotaryTab);
+    m_rotaryPlaneZOffsetSpinBox->setDecimals(3);
+    m_rotaryPlaneZOffsetSpinBox->setRange(-1000000.0, 1000000.0);
+    m_rotaryPlaneZOffsetSpinBox->setSingleStep(0.1);
+    rotaryFormLayout->addRow(QStringLiteral("加工面Z修正"), m_rotaryPlaneZOffsetSpinBox);
+
     rotaryLayout->addLayout(rotaryFormLayout);
     rotaryLayout->addStretch(1);
     tabWidget->addTab(rotaryTab, QStringLiteral("四轴加工"));
@@ -556,6 +562,7 @@ void GProfileDialog::applyProfile(const GProfile& profile)
     setBlockText(m_fileFooterEdit, profile.fileCode().footer);
     setBlockText(m_fileCommentEdit, profile.fileCode().comment);
     m_rotaryClearanceSpinBox->setValue(profile.rotaryAxisConfig().safeZ);
+    m_rotaryPlaneZOffsetSpinBox->setValue(profile.rotaryAxisConfig().machiningPlaneZOffset);
 
     if (m_entityTypeComboBox->count() > 0)
     {
@@ -573,6 +580,9 @@ GProfile GProfileDialog::collectProfile() const
     GProfile profile;
     GProfileRotaryAxisConfig rotaryConfig = m_profile.rotaryAxisConfig();
     rotaryConfig.safeZ = m_rotaryClearanceSpinBox != nullptr ? m_rotaryClearanceSpinBox->value() : rotaryConfig.safeZ;
+    rotaryConfig.machiningPlaneZOffset = m_rotaryPlaneZOffsetSpinBox != nullptr
+        ? m_rotaryPlaneZOffsetSpinBox->value()
+        : rotaryConfig.machiningPlaneZOffset;
     profile.setRotaryAxisConfig(rotaryConfig);
     profile.setProfileName(m_profileNameEdit->text().trimmed());
     profile.setFileCode
