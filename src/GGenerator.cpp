@@ -66,6 +66,15 @@ namespace
         }
     }
 
+    QString normalizeLineEndingsToCrLf(const QString& text)
+    {
+        QString normalizedText = text;
+        normalizedText.replace("\r\n", "\n");
+        normalizedText.replace('\r', '\n');
+        normalizedText.replace('\n', "\r\n");
+        return normalizedText;
+    }
+
     QString entityTypeKey(const CadItem* item)
     {
         if (item == nullptr)
@@ -1179,7 +1188,7 @@ bool GGenerator::generateToFile(const QString& filePath, QString* errorMessage) 
             writeTextBlock(stream, layerCode.header);
             writeTextBlock(stream, colorCode.header);
             writeTextBlock(stream, typeCode.header);
-            stream << geometryText;
+            stream << normalizeLineEndingsToCrLf(geometryText);
             writeTextBlock(stream, typeCode.footer);
             writeTextBlock(stream, colorCode.footer);
             writeTextBlock(stream, layerCode.footer);

@@ -89,8 +89,8 @@ GProfile GProfile::createDefaultLaserProfile()
     profile.setFileCode
     (
         {
-            QStringLiteral("%\nG90\nG17\nG21\nG54"),
-            QStringLiteral("M05\nG00 X0.000 Y0.000\nM30\n%"),
+            QStringLiteral("%\r\nG90\r\nG17\r\nG21\r\nG54"),
+            QStringLiteral("M05\r\nG00 X0.000 Y0.000\r\nM30\r\n%"),
             QStringLiteral("文件整体头尾")
         }
     );
