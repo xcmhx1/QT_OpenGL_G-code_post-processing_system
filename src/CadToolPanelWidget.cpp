@@ -15,6 +15,7 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QSizePolicy>
+#include <QTabBar>
 #include <QTabWidget>
 #include <QToolButton>
 #include <QVBoxLayout>
@@ -410,6 +411,9 @@ void CadToolPanelWidget::buildUi()
     rootLayout->setSpacing(0);
 
     m_tabWidget = new QTabWidget(this);
+    m_tabWidget->setDocumentMode(true);
+    m_tabWidget->tabBar()->setExpanding(false);
+    m_tabWidget->tabBar()->setUsesScrollButtons(false);
     rootLayout->addWidget(m_tabWidget);
 
     QWidget* defaultTab = new QWidget(m_tabWidget);
@@ -437,7 +441,7 @@ void CadToolPanelWidget::applyTheme()
         (
             "#cadToolPanelRoot { background: transparent; }"
             "QTabWidget::pane { border: none; background: transparent; margin-top: 2px; }"
-            "QTabBar::tab { background: %7; color: %2; border: 1px solid %4; border-bottom: none; padding: 5px 14px; min-width: 64px; }"
+            "QTabBar::tab { background: %7; color: %2; border: 1px solid %4; border-bottom: none; padding: 4px 10px; min-width: 52px; }"
             "QTabBar::tab:selected { background: %5; color: %9; }"
             "QTabBar::tab:!selected { margin-top: 2px; }"
             "QLabel { color: %1; }"
@@ -476,7 +480,7 @@ void CadToolPanelWidget::applyTheme()
             "QToolButton[machiningButton=\"true\"] {"
             " border: 1px solid %4;"
             " border-radius: 4px;"
-            " padding: 2px 8px;"
+            " padding: 2px 10px;"
             " background: %7;"
             " color: %1;"
             " font-size: 9px;"
@@ -612,10 +616,10 @@ void CadToolPanelWidget::applyTheme()
     }
 }
 
-QWidget* CadToolPanelWidget::buildPanelFrame(const QString& title, QWidget* contentWidget, int preferredWidth, QMenu* launcherMenu)
+QWidget* CadToolPanelWidget::buildPanelFrame(const QString& title, QWidget* contentWidget, int preferredWidth, QMenu* launcherMenu, bool flexibleWidth)
 {
     QWidget* panel = new QWidget(this);
-    panel->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+    panel->setSizePolicy(flexibleWidth ? QSizePolicy::Preferred : QSizePolicy::Fixed, QSizePolicy::Fixed);
     panel->setMinimumHeight(kPanelHeight);
     panel->setMaximumHeight(kPanelHeight);
 
@@ -666,8 +670,16 @@ QWidget* CadToolPanelWidget::buildPanelFrame(const QString& title, QWidget* cont
         : std::max(contentWidget->sizeHint().width(), titleCluster->sizeHint().width())
             + layout->contentsMargins().left() + layout->contentsMargins().right();
 
-    panel->setMinimumWidth(resolvedWidth);
-    panel->setMaximumWidth(resolvedWidth);
+    if (flexibleWidth)
+    {
+        panel->setMinimumWidth(std::max(112, resolvedWidth - 24));
+        panel->setMaximumWidth(QWIDGETSIZE_MAX);
+    }
+    else
+    {
+        panel->setMinimumWidth(resolvedWidth);
+        panel->setMaximumWidth(resolvedWidth);
+    }
 
     if (launcherMenu != nullptr)
     {
@@ -908,7 +920,7 @@ QWidget* CadToolPanelWidget::buildMachiningPanel()
 {
     QWidget* panel = new QWidget(this);
     QHBoxLayout* rootLayout = new QHBoxLayout(panel);
-    rootLayout->setContentsMargins(0, 0, 0, 0);
+    rootLayout->setContentsMargins(4, 0, 4, 0);
     rootLayout->setSpacing(0);
 
     auto buildMachiningButton =
@@ -918,7 +930,9 @@ QWidget* CadToolPanelWidget::buildMachiningPanel()
             button->setText(text);
             button->setToolButtonStyle(Qt::ToolButtonTextOnly);
             button->setProperty("machiningButton", true);
-            button->setFixedSize(92, 28);
+            button->setMinimumHeight(28);
+            button->setMinimumWidth(72);
+            button->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
             return button;
         };
 
@@ -934,19 +948,22 @@ QWidget* CadToolPanelWidget::buildMachiningPanel()
     importLayout->setContentsMargins(1, 6, 1, 2);
     importLayout->setHorizontalSpacing(6);
     importLayout->setVerticalSpacing(6);
-    importLayout->setSizeConstraint(QLayout::SetFixedSize);
     importLayout->addWidget(m_importFileButton, 0, 0);
     importLayout->addWidget(m_exportGCodeButton, 0, 1);
+    importLayout->setColumnStretch(0, 1);
+    importLayout->setColumnStretch(1, 1);
 
     QWidget* sortPanel = new QWidget(panel);
     QGridLayout* sortLayout = new QGridLayout(sortPanel);
     sortLayout->setContentsMargins(1, 6, 1, 2);
     sortLayout->setHorizontalSpacing(6);
     sortLayout->setVerticalSpacing(6);
-    sortLayout->setSizeConstraint(QLayout::SetFixedSize);
     sortLayout->addWidget(m_deduplicateButton, 0, 0);
     sortLayout->addWidget(m_sortKeepDirectionButton, 0, 1);
     sortLayout->addWidget(m_smartSortButton, 0, 2);
+    sortLayout->setColumnStretch(0, 1);
+    sortLayout->setColumnStretch(1, 1);
+    sortLayout->setColumnStretch(2, 1);
 
     QWidget* configPanel = new QWidget(panel);
     QVBoxLayout* configLayout = new QVBoxLayout(configPanel);
@@ -959,25 +976,25 @@ QWidget* CadToolPanelWidget::buildMachiningPanel()
     modeLayout->setSpacing(6);
 
     QLabel* modeLabel = new QLabel(QStringLiteral("G代码模式"), modeRow);
-    modeLabel->setFixedWidth(54);
+    modeLabel->setMinimumWidth(54);
     m_gcodeModeComboBox = new QComboBox(modeRow);
     m_gcodeModeComboBox->setEditable(false);
     m_gcodeModeComboBox->setFixedHeight(kComboHeight);
+    m_gcodeModeComboBox->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     m_gcodeModeComboBox->addItem(QStringLiteral("自动"), static_cast<int>(GCodeModeSelection::Auto));
     m_gcodeModeComboBox->addItem(QStringLiteral("3轴"), static_cast<int>(GCodeModeSelection::ThreeAxis));
     m_gcodeModeComboBox->addItem(QStringLiteral("4轴(绕A)"), static_cast<int>(GCodeModeSelection::FourAxisAroundA));
     modeLayout->addWidget(modeLabel, 0);
     modeLayout->addWidget(m_gcodeModeComboBox, 1);
     configLayout->addWidget(modeRow);
-    configLayout->addWidget(m_profileSettingsButton, 0, Qt::AlignLeft);
+    configLayout->addWidget(m_profileSettingsButton);
     configLayout->addStretch(1);
 
-    rootLayout->addWidget(buildPanelFrame(QStringLiteral("导入导出"), importPanel, 214), 0, Qt::AlignLeft | Qt::AlignTop);
+    rootLayout->addWidget(buildPanelFrame(QStringLiteral("导入导出"), importPanel, 172, nullptr, true), 1);
     rootLayout->addWidget(buildDivider(), 0, Qt::AlignLeft | Qt::AlignVCenter);
-    rootLayout->addWidget(buildPanelFrame(QStringLiteral("排序"), sortPanel, 214), 0, Qt::AlignLeft | Qt::AlignTop);
+    rootLayout->addWidget(buildPanelFrame(QStringLiteral("排序"), sortPanel, 208, nullptr, true), 1);
     rootLayout->addWidget(buildDivider(), 0, Qt::AlignLeft | Qt::AlignVCenter);
-    rootLayout->addWidget(buildPanelFrame(QStringLiteral("配置"), configPanel, 208), 0, Qt::AlignLeft | Qt::AlignTop);
-    rootLayout->addStretch(1);
+    rootLayout->addWidget(buildPanelFrame(QStringLiteral("配置"), configPanel, 180, nullptr, true), 1);
 
     connect(m_importFileButton, &QToolButton::clicked, this, [this]() { emit importFileRequested(); });
     connect(m_exportGCodeButton, &QToolButton::clicked, this, [this]() { emit exportGCodeRequested(); });

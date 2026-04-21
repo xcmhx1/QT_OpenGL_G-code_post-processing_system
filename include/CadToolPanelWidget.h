@@ -14,6 +14,7 @@ class QComboBox;
 class QFrame;
 class QLabel;
 class QMenu;
+class QTabBar;
 class QTabWidget;
 class QToolButton;
 
@@ -62,7 +63,7 @@ signals:
 private:
     void buildUi();
     void applyTheme();
-    QWidget* buildPanelFrame(const QString& title, QWidget* contentWidget, int preferredWidth = -1, QMenu* launcherMenu = nullptr);
+    QWidget* buildPanelFrame(const QString& title, QWidget* contentWidget, int preferredWidth = -1, QMenu* launcherMenu = nullptr, bool flexibleWidth = false);
     QWidget* buildDivider();
     QWidget* buildDrawPanel();
     QWidget* buildModifyPanel();
