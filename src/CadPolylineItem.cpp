@@ -8,150 +8,151 @@
 
 namespace
 {
-    namespace
+
+    constexpr double kAxisEps = 1.0e-8;
+    constexpr double kRadToDeg = 57.2957795130823208768;
+    constexpr double kTwoPi = 6.28318530717958647692;
+    // bulge 圆弧展开时参考整圆采样密度。
+    constexpr int kFullCircleSegments = 128;
+
+    void appendRawPathPoint(std::vector<RawPathPoint3D>& points, const QVector3D& point)
     {
-        constexpr double kAxisEps = 1.0e-8;
-        constexpr double kRadToDeg = 57.2957795130823208768;
-        constexpr double kTwoPi = 6.28318530717958647692;
-        // bulge 圆弧展开时参考整圆采样密度。
-        constexpr int kFullCircleSegments = 128;
-
-        void appendRawPathPoint(std::vector<RawPathPoint3D>& points, const QVector3D& point)
+        if (!points.empty())
         {
-            if (!points.empty())
+            const RawPathPoint3D& lastPoint = points.back();
+            const double dx = point.x() - lastPoint.x;
+            const double dy = point.y() - lastPoint.y;
+            const double dz = point.z() - lastPoint.z;
+
+            if (dx * dx + dy * dy + dz * dz <= 1.0e-16)
             {
-                const RawPathPoint3D& lastPoint = points.back();
-                const double dx = point.x() - lastPoint.x;
-                const double dy = point.y() - lastPoint.y;
-                const double dz = point.z() - lastPoint.z;
-
-                if (dx * dx + dy * dy + dz * dz <= 1.0e-16)
-                {
-                    return;
-                }
+                return;
             }
-
-            points.push_back({ point.x(), point.y(), point.z() });
         }
 
-        size_t effectiveClosedPolylineStartIndex(const CadItem* item, size_t vertexCount)
+        points.push_back({ point.x(), point.y(), point.z() });
+    }
+
+    size_t effectiveClosedPolylineStartIndex(const CadItem* item, size_t vertexCount)
+    {
+        if (vertexCount == 0)
         {
-            if (vertexCount == 0)
-            {
-                return 0;
-            }
-
-            if (item != nullptr && item->m_hasCustomProcessStart)
-            {
-                const int rawIndex = static_cast<int>(std::llround(item->m_processStartParameter));
-                const int normalized =
-                    ((rawIndex % static_cast<int>(vertexCount)) + static_cast<int>(vertexCount))
-                    % static_cast<int>(vertexCount);
-                return static_cast<size_t>(normalized);
-            }
-
             return 0;
         }
 
-        QVector3D resolvePolylineNormal(const DRW_Coord& extPoint)
+        if (item != nullptr && item->m_hasCustomProcessStart)
         {
-            QVector3D normal(extPoint.x, extPoint.y, extPoint.z);
-
-            if (normal.lengthSquared() <= 1.0e-12f)
-            {
-                return QVector3D();
-            }
-
-            normal.normalize();
-            return normal;
+            const int rawIndex = static_cast<int>(std::llround(item->m_processStartParameter));
+            const int normalized =
+                ((rawIndex % static_cast<int>(vertexCount)) + static_cast<int>(vertexCount))
+                % static_cast<int>(vertexCount);
+            return static_cast<size_t>(normalized);
         }
 
-        QVector3D inferPlaneNormalFromVertices(const std::vector<std::shared_ptr<DRW_Vertex>>& vertices)
+        return 0;
+    }
+
+    QVector3D resolvePolylineNormal(const DRW_Coord& extPoint)
+    {
+        QVector3D normal(extPoint.x, extPoint.y, extPoint.z);
+
+        if (normal.lengthSquared() <= 1.0e-12f)
         {
-            if (vertices.size() < 3)
-            {
-                return QVector3D();
-            }
-
-            const QVector3D p0
-            (
-                static_cast<float>(vertices.front()->basePoint.x),
-                static_cast<float>(vertices.front()->basePoint.y),
-                static_cast<float>(vertices.front()->basePoint.z)
-            );
-
-            for (size_t i = 1; i + 1 < vertices.size(); ++i)
-            {
-                const QVector3D p1
-                (
-                    static_cast<float>(vertices[i]->basePoint.x),
-                    static_cast<float>(vertices[i]->basePoint.y),
-                    static_cast<float>(vertices[i]->basePoint.z)
-                );
-                const QVector3D p2
-                (
-                    static_cast<float>(vertices[i + 1]->basePoint.x),
-                    static_cast<float>(vertices[i + 1]->basePoint.y),
-                    static_cast<float>(vertices[i + 1]->basePoint.z)
-                );
-
-                QVector3D n = QVector3D::crossProduct(p1 - p0, p2 - p0);
-                if (n.lengthSquared() > 1.0e-12f)
-                {
-                    n.normalize();
-                    return n;
-                }
-            }
-
             return QVector3D();
         }
 
-        void buildPlaneBasis(const QVector3D& normal, QVector3D& axisU, QVector3D& axisV)
+        normal.normalize();
+        return normal;
+    }
+
+    QVector3D inferPlaneNormalFromVertices(const std::vector<std::shared_ptr<DRW_Vertex>>& vertices)
+    {
+        if (vertices.size() < 3)
         {
-            const QVector3D helper = std::abs(normal.z()) < 0.999f
-                ? QVector3D(0.0f, 0.0f, 1.0f)
-                : QVector3D(0.0f, 1.0f, 0.0f);
+            return QVector3D();
+        }
 
-            axisU = QVector3D::crossProduct(helper, normal);
+        const QVector3D p0
+        (
+            static_cast<float>(vertices.front()->basePoint.x),
+            static_cast<float>(vertices.front()->basePoint.y),
+            static_cast<float>(vertices.front()->basePoint.z)
+        );
 
-            if (axisU.lengthSquared() <= 1.0e-12f)
-            {
-                axisU = QVector3D(1.0f, 0.0f, 0.0f);
-            }
-            else
-            {
-                axisU.normalize();
-            }
+        for (size_t i = 1; i + 1 < vertices.size(); ++i)
+        {
+            const QVector3D p1
+            (
+                static_cast<float>(vertices[i]->basePoint.x),
+                static_cast<float>(vertices[i]->basePoint.y),
+                static_cast<float>(vertices[i]->basePoint.z)
+            );
+            const QVector3D p2
+            (
+                static_cast<float>(vertices[i + 1]->basePoint.x),
+                static_cast<float>(vertices[i + 1]->basePoint.y),
+                static_cast<float>(vertices[i + 1]->basePoint.z)
+            );
 
-            axisV = QVector3D::crossProduct(normal, axisU);
-
-            if (axisV.lengthSquared() <= 1.0e-12f)
+            QVector3D n = QVector3D::crossProduct(p1 - p0, p2 - p0);
+            if (n.lengthSquared() > 1.0e-12f)
             {
-                axisV = QVector3D(0.0f, 1.0f, 0.0f);
-            }
-            else
-            {
-                axisV.normalize();
+                n.normalize();
+                return n;
             }
         }
 
-        bool buildPolylinePlaneBasis(const DRW_Polyline* polyline,
-            QVector3D& origin,
-            QVector3D& axisU,
-            QVector3D& axisV,
-            QVector3D& normal)
+        return QVector3D();
+    }
+
+    void buildPlaneBasis(const QVector3D& normal, QVector3D& axisU, QVector3D& axisV)
+    {
+        const QVector3D helper = std::abs(normal.z()) < 0.999f
+            ? QVector3D(0.0f, 0.0f, 1.0f)
+            : QVector3D(0.0f, 1.0f, 0.0f);
+
+        axisU = QVector3D::crossProduct(helper, normal);
+
+        if (axisU.lengthSquared() <= 1.0e-12f)
         {
-            if (polyline == nullptr || polyline->vertlist.empty())
-            {
-                return false;
-            }
+            axisU = QVector3D(1.0f, 0.0f, 0.0f);
+        }
+        else
+        {
+            axisU.normalize();
+        }
 
-            normal = resolvePolylineNormal(polyline->extPoint);
+        axisV = QVector3D::crossProduct(normal, axisU);
 
-            if (normal.lengthSquared() <= 1.0e-12f)
-            {
-                normal = inferPlaneNormalFromVertices(polyline->vertlist);
-            }
+        if (axisV.lengthSquared() <= 1.0e-12f)
+        {
+            axisV = QVector3D(0.0f, 1.0f, 0.0f);
+        }
+        else
+        {
+            axisV.normalize();
+        }
+    }
+
+    bool is3DPolyline(const DRW_Polyline* polyline)
+    {
+        return polyline != nullptr && ((polyline->flags & 8) != 0);
+    }
+
+    bool buildPolylinePlaneBasis(const DRW_Polyline* polyline,
+        QVector3D& origin,
+        QVector3D& axisU,
+        QVector3D& axisV,
+        QVector3D& normal)
+    {
+        if (polyline == nullptr || polyline->vertlist.empty())
+        {
+            return false;
+        }
+
+        if (is3DPolyline(polyline))
+        {
+            normal = inferPlaneNormalFromVertices(polyline->vertlist);
 
             if (normal.lengthSquared() <= 1.0e-12f)
             {
@@ -169,149 +170,201 @@ namespace
             return true;
         }
 
-        void projectPointToPlaneUV(const QVector3D& origin,
-            const QVector3D& axisU,
-            const QVector3D& axisV,
-            const QVector3D& point,
-            double& u,
-            double& v)
+        // 2D polyline：直接按 OCS 平面构造
+        normal = resolvePolylineNormal(polyline->extPoint);
+        if (normal.lengthSquared() <= 1.0e-12f)
         {
-            const QVector3D d = point - origin;
-            u = QVector3D::dotProduct(d, axisU);
-            v = QVector3D::dotProduct(d, axisV);
+            normal = QVector3D(0.0f, 0.0f, 1.0f);
         }
 
-        QVector3D unprojectPointFromPlaneUV(const QVector3D& origin,
-            const QVector3D& axisU,
-            const QVector3D& axisV,
-            const QVector3D& normal,
-            double u,
-            double v,
-            double h)
+        buildPlaneBasis(normal, axisU, axisV);
+        origin = normal * static_cast<float>(polyline->basePoint.z);
+        return true;
+    }
+
+    void projectPointToPlaneUV(const QVector3D& origin,
+        const QVector3D& axisU,
+        const QVector3D& axisV,
+        const QVector3D& point,
+        double& u,
+        double& v)
+    {
+        const QVector3D d = point - origin;
+        u = QVector3D::dotProduct(d, axisU);
+        v = QVector3D::dotProduct(d, axisV);
+    }
+
+    QVector3D unprojectPointFromPlaneUV(const QVector3D& origin,
+        const QVector3D& axisU,
+        const QVector3D& axisV,
+        const QVector3D& normal,
+        double u,
+        double v,
+        double h)
+    {
+        return origin
+            + axisU * static_cast<float>(u)
+            + axisV * static_cast<float>(v)
+            + normal * static_cast<float>(h);
+    }
+
+    void appendBulgeVertices(QVector<QVector3D>& vertices,
+        const QVector3D& origin,
+        const QVector3D& axisU,
+        const QVector3D& axisV,
+        const QVector3D& normal,
+        const QVector3D& start,
+        const QVector3D& end,
+        double bulge)
+    {
+        double su = 0.0;
+        double sv = 0.0;
+        double eu = 0.0;
+        double ev = 0.0;
+
+        projectPointToPlaneUV(origin, axisU, axisV, start, su, sv);
+        projectPointToPlaneUV(origin, axisU, axisV, end, eu, ev);
+
+        const double dx = eu - su;
+        const double dy = ev - sv;
+        const double chordLength = std::sqrt(dx * dx + dy * dy);
+
+        if (chordLength <= 1.0e-10 || std::abs(bulge) < 1.0e-8)
         {
-            return origin
-                + axisU * static_cast<float>(u)
-                + axisV * static_cast<float>(v)
-                + normal * static_cast<float>(h);
+            vertices.append(end);
+            return;
         }
 
-        void appendBulgeVertices(QVector<QVector3D>& vertices,
-            const QVector3D& origin,
-            const QVector3D& axisU,
-            const QVector3D& axisV,
-            const QVector3D& normal,
-            const QVector3D& start,
-            const QVector3D& end,
-            double bulge)
+        const double midpointU = (su + eu) * 0.5;
+        const double midpointV = (sv + ev) * 0.5;
+        const double centerOffset = chordLength * (1.0 / bulge - bulge) * 0.25;
+        const double centerU = midpointU - centerOffset * (dy / chordLength);
+        const double centerV = midpointV + centerOffset * (dx / chordLength);
+        const double radius = std::hypot(su - centerU, sv - centerV);
+        const double startAngle = std::atan2(sv - centerV, su - centerU);
+        const double sweepAngle = 4.0 * std::atan(bulge);
+        const int segments = std::max
+        (
+            4,
+            static_cast<int>(std::ceil(std::abs(sweepAngle) / kTwoPi * kFullCircleSegments))
+        );
+
+        const double startHeight = QVector3D::dotProduct(start - origin, normal);
+        const double endHeight = QVector3D::dotProduct(end - origin, normal);
+
+        for (int i = 1; i <= segments; ++i)
         {
-            double su = 0.0;
-            double sv = 0.0;
-            double eu = 0.0;
-            double ev = 0.0;
+            const double factor = static_cast<double>(i) / static_cast<double>(segments);
+            const double angle = startAngle + sweepAngle * factor;
+            const double u = centerU + radius * std::cos(angle);
+            const double v = centerV + radius * std::sin(angle);
+            const double h = startHeight + (endHeight - startHeight) * factor;
 
-            projectPointToPlaneUV(origin, axisU, axisV, start, su, sv);
-            projectPointToPlaneUV(origin, axisU, axisV, end, eu, ev);
-
-            const double dx = eu - su;
-            const double dy = ev - sv;
-            const double chordLength = std::sqrt(dx * dx + dy * dy);
-
-            if (chordLength <= 1.0e-10 || std::abs(bulge) < 1.0e-8)
-            {
-                vertices.append(end);
-                return;
-            }
-
-            const double midpointU = (su + eu) * 0.5;
-            const double midpointV = (sv + ev) * 0.5;
-            const double centerOffset = chordLength * (1.0 / bulge - bulge) * 0.25;
-            const double centerU = midpointU - centerOffset * (dy / chordLength);
-            const double centerV = midpointV + centerOffset * (dx / chordLength);
-            const double radius = std::hypot(su - centerU, sv - centerV);
-            const double startAngle = std::atan2(sv - centerV, su - centerU);
-            const double sweepAngle = 4.0 * std::atan(bulge);
-            const int segments = std::max
-            (
-                4,
-                static_cast<int>(std::ceil(std::abs(sweepAngle) / kTwoPi * kFullCircleSegments))
-            );
-
-            const double startHeight = QVector3D::dotProduct(start - origin, normal);
-            const double endHeight = QVector3D::dotProduct(end - origin, normal);
-
-            for (int i = 1; i <= segments; ++i)
-            {
-                const double factor = static_cast<double>(i) / static_cast<double>(segments);
-                const double angle = startAngle + sweepAngle * factor;
-                const double u = centerU + radius * std::cos(angle);
-                const double v = centerV + radius * std::sin(angle);
-                const double h = startHeight + (endHeight - startHeight) * factor;
-
-                vertices.append(unprojectPointFromPlaneUV(origin, axisU, axisV, normal, u, v, h));
-            }
-        }
-
-        void appendBulgeRawPathPoints(std::vector<RawPathPoint3D>& points,
-            const QVector3D& origin,
-            const QVector3D& axisU,
-            const QVector3D& axisV,
-            const QVector3D& normal,
-            const QVector3D& start,
-            const QVector3D& end,
-            double bulge)
-        {
-            double su = 0.0;
-            double sv = 0.0;
-            double eu = 0.0;
-            double ev = 0.0;
-
-            projectPointToPlaneUV(origin, axisU, axisV, start, su, sv);
-            projectPointToPlaneUV(origin, axisU, axisV, end, eu, ev);
-
-            const double dx = eu - su;
-            const double dy = ev - sv;
-            const double chordLength = std::sqrt(dx * dx + dy * dy);
-
-            if (chordLength <= 1.0e-10 || std::abs(bulge) < 1.0e-8)
-            {
-                appendRawPathPoint(points, end);
-                return;
-            }
-
-            const double midpointU = (su + eu) * 0.5;
-            const double midpointV = (sv + ev) * 0.5;
-            const double centerOffset = chordLength * (1.0 / bulge - bulge) * 0.25;
-            const double centerU = midpointU - centerOffset * (dy / chordLength);
-            const double centerV = midpointV + centerOffset * (dx / chordLength);
-            const double radius = std::hypot(su - centerU, sv - centerV);
-            const double startAngle = std::atan2(sv - centerV, su - centerU);
-            const double sweepAngle = 4.0 * std::atan(bulge);
-            const int segments = std::max
-            (
-                4,
-                static_cast<int>(std::ceil(std::abs(sweepAngle) / kTwoPi * kFullCircleSegments))
-            );
-
-            const double startHeight = QVector3D::dotProduct(start - origin, normal);
-            const double endHeight = QVector3D::dotProduct(end - origin, normal);
-
-            for (int index = 1; index <= segments; ++index)
-            {
-                const double factor = static_cast<double>(index) / static_cast<double>(segments);
-                const double angle = startAngle + sweepAngle * factor;
-                const double u = centerU + radius * std::cos(angle);
-                const double v = centerV + radius * std::sin(angle);
-                const double h = startHeight + (endHeight - startHeight) * factor;
-
-                appendRawPathPoint
-                (
-                    points,
-                    unprojectPointFromPlaneUV(origin, axisU, axisV, normal, u, v, h)
-                );
-            }
+            vertices.append(unprojectPointFromPlaneUV(origin, axisU, axisV, normal, u, v, h));
         }
     }
+
+    void appendBulgeRawPathPoints(std::vector<RawPathPoint3D>& points,
+        const QVector3D& origin,
+        const QVector3D& axisU,
+        const QVector3D& axisV,
+        const QVector3D& normal,
+        const QVector3D& start,
+        const QVector3D& end,
+        double bulge)
+    {
+        double su = 0.0;
+        double sv = 0.0;
+        double eu = 0.0;
+        double ev = 0.0;
+
+        projectPointToPlaneUV(origin, axisU, axisV, start, su, sv);
+        projectPointToPlaneUV(origin, axisU, axisV, end, eu, ev);
+
+        const double dx = eu - su;
+        const double dy = ev - sv;
+        const double chordLength = std::sqrt(dx * dx + dy * dy);
+
+        if (chordLength <= 1.0e-10 || std::abs(bulge) < 1.0e-8)
+        {
+            appendRawPathPoint(points, end);
+            return;
+        }
+
+        const double midpointU = (su + eu) * 0.5;
+        const double midpointV = (sv + ev) * 0.5;
+        const double centerOffset = chordLength * (1.0 / bulge - bulge) * 0.25;
+        const double centerU = midpointU - centerOffset * (dy / chordLength);
+        const double centerV = midpointV + centerOffset * (dx / chordLength);
+        const double radius = std::hypot(su - centerU, sv - centerV);
+        const double startAngle = std::atan2(sv - centerV, su - centerU);
+        const double sweepAngle = 4.0 * std::atan(bulge);
+        const int segments = std::max
+        (
+            4,
+            static_cast<int>(std::ceil(std::abs(sweepAngle) / kTwoPi * kFullCircleSegments))
+        );
+
+        const double startHeight = QVector3D::dotProduct(start - origin, normal);
+        const double endHeight = QVector3D::dotProduct(end - origin, normal);
+
+        for (int index = 1; index <= segments; ++index)
+        {
+            const double factor = static_cast<double>(index) / static_cast<double>(segments);
+            const double angle = startAngle + sweepAngle * factor;
+            const double u = centerU + radius * std::cos(angle);
+            const double v = centerV + radius * std::sin(angle);
+            const double h = startHeight + (endHeight - startHeight) * factor;
+
+            appendRawPathPoint
+            (
+                points,
+                unprojectPointFromPlaneUV(origin, axisU, axisV, normal, u, v, h)
+            );
+        }
+    }
+
+
+    QVector3D polylineVertexToWcs(const DRW_Polyline* polyline,
+        const std::shared_ptr<DRW_Vertex>& vertex)
+    {
+        if (polyline == nullptr || vertex == nullptr)
+        {
+            return QVector3D();
+        }
+
+        // 3D polyline：顶点本身就按 WCS 使用
+        if (is3DPolyline(polyline))
+        {
+            return QVector3D
+            (
+                static_cast<float>(vertex->basePoint.x),
+                static_cast<float>(vertex->basePoint.y),
+                static_cast<float>(vertex->basePoint.z)
+            );
+        }
+
+        // 2D polyline：按 OCS -> WCS 转换
+        QVector3D normal = resolvePolylineNormal(polyline->extPoint);
+        if (normal.lengthSquared() <= 1.0e-12f)
+        {
+            normal = QVector3D(0.0f, 0.0f, 1.0f);
+        }
+
+        QVector3D axisU;
+        QVector3D axisV;
+        buildPlaneBasis(normal, axisU, axisV);
+
+        // 2D POLYLINE 的 elevation 取实体基点的 z
+        const QVector3D origin = normal * static_cast<float>(polyline->basePoint.z);
+
+        return origin
+            + axisU * static_cast<float>(vertex->basePoint.x)
+            + axisV * static_cast<float>(vertex->basePoint.y)
+            + normal * static_cast<float>(vertex->basePoint.z);
+    }
 }
+
 
 CadPolylineItem::CadPolylineItem(DRW_Entity* entity, QObject* parent)
     : CadItem(entity, parent)
@@ -334,14 +387,9 @@ void CadPolylineItem::buildGeometryDatay()
 
     const bool isClosed = (m_data->flags & 1) != 0;
 
-    const auto toVertex = [](const std::shared_ptr<DRW_Vertex>& vertex)
+    const auto toVertex = [this](const std::shared_ptr<DRW_Vertex>& vertex)
         {
-            return QVector3D
-            (
-                static_cast<float>(vertex->basePoint.x),
-                static_cast<float>(vertex->basePoint.y),
-                static_cast<float>(vertex->basePoint.z)
-            );
+            return polylineVertexToWcs(m_data, vertex);
         };
 
     QVector3D origin;
@@ -373,7 +421,12 @@ void CadPolylineItem::buildGeometryDatay()
         const QVector3D start = toVertex(current);
         const QVector3D end = toVertex(next);
 
-        if (hasPlaneBasis)
+        if (is3DPolyline(m_data))
+        {
+            // 3D polyline 不做 bulge 展开，按直线段处理
+            m_geometry.vertices.append(end);
+        }
+        else if (hasPlaneBasis)
         {
             appendBulgeVertices
             (
@@ -389,7 +442,6 @@ void CadPolylineItem::buildGeometryDatay()
         }
         else
         {
-            // 无法建立稳定平面基时，保守退回直线段
             m_geometry.vertices.append(end);
         }
     }
@@ -406,14 +458,9 @@ void CadPolylineItem::rebuildRawPathPoints3D()
 
     const bool isClosed = (m_data->flags & 1) != 0;
 
-    const auto toVertex = [](const std::shared_ptr<DRW_Vertex>& vertex)
+    const auto toVertex = [this](const std::shared_ptr<DRW_Vertex>& vertex)
         {
-            return QVector3D
-            (
-                static_cast<float>(vertex->basePoint.x),
-                static_cast<float>(vertex->basePoint.y),
-                static_cast<float>(vertex->basePoint.z)
-            );
+            return polylineVertexToWcs(m_data, vertex);
         };
 
     QVector3D origin;
@@ -443,7 +490,11 @@ void CadPolylineItem::rebuildRawPathPoints3D()
                 const QVector3D end = toVertex(m_data->vertlist.at(previousIndex));
                 const double bulge = -m_data->vertlist.at(previousIndex)->bulge;
 
-                if (hasPlaneBasis)
+                if (is3DPolyline(m_data))
+                {
+                    appendRawPathPoint(m_rawPathPoints3D, end);
+                }
+                else if (hasPlaneBasis)
                 {
                     appendBulgeRawPathPoints
                     (
