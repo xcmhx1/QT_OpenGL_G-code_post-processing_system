@@ -45,8 +45,11 @@ namespace
     constexpr double kRotaryBacktrackPenaltyWeight = 1.35;
     constexpr double kRotaryDirectionPenaltyWeight = 0.2;
     constexpr double kSortConnectionEpsilon = 1.0e-6;
+    constexpr double kNearGapPriorityDistance2D = 1.0;
+    constexpr double kNearGapPriorityDistance3D = 1.0;
     constexpr double kDedupTolerance = 1.0e-6;
     const QVector3D kSortOrigin(0.0f, 0.0f, 0.0f);
+    const QVector3D kRotaryInitialSortOrigin(0.0f, 0.0f, 50.0f);
 
     enum class SortStrategy
     {
@@ -62,6 +65,7 @@ namespace
         double processStartParameter = 0.0;
         double connectionDistance = std::numeric_limits<double>::max();
         double priorityDistance = std::numeric_limits<double>::max();
+        double gapDistance = std::numeric_limits<double>::max();
         double score = std::numeric_limits<double>::max();
         QVector3D startPoint;
         QVector3D endPoint;
@@ -550,6 +554,14 @@ namespace
         const double dx = static_cast<double>(left.x()) - static_cast<double>(right.x());
         const double dy = static_cast<double>(left.y()) - static_cast<double>(right.y());
         return dx * dx + dy * dy;
+    }
+
+    double spatialDistanceSquared(const QVector3D& left, const QVector3D& right)
+    {
+        const double dx = static_cast<double>(left.x()) - static_cast<double>(right.x());
+        const double dy = static_cast<double>(left.y()) - static_cast<double>(right.y());
+        const double dz = static_cast<double>(left.z()) - static_cast<double>(right.z());
+        return dx * dx + dy * dy + dz * dz;
     }
 
     bool documentContainsThreeDimensionalGeometry(const CadDocument& document)
@@ -2037,6 +2049,11 @@ namespace
                 const bool directlyConnected = connectionDistance <= kSortConnectionEpsilon;
                 const bool bestDirectlyConnected = bestCandidate.connectionDistance <= kSortConnectionEpsilon;
                 const double entryDistance = std::sqrt(planarDistanceSquared(option.startPoint, referencePoint));
+                const double currentGapDistance = hasCurrentEndPoint
+                    ? std::sqrt(planarDistanceSquared(option.startPoint, currentEndPoint))
+                    : entryDistance;
+                const bool nearCurrentGap = hasCurrentEndPoint && currentGapDistance <= kNearGapPriorityDistance2D;
+                const bool bestNearCurrentGap = hasCurrentEndPoint && bestCandidate.gapDistance <= kNearGapPriorityDistance2D;
                 QVector3D nextStartPoint;
                 const bool hasNextStartPoint = tryFindNearestNextStartPoint
                 (
@@ -2064,8 +2081,10 @@ namespace
                     + continuityScale * kDirectionPenaltyWeight * continuityPenalty;
 
                 const bool shouldReplace = bestCandidate.index < 0
+                    || (nearCurrentGap && !bestNearCurrentGap)
                     || (directlyConnected && !bestDirectlyConnected)
-                    || (directlyConnected == bestDirectlyConnected
+                    || (nearCurrentGap == bestNearCurrentGap
+                        && directlyConnected == bestDirectlyConnected
                         && (connectionDistance < bestCandidate.connectionDistance - kSortEpsilon
                             || (std::abs(connectionDistance - bestCandidate.connectionDistance) <= kSortEpsilon
                                 && (optionScore < bestCandidate.score - kSortEpsilon
@@ -2085,6 +2104,7 @@ namespace
                 bestCandidate.processStartParameter = option.processStartParameter;
                 bestCandidate.connectionDistance = connectionDistance;
                 bestCandidate.priorityDistance = entryDistance;
+                bestCandidate.gapDistance = currentGapDistance;
                 bestCandidate.score = optionScore;
                 bestCandidate.startPoint = option.startPoint;
                 bestCandidate.endPoint = option.endPoint;
@@ -2107,7 +2127,7 @@ namespace
     )
     {
         SortCandidate bestCandidate;
-        const QVector3D referencePoint = hasCurrentEndPoint ? currentEndPoint : kSortOrigin;
+        const QVector3D referencePoint = hasCurrentEndPoint ? currentEndPoint : kRotaryInitialSortOrigin;
         RotarySortPoint referenceRotaryPoint;
         const bool hasReferenceRotaryPoint = tryBuildRotarySortPoint(referencePoint, config, referenceRotaryPoint);
         const QVector3D normalizedSweepDirection = normalizeOrZero(sweepDirection);
@@ -2132,6 +2152,11 @@ namespace
                 const bool bestDirectlyConnected = bestCandidate.connectionDistance <= kSortConnectionEpsilon;
                 double resolvedCandidateAngle = 0.0;
                 const double entryDistance = rotarySortTravelDistance(referencePoint, option.startPoint, config, &resolvedCandidateAngle);
+                const double currentGapDistance = hasCurrentEndPoint
+                    ? std::sqrt(spatialDistanceSquared(option.startPoint, currentEndPoint))
+                    : std::sqrt(spatialDistanceSquared(option.startPoint, kRotaryInitialSortOrigin));
+                const bool nearCurrentGap = hasCurrentEndPoint && currentGapDistance <= kNearGapPriorityDistance3D;
+                const bool bestNearCurrentGap = hasCurrentEndPoint && bestCandidate.gapDistance <= kNearGapPriorityDistance3D;
                 QVector3D nextStartPoint;
                 const bool hasNextStartPoint = tryFindNearestNextStartPoint3D
                 (
@@ -2161,8 +2186,10 @@ namespace
                     + continuityScale * kRotaryDirectionPenaltyWeight * continuityPenalty;
 
                 const bool shouldReplace = bestCandidate.index < 0
+                    || (nearCurrentGap && !bestNearCurrentGap)
                     || (directlyConnected && !bestDirectlyConnected)
-                    || (directlyConnected == bestDirectlyConnected
+                    || (nearCurrentGap == bestNearCurrentGap
+                        && directlyConnected == bestDirectlyConnected
                         && (connectionDistance < bestCandidate.connectionDistance - kSortEpsilon
                             || (std::abs(connectionDistance - bestCandidate.connectionDistance) <= kSortEpsilon
                                 && (optionScore < bestCandidate.score - kSortEpsilon
@@ -2182,6 +2209,7 @@ namespace
                 bestCandidate.processStartParameter = option.processStartParameter;
                 bestCandidate.connectionDistance = connectionDistance;
                 bestCandidate.priorityDistance = entryDistance;
+                bestCandidate.gapDistance = currentGapDistance;
                 bestCandidate.score = optionScore;
                 bestCandidate.startPoint = option.startPoint;
                 bestCandidate.endPoint = option.endPoint;
