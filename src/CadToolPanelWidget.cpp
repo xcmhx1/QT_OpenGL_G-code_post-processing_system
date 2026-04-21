@@ -486,14 +486,19 @@ void CadToolPanelWidget::applyTheme()
         (
             "#cadToolPanelRoot { background: transparent; }"
             "QTabWidget::pane { border: none; background: transparent; margin-top: 2px; }"
-            "QTabBar::tab { background: %7; color: %2; border: 1px solid %4; border-bottom: none; padding: 4px 10px; min-width: 52px; }"
+            "QTabBar::tab { background: %7; color: %2; border: 1px solid %4; border-bottom: none; padding: 4px 8px; min-width: 46px; font-size: 10px; }"
             "QTabBar::tab:selected { background: %5; color: %9; }"
             "QTabBar::tab:!selected { margin-top: 2px; }"
-            "QLabel { color: %1; }"
+            "QLabel { color: %1; font-size: 10px; }"
             "QLabel[panelTitle=\"true\"] {"
             " color: %2;"
-            " font-size: 11px;"
+            " font-size: 12px;"
             " padding-bottom: 1px;"
+            "}"
+            "QLabel[machiningFieldLabel=\"true\"] {"
+            " color: %2;"
+            " font-size: 11px;"
+            " font-weight: 500;"
             "}"
             "QToolButton[panelLauncher=\"true\"] {"
             " border: none;"
@@ -525,10 +530,10 @@ void CadToolPanelWidget::applyTheme()
             "QToolButton[machiningButton=\"true\"] {"
             " border: 1px solid %4;"
             " border-radius: 4px;"
-            " padding: 2px 10px;"
+            " padding: 3px 12px;"
             " background: %7;"
             " color: %1;"
-            " font-size: 9px;"
+            " font-size: 11px;"
             "}"
             "QToolButton[machiningButton=\"true\"]:hover {"
             " border-color: %6;"
@@ -544,6 +549,7 @@ void CadToolPanelWidget::applyTheme()
             " border: 1px solid %4;"
             " border-radius: 2px;"
             " padding: 1px 22px 1px 6px;"
+            " font-size: 11px;"
             "}"
             "QComboBox:hover {"
             " border-color: %6;"
@@ -975,8 +981,8 @@ QWidget* CadToolPanelWidget::buildMachiningPanel()
             button->setText(text);
             button->setToolButtonStyle(Qt::ToolButtonTextOnly);
             button->setProperty("machiningButton", true);
-            button->setMinimumHeight(28);
-            button->setMinimumWidth(72);
+            button->setMinimumHeight(30);
+            button->setMinimumWidth(88);
             button->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
             return button;
         };
@@ -1003,12 +1009,18 @@ QWidget* CadToolPanelWidget::buildMachiningPanel()
     sortLayout->setContentsMargins(1, 6, 1, 2);
     sortLayout->setHorizontalSpacing(6);
     sortLayout->setVerticalSpacing(6);
-    sortLayout->addWidget(m_deduplicateButton, 0, 0);
-    sortLayout->addWidget(m_sortKeepDirectionButton, 0, 1);
-    sortLayout->addWidget(m_smartSortButton, 0, 2);
+    sortLayout->addWidget(m_sortKeepDirectionButton, 0, 0);
+    sortLayout->addWidget(m_smartSortButton, 0, 1);
     sortLayout->setColumnStretch(0, 1);
     sortLayout->setColumnStretch(1, 1);
-    sortLayout->setColumnStretch(2, 1);
+
+    QWidget* featurePanel = new QWidget(panel);
+    QGridLayout* featureLayout = new QGridLayout(featurePanel);
+    featureLayout->setContentsMargins(1, 6, 1, 2);
+    featureLayout->setHorizontalSpacing(6);
+    featureLayout->setVerticalSpacing(6);
+    featureLayout->addWidget(m_deduplicateButton, 0, 0);
+    featureLayout->setColumnStretch(0, 1);
 
     QWidget* configPanel = new QWidget(panel);
     QVBoxLayout* configLayout = new QVBoxLayout(configPanel);
@@ -1021,6 +1033,7 @@ QWidget* CadToolPanelWidget::buildMachiningPanel()
     profileLayout->setSpacing(6);
 
     QLabel* profileLabel = new QLabel(QStringLiteral("当前配置"), profileRow);
+    profileLabel->setProperty("machiningFieldLabel", true);
     profileLabel->setMinimumWidth(54);
     m_profileComboBox = new QComboBox(profileRow);
     m_profileComboBox->setEditable(false);
@@ -1036,6 +1049,7 @@ QWidget* CadToolPanelWidget::buildMachiningPanel()
     modeLayout->setSpacing(6);
 
     QLabel* modeLabel = new QLabel(QStringLiteral("G代码模式"), modeRow);
+    modeLabel->setProperty("machiningFieldLabel", true);
     modeLabel->setMinimumWidth(54);
     m_gcodeModeComboBox = new QComboBox(modeRow);
     m_gcodeModeComboBox->setEditable(false);
@@ -1047,14 +1061,24 @@ QWidget* CadToolPanelWidget::buildMachiningPanel()
     modeLayout->addWidget(modeLabel, 0);
     modeLayout->addWidget(m_gcodeModeComboBox, 1);
     configLayout->addWidget(modeRow);
-    configLayout->addWidget(m_profileSettingsButton);
     configLayout->addStretch(1);
+
+    QWidget* profileSettingsPanel = new QWidget(panel);
+    QVBoxLayout* profileSettingsLayout = new QVBoxLayout(profileSettingsPanel);
+    profileSettingsLayout->setContentsMargins(2, 6, 2, 2);
+    profileSettingsLayout->setSpacing(6);
+    profileSettingsLayout->addWidget(m_profileSettingsButton);
+    profileSettingsLayout->addStretch(1);
 
     rootLayout->addWidget(buildPanelFrame(QStringLiteral("导入导出"), importPanel, 172, nullptr, true), 1);
     rootLayout->addWidget(buildDivider(), 0, Qt::AlignLeft | Qt::AlignVCenter);
-    rootLayout->addWidget(buildPanelFrame(QStringLiteral("排序"), sortPanel, 208, nullptr, true), 1);
+    rootLayout->addWidget(buildPanelFrame(QStringLiteral("排序"), sortPanel, 184, nullptr, true), 1);
     rootLayout->addWidget(buildDivider(), 0, Qt::AlignLeft | Qt::AlignVCenter);
-    rootLayout->addWidget(buildPanelFrame(QStringLiteral("配置"), configPanel, 180, nullptr, true), 1);
+    rootLayout->addWidget(buildPanelFrame(QStringLiteral("功能"), featurePanel, 108, nullptr, true), 1);
+    rootLayout->addWidget(buildDivider(), 0, Qt::AlignLeft | Qt::AlignVCenter);
+    rootLayout->addWidget(buildPanelFrame(QStringLiteral("配置"), configPanel, 188, nullptr, true), 1);
+    rootLayout->addWidget(buildDivider(), 0, Qt::AlignLeft | Qt::AlignVCenter);
+    rootLayout->addWidget(buildPanelFrame(QStringLiteral("G代码配置"), profileSettingsPanel, 126, nullptr, true), 1);
 
     connect(m_importFileButton, &QToolButton::clicked, this, [this]() { emit importFileRequested(); });
     connect(m_exportGCodeButton, &QToolButton::clicked, this, [this]() { emit exportGCodeRequested(); });
