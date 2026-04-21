@@ -94,6 +94,9 @@ public:
     // @return 如果删除成功返回 true，否则返回 false
     bool deleteEntity(CadItem* item);
 
+    // 批量删除指定实体
+    bool deleteEntities(const QVector<CadItem*>& items);
+
     // 复制指定实体，并按偏移量生成一个副本
     bool copyEntity(CadItem* item, const QVector3D& delta);
 

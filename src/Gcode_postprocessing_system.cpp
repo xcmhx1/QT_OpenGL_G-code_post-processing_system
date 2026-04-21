@@ -21,6 +21,7 @@
 #include <QSettings>
 #include <QStatusBar>
 #include <QStyleFactory>
+#include <QSet>
 #include <QToolBar>
 #include <QVBoxLayout>
 
@@ -44,6 +45,7 @@ namespace
     constexpr double kRotaryBacktrackPenaltyWeight = 1.35;
     constexpr double kRotaryDirectionPenaltyWeight = 0.2;
     constexpr double kSortConnectionEpsilon = 1.0e-6;
+    constexpr double kDedupTolerance = 1.0e-6;
     const QVector3D kSortOrigin(0.0f, 0.0f, 0.0f);
 
     enum class SortStrategy
@@ -89,6 +91,258 @@ namespace
     };
 
     std::vector<ProcessPathOption> buildPathOptionsForItem(const CadItem* item, SortStrategy strategy);
+
+    qint64 quantizeDedupValue(double value)
+    {
+        const qint64 quantized = static_cast<qint64>(std::llround(value / kDedupTolerance));
+        return quantized == 0 ? 0 : quantized;
+    }
+
+    QString dedupNumberToken(double value)
+    {
+        return QString::number(quantizeDedupValue(value));
+    }
+
+    QString dedupCoordToken(const DRW_Coord& coord)
+    {
+        return QStringLiteral("%1,%2,%3")
+            .arg(dedupNumberToken(coord.x))
+            .arg(dedupNumberToken(coord.y))
+            .arg(dedupNumberToken(coord.z));
+    }
+
+    QString dedupCoordToken(double x, double y, double z = 0.0)
+    {
+        return QStringLiteral("%1,%2,%3")
+            .arg(dedupNumberToken(x))
+            .arg(dedupNumberToken(y))
+            .arg(dedupNumberToken(z));
+    }
+
+    double normalizeAngleZeroToTwoPi(double angle)
+    {
+        double normalized = std::fmod(angle, kTwoPi);
+
+        if (normalized < 0.0)
+        {
+            normalized += kTwoPi;
+        }
+
+        return normalized;
+    }
+
+    QString dedupAngleToken(double angle)
+    {
+        return dedupNumberToken(normalizeAngleZeroToTwoPi(angle));
+    }
+
+    QString buildLineDuplicateKey(const DRW_Line* line)
+    {
+        if (line == nullptr)
+        {
+            return QString();
+        }
+
+        const QString start = dedupCoordToken(line->basePoint);
+        const QString end = dedupCoordToken(line->secPoint);
+        const auto ordered = start <= end
+            ? std::pair<QString, QString>(start, end)
+            : std::pair<QString, QString>(end, start);
+
+        return QStringLiteral("LINE|%1|%2").arg(ordered.first, ordered.second);
+    }
+
+    QString buildCircleDuplicateKey(const DRW_Circle* circle)
+    {
+        if (circle == nullptr)
+        {
+            return QString();
+        }
+
+        return QStringLiteral("CIRCLE|%1|%2")
+            .arg(dedupCoordToken(circle->basePoint))
+            .arg(dedupNumberToken(circle->radious));
+    }
+
+    QString buildArcDuplicateKey(const DRW_Arc* arc)
+    {
+        if (arc == nullptr)
+        {
+            return QString();
+        }
+
+        return QStringLiteral("ARC|%1|%2|%3|%4")
+            .arg(dedupCoordToken(arc->basePoint))
+            .arg(dedupNumberToken(arc->radious))
+            .arg(dedupAngleToken(arc->staangle))
+            .arg(dedupAngleToken(arc->endangle));
+    }
+
+    QString buildEllipseDuplicateKey(const DRW_Ellipse* ellipse)
+    {
+        if (ellipse == nullptr)
+        {
+            return QString();
+        }
+
+        DRW_Coord majorAxis = ellipse->secPoint;
+        double startParam = ellipse->staparam;
+        double endParam = ellipse->endparam;
+        const double span = endParam - startParam;
+        const bool isFullEllipse = std::abs(span) < kDedupTolerance
+            || std::abs(std::abs(span) - kTwoPi) < kDedupTolerance;
+
+        const bool flipMajorAxis =
+            quantizeDedupValue(majorAxis.x) < 0
+            || (quantizeDedupValue(majorAxis.x) == 0 && quantizeDedupValue(majorAxis.y) < 0)
+            || (quantizeDedupValue(majorAxis.x) == 0 && quantizeDedupValue(majorAxis.y) == 0 && quantizeDedupValue(majorAxis.z) < 0);
+
+        if (flipMajorAxis)
+        {
+            majorAxis.x = -majorAxis.x;
+            majorAxis.y = -majorAxis.y;
+            majorAxis.z = -majorAxis.z;
+            startParam += kPi;
+            endParam += kPi;
+        }
+
+        if (isFullEllipse)
+        {
+            startParam = 0.0;
+            endParam = kTwoPi;
+        }
+        else
+        {
+            startParam = normalizeAngleZeroToTwoPi(startParam);
+            double normalizedEnd = normalizeAngleZeroToTwoPi(endParam);
+
+            while (normalizedEnd <= startParam)
+            {
+                normalizedEnd += kTwoPi;
+            }
+
+            endParam = normalizedEnd;
+        }
+
+        DRW_Coord normal = ellipse->extPoint;
+        const double normalLength = std::sqrt(normal.x * normal.x + normal.y * normal.y + normal.z * normal.z);
+
+        if (normalLength > kDedupTolerance)
+        {
+            normal.x /= normalLength;
+            normal.y /= normalLength;
+            normal.z /= normalLength;
+        }
+
+        return QStringLiteral("ELLIPSE|%1|%2|%3|%4|%5|%6")
+            .arg(dedupCoordToken(ellipse->basePoint))
+            .arg(dedupCoordToken(majorAxis))
+            .arg(dedupCoordToken(normal))
+            .arg(dedupNumberToken(ellipse->ratio))
+            .arg(dedupNumberToken(startParam))
+            .arg(dedupNumberToken(endParam));
+    }
+
+    QString buildPolylineVertexSequenceToken(const std::vector<std::shared_ptr<DRW_Vertex>>& vertlist)
+    {
+        QStringList vertexTokens;
+        vertexTokens.reserve(static_cast<int>(vertlist.size()));
+
+        for (const std::shared_ptr<DRW_Vertex>& vertex : vertlist)
+        {
+            if (!vertex)
+            {
+                vertexTokens.push_back(QStringLiteral("null"));
+                continue;
+            }
+
+            vertexTokens.push_back
+            (
+                QStringLiteral("%1|%2")
+                .arg(dedupCoordToken(vertex->basePoint))
+                .arg(dedupNumberToken(vertex->bulge))
+            );
+        }
+
+        return vertexTokens.join(QStringLiteral(";"));
+    }
+
+    QString buildLWPolylineVertexSequenceToken(const std::vector<std::shared_ptr<DRW_Vertex2D>>& vertlist)
+    {
+        QStringList vertexTokens;
+        vertexTokens.reserve(static_cast<int>(vertlist.size()));
+
+        for (const std::shared_ptr<DRW_Vertex2D>& vertex : vertlist)
+        {
+            if (!vertex)
+            {
+                vertexTokens.push_back(QStringLiteral("null"));
+                continue;
+            }
+
+            vertexTokens.push_back
+            (
+                QStringLiteral("%1|%2")
+                .arg(dedupCoordToken(vertex->x, vertex->y, 0.0))
+                .arg(dedupNumberToken(vertex->bulge))
+            );
+        }
+
+        return vertexTokens.join(QStringLiteral(";"));
+    }
+
+    QString buildPolylineDuplicateKey(const DRW_Polyline* polyline)
+    {
+        if (polyline == nullptr)
+        {
+            return QString();
+        }
+
+        return QStringLiteral("POLYLINE|%1|%2|%3")
+            .arg((polyline->flags & 0x01) != 0 ? QStringLiteral("C") : QStringLiteral("O"))
+            .arg(dedupCoordToken(polyline->extPoint))
+            .arg(buildPolylineVertexSequenceToken(polyline->vertlist));
+    }
+
+    QString buildLWPolylineDuplicateKey(const DRW_LWPolyline* polyline)
+    {
+        if (polyline == nullptr)
+        {
+            return QString();
+        }
+
+        return QStringLiteral("LWPOLYLINE|%1|%2|%3|%4")
+            .arg((polyline->flags & 0x01) != 0 ? QStringLiteral("C") : QStringLiteral("O"))
+            .arg(dedupNumberToken(polyline->elevation))
+            .arg(dedupCoordToken(polyline->extPoint))
+            .arg(buildLWPolylineVertexSequenceToken(polyline->vertlist));
+    }
+
+    QString duplicateGeometryKey(const CadItem* item)
+    {
+        if (item == nullptr || item->m_nativeEntity == nullptr)
+        {
+            return QString();
+        }
+
+        switch (item->m_type)
+        {
+        case DRW::ETYPE::LINE:
+            return buildLineDuplicateKey(static_cast<const DRW_Line*>(item->m_nativeEntity));
+        case DRW::ETYPE::CIRCLE:
+            return buildCircleDuplicateKey(static_cast<const DRW_Circle*>(item->m_nativeEntity));
+        case DRW::ETYPE::ARC:
+            return buildArcDuplicateKey(static_cast<const DRW_Arc*>(item->m_nativeEntity));
+        case DRW::ETYPE::ELLIPSE:
+            return buildEllipseDuplicateKey(static_cast<const DRW_Ellipse*>(item->m_nativeEntity));
+        case DRW::ETYPE::POLYLINE:
+            return buildPolylineDuplicateKey(static_cast<const DRW_Polyline*>(item->m_nativeEntity));
+        case DRW::ETYPE::LWPOLYLINE:
+            return buildLWPolylineDuplicateKey(static_cast<const DRW_LWPolyline*>(item->m_nativeEntity));
+        default:
+            return QString();
+        }
+    }
 
     QColor colorFromAci(int colorIndex)
     {
@@ -3418,6 +3672,62 @@ void Gcode_postprocessing_system::saveSnapOptionMask(quint32 mask) const
     );
 }
 
+bool Gcode_postprocessing_system::removeDuplicateEntities()
+{
+    if (m_document.m_entities.empty())
+    {
+        statusBar()->showMessage(QStringLiteral("当前文档没有可去重的图元"), 3000);
+        return false;
+    }
+
+    QSet<QString> seenKeys;
+    QVector<CadItem*> duplicates;
+
+    for (auto it = m_document.m_entities.rbegin(); it != m_document.m_entities.rend(); ++it)
+    {
+        CadItem* item = it->get();
+
+        if (item == nullptr || item->m_nativeEntity == nullptr)
+        {
+            continue;
+        }
+
+        const QString geometryKey = duplicateGeometryKey(item);
+
+        if (geometryKey.isEmpty())
+        {
+            continue;
+        }
+
+        if (seenKeys.contains(geometryKey))
+        {
+            duplicates.push_back(item);
+            continue;
+        }
+
+        seenKeys.insert(geometryKey);
+    }
+
+    if (duplicates.isEmpty())
+    {
+        statusBar()->showMessage(QStringLiteral("未发现完全重叠的同类型图元"), 3000);
+        return false;
+    }
+
+    std::reverse(duplicates.begin(), duplicates.end());
+
+    if (!m_editer.deleteEntities(duplicates))
+    {
+        QMessageBox::warning(this, QStringLiteral("去重失败"), QStringLiteral("删除重复图元时发生错误。"));
+        return false;
+    }
+
+    ui->openGLWidget->clearSelection();
+    ui->openGLWidget->appendCommandMessage(QStringLiteral("去重完成，删除重复图元 %1 个").arg(duplicates.size()));
+    statusBar()->showMessage(QStringLiteral("去重完成，删除重复图元 %1 个").arg(duplicates.size()), 4000);
+    return true;
+}
+
 QString Gcode_postprocessing_system::generationModeDisplayName(GGenerator::GenerationMode generationMode) const
 {
     return generationMode == GGenerator::GenerationMode::Mode3D
@@ -3565,6 +3875,7 @@ void Gcode_postprocessing_system::initializeToolPanel()
     connect(m_toolPanelWidget, &CadToolPanelWidget::arrayRequested, this, [this]() { arraySelectedEntity(); });
     connect(m_toolPanelWidget, &CadToolPanelWidget::importFileRequested, this, [this]() { ui->action_File_Import_Dxf->trigger(); });
     connect(m_toolPanelWidget, &CadToolPanelWidget::exportGCodeRequested, this, [this]() { ui->action_File_Export_G->trigger(); });
+    connect(m_toolPanelWidget, &CadToolPanelWidget::deduplicateRequested, this, [this]() { removeDuplicateEntities(); });
     connect(m_toolPanelWidget, &CadToolPanelWidget::sortKeepDirectionRequested, this, [this]() { ui->action_Sort_2D_Assign->trigger(); });
     connect(m_toolPanelWidget, &CadToolPanelWidget::smartSortRequested, this, [this]() { ui->action_Sort_2D_Smart->trigger(); });
     connect(m_toolPanelWidget, &CadToolPanelWidget::profileSettingsRequested, this, [this]() { openProfileSettingsDialog(); });

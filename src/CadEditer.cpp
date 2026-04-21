@@ -1595,6 +1595,92 @@ private:
     CadItem* m_itemPtr = nullptr;
 };
 
+class DeleteEntitiesCommand final : public CadEditer::EditCommand
+{
+public:
+    DeleteEntitiesCommand(CadDocument* document, const QVector<CadItem*>& items)
+        : m_document(document)
+    {
+        QSet<CadItem*> deduplicated;
+
+        for (CadItem* item : items)
+        {
+            if (item == nullptr || deduplicated.contains(item))
+            {
+                continue;
+            }
+
+            deduplicated.insert(item);
+            m_states.push_back({ item, {}, {} });
+        }
+    }
+
+    bool execute() override
+    {
+        if (m_document == nullptr || m_states.empty())
+        {
+            return false;
+        }
+
+        for (ItemState& state : m_states)
+        {
+            if (state.itemPtr == nullptr)
+            {
+                return false;
+            }
+
+            auto [entity, item] = m_document->takeEntity(state.itemPtr);
+
+            if (entity == nullptr || item == nullptr)
+            {
+                return false;
+            }
+
+            state.entity = std::move(entity);
+            state.item = std::move(item);
+            state.itemPtr = state.item.get();
+        }
+
+        return true;
+    }
+
+    bool undo() override
+    {
+        if (m_document == nullptr || m_states.empty())
+        {
+            return false;
+        }
+
+        for (ItemState& state : m_states)
+        {
+            if (state.entity == nullptr || state.item == nullptr)
+            {
+                return false;
+            }
+
+            state.itemPtr = state.item.get();
+
+            if (m_document->appendEntity(std::move(state.entity), std::move(state.item)) == nullptr)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+private:
+    struct ItemState
+    {
+        CadItem* itemPtr = nullptr;
+        std::unique_ptr<DRW_Entity> entity;
+        std::unique_ptr<CadItem> item;
+    };
+
+    CadDocument* m_document = nullptr;
+    std::vector<ItemState> m_states;
+};
+
 // 移动实体命令：
 // 通过对原生实体做几何平移，再触发文档刷新来实现可撤销移动。
 class MoveEntityCommand final : public CadEditer::EditCommand
@@ -2586,6 +2672,48 @@ bool CadEditer::deleteEntity(CadItem* item)
     }
 
     return executeCommand(std::make_unique<DeleteEntityCommand>(m_document, item));
+}
+
+bool CadEditer::deleteEntities(const QVector<CadItem*>& items)
+{
+    if (m_document == nullptr || items.isEmpty())
+    {
+        return false;
+    }
+
+    QVector<CadItem*> validItems;
+    QSet<CadItem*> deduplicated;
+
+    for (CadItem* item : items)
+    {
+        if (item == nullptr || !m_document->containsEntity(item) || deduplicated.contains(item))
+        {
+            continue;
+        }
+
+        deduplicated.insert(item);
+        validItems.push_back(item);
+
+        if (item == m_moveTarget)
+        {
+            m_moveTarget = nullptr;
+        }
+
+        m_moveTargets.removeAll(item);
+
+        if (item == m_gripTarget)
+        {
+            m_gripTarget = nullptr;
+            m_gripPointIndex = -1;
+        }
+    }
+
+    if (validItems.isEmpty())
+    {
+        return false;
+    }
+
+    return executeCommand(std::make_unique<DeleteEntitiesCommand>(m_document, validItems));
 }
 
 bool CadEditer::copyEntity(CadItem* item, const QVector3D& delta)

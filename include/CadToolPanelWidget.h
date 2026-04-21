@@ -53,6 +53,7 @@ signals:
     void colorChangeRequested(int colorIndex);
     void importFileRequested();
     void exportGCodeRequested();
+    void deduplicateRequested();
     void sortKeepDirectionRequested();
     void smartSortRequested();
     void gcodeModeSelectionChanged(CadToolPanelWidget::GCodeModeSelection selection);
@@ -91,6 +92,7 @@ private:
     QAction* m_drawPointAction = nullptr;
     QToolButton* m_importFileButton = nullptr;
     QToolButton* m_exportGCodeButton = nullptr;
+    QToolButton* m_deduplicateButton = nullptr;
     QToolButton* m_sortKeepDirectionButton = nullptr;
     QToolButton* m_smartSortButton = nullptr;
     QToolButton* m_profileSettingsButton = nullptr;

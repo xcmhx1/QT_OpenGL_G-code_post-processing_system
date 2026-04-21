@@ -72,6 +72,7 @@ private:
     bool rotateSelectedEntity();
     bool scaleSelectedEntity();
     bool arraySelectedEntity();
+    bool removeDuplicateEntities();
     bool sortEntitiesByCurrentDirection();
     bool assignSelectedEntityProcessOrder();
     bool smartSortEntities();

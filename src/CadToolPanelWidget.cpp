@@ -924,6 +924,7 @@ QWidget* CadToolPanelWidget::buildMachiningPanel()
 
     m_importFileButton = buildMachiningButton(QStringLiteral("文件导入"));
     m_exportGCodeButton = buildMachiningButton(QStringLiteral("G代码导出"));
+    m_deduplicateButton = buildMachiningButton(QStringLiteral("去重"));
     m_sortKeepDirectionButton = buildMachiningButton(QStringLiteral("排序(保留方向)"));
     m_smartSortButton = buildMachiningButton(QStringLiteral("智能排序"));
     m_profileSettingsButton = buildMachiningButton(QStringLiteral("G代码配置"));
@@ -943,8 +944,9 @@ QWidget* CadToolPanelWidget::buildMachiningPanel()
     sortLayout->setHorizontalSpacing(6);
     sortLayout->setVerticalSpacing(6);
     sortLayout->setSizeConstraint(QLayout::SetFixedSize);
-    sortLayout->addWidget(m_sortKeepDirectionButton, 0, 0);
-    sortLayout->addWidget(m_smartSortButton, 0, 1);
+    sortLayout->addWidget(m_deduplicateButton, 0, 0);
+    sortLayout->addWidget(m_sortKeepDirectionButton, 0, 1);
+    sortLayout->addWidget(m_smartSortButton, 0, 2);
 
     QWidget* configPanel = new QWidget(panel);
     QVBoxLayout* configLayout = new QVBoxLayout(configPanel);
@@ -979,6 +981,7 @@ QWidget* CadToolPanelWidget::buildMachiningPanel()
 
     connect(m_importFileButton, &QToolButton::clicked, this, [this]() { emit importFileRequested(); });
     connect(m_exportGCodeButton, &QToolButton::clicked, this, [this]() { emit exportGCodeRequested(); });
+    connect(m_deduplicateButton, &QToolButton::clicked, this, [this]() { emit deduplicateRequested(); });
     connect(m_sortKeepDirectionButton, &QToolButton::clicked, this, [this]() { emit sortKeepDirectionRequested(); });
     connect(m_smartSortButton, &QToolButton::clicked, this, [this]() { emit smartSortRequested(); });
     connect(m_profileSettingsButton, &QToolButton::clicked, this, [this]() { emit profileSettingsRequested(); });
