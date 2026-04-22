@@ -10,6 +10,7 @@
 #include <QWidget>
 
 class QAction;
+class QCheckBox;
 class QComboBox;
 class QFrame;
 class QLabel;
@@ -43,6 +44,14 @@ public:
     void setGCodeModeSelection(GCodeModeSelection selection);
     void setAvailableProfiles(const QList<QPair<QString, QString>>& profiles);
     void setCurrentProfileSelection(const QString& profileId);
+    void setAutoDeduplicateEnabled(bool enabled);
+    bool autoDeduplicateEnabled() const;
+    void setUseDxfFileNameEnabled(bool enabled);
+    bool useDxfFileNameEnabled() const;
+    void setUseDefaultImportPathEnabled(bool enabled);
+    bool useDefaultImportPathEnabled() const;
+    void setUseDefaultExportPathEnabled(bool enabled);
+    bool useDefaultExportPathEnabled() const;
 
 signals:
     void drawRequested(DrawType drawType);
@@ -62,6 +71,10 @@ signals:
     void gcodeModeSelectionChanged(CadToolPanelWidget::GCodeModeSelection selection);
     void profileSelectionChanged(const QString& profileId);
     void profileSettingsRequested();
+    void autoDeduplicateOptionChanged(bool enabled);
+    void useDxfFileNameOptionChanged(bool enabled);
+    void useDefaultImportPathOptionChanged(bool enabled);
+    void useDefaultExportPathOptionChanged(bool enabled);
 
 private:
     void buildUi();
@@ -93,6 +106,10 @@ private:
     QComboBox* m_colorComboBox = nullptr;
     QComboBox* m_gcodeModeComboBox = nullptr;
     QComboBox* m_profileComboBox = nullptr;
+    QCheckBox* m_autoDeduplicateCheckBox = nullptr;
+    QCheckBox* m_useDxfFileNameCheckBox = nullptr;
+    QCheckBox* m_useDefaultImportPathCheckBox = nullptr;
+    QCheckBox* m_useDefaultExportPathCheckBox = nullptr;
     QMenu* m_drawMoreMenu = nullptr;
     QAction* m_drawPointAction = nullptr;
     QToolButton* m_importFileButton = nullptr;

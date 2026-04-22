@@ -15,6 +15,10 @@
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QDir>
+#include <QMessageBox>
+#include <QSettings>
+#include <QStandardPaths>
 #include <QTextStream>
 #include <QVector3D>
 #include <QWidget>
@@ -117,6 +121,58 @@ namespace
             outCuttingBody += line;
             outCuttingBody += QLatin1Char('\n');
         }
+    }
+
+    QString defaultNcPath()
+    {
+        QString baseDirectory = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+
+        if (baseDirectory.trimmed().isEmpty())
+        {
+            baseDirectory = QDir::homePath();
+        }
+
+        return QDir(baseDirectory).filePath(QStringLiteral("output.nc"));
+    }
+
+    QString loadLastExportPath()
+    {
+        QSettings settings(QStringLiteral("GCodePostProcessingSystem"), QStringLiteral("GCodePostProcessingSystem"));
+        return settings.value(QStringLiteral("gcode/lastExportPath"), QString()).toString().trimmed();
+    }
+
+    void saveLastExportPath(const QString& filePath)
+    {
+        QSettings settings(QStringLiteral("GCodePostProcessingSystem"), QStringLiteral("GCodePostProcessingSystem"));
+        settings.setValue(QStringLiteral("gcode/lastExportPath"), filePath.trimmed());
+    }
+
+    QString resolveInitialExportPath(QWidget* parent)
+    {
+        const QString lastExportPath = loadLastExportPath();
+
+        if (!lastExportPath.isEmpty())
+        {
+            const QFileInfo lastExportInfo(lastExportPath);
+            const QString lastDirectoryPath = lastExportInfo.absolutePath();
+
+            if (QDir(lastDirectoryPath).exists())
+            {
+                return lastExportPath;
+            }
+
+            if (parent != nullptr)
+            {
+                QMessageBox::warning
+                (
+                    parent,
+                    QStringLiteral("导出目录不可用"),
+                    QStringLiteral("上次导出的目录已不存在：\n%1\n\n将改用其它默认目录。").arg(lastDirectoryPath)
+                );
+            }
+        }
+
+        return defaultNcPath();
     }
 
     QString entityTypeKey(const CadItem* item)
@@ -1112,11 +1168,12 @@ GGenerator::GenerationMode GGenerator::generationMode() const
 
 bool GGenerator::generate(QWidget* parent, QString* errorMessage) const
 {
+    const QString initialPath = resolveInitialExportPath(parent);
     const QString filePath = QFileDialog::getSaveFileName
     (
         parent,
         QStringLiteral("导出 G 代码"),
-        QStringLiteral("output.nc"),
+        initialPath,
         QStringLiteral("NC 文件 (*.nc);;GCode 文件 (*.gcode);;文本文件 (*.txt)")
     );
 
@@ -1137,7 +1194,14 @@ bool GGenerator::generate(QWidget* parent, QString* errorMessage) const
         resolvedPath.append(QStringLiteral(".nc"));
     }
 
-    return generateToFile(resolvedPath, errorMessage);
+    const bool generated = generateToFile(resolvedPath, errorMessage);
+
+    if (generated)
+    {
+        saveLastExportPath(resolvedPath);
+    }
+
+    return generated;
 }
 
 bool GGenerator::generateToFile(const QString& filePath, QString* errorMessage) const

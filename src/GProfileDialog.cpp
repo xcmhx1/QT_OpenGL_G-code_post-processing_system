@@ -267,17 +267,27 @@ void GProfileDialog::buildUi()
     tabWidget->addTab(fileTab, QStringLiteral("文件级"));
 
     QWidget* typeTab = new QWidget(tabWidget);
-    QVBoxLayout* typeLayout = new QVBoxLayout(typeTab);
+    QHBoxLayout* typeLayout = new QHBoxLayout(typeTab);
     typeLayout->setContentsMargins(8, 8, 8, 8);
-    typeLayout->setSpacing(8);
+    typeLayout->setSpacing(10);
 
-    QFormLayout* typeFormLayout = new QFormLayout();
+    QVBoxLayout* typeListLayout = new QVBoxLayout();
+    typeListLayout->setSpacing(6);
+    typeListLayout->addWidget(new QLabel(QStringLiteral("实体类型"), typeTab));
+
+    m_entityTypeListWidget = new QListWidget(typeTab);
+    m_entityTypeListWidget->setMinimumWidth(220);
+    typeListLayout->addWidget(m_entityTypeListWidget, 1);
+    typeLayout->addLayout(typeListLayout, 0);
+
+    QWidget* typeEditorPanel = new QWidget(typeTab);
+    QFormLayout* typeFormLayout = new QFormLayout(typeEditorPanel);
     typeFormLayout->setContentsMargins(0, 0, 0, 0);
     typeFormLayout->setSpacing(8);
 
-    m_entityTypeComboBox = new QComboBox(typeTab);
-    populateEntityTypeCombo();
-    typeFormLayout->addRow(QStringLiteral("实体类型"), m_entityTypeComboBox);
+    QLineEdit* entityTypeKeyEdit = new QLineEdit(typeEditorPanel);
+    entityTypeKeyEdit->setReadOnly(true);
+    typeFormLayout->addRow(QStringLiteral("实体键"), entityTypeKeyEdit);
 
     m_entityTypeHeaderEdit = new QPlainTextEdit(typeTab);
     m_entityTypeHeaderEdit->setMinimumHeight(120);
@@ -291,7 +301,7 @@ void GProfileDialog::buildUi()
     m_entityTypeCommentEdit->setMinimumHeight(80);
     typeFormLayout->addRow(QStringLiteral("说明"), m_entityTypeCommentEdit);
 
-    typeLayout->addLayout(typeFormLayout);
+    typeLayout->addWidget(typeEditorPanel, 1);
     tabWidget->addTab(typeTab, QStringLiteral("实体类型"));
 
     QWidget* layerTab = new QWidget(tabWidget);
@@ -423,11 +433,12 @@ void GProfileDialog::buildUi()
 
     connect
     (
-        m_entityTypeComboBox,
-        QOverload<int>::of(&QComboBox::currentIndexChanged),
+        m_entityTypeListWidget,
+        &QListWidget::currentItemChanged,
         this,
-        [this](int)
+        [this, entityTypeKeyEdit](QListWidgetItem* current, QListWidgetItem*)
         {
+            entityTypeKeyEdit->setText(current != nullptr ? current->data(Qt::UserRole).toString() : QString());
             loadSelectedEntityTypeBlock();
         }
     );
@@ -572,12 +583,7 @@ void GProfileDialog::applyProfile(const GProfile& profile)
     m_rotaryClearanceSpinBox->setValue(profile.rotaryAxisConfig().safeZ);
     m_rotaryPlaneZOffsetSpinBox->setValue(profile.rotaryAxisConfig().machiningPlaneZOffset);
 
-    if (m_entityTypeComboBox->count() > 0)
-    {
-        m_entityTypeComboBox->setCurrentIndex(0);
-    }
-
-    loadSelectedEntityTypeBlock();
+    refreshEntityTypeList();
     refreshLayerRuleList();
     refreshColorRuleList();
     m_updatingUi = false;
@@ -629,12 +635,43 @@ GProfile GProfileDialog::collectProfile() const
     return profile;
 }
 
-void GProfileDialog::populateEntityTypeCombo()
+void GProfileDialog::refreshEntityTypeList(const QString& preferredEntityTypeKey)
 {
+    const QString targetEntityTypeKey = preferredEntityTypeKey.isEmpty()
+        ? currentEntityTypeKey()
+        : GProfile::normalizeEntityTypeKey(preferredEntityTypeKey);
+
+    m_updatingUi = true;
+    m_entityTypeListWidget->clear();
+
     for (const QString& entityTypeKey : supportedEntityTypes())
     {
-        m_entityTypeComboBox->addItem(displayNameForEntityType(entityTypeKey), entityTypeKey);
+        QListWidgetItem* item = new QListWidgetItem(displayNameForEntityType(entityTypeKey), m_entityTypeListWidget);
+        item->setData(Qt::UserRole, entityTypeKey);
     }
+
+    int targetIndex = -1;
+
+    for (int index = 0; index < m_entityTypeListWidget->count(); ++index)
+    {
+        if (m_entityTypeListWidget->item(index)->data(Qt::UserRole).toString() == targetEntityTypeKey)
+        {
+            targetIndex = index;
+            break;
+        }
+    }
+
+    if (targetIndex >= 0)
+    {
+        m_entityTypeListWidget->setCurrentRow(targetIndex);
+    }
+    else if (m_entityTypeListWidget->count() > 0)
+    {
+        m_entityTypeListWidget->setCurrentRow(0);
+    }
+
+    m_updatingUi = false;
+    loadSelectedEntityTypeBlock();
 }
 
 void GProfileDialog::loadSelectedEntityTypeBlock()
@@ -1019,7 +1056,8 @@ void GProfileDialog::resetToDefaultRotaryProfile()
 
 QString GProfileDialog::currentEntityTypeKey() const
 {
-    return m_entityTypeComboBox->currentData().toString();
+    QListWidgetItem* item = m_entityTypeListWidget != nullptr ? m_entityTypeListWidget->currentItem() : nullptr;
+    return item != nullptr ? item->data(Qt::UserRole).toString() : QString();
 }
 
 QString GProfileDialog::currentLayerKey() const

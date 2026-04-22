@@ -41,7 +41,7 @@ private:
     void applyProfile(const GProfile& profile);
     GProfile collectProfile() const;
 
-    void populateEntityTypeCombo();
+    void refreshEntityTypeList(const QString& preferredEntityTypeKey = QString());
     void loadSelectedEntityTypeBlock();
     void updateCurrentEntityTypeBlock();
 
@@ -89,7 +89,7 @@ private:
     QDoubleSpinBox* m_rotaryClearanceSpinBox = nullptr;
     QDoubleSpinBox* m_rotaryPlaneZOffsetSpinBox = nullptr;
 
-    QComboBox* m_entityTypeComboBox = nullptr;
+    QListWidget* m_entityTypeListWidget = nullptr;
     QPlainTextEdit* m_entityTypeHeaderEdit = nullptr;
     QPlainTextEdit* m_entityTypeFooterEdit = nullptr;
     QPlainTextEdit* m_entityTypeCommentEdit = nullptr;

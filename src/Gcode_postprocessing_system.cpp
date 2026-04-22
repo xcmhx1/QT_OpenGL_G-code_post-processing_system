@@ -23,6 +23,7 @@
 #include <QSettings>
 #include <QStatusBar>
 #include <QStyleFactory>
+#include <QStandardPaths>
 #include <QSet>
 #include <QToolBar>
 #include <QVBoxLayout>
@@ -364,6 +365,53 @@ namespace
         default:
             return QString();
         }
+    }
+
+    bool isExportSortableEntityType(DRW::ETYPE type)
+    {
+        switch (type)
+        {
+        case DRW::ETYPE::LINE:
+        case DRW::ETYPE::ARC:
+        case DRW::ETYPE::CIRCLE:
+        case DRW::ETYPE::ELLIPSE:
+        case DRW::ETYPE::POLYLINE:
+        case DRW::ETYPE::LWPOLYLINE:
+            return true;
+        default:
+            return false;
+        }
+    }
+
+    bool documentHasRemovableDuplicates(const CadDocument& document)
+    {
+        QSet<QString> seenKeys;
+
+        for (auto it = document.m_entities.rbegin(); it != document.m_entities.rend(); ++it)
+        {
+            const CadItem* item = it->get();
+
+            if (item == nullptr || item->m_nativeEntity == nullptr)
+            {
+                continue;
+            }
+
+            const QString geometryKey = duplicateGeometryKey(item);
+
+            if (geometryKey.isEmpty())
+            {
+                continue;
+            }
+
+            if (seenKeys.contains(geometryKey))
+            {
+                return true;
+            }
+
+            seenKeys.insert(geometryKey);
+        }
+
+        return false;
     }
 
     QColor colorFromAci(int colorIndex)
@@ -2738,7 +2786,7 @@ Gcode_postprocessing_system::Gcode_postprocessing_system(QWidget* parent)
             (
                 this,
                 QStringLiteral("导入文件"),
-                QString(),
+                defaultImportPath(),
                 QStringLiteral("支持文件 (*.dxf *.dwg *.bmp *.png *.jpg *.jpeg);;CAD 文件 (*.dxf *.dwg);;位图文件 (*.bmp *.png *.jpg *.jpeg)")
             );
 
@@ -2767,7 +2815,7 @@ Gcode_postprocessing_system::Gcode_postprocessing_system(QWidget* parent)
             (
                 this,
                 QStringLiteral("导入DXF"),
-                QString(),
+                defaultImportPath(),
                 QStringLiteral("DXF 文件 (*.dxf)")
             );
 
@@ -2789,7 +2837,7 @@ Gcode_postprocessing_system::Gcode_postprocessing_system(QWidget* parent)
             (
                 this,
                 QStringLiteral("导入DWG"),
-                QString(),
+                defaultImportPath(),
                 QStringLiteral("DWG 文件 (*.dwg)")
             );
 
@@ -2811,7 +2859,7 @@ Gcode_postprocessing_system::Gcode_postprocessing_system(QWidget* parent)
             (
                 this,
                 QStringLiteral("导入图片"),
-                QString(),
+                defaultImportPath(),
                 QStringLiteral("位图文件 (*.bmp *.png *.jpg *.jpeg)")
             );
 
@@ -2868,6 +2916,8 @@ bool Gcode_postprocessing_system::importCadFile(const QString& filePath)
     {
         return false;
     }
+
+    saveLastImportDirectory(filePath);
 
     if (isCadVectorFile(filePath))
     {
@@ -3042,6 +3092,75 @@ bool Gcode_postprocessing_system::exportGCode()
     return exportGCode(generationMode, modeDisplayName);
 }
 
+QString Gcode_postprocessing_system::defaultImportPath() const
+{
+    if (!loadUseDefaultImportPath())
+    {
+        return QString();
+    }
+
+    const QString lastImportDirectory = loadLastImportDirectory();
+
+    if (!lastImportDirectory.isEmpty() && QDir(lastImportDirectory).exists())
+    {
+        return lastImportDirectory;
+    }
+
+    QString baseDirectory = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+
+    if (baseDirectory.trimmed().isEmpty())
+    {
+        baseDirectory = QDir::homePath();
+    }
+
+    return baseDirectory;
+}
+
+QString Gcode_postprocessing_system::defaultGCodeExportPathForCurrentDocument() const
+{
+    if (!loadUseDefaultExportPath())
+    {
+        return QString();
+    }
+
+    QString exportDirectory;
+    const QString lastExportPath = loadLastGCodeExportPath();
+
+    if (!lastExportPath.isEmpty())
+    {
+        const QString lastExportDirectory = QFileInfo(lastExportPath).absolutePath();
+
+        if (QDir(lastExportDirectory).exists())
+        {
+            exportDirectory = lastExportDirectory;
+        }
+    }
+
+    if (exportDirectory.trimmed().isEmpty())
+    {
+        exportDirectory = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+    }
+
+    if (exportDirectory.trimmed().isEmpty())
+    {
+        exportDirectory = QDir::homePath();
+    }
+
+    QString outputFileName = QStringLiteral("output.nc");
+
+    if (!m_currentDocumentPath.trimmed().isEmpty())
+    {
+        const QString baseName = QFileInfo(m_currentDocumentPath).completeBaseName().trimmed();
+
+        if (!baseName.isEmpty())
+        {
+            outputFileName = baseName + QStringLiteral(".nc");
+        }
+    }
+
+    return QDir(exportDirectory).filePath(outputFileName);
+}
+
 bool Gcode_postprocessing_system::sortEntitiesByCurrentMode(bool smartSort)
 {
     const GGenerator::GenerationMode generationMode = resolveGenerationMode();
@@ -3054,20 +3173,146 @@ bool Gcode_postprocessing_system::sortEntitiesByCurrentMode(bool smartSort)
             : sortEntitiesByCurrentDirection());
 }
 
+bool Gcode_postprocessing_system::prepareDocumentForGCodeExport(GGenerator::GenerationMode generationMode)
+{
+    if (m_toolPanelWidget != nullptr && m_toolPanelWidget->autoDeduplicateEnabled() && documentHasRemovableDuplicates(m_document))
+    {
+        ui->openGLWidget->appendCommandMessage(QStringLiteral("检测到已勾选自动去重，导出前先执行一次去重。"));
+
+        if (!removeDuplicateEntities())
+        {
+            QMessageBox::warning(this, QStringLiteral("导出G代码失败"), QStringLiteral("自动去重失败，G代码导出已取消。"));
+            return false;
+        }
+    }
+
+    if (!hasCompleteProcessOrderForExport(generationMode))
+    {
+        ui->openGLWidget->appendCommandMessage(QStringLiteral("检测到当前图元尚未完成排序，导出前自动执行智能排序。"));
+
+        const bool sorted = generationMode == GGenerator::GenerationMode::Mode3D
+            ? smartSortEntities3D()
+            : smartSortEntities();
+
+        if (!sorted)
+        {
+            QMessageBox::warning(this, QStringLiteral("导出G代码失败"), QStringLiteral("自动智能排序失败，G代码导出已取消。"));
+            return false;
+        }
+    }
+
+    return true;
+}
+
 bool Gcode_postprocessing_system::exportGCode
 (
     GGenerator::GenerationMode generationMode,
     const QString& modeDisplayName
 )
 {
+    if (!prepareDocumentForGCodeExport(generationMode))
+    {
+        return false;
+    }
+
     GGenerator generator;
     generator.setDocument(&m_document);
     generator.setProfile(&m_activeProfile);
     generator.setGenerationMode(generationMode);
 
     QString errorMessage;
+    bool generated = false;
+    QString resolvedExportPath;
+    const QString exportFilters = QStringLiteral("NC 文件 (*.nc);;GCode 文件 (*.gcode);;文本文件 (*.txt)");
 
-    if (!generator.generate(this, &errorMessage))
+    if (m_toolPanelWidget != nullptr && m_toolPanelWidget->useDxfFileNameEnabled())
+    {
+        if (m_currentDocumentPath.trimmed().isEmpty())
+        {
+            QMessageBox::warning(this, QStringLiteral("导出G代码失败"), QStringLiteral("当前没有可用的DXF文件名，无法自动使用dxf文件名导出。"));
+            return false;
+        }
+
+        const QString suggestedFileName = QFileInfo(m_currentDocumentPath).completeBaseName().trimmed() + QStringLiteral(".nc");
+
+        if (loadUseDefaultExportPath())
+        {
+            resolvedExportPath = defaultGCodeExportPathForCurrentDocument();
+        }
+        else
+        {
+            resolvedExportPath = QFileDialog::getSaveFileName
+            (
+                this,
+                QStringLiteral("导出 G 代码"),
+                suggestedFileName,
+                exportFilters
+            );
+
+            if (resolvedExportPath.isEmpty())
+            {
+                return false;
+            }
+        }
+
+        if (QFileInfo(resolvedExportPath).suffix().isEmpty())
+        {
+            resolvedExportPath.append(QStringLiteral(".nc"));
+        }
+
+        if (QFileInfo::exists(resolvedExportPath))
+        {
+            const QMessageBox::StandardButton overwrite = QMessageBox::question
+            (
+                this,
+                QStringLiteral("目标文件已存在"),
+                QStringLiteral("目标文件已存在：\n%1\n\n是否覆盖导出？").arg(QDir::toNativeSeparators(resolvedExportPath)),
+                QMessageBox::Yes | QMessageBox::No,
+                QMessageBox::No
+            );
+
+            if (overwrite != QMessageBox::Yes)
+            {
+                return false;
+            }
+        }
+
+        generated = generator.generateToFile(resolvedExportPath, &errorMessage);
+
+        if (generated)
+        {
+            saveLastGCodeExportPath(resolvedExportPath);
+        }
+    }
+    else
+    {
+        resolvedExportPath = QFileDialog::getSaveFileName
+        (
+            this,
+            QStringLiteral("导出 G 代码"),
+            loadUseDefaultExportPath() ? defaultGCodeExportPathForCurrentDocument() : QString(),
+            exportFilters
+        );
+
+        if (resolvedExportPath.isEmpty())
+        {
+            return false;
+        }
+
+        if (QFileInfo(resolvedExportPath).suffix().isEmpty())
+        {
+            resolvedExportPath.append(QStringLiteral(".nc"));
+        }
+
+        generated = generator.generateToFile(resolvedExportPath, &errorMessage);
+
+        if (generated)
+        {
+            saveLastGCodeExportPath(resolvedExportPath);
+        }
+    }
+
+    if (!generated)
     {
         if (!errorMessage.trimmed().isEmpty())
         {
@@ -4522,6 +4767,47 @@ bool Gcode_postprocessing_system::removeDuplicateEntities()
     return true;
 }
 
+bool Gcode_postprocessing_system::hasCompleteProcessOrderForExport(GGenerator::GenerationMode generationMode) const
+{
+    Q_UNUSED(generationMode);
+
+    int sortableCount = 0;
+    bool hasMissingOrder = false;
+    QSet<int> assignedOrders;
+
+    for (const std::unique_ptr<CadItem>& entity : m_document.m_entities)
+    {
+        const CadItem* item = entity.get();
+
+        if (item == nullptr || item->m_nativeEntity == nullptr || !isExportSortableEntityType(item->m_type))
+        {
+            continue;
+        }
+
+        ++sortableCount;
+
+        if (item->m_processOrder < 0)
+        {
+            hasMissingOrder = true;
+            continue;
+        }
+
+        if (assignedOrders.contains(item->m_processOrder))
+        {
+            return false;
+        }
+
+        assignedOrders.insert(item->m_processOrder);
+    }
+
+    if (sortableCount <= 1)
+    {
+        return true;
+    }
+
+    return !hasMissingOrder && assignedOrders.size() == sortableCount;
+}
+
 QString Gcode_postprocessing_system::generationModeDisplayName(GGenerator::GenerationMode generationMode) const
 {
     return generationMode == GGenerator::GenerationMode::Mode3D
@@ -4545,6 +4831,91 @@ Gcode_postprocessing_system::GCodeGenerationPreference Gcode_postprocessing_syst
     }
 
     return GCodeGenerationPreference::Auto;
+}
+
+bool Gcode_postprocessing_system::loadAutoDeduplicateOnExport() const
+{
+    QSettings settings(QStringLiteral("GCodePostProcessingSystem"), QStringLiteral("GCodePostProcessingSystem"));
+    return settings.value(QStringLiteral("gcode/autoDeduplicateOnExport"), false).toBool();
+}
+
+void Gcode_postprocessing_system::saveAutoDeduplicateOnExport(bool enabled) const
+{
+    QSettings settings(QStringLiteral("GCodePostProcessingSystem"), QStringLiteral("GCodePostProcessingSystem"));
+    settings.setValue(QStringLiteral("gcode/autoDeduplicateOnExport"), enabled);
+}
+
+bool Gcode_postprocessing_system::loadUseDxfFileNameOnExport() const
+{
+    QSettings settings(QStringLiteral("GCodePostProcessingSystem"), QStringLiteral("GCodePostProcessingSystem"));
+    return settings.value(QStringLiteral("gcode/useDxfFileNameOnExport"), false).toBool();
+}
+
+void Gcode_postprocessing_system::saveUseDxfFileNameOnExport(bool enabled) const
+{
+    QSettings settings(QStringLiteral("GCodePostProcessingSystem"), QStringLiteral("GCodePostProcessingSystem"));
+    settings.setValue(QStringLiteral("gcode/useDxfFileNameOnExport"), enabled);
+}
+
+bool Gcode_postprocessing_system::loadUseDefaultImportPath() const
+{
+    QSettings settings(QStringLiteral("GCodePostProcessingSystem"), QStringLiteral("GCodePostProcessingSystem"));
+    return settings.value(QStringLiteral("ui/useDefaultImportPath"), true).toBool();
+}
+
+void Gcode_postprocessing_system::saveUseDefaultImportPath(bool enabled) const
+{
+    QSettings settings(QStringLiteral("GCodePostProcessingSystem"), QStringLiteral("GCodePostProcessingSystem"));
+    settings.setValue(QStringLiteral("ui/useDefaultImportPath"), enabled);
+}
+
+bool Gcode_postprocessing_system::loadUseDefaultExportPath() const
+{
+    QSettings settings(QStringLiteral("GCodePostProcessingSystem"), QStringLiteral("GCodePostProcessingSystem"));
+    return settings.value(QStringLiteral("gcode/useDefaultExportPath"), true).toBool();
+}
+
+void Gcode_postprocessing_system::saveUseDefaultExportPath(bool enabled) const
+{
+    QSettings settings(QStringLiteral("GCodePostProcessingSystem"), QStringLiteral("GCodePostProcessingSystem"));
+    settings.setValue(QStringLiteral("gcode/useDefaultExportPath"), enabled);
+}
+
+QString Gcode_postprocessing_system::loadLastImportDirectory() const
+{
+    QSettings settings(QStringLiteral("GCodePostProcessingSystem"), QStringLiteral("GCodePostProcessingSystem"));
+    return settings.value(QStringLiteral("ui/lastImportDirectory"), QString()).toString().trimmed();
+}
+
+void Gcode_postprocessing_system::saveLastImportDirectory(const QString& filePath) const
+{
+    const QFileInfo fileInfo(filePath);
+    const QString directoryPath = fileInfo.exists() ? fileInfo.absolutePath() : QFileInfo(QDir::fromNativeSeparators(filePath)).absolutePath();
+
+    if (directoryPath.trimmed().isEmpty())
+    {
+        return;
+    }
+
+    QSettings settings(QStringLiteral("GCodePostProcessingSystem"), QStringLiteral("GCodePostProcessingSystem"));
+    settings.setValue(QStringLiteral("ui/lastImportDirectory"), directoryPath);
+}
+
+QString Gcode_postprocessing_system::loadLastGCodeExportPath() const
+{
+    QSettings settings(QStringLiteral("GCodePostProcessingSystem"), QStringLiteral("GCodePostProcessingSystem"));
+    return settings.value(QStringLiteral("gcode/lastExportPath"), QString()).toString().trimmed();
+}
+
+void Gcode_postprocessing_system::saveLastGCodeExportPath(const QString& filePath) const
+{
+    if (filePath.trimmed().isEmpty())
+    {
+        return;
+    }
+
+    QSettings settings(QStringLiteral("GCodePostProcessingSystem"), QStringLiteral("GCodePostProcessingSystem"));
+    settings.setValue(QStringLiteral("gcode/lastExportPath"), filePath.trimmed());
 }
 
 void Gcode_postprocessing_system::saveGenerationPreference(GCodeGenerationPreference preference) const
@@ -4629,6 +5000,10 @@ GGenerator::GenerationMode Gcode_postprocessing_system::resolveGenerationMode() 
 void Gcode_postprocessing_system::initializeToolPanel()
 {
     m_toolPanelWidget = new CadToolPanelWidget(this);
+    m_toolPanelWidget->setAutoDeduplicateEnabled(loadAutoDeduplicateOnExport());
+    m_toolPanelWidget->setUseDxfFileNameEnabled(loadUseDxfFileNameOnExport());
+    m_toolPanelWidget->setUseDefaultImportPathEnabled(loadUseDefaultImportPath());
+    m_toolPanelWidget->setUseDefaultExportPathEnabled(loadUseDefaultExportPath());
     ui->mainToolBar->setMovable(false);
     ui->mainToolBar->setFloatable(false);
     ui->mainToolBar->addWidget(m_toolPanelWidget);
@@ -4670,6 +5045,10 @@ void Gcode_postprocessing_system::initializeToolPanel()
     connect(m_toolPanelWidget, &CadToolPanelWidget::importFileRequested, this, [this]() { ui->action_File_Import_Dxf->trigger(); });
     connect(m_toolPanelWidget, &CadToolPanelWidget::exportGCodeRequested, this, [this]() { ui->action_File_Export_G->trigger(); });
     connect(m_toolPanelWidget, &CadToolPanelWidget::deduplicateRequested, this, [this]() { removeDuplicateEntities(); });
+    connect(m_toolPanelWidget, &CadToolPanelWidget::autoDeduplicateOptionChanged, this, [this](bool enabled) { saveAutoDeduplicateOnExport(enabled); });
+    connect(m_toolPanelWidget, &CadToolPanelWidget::useDxfFileNameOptionChanged, this, [this](bool enabled) { saveUseDxfFileNameOnExport(enabled); });
+    connect(m_toolPanelWidget, &CadToolPanelWidget::useDefaultImportPathOptionChanged, this, [this](bool enabled) { saveUseDefaultImportPath(enabled); });
+    connect(m_toolPanelWidget, &CadToolPanelWidget::useDefaultExportPathOptionChanged, this, [this](bool enabled) { saveUseDefaultExportPath(enabled); });
     connect(m_toolPanelWidget, &CadToolPanelWidget::sortKeepDirectionRequested, this, [this]() { ui->action_Sort_2D_Assign->trigger(); });
     connect(m_toolPanelWidget, &CadToolPanelWidget::smartSortRequested, this, [this]() { ui->action_Sort_2D_Smart->trigger(); });
     connect

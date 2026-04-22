@@ -47,6 +47,18 @@ private:
     void saveSnapOptionMask(quint32 mask) const;
     GCodeGenerationPreference loadGenerationPreference() const;
     void saveGenerationPreference(GCodeGenerationPreference preference) const;
+    bool loadAutoDeduplicateOnExport() const;
+    void saveAutoDeduplicateOnExport(bool enabled) const;
+    bool loadUseDxfFileNameOnExport() const;
+    void saveUseDxfFileNameOnExport(bool enabled) const;
+    bool loadUseDefaultImportPath() const;
+    void saveUseDefaultImportPath(bool enabled) const;
+    bool loadUseDefaultExportPath() const;
+    void saveUseDefaultExportPath(bool enabled) const;
+    QString loadLastImportDirectory() const;
+    void saveLastImportDirectory(const QString& filePath) const;
+    QString loadLastGCodeExportPath() const;
+    void saveLastGCodeExportPath(const QString& filePath) const;
     void applyGenerationPreference(GCodeGenerationPreference preference);
     GGenerator::GenerationMode resolveGenerationMode() const;
     void loadAvailableProfiles();
@@ -68,6 +80,9 @@ private:
     bool exportDxfDocument(bool safeMode = false);
     bool exportGCode();
     bool exportGCode(GGenerator::GenerationMode generationMode, const QString& modeDisplayName);
+    QString defaultImportPath() const;
+    QString defaultGCodeExportPathForCurrentDocument() const;
+    bool prepareDocumentForGCodeExport(GGenerator::GenerationMode generationMode);
     bool sortEntitiesByCurrentMode(bool smartSort);
     bool writeDocumentToDxf(const QString& filePath, bool updateCurrentPath, bool safeMode = false);
     QString ensureDxfSuffix(const QString& filePath) const;
@@ -85,6 +100,7 @@ private:
     bool smartSortEntities();
     bool sortEntitiesByCurrentDirection3D();
     bool smartSortEntities3D();
+    bool hasCompleteProcessOrderForExport(GGenerator::GenerationMode generationMode) const;
 
 private:
     Ui::Gcode_postprocessing_systemClass* ui = nullptr;

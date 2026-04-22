@@ -2,6 +2,7 @@
 
 #include "CadToolPanelWidget.h"
 
+#include <QCheckBox>
 #include <QComboBox>
 #include <QFormLayout>
 #include <QFrame>
@@ -445,6 +446,74 @@ void CadToolPanelWidget::setCurrentProfileSelection(const QString& profileId)
     m_updatingUi = false;
 }
 
+void CadToolPanelWidget::setAutoDeduplicateEnabled(bool enabled)
+{
+    if (m_autoDeduplicateCheckBox == nullptr)
+    {
+        return;
+    }
+
+    m_updatingUi = true;
+    m_autoDeduplicateCheckBox->setChecked(enabled);
+    m_updatingUi = false;
+}
+
+bool CadToolPanelWidget::autoDeduplicateEnabled() const
+{
+    return m_autoDeduplicateCheckBox != nullptr && m_autoDeduplicateCheckBox->isChecked();
+}
+
+void CadToolPanelWidget::setUseDxfFileNameEnabled(bool enabled)
+{
+    if (m_useDxfFileNameCheckBox == nullptr)
+    {
+        return;
+    }
+
+    m_updatingUi = true;
+    m_useDxfFileNameCheckBox->setChecked(enabled);
+    m_updatingUi = false;
+}
+
+bool CadToolPanelWidget::useDxfFileNameEnabled() const
+{
+    return m_useDxfFileNameCheckBox != nullptr && m_useDxfFileNameCheckBox->isChecked();
+}
+
+void CadToolPanelWidget::setUseDefaultImportPathEnabled(bool enabled)
+{
+    if (m_useDefaultImportPathCheckBox == nullptr)
+    {
+        return;
+    }
+
+    m_updatingUi = true;
+    m_useDefaultImportPathCheckBox->setChecked(enabled);
+    m_updatingUi = false;
+}
+
+bool CadToolPanelWidget::useDefaultImportPathEnabled() const
+{
+    return m_useDefaultImportPathCheckBox != nullptr && m_useDefaultImportPathCheckBox->isChecked();
+}
+
+void CadToolPanelWidget::setUseDefaultExportPathEnabled(bool enabled)
+{
+    if (m_useDefaultExportPathCheckBox == nullptr)
+    {
+        return;
+    }
+
+    m_updatingUi = true;
+    m_useDefaultExportPathCheckBox->setChecked(enabled);
+    m_updatingUi = false;
+}
+
+bool CadToolPanelWidget::useDefaultExportPathEnabled() const
+{
+    return m_useDefaultExportPathCheckBox != nullptr && m_useDefaultExportPathCheckBox->isChecked();
+}
+
 void CadToolPanelWidget::buildUi()
 {
     m_drawMoreMenu = new QMenu(this);
@@ -500,6 +569,16 @@ void CadToolPanelWidget::applyTheme()
             " font-size: 11px;"
             " font-weight: 500;"
             "}"
+            "QCheckBox[machiningOption=\"true\"] {"
+            " color: %2;"
+            " font-size: 10px;"
+            " spacing: 4px;"
+            " padding: 0px 3px 0px 0px;"
+            "}"
+            "QCheckBox[machiningOption=\"true\"]::indicator {"
+            " width: 13px;"
+            " height: 13px;"
+            "}"
             "QToolButton[panelLauncher=\"true\"] {"
             " border: none;"
             " padding: 0px;"
@@ -529,11 +608,12 @@ void CadToolPanelWidget::applyTheme()
             "}"
             "QToolButton[machiningButton=\"true\"] {"
             " border: 1px solid %4;"
-            " border-radius: 4px;"
-            " padding: 3px 12px;"
+            " border-radius: 2px;"
+            " padding: 3px 10px;"
             " background: %7;"
             " color: %1;"
             " font-size: 11px;"
+            " text-align: left;"
             "}"
             "QToolButton[machiningButton=\"true\"]:hover {"
             " border-color: %6;"
@@ -973,6 +1053,7 @@ QWidget* CadToolPanelWidget::buildMachiningPanel()
     QHBoxLayout* rootLayout = new QHBoxLayout(panel);
     rootLayout->setContentsMargins(4, 0, 4, 0);
     rootLayout->setSpacing(0);
+    rootLayout->setAlignment(Qt::AlignLeft | Qt::AlignTop);
 
     auto buildMachiningButton =
         [panel](const QString& text)
@@ -982,14 +1063,23 @@ QWidget* CadToolPanelWidget::buildMachiningPanel()
             button->setToolButtonStyle(Qt::ToolButtonTextOnly);
             button->setProperty("machiningButton", true);
             button->setMinimumHeight(30);
-            button->setMinimumWidth(88);
-            button->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+            button->setMinimumWidth(92);
+            button->setSizePolicy(QSizePolicy::MinimumExpanding, QSizePolicy::Fixed);
             return button;
         };
 
     m_importFileButton = buildMachiningButton(QStringLiteral("文件导入"));
     m_exportGCodeButton = buildMachiningButton(QStringLiteral("G代码导出"));
     m_deduplicateButton = buildMachiningButton(QStringLiteral("去重"));
+    m_autoDeduplicateCheckBox = new QCheckBox(QStringLiteral("自动"), panel);
+    m_autoDeduplicateCheckBox->setProperty("machiningOption", true);
+    m_autoDeduplicateCheckBox->setToolTip(QStringLiteral("勾选后，导出G代码前会先自动执行一次去重"));
+    m_useDxfFileNameCheckBox = new QCheckBox(QStringLiteral("使用dxf文件名"), panel);
+    m_useDxfFileNameCheckBox->setProperty("machiningOption", true);
+    m_useDxfFileNameCheckBox->setToolTip(QStringLiteral("勾选后，导出G代码时会优先使用当前DXF文件名作为输出文件名"));
+    m_useDefaultExportPathCheckBox = new QCheckBox(QStringLiteral("使用默认导出路径"), panel);
+    m_useDefaultExportPathCheckBox->setProperty("machiningOption", true);
+    m_useDefaultExportPathCheckBox->setToolTip(QStringLiteral("勾选后，导出G代码时会默认定位到上次导出目录"));
     m_sortKeepDirectionButton = buildMachiningButton(QStringLiteral("排序(保留方向)"));
     m_smartSortButton = buildMachiningButton(QStringLiteral("智能排序"));
     m_profileSettingsButton = buildMachiningButton(QStringLiteral("G代码配置"));
@@ -999,10 +1089,11 @@ QWidget* CadToolPanelWidget::buildMachiningPanel()
     importLayout->setContentsMargins(1, 6, 1, 2);
     importLayout->setHorizontalSpacing(6);
     importLayout->setVerticalSpacing(6);
-    importLayout->addWidget(m_importFileButton, 0, 0);
-    importLayout->addWidget(m_exportGCodeButton, 0, 1);
+    importLayout->addWidget(m_importFileButton, 0, 0, 1, 2);
+    importLayout->addWidget(m_exportGCodeButton, 1, 0, 1, 2);
     importLayout->setColumnStretch(0, 1);
     importLayout->setColumnStretch(1, 1);
+    importLayout->setAlignment(Qt::AlignLeft | Qt::AlignTop);
 
     QWidget* sortPanel = new QWidget(panel);
     QGridLayout* sortLayout = new QGridLayout(sortPanel);
@@ -1010,17 +1101,21 @@ QWidget* CadToolPanelWidget::buildMachiningPanel()
     sortLayout->setHorizontalSpacing(6);
     sortLayout->setVerticalSpacing(6);
     sortLayout->addWidget(m_sortKeepDirectionButton, 0, 0);
-    sortLayout->addWidget(m_smartSortButton, 0, 1);
+    sortLayout->addWidget(m_smartSortButton, 1, 0);
     sortLayout->setColumnStretch(0, 1);
-    sortLayout->setColumnStretch(1, 1);
+    sortLayout->setAlignment(Qt::AlignLeft | Qt::AlignTop);
 
     QWidget* featurePanel = new QWidget(panel);
     QGridLayout* featureLayout = new QGridLayout(featurePanel);
     featureLayout->setContentsMargins(1, 6, 1, 2);
     featureLayout->setHorizontalSpacing(6);
     featureLayout->setVerticalSpacing(6);
-    featureLayout->addWidget(m_deduplicateButton, 0, 0);
-    featureLayout->setColumnStretch(0, 1);
+    featureLayout->addWidget(m_autoDeduplicateCheckBox, 0, 0, Qt::AlignLeft | Qt::AlignVCenter);
+    featureLayout->addWidget(m_deduplicateButton, 0, 1);
+    featureLayout->addWidget(m_useDefaultExportPathCheckBox, 1, 0, 1, 2, Qt::AlignLeft | Qt::AlignVCenter);
+    featureLayout->addWidget(m_useDxfFileNameCheckBox, 2, 0, 1, 2, Qt::AlignLeft | Qt::AlignVCenter);
+    featureLayout->setColumnStretch(1, 1);
+    featureLayout->setAlignment(Qt::AlignLeft | Qt::AlignTop);
 
     QWidget* configPanel = new QWidget(panel);
     QVBoxLayout* configLayout = new QVBoxLayout(configPanel);
@@ -1070,19 +1165,41 @@ QWidget* CadToolPanelWidget::buildMachiningPanel()
     profileSettingsLayout->addWidget(m_profileSettingsButton);
     profileSettingsLayout->addStretch(1);
 
-    rootLayout->addWidget(buildPanelFrame(QStringLiteral("导入导出"), importPanel, 172, nullptr, true), 1);
+    rootLayout->addWidget(buildPanelFrame(QStringLiteral("导入导出"), importPanel, 182, nullptr, false), 0);
     rootLayout->addWidget(buildDivider(), 0, Qt::AlignLeft | Qt::AlignVCenter);
-    rootLayout->addWidget(buildPanelFrame(QStringLiteral("排序"), sortPanel, 184, nullptr, true), 1);
+    rootLayout->addWidget(buildPanelFrame(QStringLiteral("排序"), sortPanel, 132, nullptr, false), 0);
     rootLayout->addWidget(buildDivider(), 0, Qt::AlignLeft | Qt::AlignVCenter);
-    rootLayout->addWidget(buildPanelFrame(QStringLiteral("功能"), featurePanel, 108, nullptr, true), 1);
+    rootLayout->addWidget(buildPanelFrame(QStringLiteral("功能"), featurePanel, 148, nullptr, false), 0);
     rootLayout->addWidget(buildDivider(), 0, Qt::AlignLeft | Qt::AlignVCenter);
-    rootLayout->addWidget(buildPanelFrame(QStringLiteral("配置"), configPanel, 188, nullptr, true), 1);
+    rootLayout->addWidget(buildPanelFrame(QStringLiteral("配置"), configPanel, 196, nullptr, false), 0);
     rootLayout->addWidget(buildDivider(), 0, Qt::AlignLeft | Qt::AlignVCenter);
-    rootLayout->addWidget(buildPanelFrame(QStringLiteral("G代码配置"), profileSettingsPanel, 126, nullptr, true), 1);
+    rootLayout->addWidget(buildPanelFrame(QStringLiteral("G代码配置"), profileSettingsPanel, 128, nullptr, false), 0);
+    rootLayout->addStretch(1);
 
     connect(m_importFileButton, &QToolButton::clicked, this, [this]() { emit importFileRequested(); });
     connect(m_exportGCodeButton, &QToolButton::clicked, this, [this]() { emit exportGCodeRequested(); });
     connect(m_deduplicateButton, &QToolButton::clicked, this, [this]() { emit deduplicateRequested(); });
+    connect(m_autoDeduplicateCheckBox, &QCheckBox::toggled, this, [this](bool checked)
+    {
+        if (!m_updatingUi)
+        {
+            emit autoDeduplicateOptionChanged(checked);
+        }
+    });
+    connect(m_useDxfFileNameCheckBox, &QCheckBox::toggled, this, [this](bool checked)
+    {
+        if (!m_updatingUi)
+        {
+            emit useDxfFileNameOptionChanged(checked);
+        }
+    });
+    connect(m_useDefaultExportPathCheckBox, &QCheckBox::toggled, this, [this](bool checked)
+    {
+        if (!m_updatingUi)
+        {
+            emit useDefaultExportPathOptionChanged(checked);
+        }
+    });
     connect(m_sortKeepDirectionButton, &QToolButton::clicked, this, [this]() { emit sortKeepDirectionRequested(); });
     connect(m_smartSortButton, &QToolButton::clicked, this, [this]() { emit smartSortRequested(); });
     connect(m_profileSettingsButton, &QToolButton::clicked, this, [this]() { emit profileSettingsRequested(); });
