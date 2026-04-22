@@ -51,6 +51,8 @@ namespace
     constexpr double kSortConnectionEpsilon = 1.0e-6;
     constexpr double kNearGapPriorityDistance2D = 1.0;
     constexpr double kNearGapPriorityDistance3D = 1.0;
+    constexpr double kPreferredStartGapDistance2D = 1.0;
+    constexpr double kPreferredStartGapDistance3D = 1.0;
     constexpr double kDedupTolerance = 1.0e-6;
     const QVector3D kSortOrigin(0.0f, 0.0f, 0.0f);
     const QVector3D kRotaryInitialSortOrigin(0.0f, 0.0f, 50.0f);
@@ -96,6 +98,18 @@ namespace
     {
         QVector3D startPoint;
         QVector3D endPoint;
+    };
+
+    struct EndpointNode
+    {
+        size_t itemIndex = 0;
+        QVector3D point;
+    };
+
+    struct GapStartSelectionContext
+    {
+        std::vector<int> componentIds;
+        std::vector<std::vector<QVector3D>> preferredStartPointsByComponent;
     };
 
     std::vector<ProcessPathOption> buildPathOptionsForItem(const CadItem* item, SortStrategy strategy);
@@ -566,6 +580,21 @@ namespace
         const double dy = static_cast<double>(left.y()) - static_cast<double>(right.y());
         const double dz = static_cast<double>(left.z()) - static_cast<double>(right.z());
         return dx * dx + dy * dy + dz * dz;
+    }
+
+    bool isPointNearAnyPreferredStart(const QVector3D& point, const std::vector<QVector3D>& preferredPoints, double maxDistance)
+    {
+        const double maxDistanceSquared = maxDistance * maxDistance;
+
+        for (const QVector3D& preferredPoint : preferredPoints)
+        {
+            if (spatialDistanceSquared(point, preferredPoint) <= maxDistanceSquared)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     bool documentContainsThreeDimensionalGeometry(const CadDocument& document)
@@ -1919,6 +1948,309 @@ namespace
         return options;
     }
 
+    std::vector<EndpointNode> collectOpenEndpointNodes(const std::vector<CadItem*>& sortableItems)
+    {
+        std::vector<EndpointNode> endpoints;
+
+        for (size_t index = 0; index < sortableItems.size(); ++index)
+        {
+            const std::vector<ProcessPathOption> options = buildPathOptionsForItem(sortableItems[index], SortStrategy::KeepDirection);
+
+            if (options.empty())
+            {
+                continue;
+            }
+
+            const ProcessPathOption& option = options.front();
+
+            if (spatialDistanceSquared(option.startPoint, option.endPoint) <= kSortConnectionEpsilon * kSortConnectionEpsilon)
+            {
+                continue;
+            }
+
+            endpoints.push_back({ index, option.startPoint });
+            endpoints.push_back({ index, option.endPoint });
+        }
+
+        return endpoints;
+    }
+
+    std::vector<int> collectLooseEndpointIndices
+    (
+        const std::vector<EndpointNode>& endpoints,
+        double exactConnectionDistance
+    )
+    {
+        std::vector<int> looseIndices;
+        const double exactConnectionDistanceSquared = exactConnectionDistance * exactConnectionDistance;
+
+        for (size_t index = 0; index < endpoints.size(); ++index)
+        {
+            bool hasExactMatch = false;
+
+            for (size_t otherIndex = 0; otherIndex < endpoints.size(); ++otherIndex)
+            {
+                if (index == otherIndex || endpoints[index].itemIndex == endpoints[otherIndex].itemIndex)
+                {
+                    continue;
+                }
+
+                if (spatialDistanceSquared(endpoints[index].point, endpoints[otherIndex].point) <= exactConnectionDistanceSquared)
+                {
+                    hasExactMatch = true;
+                    break;
+                }
+            }
+
+            if (!hasExactMatch)
+            {
+                looseIndices.push_back(static_cast<int>(index));
+            }
+        }
+
+        return looseIndices;
+    }
+
+    std::vector<int> buildItemConnectivityComponents(const std::vector<CadItem*>& sortableItems)
+    {
+        const std::vector<EndpointNode> endpoints = collectOpenEndpointNodes(sortableItems);
+        std::vector<std::vector<size_t>> itemEndpointIndices(sortableItems.size());
+        const double exactConnectionDistanceSquared = kSortConnectionEpsilon * kSortConnectionEpsilon;
+
+        for (size_t endpointIndex = 0; endpointIndex < endpoints.size(); ++endpointIndex)
+        {
+            itemEndpointIndices[endpoints[endpointIndex].itemIndex].push_back(endpointIndex);
+        }
+
+        std::vector<std::vector<size_t>> adjacency(sortableItems.size());
+
+        for (size_t leftItem = 0; leftItem < itemEndpointIndices.size(); ++leftItem)
+        {
+            for (size_t rightItem = leftItem + 1; rightItem < itemEndpointIndices.size(); ++rightItem)
+            {
+                bool connected = false;
+
+                for (size_t leftEndpointIndex : itemEndpointIndices[leftItem])
+                {
+                    for (size_t rightEndpointIndex : itemEndpointIndices[rightItem])
+                    {
+                        if (spatialDistanceSquared(endpoints[leftEndpointIndex].point, endpoints[rightEndpointIndex].point) <= exactConnectionDistanceSquared)
+                        {
+                            connected = true;
+                            break;
+                        }
+                    }
+
+                    if (connected)
+                    {
+                        break;
+                    }
+                }
+
+                if (connected)
+                {
+                    adjacency[leftItem].push_back(rightItem);
+                    adjacency[rightItem].push_back(leftItem);
+                }
+            }
+        }
+
+        std::vector<int> componentIds(sortableItems.size(), -1);
+        int nextComponentId = 0;
+
+        for (size_t itemIndex = 0; itemIndex < sortableItems.size(); ++itemIndex)
+        {
+            if (componentIds[itemIndex] >= 0)
+            {
+                continue;
+            }
+
+            std::vector<size_t> stack = { itemIndex };
+            componentIds[itemIndex] = nextComponentId;
+
+            while (!stack.empty())
+            {
+                const size_t currentItem = stack.back();
+                stack.pop_back();
+
+                for (size_t neighborItem : adjacency[currentItem])
+                {
+                    if (componentIds[neighborItem] >= 0)
+                    {
+                        continue;
+                    }
+
+                    componentIds[neighborItem] = nextComponentId;
+                    stack.push_back(neighborItem);
+                }
+            }
+
+            ++nextComponentId;
+        }
+
+        return componentIds;
+    }
+
+    std::vector<std::vector<QVector3D>> detectPreferredGapStartPointsByComponent
+    (
+        const std::vector<CadItem*>& sortableItems,
+        const std::vector<int>& componentIds,
+        double preferredGapDistance
+    )
+    {
+        const std::vector<EndpointNode> endpoints = collectOpenEndpointNodes(sortableItems);
+        const std::vector<int> looseIndices = collectLooseEndpointIndices(endpoints, kSortConnectionEpsilon);
+        const int componentCount = componentIds.empty()
+            ? 0
+            : (*std::max_element(componentIds.begin(), componentIds.end()) + 1);
+        std::vector<std::vector<QVector3D>> preferredPointsByComponent(static_cast<size_t>(std::max(0, componentCount)));
+
+        if (looseIndices.size() < 2 || componentCount <= 0)
+        {
+            return preferredPointsByComponent;
+        }
+
+        std::vector<int> nearestLooseIndex(looseIndices.size(), -1);
+        std::vector<double> nearestLooseDistance(looseIndices.size(), std::numeric_limits<double>::max());
+
+        for (size_t localIndex = 0; localIndex < looseIndices.size(); ++localIndex)
+        {
+            const EndpointNode& node = endpoints[static_cast<size_t>(looseIndices[localIndex])];
+            const int componentId = componentIds[node.itemIndex];
+
+            if (componentId < 0)
+            {
+                continue;
+            }
+
+            for (size_t otherLocalIndex = 0; otherLocalIndex < looseIndices.size(); ++otherLocalIndex)
+            {
+                if (localIndex == otherLocalIndex)
+                {
+                    continue;
+                }
+
+                const EndpointNode& otherNode = endpoints[static_cast<size_t>(looseIndices[otherLocalIndex])];
+
+                if (node.itemIndex == otherNode.itemIndex)
+                {
+                    continue;
+                }
+
+                if (componentIds[otherNode.itemIndex] != componentId)
+                {
+                    continue;
+                }
+
+                const double distance = std::sqrt(spatialDistanceSquared(node.point, otherNode.point));
+
+                const bool shouldReplace = nearestLooseIndex[localIndex] < 0
+                    || distance < nearestLooseDistance[localIndex] - kSortEpsilon
+                    || (std::abs(distance - nearestLooseDistance[localIndex]) <= kSortEpsilon
+                        && isPointLexicographicallyLess
+                        (
+                            otherNode.point,
+                            endpoints[static_cast<size_t>(looseIndices[static_cast<size_t>(nearestLooseIndex[localIndex])])].point
+                        ));
+
+                if (shouldReplace)
+                {
+                    nearestLooseDistance[localIndex] = distance;
+                    nearestLooseIndex[localIndex] = static_cast<int>(otherLocalIndex);
+                }
+            }
+        }
+
+        std::vector<QVector3D> preferredPoints;
+
+        for (size_t localIndex = 0; localIndex < looseIndices.size(); ++localIndex)
+        {
+            const int nearestIndex = nearestLooseIndex[localIndex];
+            const EndpointNode& firstNode = endpoints[static_cast<size_t>(looseIndices[localIndex])];
+            const int componentId = componentIds[firstNode.itemIndex];
+
+            if (nearestIndex < 0
+                || componentId < 0
+                || nearestLooseDistance[localIndex] > preferredGapDistance + kSortEpsilon
+                || nearestLooseIndex[static_cast<size_t>(nearestIndex)] != static_cast<int>(localIndex))
+            {
+                continue;
+            }
+
+            std::vector<QVector3D>& preferredPoints = preferredPointsByComponent[static_cast<size_t>(componentId)];
+            const QVector3D firstPoint = firstNode.point;
+            const QVector3D secondPoint = endpoints[static_cast<size_t>(looseIndices[static_cast<size_t>(nearestIndex)])].point;
+
+            if (!isPointNearAnyPreferredStart(firstPoint, preferredPoints, kSortConnectionEpsilon))
+            {
+                preferredPoints.push_back(firstPoint);
+            }
+
+            if (!isPointNearAnyPreferredStart(secondPoint, preferredPoints, kSortConnectionEpsilon))
+            {
+                preferredPoints.push_back(secondPoint);
+            }
+        }
+
+        return preferredPointsByComponent;
+    }
+
+    std::vector<bool> buildVisitedComponentMask(const std::vector<bool>& visited, const std::vector<int>& componentIds)
+    {
+        const int componentCount = componentIds.empty()
+            ? 0
+            : (*std::max_element(componentIds.begin(), componentIds.end()) + 1);
+        std::vector<bool> visitedComponents(static_cast<size_t>(std::max(0, componentCount)), false);
+
+        for (size_t itemIndex = 0; itemIndex < visited.size() && itemIndex < componentIds.size(); ++itemIndex)
+        {
+            const int componentId = componentIds[itemIndex];
+
+            if (visited[itemIndex] && componentId >= 0)
+            {
+                visitedComponents[static_cast<size_t>(componentId)] = true;
+            }
+        }
+
+        return visitedComponents;
+    }
+
+    bool hasRemainingUnvisitedInComponent
+    (
+        const std::vector<bool>& visited,
+        const std::vector<int>& componentIds,
+        int componentId
+    )
+    {
+        if (componentId < 0)
+        {
+            return false;
+        }
+
+        for (size_t itemIndex = 0; itemIndex < visited.size() && itemIndex < componentIds.size(); ++itemIndex)
+        {
+            if (!visited[itemIndex] && componentIds[itemIndex] == componentId)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    GapStartSelectionContext buildGapStartSelectionContext(const std::vector<CadItem*>& sortableItems, double preferredGapDistance)
+    {
+        GapStartSelectionContext context;
+        context.componentIds = buildItemConnectivityComponents(sortableItems);
+        context.preferredStartPointsByComponent = detectPreferredGapStartPointsByComponent
+        (
+            sortableItems,
+            context.componentIds,
+            preferredGapDistance
+        );
+        return context;
+    }
+
     bool tryFindNearestNextStartPoint
     (
         const std::vector<CadItem*>& sortableItems,
@@ -2027,13 +2359,20 @@ namespace
         const std::vector<CadItem*>& sortableItems,
         const std::vector<bool>& visited,
         const std::vector<ProcessConnectionSegment>& processedSegments,
+        const GapStartSelectionContext& gapStartContext,
         SortStrategy strategy,
+        int currentComponentId,
+        int restrictedComponentId,
+        bool preferPreferredGapStart,
         bool hasCurrentEndPoint,
         const QVector3D& currentEndPoint,
         const QVector3D& sweepDirection
     )
     {
         SortCandidate bestCandidate;
+        const std::vector<bool> visitedComponents = buildVisitedComponentMask(visited, gapStartContext.componentIds);
+        const bool mustStayInCurrentComponent = hasCurrentEndPoint
+            && hasRemainingUnvisitedInComponent(visited, gapStartContext.componentIds, currentComponentId);
         const QVector3D referencePoint = hasCurrentEndPoint ? currentEndPoint : kSortOrigin;
         const QVector3D normalizedSweepDirection = normalizeOrZero(sweepDirection);
         const double referenceProgress = static_cast<double>(QVector3D::dotProduct(referencePoint, normalizedSweepDirection));
@@ -2049,6 +2388,25 @@ namespace
 
             for (const ProcessPathOption& option : options)
             {
+                const int componentId = index < gapStartContext.componentIds.size()
+                    ? gapStartContext.componentIds[index]
+                    : -1;
+
+                if (mustStayInCurrentComponent && componentId != currentComponentId)
+                {
+                    continue;
+                }
+
+                if (restrictedComponentId >= 0 && componentId != restrictedComponentId)
+                {
+                    continue;
+                }
+
+                const std::vector<QVector3D> emptyPreferredPoints;
+                const std::vector<QVector3D>& componentPreferredPoints =
+                    (componentId >= 0 && static_cast<size_t>(componentId) < gapStartContext.preferredStartPointsByComponent.size())
+                    ? gapStartContext.preferredStartPointsByComponent[static_cast<size_t>(componentId)]
+                    : emptyPreferredPoints;
                 const double connectionDistance = computeClosestConnectionDistance2D(processedSegments, option.startPoint, option.endPoint);
                 const bool directlyConnected = connectionDistance <= kSortConnectionEpsilon;
                 const bool bestDirectlyConnected = bestCandidate.connectionDistance <= kSortConnectionEpsilon;
@@ -2058,6 +2416,22 @@ namespace
                     : entryDistance;
                 const bool nearCurrentGap = hasCurrentEndPoint && currentGapDistance <= kNearGapPriorityDistance2D;
                 const bool bestNearCurrentGap = hasCurrentEndPoint && bestCandidate.gapDistance <= kNearGapPriorityDistance2D;
+                const bool preferredGapStart = preferPreferredGapStart
+                    && componentId == restrictedComponentId
+                    && isPointNearAnyPreferredStart(option.startPoint, componentPreferredPoints, kPreferredStartGapDistance2D);
+                const bool bestPreferredGapStart =
+                    preferPreferredGapStart
+                    && restrictedComponentId >= 0
+                    && bestCandidate.index >= 0
+                    && static_cast<size_t>(bestCandidate.index) < gapStartContext.componentIds.size()
+                    && gapStartContext.componentIds[static_cast<size_t>(bestCandidate.index)] == restrictedComponentId
+                    && static_cast<size_t>(restrictedComponentId) < gapStartContext.preferredStartPointsByComponent.size()
+                    && isPointNearAnyPreferredStart
+                    (
+                        bestCandidate.startPoint,
+                        gapStartContext.preferredStartPointsByComponent[static_cast<size_t>(restrictedComponentId)],
+                        kPreferredStartGapDistance2D
+                    );
                 QVector3D nextStartPoint;
                 const bool hasNextStartPoint = tryFindNearestNextStartPoint
                 (
@@ -2085,10 +2459,19 @@ namespace
                     + continuityScale * kDirectionPenaltyWeight * continuityPenalty;
 
                 const bool shouldReplace = bestCandidate.index < 0
+                    || (preferPreferredGapStart && preferredGapStart && !bestPreferredGapStart)
+                    || (preferPreferredGapStart
+                        && preferredGapStart == bestPreferredGapStart
+                        && (entryDistance < bestCandidate.priorityDistance - kSortEpsilon
+                            || (std::abs(entryDistance - bestCandidate.priorityDistance) <= kSortEpsilon
+                                && (optionScore < bestCandidate.score - kSortEpsilon
+                                    || (std::abs(optionScore - bestCandidate.score) <= kSortEpsilon
+                                        && isPointLexicographicallyLess(option.startPoint, bestCandidate.startPoint))))))
                     || (nearCurrentGap && !bestNearCurrentGap)
                     || (directlyConnected && !bestDirectlyConnected)
                     || (nearCurrentGap == bestNearCurrentGap
                         && directlyConnected == bestDirectlyConnected
+                        && (!preferPreferredGapStart || preferredGapStart == bestPreferredGapStart)
                         && (connectionDistance < bestCandidate.connectionDistance - kSortEpsilon
                             || (std::abs(connectionDistance - bestCandidate.connectionDistance) <= kSortEpsilon
                                 && (optionScore < bestCandidate.score - kSortEpsilon
@@ -2123,7 +2506,11 @@ namespace
         const std::vector<CadItem*>& sortableItems,
         const std::vector<bool>& visited,
         const std::vector<ProcessConnectionSegment>& processedSegments,
+        const GapStartSelectionContext& gapStartContext,
         SortStrategy strategy,
+        int currentComponentId,
+        int restrictedComponentId,
+        bool preferPreferredGapStart,
         bool hasCurrentEndPoint,
         const QVector3D& currentEndPoint,
         const QVector3D& sweepDirection,
@@ -2131,6 +2518,9 @@ namespace
     )
     {
         SortCandidate bestCandidate;
+        const std::vector<bool> visitedComponents = buildVisitedComponentMask(visited, gapStartContext.componentIds);
+        const bool mustStayInCurrentComponent = hasCurrentEndPoint
+            && hasRemainingUnvisitedInComponent(visited, gapStartContext.componentIds, currentComponentId);
         const QVector3D referencePoint = hasCurrentEndPoint ? currentEndPoint : kRotaryInitialSortOrigin;
         RotarySortPoint referenceRotaryPoint;
         const bool hasReferenceRotaryPoint = tryBuildRotarySortPoint(referencePoint, config, referenceRotaryPoint);
@@ -2151,6 +2541,25 @@ namespace
 
             for (const ProcessPathOption& option : options)
             {
+                const int componentId = index < gapStartContext.componentIds.size()
+                    ? gapStartContext.componentIds[index]
+                    : -1;
+
+                if (mustStayInCurrentComponent && componentId != currentComponentId)
+                {
+                    continue;
+                }
+
+                if (restrictedComponentId >= 0 && componentId != restrictedComponentId)
+                {
+                    continue;
+                }
+
+                const std::vector<QVector3D> emptyPreferredPoints;
+                const std::vector<QVector3D>& componentPreferredPoints =
+                    (componentId >= 0 && static_cast<size_t>(componentId) < gapStartContext.preferredStartPointsByComponent.size())
+                    ? gapStartContext.preferredStartPointsByComponent[static_cast<size_t>(componentId)]
+                    : emptyPreferredPoints;
                 const double connectionDistance = computeClosestConnectionDistance3D(processedSegments, option.startPoint, option.endPoint);
                 const bool directlyConnected = connectionDistance <= kSortConnectionEpsilon;
                 const bool bestDirectlyConnected = bestCandidate.connectionDistance <= kSortConnectionEpsilon;
@@ -2161,6 +2570,22 @@ namespace
                     : std::sqrt(spatialDistanceSquared(option.startPoint, kRotaryInitialSortOrigin));
                 const bool nearCurrentGap = hasCurrentEndPoint && currentGapDistance <= kNearGapPriorityDistance3D;
                 const bool bestNearCurrentGap = hasCurrentEndPoint && bestCandidate.gapDistance <= kNearGapPriorityDistance3D;
+                const bool preferredGapStart = preferPreferredGapStart
+                    && componentId == restrictedComponentId
+                    && isPointNearAnyPreferredStart(option.startPoint, componentPreferredPoints, kPreferredStartGapDistance3D);
+                const bool bestPreferredGapStart =
+                    preferPreferredGapStart
+                    && restrictedComponentId >= 0
+                    && bestCandidate.index >= 0
+                    && static_cast<size_t>(bestCandidate.index) < gapStartContext.componentIds.size()
+                    && gapStartContext.componentIds[static_cast<size_t>(bestCandidate.index)] == restrictedComponentId
+                    && static_cast<size_t>(restrictedComponentId) < gapStartContext.preferredStartPointsByComponent.size()
+                    && isPointNearAnyPreferredStart
+                    (
+                        bestCandidate.startPoint,
+                        gapStartContext.preferredStartPointsByComponent[static_cast<size_t>(restrictedComponentId)],
+                        kPreferredStartGapDistance3D
+                    );
                 QVector3D nextStartPoint;
                 const bool hasNextStartPoint = tryFindNearestNextStartPoint3D
                 (
@@ -2190,10 +2615,19 @@ namespace
                     + continuityScale * kRotaryDirectionPenaltyWeight * continuityPenalty;
 
                 const bool shouldReplace = bestCandidate.index < 0
+                    || (preferPreferredGapStart && preferredGapStart && !bestPreferredGapStart)
+                    || (preferPreferredGapStart
+                        && preferredGapStart == bestPreferredGapStart
+                        && (entryDistance < bestCandidate.priorityDistance - kSortEpsilon
+                            || (std::abs(entryDistance - bestCandidate.priorityDistance) <= kSortEpsilon
+                                && (optionScore < bestCandidate.score - kSortEpsilon
+                                    || (std::abs(optionScore - bestCandidate.score) <= kSortEpsilon
+                                        && isPointLexicographicallyLess(option.startPoint, bestCandidate.startPoint))))))
                     || (nearCurrentGap && !bestNearCurrentGap)
                     || (directlyConnected && !bestDirectlyConnected)
                     || (nearCurrentGap == bestNearCurrentGap
                         && directlyConnected == bestDirectlyConnected
+                        && (!preferPreferredGapStart || preferredGapStart == bestPreferredGapStart)
                         && (connectionDistance < bestCandidate.connectionDistance - kSortEpsilon
                             || (std::abs(connectionDistance - bestCandidate.connectionDistance) <= kSortEpsilon
                                 && (optionScore < bestCandidate.score - kSortEpsilon
@@ -3115,6 +3549,7 @@ bool Gcode_postprocessing_system::sortEntitiesByCurrentDirection()
     }
 
     const QVector3D sweepDirection = computeSweepDirection(sortableItems);
+    const GapStartSelectionContext gapStartContext = buildGapStartSelectionContext(sortableItems, kPreferredStartGapDistance2D);
     std::vector<CadEditer::ProcessStateUpdate> processUpdates;
     std::vector<ProcessConnectionSegment> processedSegments;
     std::vector<bool> visited(sortableItems.size(), false);
@@ -3123,20 +3558,55 @@ bool Gcode_postprocessing_system::sortEntitiesByCurrentDirection()
     processedSegments.reserve(sortableItems.size());
 
     bool hasCurrentEndPoint = false;
+    int currentComponentId = -1;
     QVector3D currentEndPoint;
 
     for (size_t order = 0; order < sortableItems.size(); ++order)
     {
-        const SortCandidate bestCandidate = chooseNext2DSortCandidate
+        SortCandidate bestCandidate = chooseNext2DSortCandidate
         (
             sortableItems,
             visited,
             processedSegments,
+            gapStartContext,
             SortStrategy::KeepDirection,
+            currentComponentId,
+            -1,
+            false,
             hasCurrentEndPoint,
             currentEndPoint,
             sweepDirection
         );
+
+        const std::vector<bool> visitedComponents = buildVisitedComponentMask(visited, gapStartContext.componentIds);
+        const int selectedComponentId =
+            bestCandidate.index >= 0 && static_cast<size_t>(bestCandidate.index) < gapStartContext.componentIds.size()
+            ? gapStartContext.componentIds[static_cast<size_t>(bestCandidate.index)]
+            : -1;
+        const bool enteringFreshPreferredComponent =
+            selectedComponentId >= 0
+            && static_cast<size_t>(selectedComponentId) < visitedComponents.size()
+            && !visitedComponents[static_cast<size_t>(selectedComponentId)]
+            && static_cast<size_t>(selectedComponentId) < gapStartContext.preferredStartPointsByComponent.size()
+            && !gapStartContext.preferredStartPointsByComponent[static_cast<size_t>(selectedComponentId)].empty();
+
+        if (enteringFreshPreferredComponent)
+        {
+            bestCandidate = chooseNext2DSortCandidate
+            (
+                sortableItems,
+                visited,
+                processedSegments,
+                gapStartContext,
+                SortStrategy::KeepDirection,
+                currentComponentId,
+                selectedComponentId,
+                true,
+                hasCurrentEndPoint,
+                currentEndPoint,
+                sweepDirection
+            );
+        }
 
         if (bestCandidate.index < 0)
         {
@@ -3154,6 +3624,10 @@ bool Gcode_postprocessing_system::sortEntitiesByCurrentDirection()
             sortableItems[static_cast<size_t>(bestCandidate.index)]->m_processStartParameter
         });
         hasCurrentEndPoint = true;
+        currentComponentId =
+            static_cast<size_t>(bestCandidate.index) < gapStartContext.componentIds.size()
+            ? gapStartContext.componentIds[static_cast<size_t>(bestCandidate.index)]
+            : -1;
         currentEndPoint = bestCandidate.endPoint;
         processedSegments.push_back({ bestCandidate.startPoint, bestCandidate.endPoint });
     }
@@ -3237,6 +3711,7 @@ bool Gcode_postprocessing_system::smartSortEntities()
     }
 
     const QVector3D sweepDirection = computeSweepDirection(sortableItems);
+    const GapStartSelectionContext gapStartContext = buildGapStartSelectionContext(sortableItems, kPreferredStartGapDistance2D);
     std::vector<CadEditer::ProcessStateUpdate> processUpdates;
     std::vector<ProcessConnectionSegment> processedSegments;
     std::vector<bool> visited(sortableItems.size(), false);
@@ -3245,20 +3720,55 @@ bool Gcode_postprocessing_system::smartSortEntities()
     processedSegments.reserve(sortableItems.size());
 
     bool hasCurrentEndPoint = false;
+    int currentComponentId = -1;
     QVector3D currentEndPoint;
 
     for (size_t order = 0; order < sortableItems.size(); ++order)
     {
-        const SortCandidate bestCandidate = chooseNext2DSortCandidate
+        SortCandidate bestCandidate = chooseNext2DSortCandidate
         (
             sortableItems,
             visited,
             processedSegments,
+            gapStartContext,
             SortStrategy::Smart,
+            currentComponentId,
+            -1,
+            false,
             hasCurrentEndPoint,
             currentEndPoint,
             sweepDirection
         );
+
+        const std::vector<bool> visitedComponents = buildVisitedComponentMask(visited, gapStartContext.componentIds);
+        const int selectedComponentId =
+            bestCandidate.index >= 0 && static_cast<size_t>(bestCandidate.index) < gapStartContext.componentIds.size()
+            ? gapStartContext.componentIds[static_cast<size_t>(bestCandidate.index)]
+            : -1;
+        const bool enteringFreshPreferredComponent =
+            selectedComponentId >= 0
+            && static_cast<size_t>(selectedComponentId) < visitedComponents.size()
+            && !visitedComponents[static_cast<size_t>(selectedComponentId)]
+            && static_cast<size_t>(selectedComponentId) < gapStartContext.preferredStartPointsByComponent.size()
+            && !gapStartContext.preferredStartPointsByComponent[static_cast<size_t>(selectedComponentId)].empty();
+
+        if (enteringFreshPreferredComponent)
+        {
+            bestCandidate = chooseNext2DSortCandidate
+            (
+                sortableItems,
+                visited,
+                processedSegments,
+                gapStartContext,
+                SortStrategy::Smart,
+                currentComponentId,
+                selectedComponentId,
+                true,
+                hasCurrentEndPoint,
+                currentEndPoint,
+                sweepDirection
+            );
+        }
 
         if (bestCandidate.index < 0)
         {
@@ -3276,6 +3786,10 @@ bool Gcode_postprocessing_system::smartSortEntities()
             bestCandidate.processStartParameter
         });
         hasCurrentEndPoint = true;
+        currentComponentId =
+            static_cast<size_t>(bestCandidate.index) < gapStartContext.componentIds.size()
+            ? gapStartContext.componentIds[static_cast<size_t>(bestCandidate.index)]
+            : -1;
         currentEndPoint = bestCandidate.endPoint;
         processedSegments.push_back({ bestCandidate.startPoint, bestCandidate.endPoint });
     }
@@ -3336,6 +3850,7 @@ bool Gcode_postprocessing_system::sortEntitiesByCurrentDirection3D()
 
     const GProfileRotaryAxisConfig& rotaryAxisConfig = m_activeProfile.rotaryAxisConfig();
     const QVector3D sweepDirection = computeRotarySweepDirection(sortableItems, rotaryAxisConfig);
+    const GapStartSelectionContext gapStartContext = buildGapStartSelectionContext(sortableItems, kPreferredStartGapDistance3D);
     std::vector<CadEditer::ProcessStateUpdate> processUpdates;
     std::vector<ProcessConnectionSegment> processedSegments;
     std::vector<bool> visited(sortableItems.size(), false);
@@ -3344,21 +3859,57 @@ bool Gcode_postprocessing_system::sortEntitiesByCurrentDirection3D()
     processedSegments.reserve(sortableItems.size());
 
     bool hasCurrentEndPoint = false;
+    int currentComponentId = -1;
     QVector3D currentEndPoint;
 
     for (size_t order = 0; order < sortableItems.size(); ++order)
     {
-        const SortCandidate bestCandidate = chooseNext3DSortCandidate
+        SortCandidate bestCandidate = chooseNext3DSortCandidate
         (
             sortableItems,
             visited,
             processedSegments,
+            gapStartContext,
             SortStrategy::KeepDirection,
+            currentComponentId,
+            -1,
+            false,
             hasCurrentEndPoint,
             currentEndPoint,
             sweepDirection,
             rotaryAxisConfig
         );
+
+        const std::vector<bool> visitedComponents = buildVisitedComponentMask(visited, gapStartContext.componentIds);
+        const int selectedComponentId =
+            bestCandidate.index >= 0 && static_cast<size_t>(bestCandidate.index) < gapStartContext.componentIds.size()
+            ? gapStartContext.componentIds[static_cast<size_t>(bestCandidate.index)]
+            : -1;
+        const bool enteringFreshPreferredComponent =
+            selectedComponentId >= 0
+            && static_cast<size_t>(selectedComponentId) < visitedComponents.size()
+            && !visitedComponents[static_cast<size_t>(selectedComponentId)]
+            && static_cast<size_t>(selectedComponentId) < gapStartContext.preferredStartPointsByComponent.size()
+            && !gapStartContext.preferredStartPointsByComponent[static_cast<size_t>(selectedComponentId)].empty();
+
+        if (enteringFreshPreferredComponent)
+        {
+            bestCandidate = chooseNext3DSortCandidate
+            (
+                sortableItems,
+                visited,
+                processedSegments,
+                gapStartContext,
+                SortStrategy::KeepDirection,
+                currentComponentId,
+                selectedComponentId,
+                true,
+                hasCurrentEndPoint,
+                currentEndPoint,
+                sweepDirection,
+                rotaryAxisConfig
+            );
+        }
 
         if (bestCandidate.index < 0)
         {
@@ -3376,6 +3927,10 @@ bool Gcode_postprocessing_system::sortEntitiesByCurrentDirection3D()
             sortableItems[static_cast<size_t>(bestCandidate.index)]->m_processStartParameter
         });
         hasCurrentEndPoint = true;
+        currentComponentId =
+            static_cast<size_t>(bestCandidate.index) < gapStartContext.componentIds.size()
+            ? gapStartContext.componentIds[static_cast<size_t>(bestCandidate.index)]
+            : -1;
         currentEndPoint = bestCandidate.endPoint;
         processedSegments.push_back({ bestCandidate.startPoint, bestCandidate.endPoint });
     }
@@ -3436,6 +3991,7 @@ bool Gcode_postprocessing_system::smartSortEntities3D()
 
     const GProfileRotaryAxisConfig& rotaryAxisConfig = m_activeProfile.rotaryAxisConfig();
     const QVector3D sweepDirection = computeRotarySweepDirection(sortableItems, rotaryAxisConfig);
+    const GapStartSelectionContext gapStartContext = buildGapStartSelectionContext(sortableItems, kPreferredStartGapDistance3D);
     std::vector<CadEditer::ProcessStateUpdate> processUpdates;
     std::vector<ProcessConnectionSegment> processedSegments;
     std::vector<bool> visited(sortableItems.size(), false);
@@ -3444,21 +4000,57 @@ bool Gcode_postprocessing_system::smartSortEntities3D()
     processedSegments.reserve(sortableItems.size());
 
     bool hasCurrentEndPoint = false;
+    int currentComponentId = -1;
     QVector3D currentEndPoint;
 
     for (size_t order = 0; order < sortableItems.size(); ++order)
     {
-        const SortCandidate bestCandidate = chooseNext3DSortCandidate
+        SortCandidate bestCandidate = chooseNext3DSortCandidate
         (
             sortableItems,
             visited,
             processedSegments,
+            gapStartContext,
             SortStrategy::Smart,
+            currentComponentId,
+            -1,
+            false,
             hasCurrentEndPoint,
             currentEndPoint,
             sweepDirection,
             rotaryAxisConfig
         );
+
+        const std::vector<bool> visitedComponents = buildVisitedComponentMask(visited, gapStartContext.componentIds);
+        const int selectedComponentId =
+            bestCandidate.index >= 0 && static_cast<size_t>(bestCandidate.index) < gapStartContext.componentIds.size()
+            ? gapStartContext.componentIds[static_cast<size_t>(bestCandidate.index)]
+            : -1;
+        const bool enteringFreshPreferredComponent =
+            selectedComponentId >= 0
+            && static_cast<size_t>(selectedComponentId) < visitedComponents.size()
+            && !visitedComponents[static_cast<size_t>(selectedComponentId)]
+            && static_cast<size_t>(selectedComponentId) < gapStartContext.preferredStartPointsByComponent.size()
+            && !gapStartContext.preferredStartPointsByComponent[static_cast<size_t>(selectedComponentId)].empty();
+
+        if (enteringFreshPreferredComponent)
+        {
+            bestCandidate = chooseNext3DSortCandidate
+            (
+                sortableItems,
+                visited,
+                processedSegments,
+                gapStartContext,
+                SortStrategy::Smart,
+                currentComponentId,
+                selectedComponentId,
+                true,
+                hasCurrentEndPoint,
+                currentEndPoint,
+                sweepDirection,
+                rotaryAxisConfig
+            );
+        }
 
         if (bestCandidate.index < 0)
         {
@@ -3476,6 +4068,10 @@ bool Gcode_postprocessing_system::smartSortEntities3D()
             bestCandidate.processStartParameter
         });
         hasCurrentEndPoint = true;
+        currentComponentId =
+            static_cast<size_t>(bestCandidate.index) < gapStartContext.componentIds.size()
+            ? gapStartContext.componentIds[static_cast<size_t>(bestCandidate.index)]
+            : -1;
         currentEndPoint = bestCandidate.endPoint;
         processedSegments.push_back({ bestCandidate.startPoint, bestCandidate.endPoint });
     }
