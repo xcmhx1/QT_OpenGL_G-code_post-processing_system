@@ -86,6 +86,7 @@ private:
     QPlainTextEdit* m_fileHeaderEdit = nullptr;
     QPlainTextEdit* m_fileFooterEdit = nullptr;
     QPlainTextEdit* m_fileCommentEdit = nullptr;
+    QComboBox* m_rotaryCollisionCenterLineModeComboBox = nullptr;
     QDoubleSpinBox* m_rotaryClearanceSpinBox = nullptr;
     QDoubleSpinBox* m_rotaryPlaneZOffsetSpinBox = nullptr;
 

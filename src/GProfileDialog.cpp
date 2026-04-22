@@ -405,6 +405,19 @@ void GProfileDialog::buildUi()
     rotaryFormLayout->setContentsMargins(0, 0, 0, 0);
     rotaryFormLayout->setSpacing(8);
 
+    m_rotaryCollisionCenterLineModeComboBox = new QComboBox(rotaryTab);
+    m_rotaryCollisionCenterLineModeComboBox->addItem
+    (
+        QStringLiteral("X轴（默认）"),
+        static_cast<int>(CollisionReferenceCenterLineMode::XAxis)
+    );
+    m_rotaryCollisionCenterLineModeComboBox->addItem
+    (
+        QStringLiteral("图元包围盒中心线"),
+        static_cast<int>(CollisionReferenceCenterLineMode::JudgeCenterLine)
+    );
+    rotaryFormLayout->addRow(QStringLiteral("安全加工中心线"), m_rotaryCollisionCenterLineModeComboBox);
+
     m_rotaryClearanceSpinBox = new QDoubleSpinBox(rotaryTab);
     m_rotaryClearanceSpinBox->setDecimals(3);
     m_rotaryClearanceSpinBox->setRange(0.0, 1000000.0);
@@ -580,6 +593,15 @@ void GProfileDialog::applyProfile(const GProfile& profile)
     setBlockText(m_fileHeaderEdit, profile.fileCode().header);
     setBlockText(m_fileFooterEdit, profile.fileCode().footer);
     setBlockText(m_fileCommentEdit, profile.fileCode().comment);
+    const int rotaryCollisionCenterLineIndex = m_rotaryCollisionCenterLineModeComboBox != nullptr
+        ? m_rotaryCollisionCenterLineModeComboBox->findData(static_cast<int>(profile.rotaryAxisConfig().collisionReferenceCenterLineMode))
+        : -1;
+
+    if (m_rotaryCollisionCenterLineModeComboBox != nullptr)
+    {
+        m_rotaryCollisionCenterLineModeComboBox->setCurrentIndex(rotaryCollisionCenterLineIndex >= 0 ? rotaryCollisionCenterLineIndex : 0);
+    }
+
     m_rotaryClearanceSpinBox->setValue(profile.rotaryAxisConfig().safeZ);
     m_rotaryPlaneZOffsetSpinBox->setValue(profile.rotaryAxisConfig().machiningPlaneZOffset);
 
@@ -593,6 +615,10 @@ GProfile GProfileDialog::collectProfile() const
 {
     GProfile profile;
     GProfileRotaryAxisConfig rotaryConfig = m_profile.rotaryAxisConfig();
+    rotaryConfig.collisionReferenceCenterLineMode =
+        m_rotaryCollisionCenterLineModeComboBox != nullptr
+        ? static_cast<CollisionReferenceCenterLineMode>(m_rotaryCollisionCenterLineModeComboBox->currentData().toInt())
+        : rotaryConfig.collisionReferenceCenterLineMode;
     rotaryConfig.safeZ = m_rotaryClearanceSpinBox != nullptr ? m_rotaryClearanceSpinBox->value() : rotaryConfig.safeZ;
     rotaryConfig.machiningPlaneZOffset = m_rotaryPlaneZOffsetSpinBox != nullptr
         ? m_rotaryPlaneZOffsetSpinBox->value()

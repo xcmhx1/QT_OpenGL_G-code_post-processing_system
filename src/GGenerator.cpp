@@ -16,6 +16,7 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QDir>
+#include <QDebug>
 #include <QMessageBox>
 #include <QSettings>
 #include <QStandardPaths>
@@ -25,6 +26,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <vector>
 
 namespace
@@ -42,6 +44,11 @@ namespace
     QString formatAngle(double value)
     {
         return QString::number(value, 'f', 5);
+    }
+
+    QString formatDebugValue(double value)
+    {
+        return QString::number(value, 'f', 6);
     }
 
     QVector<QVector3D> buildEllipsePolyline(const CadEllipseItem* item);
@@ -909,6 +916,17 @@ namespace
         return std::sqrt(dy * dy + dz * dz);
     }
 
+    struct RotaryExportContext
+    {
+        double axisY = 0.0;
+        double axisZ = 0.0;
+        double judgeCenterY = 0.0;
+        double judgeCenterZ = 0.0;
+        double collisionCenterY = 0.0;
+        double collisionCenterZ = 0.0;
+        double safeMachineZ = 0.0;
+    };
+
     double computeGlobalSafeMachineZ
     (
         const CadDocument* document,
@@ -1017,6 +1035,64 @@ namespace
         outJudgeCenterY = 0.5 * (minY + maxY);
         outJudgeCenterZ = 0.5 * (minZ + maxZ);
         return true;
+    }
+
+    QString collisionReferenceCenterLineModeName(CollisionReferenceCenterLineMode mode)
+    {
+        switch (mode)
+        {
+        case CollisionReferenceCenterLineMode::XAxis:
+            return QStringLiteral("XAxis");
+        case CollisionReferenceCenterLineMode::JudgeCenterLine:
+            return QStringLiteral("JudgeCenterLine");
+        default:
+            return QStringLiteral("Unknown");
+        }
+    }
+
+    void writeCommentLine(QTextStream& stream, const QString& comment)
+    {
+        if (!comment.trimmed().isEmpty())
+        {
+            stream << "(" << comment << ")\r\n";
+        }
+    }
+
+    double computeSafeMachineZFromCollisionCenterLine
+    (
+        const QVector<CadItem*>& orderedItems,
+        double collisionCenterY,
+        double collisionCenterZ,
+        double extraRadialClearance,
+        double* outMaxCollisionRadius = nullptr
+    )
+    {
+        double maxCollisionRadius = 0.0;
+
+        for (CadItem* item : orderedItems)
+        {
+            if (item == nullptr || item->m_nativeEntity == nullptr)
+            {
+                continue;
+            }
+
+            item->rebuildRawPathPoints3D();
+
+            for (const RawPathPoint3D& point : item->rawPathPoints3D())
+            {
+                const double dy = point.y - collisionCenterY;
+                const double dz = point.z - collisionCenterZ;
+                const double radius = std::sqrt(dy * dy + dz * dz);
+                maxCollisionRadius = std::max(maxCollisionRadius, radius);
+            }
+        }
+
+        if (outMaxCollisionRadius != nullptr)
+        {
+            *outMaxCollisionRadius = maxCollisionRadius;
+        }
+
+        return collisionCenterZ + maxCollisionRadius + extraRadialClearance;
     }
 
     ControlPoint4Axis machineSafeApproachPoint
@@ -1135,9 +1211,7 @@ namespace
         QTextStream& stream,
         const CadItem* item,
         const GProfileRotaryAxisConfig& config,
-        double judgeCenterY,
-        double judgeCenterZ,
-        double safeMachineZ,
+        const RotaryExportContext& exportContext,
         const ControlPoint4Axis* previousEndPoint,
         ControlPoint4Axis* writtenEndPoint,
         QString* errorMessage
@@ -1166,10 +1240,10 @@ namespace
         CadItem* writableItem = const_cast<CadItem*>(item);
         const bool rebuilt = writableItem->rebuildControlPoints4Axis
         (
-            config.centerY,
-            config.centerZ,
-            judgeCenterY,
-            judgeCenterZ,
+            exportContext.axisY,
+            exportContext.axisZ,
+            exportContext.judgeCenterY,
+            exportContext.judgeCenterZ,
             config.invertAAxisDirection,
             config.aAxisOffsetDegrees,
             config.keepContinuousAngle,
@@ -1194,7 +1268,7 @@ namespace
             stream,
             controlPoints,
             config,
-            safeMachineZ,
+            exportContext.safeMachineZ,
             previousEndPoint,
             writtenEndPoint
         );
@@ -1317,16 +1391,96 @@ bool GGenerator::generateToFile(const QString& filePath, QString* errorMessage) 
 
     const QVector<CadItem*> orderedItems = collectOrderedItems(m_document);
     const GProfileRotaryAxisConfig& rotaryAxisConfig = m_profile->rotaryAxisConfig();
-    double judgeCenterY = rotaryAxisConfig.centerY;
-    double judgeCenterZ = rotaryAxisConfig.centerZ;
-    computeRotaryJudgeCenter(orderedItems, judgeCenterY, judgeCenterZ);
-    const double safeMachineZ = computeGlobalSafeMachineZ
+    RotaryExportContext rotaryExportContext;
+    rotaryExportContext.axisY = rotaryAxisConfig.centerY;
+    rotaryExportContext.axisZ = rotaryAxisConfig.centerZ;
+    rotaryExportContext.judgeCenterY = rotaryAxisConfig.centerY;
+    rotaryExportContext.judgeCenterZ = rotaryAxisConfig.centerZ;
+    computeRotaryJudgeCenter
     (
-        m_document,
-        rotaryAxisConfig.centerY,
-        rotaryAxisConfig.centerZ,
-        rotaryAxisConfig.safeZ
+        orderedItems,
+        rotaryExportContext.judgeCenterY,
+        rotaryExportContext.judgeCenterZ
     );
+    switch (rotaryAxisConfig.collisionReferenceCenterLineMode)
+    {
+    case CollisionReferenceCenterLineMode::XAxis:
+        rotaryExportContext.collisionCenterY = 0.0;
+        rotaryExportContext.collisionCenterZ = 0.0;
+        break;
+    case CollisionReferenceCenterLineMode::JudgeCenterLine:
+        rotaryExportContext.collisionCenterY = rotaryExportContext.judgeCenterY;
+        rotaryExportContext.collisionCenterZ = rotaryExportContext.judgeCenterZ;
+        break;
+    default:
+        rotaryExportContext.collisionCenterY = 0.0;
+        rotaryExportContext.collisionCenterZ = 0.0;
+        break;
+    }
+
+    double maxCollisionRadius = 0.0;
+    switch (rotaryAxisConfig.collisionReferenceCenterLineMode)
+    {
+    case CollisionReferenceCenterLineMode::XAxis:
+        rotaryExportContext.safeMachineZ = computeGlobalSafeMachineZ
+        (
+            m_document,
+            rotaryExportContext.axisY,
+            rotaryExportContext.axisZ,
+            rotaryAxisConfig.safeZ
+        );
+        maxCollisionRadius = std::max(0.0, rotaryExportContext.safeMachineZ - rotaryExportContext.collisionCenterZ - rotaryAxisConfig.safeZ);
+        break;
+
+    case CollisionReferenceCenterLineMode::JudgeCenterLine:
+        rotaryExportContext.safeMachineZ = computeSafeMachineZFromCollisionCenterLine
+        (
+            orderedItems,
+            rotaryExportContext.collisionCenterY,
+            rotaryExportContext.collisionCenterZ,
+            rotaryAxisConfig.safeZ,
+            &maxCollisionRadius
+        );
+        break;
+
+    default:
+        rotaryExportContext.safeMachineZ = computeGlobalSafeMachineZ
+        (
+            m_document,
+            rotaryExportContext.axisY,
+            rotaryExportContext.axisZ,
+            rotaryAxisConfig.safeZ
+        );
+        maxCollisionRadius = std::max(0.0, rotaryExportContext.safeMachineZ - rotaryExportContext.collisionCenterZ - rotaryAxisConfig.safeZ);
+        break;
+    }
+
+    if (m_generationMode == GenerationMode::Mode3D)
+    {
+        writeCommentLine
+        (
+            stream,
+            QStringLiteral("ROTARY SAFE CENTER MODE: %1")
+                .arg(collisionReferenceCenterLineModeName(rotaryAxisConfig.collisionReferenceCenterLineMode))
+        );
+        writeCommentLine(stream, QStringLiteral("JUDGE CENTER Y: %1").arg(formatDebugValue(rotaryExportContext.judgeCenterY)));
+        writeCommentLine(stream, QStringLiteral("JUDGE CENTER Z: %1").arg(formatDebugValue(rotaryExportContext.judgeCenterZ)));
+        writeCommentLine(stream, QStringLiteral("COLLISION CENTER Y: %1").arg(formatDebugValue(rotaryExportContext.collisionCenterY)));
+        writeCommentLine(stream, QStringLiteral("COLLISION CENTER Z: %1").arg(formatDebugValue(rotaryExportContext.collisionCenterZ)));
+        writeCommentLine(stream, QStringLiteral("MAX COLLISION RADIUS: %1").arg(formatDebugValue(maxCollisionRadius)));
+        writeCommentLine(stream, QStringLiteral("FINAL SAFE MACHINE Z: %1").arg(formatDebugValue(rotaryExportContext.safeMachineZ)));
+    }
+
+    qDebug().noquote()
+        << QStringLiteral("[RotarySafeCenter] mode=%1 judgeCenterY=%2 judgeCenterZ=%3 collisionCenterY=%4 collisionCenterZ=%5 maxCollisionRadius=%6 finalSafeMachineZ=%7")
+            .arg(collisionReferenceCenterLineModeName(rotaryAxisConfig.collisionReferenceCenterLineMode))
+            .arg(formatDebugValue(rotaryExportContext.judgeCenterY))
+            .arg(formatDebugValue(rotaryExportContext.judgeCenterZ))
+            .arg(formatDebugValue(rotaryExportContext.collisionCenterY))
+            .arg(formatDebugValue(rotaryExportContext.collisionCenterZ))
+            .arg(formatDebugValue(maxCollisionRadius))
+            .arg(formatDebugValue(rotaryExportContext.safeMachineZ));
+
     bool hasPrevious4AxisEndPoint = false;
     ControlPoint4Axis previous4AxisEndPoint;
 
@@ -1356,9 +1510,7 @@ bool GGenerator::generateToFile(const QString& filePath, QString* errorMessage) 
                 geometryStream,
                 item,
                 rotaryAxisConfig,
-                judgeCenterY,
-                judgeCenterZ,
-                safeMachineZ,
+                rotaryExportContext,
                 hasPrevious4AxisEndPoint ? &previous4AxisEndPoint : nullptr,
                 &currentItemEndPoint,
                 &geometryError

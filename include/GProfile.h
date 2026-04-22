@@ -15,6 +15,12 @@ struct GProfileCodeBlock
     static GProfileCodeBlock fromJson(const QJsonObject& object);
 };
 
+enum class CollisionReferenceCenterLineMode
+{
+    XAxis = 0,
+    JudgeCenterLine = 1
+};
+
 struct GProfileRotaryAxisConfig
 {
     double centerY = 0.0;
@@ -26,6 +32,7 @@ struct GProfileRotaryAxisConfig
     bool keepContinuousAngle = true;
     bool useSafeZBeforeRapid = true;
     bool useInitialMachinePoint = false;
+    CollisionReferenceCenterLineMode collisionReferenceCenterLineMode = CollisionReferenceCenterLineMode::XAxis;
     double initialMachineX = 0.0;
     double initialMachineY = 0.0;
     double initialMachineZ = 0.0;
