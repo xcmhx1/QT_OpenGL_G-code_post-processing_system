@@ -3509,13 +3509,11 @@ std::vector<TransientPrimitive> CadViewer::buildProcessDirectionPrimitives() con
     }
 
     std::vector<TransientPrimitive> primitives;
-    primitives.reserve(scene->m_entities.size() * 2);
+    primitives.reserve(scene->m_entities.size());
 
     const float pixelScale = std::max(pixelToWorldScale(), 1.0e-4f);
-    const float totalLength = pixelScale * 18.0f;
-    const float headLength = pixelScale * 8.4f;
-    const float headHalfWidth = pixelScale * 5.2f;
-    const float shaftHalfWidth = pixelScale * 1.6f;
+    const float headLength = pixelScale * 13.0f;
+    const float headHalfWidth = pixelScale * 5.0f;
     const QVector3D viewForward = m_camera.forwardDirection().lengthSquared() > 1.0e-6f
         ? m_camera.forwardDirection().normalized()
         : QVector3D(0.0f, 0.0f, -1.0f);
@@ -3556,9 +3554,10 @@ std::vector<TransientPrimitive> CadViewer::buildProcessDirectionPrimitives() con
             continue;
         }
 
-        const QVector3D tail = info.startPoint;
-        const QVector3D tip = tail + info.direction * totalLength;
+        // 箭镞顶角直接锚定在加工起始点。
+        const QVector3D tip = info.startPoint;
         const QVector3D headBase = tip - info.direction * headLength;
+        const QVector3D notch = tip - info.direction * (headLength * 0.72f);
 
         QVector3D arrowColor;
         if (entity->m_isSelected)
@@ -3574,21 +3573,6 @@ std::vector<TransientPrimitive> CadViewer::buildProcessDirectionPrimitives() con
             arrowColor = info.isReverse ? QVector3D(0.82f, 0.34f, 0.26f) : QVector3D(0.34f, 0.78f, 0.58f);
         }
 
-        TransientPrimitive shaftPrimitive;
-        shaftPrimitive.primitiveType = GL_TRIANGLES;
-        shaftPrimitive.color = arrowColor;
-        shaftPrimitive.vertices =
-        {
-            tail + perpendicular * shaftHalfWidth,
-            tail - perpendicular * shaftHalfWidth,
-            headBase + perpendicular * shaftHalfWidth,
-
-            headBase + perpendicular * shaftHalfWidth,
-            tail - perpendicular * shaftHalfWidth,
-            headBase - perpendicular * shaftHalfWidth
-        };
-        primitives.push_back(std::move(shaftPrimitive));
-
         TransientPrimitive headPrimitive;
         headPrimitive.primitiveType = GL_TRIANGLES;
         headPrimitive.color = arrowColor;
@@ -3596,6 +3580,10 @@ std::vector<TransientPrimitive> CadViewer::buildProcessDirectionPrimitives() con
         {
             tip,
             headBase + perpendicular * headHalfWidth,
+            notch,
+
+            tip,
+            notch,
             headBase - perpendicular * headHalfWidth
         };
         primitives.push_back(std::move(headPrimitive));
