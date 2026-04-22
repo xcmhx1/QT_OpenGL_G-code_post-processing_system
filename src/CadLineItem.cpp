@@ -61,6 +61,8 @@ bool CadLineItem::rebuildControlPoints4Axis
 (
     double axisY,
     double axisZ,
+    double judgeCenterY,
+    double judgeCenterZ,
     bool invertAAxisDirection,
     double aAxisOffsetDegrees,
     bool keepContinuousAngle,
@@ -123,12 +125,12 @@ bool CadLineItem::rebuildControlPoints4Axis
     {
         const double midY = 0.5 * (p0.y + p1.y);
 
-        if (midY > axisY + kPlaneEps)
+        if (midY > judgeCenterY + kPlaneEps)
         {
             fixedRawA = 90.0;
             useFixedA = true;
         }
-        else if (midY < axisY - kPlaneEps)
+        else if (midY < judgeCenterY - kPlaneEps)
         {
             fixedRawA = -90.0;
             useFixedA = true;
@@ -137,7 +139,7 @@ bool CadLineItem::rebuildControlPoints4Axis
         {
             // 线恰好落在 axisY 对应的 Y 平面附近时，退化到看 Z 位置
             const double midZ = 0.5 * (p0.z + p1.z);
-            fixedRawA = (midZ >= axisZ) ? 0.0 : 180.0;
+            fixedRawA = (midZ >= judgeCenterZ) ? 0.0 : 180.0;
             useFixedA = true;
         }
     }
@@ -149,12 +151,12 @@ bool CadLineItem::rebuildControlPoints4Axis
     {
         const double midZ = 0.5 * (p0.z + p1.z);
 
-        if (midZ > axisZ + kPlaneEps)
+        if (midZ > judgeCenterZ + kPlaneEps)
         {
             fixedRawA = 0.0;
             useFixedA = true;
         }
-        else if (midZ < axisZ - kPlaneEps)
+        else if (midZ < judgeCenterZ - kPlaneEps)
         {
             fixedRawA = 180.0;
             useFixedA = true;
@@ -163,7 +165,7 @@ bool CadLineItem::rebuildControlPoints4Axis
         {
             // 线恰好落在 axisZ 对应的 Z 平面附近时，退化到看 Y 位置
             const double midY = 0.5 * (p0.y + p1.y);
-            fixedRawA = (midY >= axisY) ? 90.0 : -90.0;
+            fixedRawA = (midY >= judgeCenterY) ? 90.0 : -90.0;
             useFixedA = true;
         }
     }

@@ -560,6 +560,8 @@ bool CadLWPolylineItem::rebuildControlPoints4Axis
 (
     double axisY,
     double axisZ,
+    double judgeCenterY,
+    double judgeCenterZ,
     bool invertAAxisDirection,
     double aAxisOffsetDegrees,
     bool keepContinuousAngle,
@@ -632,37 +634,37 @@ bool CadLWPolylineItem::rebuildControlPoints4Axis
 
     if (inPlaneParallelXZ)
     {
-        if (avgY > axisY + kPlaneEps)
+        if (avgY > judgeCenterY + kPlaneEps)
         {
             fixedRawA = 90.0;
             useFixedA = true;
         }
-        else if (avgY < axisY - kPlaneEps)
+        else if (avgY < judgeCenterY - kPlaneEps)
         {
             fixedRawA = -90.0;
             useFixedA = true;
         }
         else
         {
-            fixedRawA = (avgZ >= axisZ) ? 0.0 : 180.0;
+            fixedRawA = (avgZ >= judgeCenterZ) ? 0.0 : 180.0;
             useFixedA = true;
         }
     }
     else if (inPlaneParallelXY)
     {
-        if (avgZ > axisZ + kPlaneEps)
+        if (avgZ > judgeCenterZ + kPlaneEps)
         {
             fixedRawA = 0.0;
             useFixedA = true;
         }
-        else if (avgZ < axisZ - kPlaneEps)
+        else if (avgZ < judgeCenterZ - kPlaneEps)
         {
             fixedRawA = 180.0;
             useFixedA = true;
         }
         else
         {
-            fixedRawA = (avgY >= axisY) ? 90.0 : -90.0;
+            fixedRawA = (avgY >= judgeCenterY) ? 90.0 : -90.0;
             useFixedA = true;
         }
     }

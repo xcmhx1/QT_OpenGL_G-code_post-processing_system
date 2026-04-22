@@ -233,6 +233,8 @@ bool CadEllipseItem::rebuildControlPoints4Axis
 (
     double axisY,
     double axisZ,
+    double judgeCenterY,
+    double judgeCenterZ,
     bool invertAAxisDirection,
     double aAxisOffsetDegrees,
     bool keepContinuousAngle,
@@ -301,7 +303,7 @@ bool CadEllipseItem::rebuildControlPoints4Axis
     // A 由椭圆中心位于 +Z / -Z 决定，而不是由法向正负决定。
     if (std::abs(normal.x()) < kNormalEps && std::abs(normal.y()) < kNormalEps)
     {
-        const double relativeZ = centerZ - axisZ;
+        const double relativeZ = centerZ - judgeCenterZ;
 
         if (relativeZ > kSideEps)
         {
@@ -323,7 +325,7 @@ bool CadEllipseItem::rebuildControlPoints4Axis
     // A 由椭圆中心位于 +Y / -Y 决定，而不是由法向正负决定。
     else if (std::abs(normal.x()) < kNormalEps && std::abs(normal.z()) < kNormalEps)
     {
-        const double relativeY = centerY - axisY;
+        const double relativeY = centerY - judgeCenterY;
 
         if (relativeY > kSideEps)
         {

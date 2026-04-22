@@ -51,12 +51,17 @@ bool CadPointItem::rebuildControlPoints4Axis
 (
     double axisY,
     double axisZ,
+    double judgeCenterY,
+    double judgeCenterZ,
     bool invertAAxisDirection,
     double aAxisOffsetDegrees,
     bool keepContinuousAngle,
     QString* errorMessage
 )
 {
+    Q_UNUSED(judgeCenterY);
+    Q_UNUSED(judgeCenterZ);
+
     clearPathCaches();
     rebuildRawPathPoints3D();
 

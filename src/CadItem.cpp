@@ -148,6 +148,8 @@ bool CadItem::rebuildControlPoints4Axis
 (
     double axisY,
     double axisZ,
+    double judgeCenterY,
+    double judgeCenterZ,
     bool invertAAxisDirection,
     double aAxisOffsetDegrees,
     bool keepContinuousAngle,
@@ -156,6 +158,8 @@ bool CadItem::rebuildControlPoints4Axis
 {
     Q_UNUSED(axisY);
     Q_UNUSED(axisZ);
+    Q_UNUSED(judgeCenterY);
+    Q_UNUSED(judgeCenterZ);
     Q_UNUSED(invertAAxisDirection);
     Q_UNUSED(aAxisOffsetDegrees);
     Q_UNUSED(keepContinuousAngle);

@@ -951,6 +951,74 @@ namespace
         return axisZ + maxRadius + extraRadialClearance;
     }
 
+    bool computeRotaryJudgeCenter
+    (
+        const QVector<CadItem*>& orderedItems,
+        double& outJudgeCenterY,
+        double& outJudgeCenterZ
+    )
+    {
+        bool hasPoint = false;
+        double minY = 0.0;
+        double maxY = 0.0;
+        double minZ = 0.0;
+        double maxZ = 0.0;
+
+        auto includePoint = [&](double y, double z)
+            {
+                if (!hasPoint)
+                {
+                    minY = maxY = y;
+                    minZ = maxZ = z;
+                    hasPoint = true;
+                    return;
+                }
+
+                minY = std::min(minY, y);
+                maxY = std::max(maxY, y);
+                minZ = std::min(minZ, z);
+                maxZ = std::max(maxZ, z);
+            };
+
+        for (CadItem* item : orderedItems)
+        {
+            if (item == nullptr || item->m_nativeEntity == nullptr)
+            {
+                continue;
+            }
+
+            item->rebuildRawPathPoints3D();
+
+            const std::vector<RawPathPoint3D>& rawPathPoints = item->rawPathPoints3D();
+
+            if (!rawPathPoints.empty())
+            {
+                for (const RawPathPoint3D& point : rawPathPoints)
+                {
+                    includePoint(point.y, point.z);
+                }
+
+                continue;
+            }
+
+            for (const QVector3D& vertex : item->m_geometry.vertices)
+            {
+                includePoint(vertex.y(), vertex.z());
+            }
+        }
+
+        if (!hasPoint)
+        {
+            outJudgeCenterY = 0.0;
+            outJudgeCenterZ = 0.0;
+            return false;
+        }
+
+        outJudgeCenterY = 0.5 * (minY + maxY);
+        outJudgeCenterZ = 0.5 * (minZ + maxZ);
+        return true;
+    }
+
     ControlPoint4Axis machineSafeApproachPoint
     (
         const ControlPoint4Axis& point,
@@ -1067,6 +1135,8 @@ namespace
         QTextStream& stream,
         const CadItem* item,
         const GProfileRotaryAxisConfig& config,
+        double judgeCenterY,
+        double judgeCenterZ,
         double safeMachineZ,
         const ControlPoint4Axis* previousEndPoint,
         ControlPoint4Axis* writtenEndPoint,
@@ -1098,6 +1168,8 @@ namespace
         (
             config.centerY,
             config.centerZ,
+            judgeCenterY,
+            judgeCenterZ,
             config.invertAAxisDirection,
             config.aAxisOffsetDegrees,
             config.keepContinuousAngle,
@@ -1245,6 +1317,9 @@ bool GGenerator::generateToFile(const QString& filePath, QString* errorMessage) 
 
     const QVector<CadItem*> orderedItems = collectOrderedItems(m_document);
     const GProfileRotaryAxisConfig& rotaryAxisConfig = m_profile->rotaryAxisConfig();
+    double judgeCenterY = rotaryAxisConfig.centerY;
+    double judgeCenterZ = rotaryAxisConfig.centerZ;
+    computeRotaryJudgeCenter(orderedItems, judgeCenterY, judgeCenterZ);
     const double safeMachineZ = computeGlobalSafeMachineZ
     (
         m_document,
@@ -1281,6 +1356,8 @@ bool GGenerator::generateToFile(const QString& filePath, QString* errorMessage) 
                 geometryStream,
                 item,
                 rotaryAxisConfig,
+                judgeCenterY,
+                judgeCenterZ,
                 safeMachineZ,
                 hasPrevious4AxisEndPoint ? &previous4AxisEndPoint : nullptr,
                 &currentItemEndPoint,
