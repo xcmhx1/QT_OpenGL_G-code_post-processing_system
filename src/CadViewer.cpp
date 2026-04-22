@@ -3509,11 +3509,16 @@ std::vector<TransientPrimitive> CadViewer::buildProcessDirectionPrimitives() con
     }
 
     std::vector<TransientPrimitive> primitives;
-    primitives.reserve(scene->m_entities.size());
+    primitives.reserve(scene->m_entities.size() * 2);
 
     const float pixelScale = std::max(pixelToWorldScale(), 1.0e-4f);
-    const float headLength = pixelScale * 9.2f;
-    const float headHalfWidth = pixelScale * 4.4f;
+    const float totalLength = pixelScale * 18.0f;
+    const float headLength = pixelScale * 8.4f;
+    const float headHalfWidth = pixelScale * 5.2f;
+    const float shaftHalfWidth = pixelScale * 1.6f;
+    const QVector3D viewForward = m_camera.forwardDirection().lengthSquared() > 1.0e-6f
+        ? m_camera.forwardDirection().normalized()
+        : QVector3D(0.0f, 0.0f, -1.0f);
 
     for (const std::unique_ptr<CadItem>& entity : scene->m_entities)
     {
@@ -3529,15 +3534,30 @@ std::vector<TransientPrimitive> CadViewer::buildProcessDirectionPrimitives() con
             continue;
         }
 
-        const QVector3D perpendicular = buildPerpendicularDirection(info.direction);
+        QVector3D perpendicular = QVector3D::crossProduct(viewForward, info.direction);
+
+        if (perpendicular.lengthSquared() <= 1.0e-6f)
+        {
+            perpendicular = QVector3D(-info.direction.y(), info.direction.x(), 0.0f);
+        }
+
+        if (perpendicular.lengthSquared() <= 1.0e-6f)
+        {
+            perpendicular = buildPerpendicularDirection(info.direction);
+        }
+
+        if (perpendicular.lengthSquared() > 1.0e-6f)
+        {
+            perpendicular.normalize();
+        }
 
         if (perpendicular.lengthSquared() <= 1.0e-6f)
         {
             continue;
         }
 
-        // 按用户要求：箭头尖端直接锚定在加工起始点（不做前向偏移）。
-        const QVector3D tip = info.startPoint;
+        const QVector3D tail = info.startPoint;
+        const QVector3D tip = tail + info.direction * totalLength;
         const QVector3D headBase = tip - info.direction * headLength;
 
         QVector3D arrowColor;
@@ -3554,7 +3574,21 @@ std::vector<TransientPrimitive> CadViewer::buildProcessDirectionPrimitives() con
             arrowColor = info.isReverse ? QVector3D(0.82f, 0.34f, 0.26f) : QVector3D(0.34f, 0.78f, 0.58f);
         }
 
-        // 仅保留小实心三角箭头头
+        TransientPrimitive shaftPrimitive;
+        shaftPrimitive.primitiveType = GL_TRIANGLES;
+        shaftPrimitive.color = arrowColor;
+        shaftPrimitive.vertices =
+        {
+            tail + perpendicular * shaftHalfWidth,
+            tail - perpendicular * shaftHalfWidth,
+            headBase + perpendicular * shaftHalfWidth,
+
+            headBase + perpendicular * shaftHalfWidth,
+            tail - perpendicular * shaftHalfWidth,
+            headBase - perpendicular * shaftHalfWidth
+        };
+        primitives.push_back(std::move(shaftPrimitive));
+
         TransientPrimitive headPrimitive;
         headPrimitive.primitiveType = GL_TRIANGLES;
         headPrimitive.color = arrowColor;

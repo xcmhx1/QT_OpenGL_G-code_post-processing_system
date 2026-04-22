@@ -28,6 +28,15 @@ namespace
         return QVector3D(-vector.y(), vector.x(), 0.0f);
     }
 
+    QVector3D mapPlaneVectorToWorld(const QVector3D& axisU, const QVector3D& axisV, double u, double v)
+    {
+        return normalizeOrZero
+        (
+            axisU * static_cast<float>(u)
+            + axisV * static_cast<float>(v)
+        );
+    }
+
     QVector3D bulgeArcCenter(const QVector3D& startPoint, const QVector3D& endPoint, double bulge, bool* valid = nullptr)
     {
         const QVector3D chord = endPoint - startPoint;
@@ -379,6 +388,280 @@ namespace
         return normalizeOrZero(tangent);
     }
 
+    QVector3D resolvePolylineNormal(const DRW_Coord& extPoint)
+    {
+        QVector3D normal(extPoint.x, extPoint.y, extPoint.z);
+
+        if (normal.lengthSquared() <= kVisualEpsilon)
+        {
+            return QVector3D();
+        }
+
+        normal.normalize();
+        return normal;
+    }
+
+    bool is3DPolyline(const DRW_Polyline* polyline)
+    {
+        return polyline != nullptr && ((polyline->flags & 8) != 0);
+    }
+
+    QVector3D inferPolylinePlaneNormal(const std::vector<std::shared_ptr<DRW_Vertex>>& vertices)
+    {
+        if (vertices.size() < 3)
+        {
+            return QVector3D();
+        }
+
+        const QVector3D p0
+        (
+            static_cast<float>(vertices.front()->basePoint.x),
+            static_cast<float>(vertices.front()->basePoint.y),
+            static_cast<float>(vertices.front()->basePoint.z)
+        );
+
+        for (size_t index = 1; index + 1 < vertices.size(); ++index)
+        {
+            const QVector3D p1
+            (
+                static_cast<float>(vertices[index]->basePoint.x),
+                static_cast<float>(vertices[index]->basePoint.y),
+                static_cast<float>(vertices[index]->basePoint.z)
+            );
+            const QVector3D p2
+            (
+                static_cast<float>(vertices[index + 1]->basePoint.x),
+                static_cast<float>(vertices[index + 1]->basePoint.y),
+                static_cast<float>(vertices[index + 1]->basePoint.z)
+            );
+
+            QVector3D normal = QVector3D::crossProduct(p1 - p0, p2 - p0);
+
+            if (normal.lengthSquared() > kVisualEpsilon)
+            {
+                normal.normalize();
+                return normal;
+            }
+        }
+
+        return QVector3D();
+    }
+
+    bool buildPolylinePlaneBasis
+    (
+        const DRW_Polyline* polyline,
+        QVector3D& origin,
+        QVector3D& axisU,
+        QVector3D& axisV,
+        QVector3D& normal
+    )
+    {
+        if (polyline == nullptr || polyline->vertlist.empty())
+        {
+            return false;
+        }
+
+        if (is3DPolyline(polyline))
+        {
+            normal = inferPolylinePlaneNormal(polyline->vertlist);
+
+            if (normal.lengthSquared() <= kVisualEpsilon)
+            {
+                return false;
+            }
+
+            origin = QVector3D
+            (
+                static_cast<float>(polyline->vertlist.front()->basePoint.x),
+                static_cast<float>(polyline->vertlist.front()->basePoint.y),
+                static_cast<float>(polyline->vertlist.front()->basePoint.z)
+            );
+            buildPlaneBasis(normal, axisU, axisV);
+            return true;
+        }
+
+        normal = resolvePolylineNormal(polyline->extPoint);
+
+        if (normal.lengthSquared() <= kVisualEpsilon)
+        {
+            normal = QVector3D(0.0f, 0.0f, 1.0f);
+        }
+
+        buildPlaneBasis(normal, axisU, axisV);
+        origin = normal * static_cast<float>(polyline->basePoint.z);
+        return true;
+    }
+
+    bool buildLWPolylinePlaneBasis
+    (
+        const DRW_LWPolyline* polyline,
+        QVector3D& origin,
+        QVector3D& axisU,
+        QVector3D& axisV,
+        QVector3D& normal
+    )
+    {
+        if (polyline == nullptr)
+        {
+            return false;
+        }
+
+        normal = resolveNormal(polyline->extPoint);
+        buildPlaneBasis(normal, axisU, axisV);
+        origin = normal * static_cast<float>(polyline->elevation);
+        return true;
+    }
+
+    QVector3D polylineVertexToWcs(const DRW_Polyline* polyline, const std::shared_ptr<DRW_Vertex>& vertex)
+    {
+        if (polyline == nullptr || vertex == nullptr)
+        {
+            return QVector3D();
+        }
+
+        if (is3DPolyline(polyline))
+        {
+            return QVector3D
+            (
+                static_cast<float>(vertex->basePoint.x),
+                static_cast<float>(vertex->basePoint.y),
+                static_cast<float>(vertex->basePoint.z)
+            );
+        }
+
+        QVector3D origin;
+        QVector3D axisU;
+        QVector3D axisV;
+        QVector3D normal;
+        buildPolylinePlaneBasis(polyline, origin, axisU, axisV, normal);
+
+        return origin
+            + axisU * static_cast<float>(vertex->basePoint.x)
+            + axisV * static_cast<float>(vertex->basePoint.y)
+            + normal * static_cast<float>(vertex->basePoint.z);
+    }
+
+    QVector3D lwPolylineVertexToWcs(const DRW_LWPolyline* polyline, const std::shared_ptr<DRW_Vertex2D>& vertex)
+    {
+        if (polyline == nullptr || vertex == nullptr)
+        {
+            return QVector3D();
+        }
+
+        QVector3D origin;
+        QVector3D axisU;
+        QVector3D axisV;
+        QVector3D normal;
+        buildLWPolylinePlaneBasis(polyline, origin, axisU, axisV, normal);
+
+        return origin
+            + axisU * static_cast<float>(vertex->x)
+            + axisV * static_cast<float>(vertex->y);
+    }
+
+    void projectPointToPlaneUV
+    (
+        const QVector3D& origin,
+        const QVector3D& axisU,
+        const QVector3D& axisV,
+        const QVector3D& point,
+        double& u,
+        double& v
+    )
+    {
+        const QVector3D delta = point - origin;
+        u = QVector3D::dotProduct(delta, axisU);
+        v = QVector3D::dotProduct(delta, axisV);
+    }
+
+    QVector3D bulgeSegmentTangentAtStartOnPlane
+    (
+        const QVector3D& origin,
+        const QVector3D& axisU,
+        const QVector3D& axisV,
+        const QVector3D& startPoint,
+        const QVector3D& endPoint,
+        double bulge
+    )
+    {
+        if (std::abs(bulge) < 1.0e-8)
+        {
+            return normalizeOrZero(endPoint - startPoint);
+        }
+
+        double su = 0.0;
+        double sv = 0.0;
+        double eu = 0.0;
+        double ev = 0.0;
+        projectPointToPlaneUV(origin, axisU, axisV, startPoint, su, sv);
+        projectPointToPlaneUV(origin, axisU, axisV, endPoint, eu, ev);
+
+        const double dx = eu - su;
+        const double dy = ev - sv;
+        const double chordLength = std::sqrt(dx * dx + dy * dy);
+
+        if (chordLength <= kVisualEpsilon)
+        {
+            return QVector3D();
+        }
+
+        const double midpointU = (su + eu) * 0.5;
+        const double midpointV = (sv + ev) * 0.5;
+        const double centerOffset = chordLength * (1.0 / bulge - bulge) * 0.25;
+        const double centerU = midpointU - centerOffset * (dy / chordLength);
+        const double centerV = midpointV + centerOffset * (dx / chordLength);
+        const double radiusU = su - centerU;
+        const double radiusV = sv - centerV;
+        const double tangentU = bulge > 0.0 ? -radiusV : radiusV;
+        const double tangentV = bulge > 0.0 ? radiusU : -radiusU;
+
+        return mapPlaneVectorToWorld(axisU, axisV, tangentU, tangentV);
+    }
+
+    QVector3D bulgeSegmentTangentAtEndOnPlane
+    (
+        const QVector3D& origin,
+        const QVector3D& axisU,
+        const QVector3D& axisV,
+        const QVector3D& startPoint,
+        const QVector3D& endPoint,
+        double bulge
+    )
+    {
+        if (std::abs(bulge) < 1.0e-8)
+        {
+            return normalizeOrZero(endPoint - startPoint);
+        }
+
+        double su = 0.0;
+        double sv = 0.0;
+        double eu = 0.0;
+        double ev = 0.0;
+        projectPointToPlaneUV(origin, axisU, axisV, startPoint, su, sv);
+        projectPointToPlaneUV(origin, axisU, axisV, endPoint, eu, ev);
+
+        const double dx = eu - su;
+        const double dy = ev - sv;
+        const double chordLength = std::sqrt(dx * dx + dy * dy);
+
+        if (chordLength <= kVisualEpsilon)
+        {
+            return QVector3D();
+        }
+
+        const double midpointU = (su + eu) * 0.5;
+        const double midpointV = (sv + ev) * 0.5;
+        const double centerOffset = chordLength * (1.0 / bulge - bulge) * 0.25;
+        const double centerU = midpointU - centerOffset * (dy / chordLength);
+        const double centerV = midpointV + centerOffset * (dx / chordLength);
+        const double radiusU = eu - centerU;
+        const double radiusV = ev - centerV;
+        const double tangentU = bulge > 0.0 ? -radiusV : radiusV;
+        const double tangentV = bulge > 0.0 ? radiusU : -radiusU;
+
+        return mapPlaneVectorToWorld(axisU, axisV, tangentU, tangentV);
+    }
+
     QVector3D polylineForwardStartTangent(const DRW_Polyline* polyline)
     {
         if (polyline == nullptr || polyline->vertlist.size() < 2)
@@ -386,13 +669,21 @@ namespace
             return QVector3D();
         }
 
+        QVector3D origin;
+        QVector3D axisU;
+        QVector3D axisV;
+        QVector3D normal;
+        const bool hasPlaneBasis = buildPolylinePlaneBasis(polyline, origin, axisU, axisV, normal);
+
         for (size_t index = 0; index + 1 < polyline->vertlist.size(); ++index)
         {
             const auto& current = polyline->vertlist.at(index);
             const auto& next = polyline->vertlist.at(index + 1);
-            const QVector3D startPoint(current->basePoint.x, current->basePoint.y, current->basePoint.z);
-            const QVector3D endPoint(next->basePoint.x, next->basePoint.y, next->basePoint.z);
-            const QVector3D tangent = bulgeSegmentTangentAtStart(startPoint, endPoint, current->bulge);
+            const QVector3D startPoint = polylineVertexToWcs(polyline, current);
+            const QVector3D endPoint = polylineVertexToWcs(polyline, next);
+            const QVector3D tangent = hasPlaneBasis && !is3DPolyline(polyline)
+                ? bulgeSegmentTangentAtStartOnPlane(origin, axisU, axisV, startPoint, endPoint, current->bulge)
+                : normalizeOrZero(endPoint - startPoint);
 
             if (tangent.lengthSquared() > kVisualEpsilon)
             {
@@ -404,9 +695,11 @@ namespace
         {
             const auto& current = polyline->vertlist.back();
             const auto& next = polyline->vertlist.front();
-            const QVector3D startPoint(current->basePoint.x, current->basePoint.y, current->basePoint.z);
-            const QVector3D endPoint(next->basePoint.x, next->basePoint.y, next->basePoint.z);
-            return bulgeSegmentTangentAtStart(startPoint, endPoint, current->bulge);
+            const QVector3D startPoint = polylineVertexToWcs(polyline, current);
+            const QVector3D endPoint = polylineVertexToWcs(polyline, next);
+            return hasPlaneBasis && !is3DPolyline(polyline)
+                ? bulgeSegmentTangentAtStartOnPlane(origin, axisU, axisV, startPoint, endPoint, current->bulge)
+                : normalizeOrZero(endPoint - startPoint);
         }
 
         return QVector3D();
@@ -423,9 +716,16 @@ namespace
         const size_t nextIndex = (startIndex + 1) % count;
         const auto& current = polyline->vertlist.at(startIndex);
         const auto& next = polyline->vertlist.at(nextIndex);
-        const QVector3D startPoint(current->basePoint.x, current->basePoint.y, current->basePoint.z);
-        const QVector3D endPoint(next->basePoint.x, next->basePoint.y, next->basePoint.z);
-        return bulgeSegmentTangentAtStart(startPoint, endPoint, current->bulge);
+        const QVector3D startPoint = polylineVertexToWcs(polyline, current);
+        const QVector3D endPoint = polylineVertexToWcs(polyline, next);
+        QVector3D origin;
+        QVector3D axisU;
+        QVector3D axisV;
+        QVector3D normal;
+        const bool hasPlaneBasis = buildPolylinePlaneBasis(polyline, origin, axisU, axisV, normal);
+        return hasPlaneBasis && !is3DPolyline(polyline)
+            ? bulgeSegmentTangentAtStartOnPlane(origin, axisU, axisV, startPoint, endPoint, current->bulge)
+            : normalizeOrZero(endPoint - startPoint);
     }
 
     QVector3D polylineReverseStartTangent(const DRW_Polyline* polyline)
@@ -435,13 +735,21 @@ namespace
             return QVector3D();
         }
 
+        QVector3D origin;
+        QVector3D axisU;
+        QVector3D axisV;
+        QVector3D normal;
+        const bool hasPlaneBasis = buildPolylinePlaneBasis(polyline, origin, axisU, axisV, normal);
+
         for (size_t index = polyline->vertlist.size() - 1; index > 0; --index)
         {
             const auto& current = polyline->vertlist.at(index);
             const auto& next = polyline->vertlist.at(index - 1);
-            const QVector3D startPoint(current->basePoint.x, current->basePoint.y, current->basePoint.z);
-            const QVector3D endPoint(next->basePoint.x, next->basePoint.y, next->basePoint.z);
-            const QVector3D tangent = bulgeSegmentTangentAtStart(startPoint, endPoint, -next->bulge);
+            const QVector3D startPoint = polylineVertexToWcs(polyline, current);
+            const QVector3D endPoint = polylineVertexToWcs(polyline, next);
+            const QVector3D tangent = hasPlaneBasis && !is3DPolyline(polyline)
+                ? bulgeSegmentTangentAtStartOnPlane(origin, axisU, axisV, startPoint, endPoint, -next->bulge)
+                : normalizeOrZero(endPoint - startPoint);
 
             if (tangent.lengthSquared() > kVisualEpsilon)
             {
@@ -453,9 +761,11 @@ namespace
         {
             const auto& current = polyline->vertlist.front();
             const auto& next = polyline->vertlist.back();
-            const QVector3D startPoint(current->basePoint.x, current->basePoint.y, current->basePoint.z);
-            const QVector3D endPoint(next->basePoint.x, next->basePoint.y, next->basePoint.z);
-            return bulgeSegmentTangentAtStart(startPoint, endPoint, -next->bulge);
+            const QVector3D startPoint = polylineVertexToWcs(polyline, current);
+            const QVector3D endPoint = polylineVertexToWcs(polyline, next);
+            return hasPlaneBasis && !is3DPolyline(polyline)
+                ? bulgeSegmentTangentAtStartOnPlane(origin, axisU, axisV, startPoint, endPoint, -next->bulge)
+                : normalizeOrZero(endPoint - startPoint);
         }
 
         return QVector3D();
@@ -472,9 +782,16 @@ namespace
         const size_t previousIndex = (startIndex + count - 1) % count;
         const auto& previous = polyline->vertlist.at(previousIndex);
         const auto& current = polyline->vertlist.at(startIndex);
-        const QVector3D startPoint(previous->basePoint.x, previous->basePoint.y, previous->basePoint.z);
-        const QVector3D endPoint(current->basePoint.x, current->basePoint.y, current->basePoint.z);
-        return bulgeSegmentTangentAtEnd(startPoint, endPoint, previous->bulge);
+        const QVector3D startPoint = polylineVertexToWcs(polyline, previous);
+        const QVector3D endPoint = polylineVertexToWcs(polyline, current);
+        QVector3D origin;
+        QVector3D axisU;
+        QVector3D axisV;
+        QVector3D normal;
+        const bool hasPlaneBasis = buildPolylinePlaneBasis(polyline, origin, axisU, axisV, normal);
+        return hasPlaneBasis && !is3DPolyline(polyline)
+            ? bulgeSegmentTangentAtEndOnPlane(origin, axisU, axisV, startPoint, endPoint, previous->bulge)
+            : normalizeOrZero(endPoint - startPoint);
     }
 
     QVector3D polylineReverseStartTangentAt(const DRW_Polyline* polyline, size_t startIndex)
@@ -489,15 +806,21 @@ namespace
             return QVector3D();
         }
 
-        const float z = static_cast<float>(polyline->elevation);
+        QVector3D origin;
+        QVector3D axisU;
+        QVector3D axisV;
+        QVector3D normal;
+        const bool hasPlaneBasis = buildLWPolylinePlaneBasis(polyline, origin, axisU, axisV, normal);
 
         for (size_t index = 0; index + 1 < polyline->vertlist.size(); ++index)
         {
             const auto& current = polyline->vertlist.at(index);
             const auto& next = polyline->vertlist.at(index + 1);
-            const QVector3D startPoint(static_cast<float>(current->x), static_cast<float>(current->y), z);
-            const QVector3D endPoint(static_cast<float>(next->x), static_cast<float>(next->y), z);
-            const QVector3D tangent = bulgeSegmentTangentAtStart(startPoint, endPoint, current->bulge);
+            const QVector3D startPoint = lwPolylineVertexToWcs(polyline, current);
+            const QVector3D endPoint = lwPolylineVertexToWcs(polyline, next);
+            const QVector3D tangent = hasPlaneBasis
+                ? bulgeSegmentTangentAtStartOnPlane(origin, axisU, axisV, startPoint, endPoint, current->bulge)
+                : normalizeOrZero(endPoint - startPoint);
 
             if (tangent.lengthSquared() > kVisualEpsilon)
             {
@@ -509,9 +832,11 @@ namespace
         {
             const auto& current = polyline->vertlist.back();
             const auto& next = polyline->vertlist.front();
-            const QVector3D startPoint(static_cast<float>(current->x), static_cast<float>(current->y), z);
-            const QVector3D endPoint(static_cast<float>(next->x), static_cast<float>(next->y), z);
-            return bulgeSegmentTangentAtStart(startPoint, endPoint, current->bulge);
+            const QVector3D startPoint = lwPolylineVertexToWcs(polyline, current);
+            const QVector3D endPoint = lwPolylineVertexToWcs(polyline, next);
+            return hasPlaneBasis
+                ? bulgeSegmentTangentAtStartOnPlane(origin, axisU, axisV, startPoint, endPoint, current->bulge)
+                : normalizeOrZero(endPoint - startPoint);
         }
 
         return QVector3D();
@@ -526,12 +851,18 @@ namespace
 
         const size_t count = polyline->vertlist.size();
         const size_t nextIndex = (startIndex + 1) % count;
-        const float z = static_cast<float>(polyline->elevation);
         const auto& current = polyline->vertlist.at(startIndex);
         const auto& next = polyline->vertlist.at(nextIndex);
-        const QVector3D startPoint(static_cast<float>(current->x), static_cast<float>(current->y), z);
-        const QVector3D endPoint(static_cast<float>(next->x), static_cast<float>(next->y), z);
-        return bulgeSegmentTangentAtStart(startPoint, endPoint, current->bulge);
+        const QVector3D startPoint = lwPolylineVertexToWcs(polyline, current);
+        const QVector3D endPoint = lwPolylineVertexToWcs(polyline, next);
+        QVector3D origin;
+        QVector3D axisU;
+        QVector3D axisV;
+        QVector3D normal;
+        const bool hasPlaneBasis = buildLWPolylinePlaneBasis(polyline, origin, axisU, axisV, normal);
+        return hasPlaneBasis
+            ? bulgeSegmentTangentAtStartOnPlane(origin, axisU, axisV, startPoint, endPoint, current->bulge)
+            : normalizeOrZero(endPoint - startPoint);
     }
 
     QVector3D lwPolylineReverseStartTangent(const DRW_LWPolyline* polyline)
@@ -541,15 +872,21 @@ namespace
             return QVector3D();
         }
 
-        const float z = static_cast<float>(polyline->elevation);
+        QVector3D origin;
+        QVector3D axisU;
+        QVector3D axisV;
+        QVector3D normal;
+        const bool hasPlaneBasis = buildLWPolylinePlaneBasis(polyline, origin, axisU, axisV, normal);
 
         for (size_t index = polyline->vertlist.size() - 1; index > 0; --index)
         {
             const auto& current = polyline->vertlist.at(index);
             const auto& next = polyline->vertlist.at(index - 1);
-            const QVector3D startPoint(static_cast<float>(current->x), static_cast<float>(current->y), z);
-            const QVector3D endPoint(static_cast<float>(next->x), static_cast<float>(next->y), z);
-            const QVector3D tangent = bulgeSegmentTangentAtStart(startPoint, endPoint, -next->bulge);
+            const QVector3D startPoint = lwPolylineVertexToWcs(polyline, current);
+            const QVector3D endPoint = lwPolylineVertexToWcs(polyline, next);
+            const QVector3D tangent = hasPlaneBasis
+                ? bulgeSegmentTangentAtStartOnPlane(origin, axisU, axisV, startPoint, endPoint, -next->bulge)
+                : normalizeOrZero(endPoint - startPoint);
 
             if (tangent.lengthSquared() > kVisualEpsilon)
             {
@@ -561,9 +898,11 @@ namespace
         {
             const auto& current = polyline->vertlist.front();
             const auto& next = polyline->vertlist.back();
-            const QVector3D startPoint(static_cast<float>(current->x), static_cast<float>(current->y), z);
-            const QVector3D endPoint(static_cast<float>(next->x), static_cast<float>(next->y), z);
-            return bulgeSegmentTangentAtStart(startPoint, endPoint, -next->bulge);
+            const QVector3D startPoint = lwPolylineVertexToWcs(polyline, current);
+            const QVector3D endPoint = lwPolylineVertexToWcs(polyline, next);
+            return hasPlaneBasis
+                ? bulgeSegmentTangentAtStartOnPlane(origin, axisU, axisV, startPoint, endPoint, -next->bulge)
+                : normalizeOrZero(endPoint - startPoint);
         }
 
         return QVector3D();
@@ -578,12 +917,18 @@ namespace
 
         const size_t count = polyline->vertlist.size();
         const size_t previousIndex = (startIndex + count - 1) % count;
-        const float z = static_cast<float>(polyline->elevation);
         const auto& previous = polyline->vertlist.at(previousIndex);
         const auto& current = polyline->vertlist.at(startIndex);
-        const QVector3D startPoint(static_cast<float>(previous->x), static_cast<float>(previous->y), z);
-        const QVector3D endPoint(static_cast<float>(current->x), static_cast<float>(current->y), z);
-        return bulgeSegmentTangentAtEnd(startPoint, endPoint, previous->bulge);
+        const QVector3D startPoint = lwPolylineVertexToWcs(polyline, previous);
+        const QVector3D endPoint = lwPolylineVertexToWcs(polyline, current);
+        QVector3D origin;
+        QVector3D axisU;
+        QVector3D axisV;
+        QVector3D normal;
+        const bool hasPlaneBasis = buildLWPolylinePlaneBasis(polyline, origin, axisU, axisV, normal);
+        return hasPlaneBasis
+            ? bulgeSegmentTangentAtEndOnPlane(origin, axisU, axisV, startPoint, endPoint, previous->bulge)
+            : normalizeOrZero(endPoint - startPoint);
     }
 
     QVector3D lwPolylineReverseStartTangentAt(const DRW_LWPolyline* polyline, size_t startIndex)
@@ -777,10 +1122,10 @@ CadProcessVisualInfo buildProcessVisualInfo(const CadItem* item)
             : 0;
         const auto& firstVertex = polyline->vertlist.at(seamIndex);
         const auto& lastVertex = polyline->vertlist.back();
-        info.forwardStartPoint = QVector3D(firstVertex->basePoint.x, firstVertex->basePoint.y, firstVertex->basePoint.z);
+        info.forwardStartPoint = polylineVertexToWcs(polyline, firstVertex);
         info.forwardEndPoint = info.closedPath
             ? info.forwardStartPoint
-            : QVector3D(lastVertex->basePoint.x, lastVertex->basePoint.y, lastVertex->basePoint.z);
+            : polylineVertexToWcs(polyline, lastVertex);
         info.labelAnchor = hasGeometryAnchor ? preferredAnchor : info.forwardStartPoint;
         info.direction = info.closedPath
             ? polylineForwardStartTangentAt(polyline, seamIndex)
@@ -796,17 +1141,16 @@ CadProcessVisualInfo buildProcessVisualInfo(const CadItem* item)
             return info;
         }
 
-        const float z = static_cast<float>(polyline->elevation);
         info.closedPath = (polyline->flags & 1) != 0;
         const size_t seamIndex = info.closedPath
             ? effectiveClosedPolylineStartIndex(item, polyline->vertlist.size())
             : 0;
         const auto& firstVertex = polyline->vertlist.at(seamIndex);
         const auto& lastVertex = polyline->vertlist.back();
-        info.forwardStartPoint = QVector3D(static_cast<float>(firstVertex->x), static_cast<float>(firstVertex->y), z);
+        info.forwardStartPoint = lwPolylineVertexToWcs(polyline, firstVertex);
         info.forwardEndPoint = info.closedPath
             ? info.forwardStartPoint
-            : QVector3D(static_cast<float>(lastVertex->x), static_cast<float>(lastVertex->y), z);
+            : lwPolylineVertexToWcs(polyline, lastVertex);
         info.labelAnchor = hasGeometryAnchor ? preferredAnchor : info.forwardStartPoint;
         info.direction = info.closedPath
             ? lwPolylineForwardStartTangentAt(polyline, seamIndex)
@@ -1005,7 +1349,7 @@ QVector<CadSelectionHandleInfo> buildSelectionHandleInfo(const CadItem* item)
         appendSelectionHandle
         (
             handles,
-            QVector3D(firstVertex->basePoint.x, firstVertex->basePoint.y, firstVertex->basePoint.z),
+            polylineVertexToWcs(polyline, firstVertex),
             true,
             true,
             0
@@ -1017,7 +1361,7 @@ QVector<CadSelectionHandleInfo> buildSelectionHandleInfo(const CadItem* item)
             appendSelectionHandle
             (
                 handles,
-                QVector3D(vertex->basePoint.x, vertex->basePoint.y, vertex->basePoint.z),
+                polylineVertexToWcs(polyline, vertex),
                 false,
                 true,
                 static_cast<int>(index)
@@ -1034,12 +1378,11 @@ QVector<CadSelectionHandleInfo> buildSelectionHandleInfo(const CadItem* item)
             return handles;
         }
 
-        const float z = static_cast<float>(polyline->elevation);
         const auto& firstVertex = polyline->vertlist.front();
         appendSelectionHandle
         (
             handles,
-            QVector3D(static_cast<float>(firstVertex->x), static_cast<float>(firstVertex->y), z),
+            lwPolylineVertexToWcs(polyline, firstVertex),
             true,
             true,
             0
@@ -1051,7 +1394,7 @@ QVector<CadSelectionHandleInfo> buildSelectionHandleInfo(const CadItem* item)
             appendSelectionHandle
             (
                 handles,
-                QVector3D(static_cast<float>(vertex->x), static_cast<float>(vertex->y), z),
+                lwPolylineVertexToWcs(polyline, vertex),
                 false,
                 true,
                 static_cast<int>(index)

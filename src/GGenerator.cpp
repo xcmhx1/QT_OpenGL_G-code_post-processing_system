@@ -75,6 +75,50 @@ namespace
         return normalizedText;
     }
 
+    bool isRapidMoveLine(const QString& line)
+    {
+        const QString trimmedLine = line.trimmed().toUpper();
+        return trimmedLine.startsWith(QStringLiteral("G00"))
+            || trimmedLine.startsWith(QStringLiteral("G0 "));
+    }
+
+    void splitLeadingRapidMoves
+    (
+        const QString& geometryText,
+        QString& outRapidPrefix,
+        QString& outCuttingBody
+    )
+    {
+        outRapidPrefix.clear();
+        outCuttingBody.clear();
+
+        QString normalizedText = geometryText;
+        normalizedText.replace("\r\n", "\n");
+        normalizedText.replace('\r', '\n');
+
+        const QStringList lines = normalizedText.split('\n', Qt::KeepEmptyParts);
+        bool bodyStarted = false;
+
+        for (const QString& line : lines)
+        {
+            if (line.trimmed().isEmpty())
+            {
+                continue;
+            }
+
+            if (!bodyStarted && isRapidMoveLine(line))
+            {
+                outRapidPrefix += line;
+                outRapidPrefix += QLatin1Char('\n');
+                continue;
+            }
+
+            bodyStarted = true;
+            outCuttingBody += line;
+            outCuttingBody += QLatin1Char('\n');
+        }
+    }
+
     QString entityTypeKey(const CadItem* item)
     {
         if (item == nullptr)
@@ -1199,13 +1243,25 @@ bool GGenerator::generateToFile(const QString& filePath, QString* errorMessage) 
 
         if (!geometryText.isEmpty())
         {
-            writeTextBlock(stream, layerCode.header);
-            writeTextBlock(stream, colorCode.header);
-            writeTextBlock(stream, typeCode.header);
-            stream << normalizeLineEndingsToCrLf(geometryText);
-            writeTextBlock(stream, typeCode.footer);
-            writeTextBlock(stream, colorCode.footer);
-            writeTextBlock(stream, layerCode.footer);
+            QString rapidPrefix;
+            QString cuttingBody;
+            splitLeadingRapidMoves(geometryText, rapidPrefix, cuttingBody);
+
+            if (!rapidPrefix.isEmpty())
+            {
+                stream << normalizeLineEndingsToCrLf(rapidPrefix);
+            }
+
+            if (!cuttingBody.trimmed().isEmpty())
+            {
+                writeTextBlock(stream, layerCode.header);
+                writeTextBlock(stream, colorCode.header);
+                writeTextBlock(stream, typeCode.header);
+                stream << normalizeLineEndingsToCrLf(cuttingBody);
+                writeTextBlock(stream, typeCode.footer);
+                writeTextBlock(stream, colorCode.footer);
+                writeTextBlock(stream, layerCode.footer);
+            }
         }
 
         if (m_generationMode == GenerationMode::Mode3D)
