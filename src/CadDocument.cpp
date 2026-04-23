@@ -11,6 +11,7 @@
 #include "CadLWPolylineItem.h"
 #include "CadPointItem.h"
 #include "CadPolylineItem.h"
+#include "CadXlineItem.h"
 #include "dx_data.h"
 #include "dx_iface.h"
 
@@ -100,6 +101,8 @@ namespace
             return std::make_unique<DRW_Point>(*static_cast<const DRW_Point*>(entity));
         case DRW::ETYPE::LINE:
             return std::make_unique<DRW_Line>(*static_cast<const DRW_Line*>(entity));
+        case DRW::ETYPE::XLINE:
+            return std::make_unique<DRW_Xline>(*static_cast<const DRW_Xline*>(entity));
         case DRW::ETYPE::CIRCLE:
             return std::make_unique<DRW_Circle>(*static_cast<const DRW_Circle*>(entity));
         case DRW::ETYPE::ARC:
@@ -290,6 +293,9 @@ std::unique_ptr<CadItem> CadDocument::createCadItemForEntity(DRW_Entity* entity)
     // 每个受支持的实体类型都映射到一个对应的 Cad*Item 派生类。
     case DRW::ETYPE::LINE:
         return std::make_unique<CadLineItem>(entity);
+
+    case DRW::ETYPE::XLINE:
+        return std::make_unique<CadXlineItem>(entity);
 
     case DRW::ETYPE::CIRCLE:
         return std::make_unique<CadCircleItem>(entity);

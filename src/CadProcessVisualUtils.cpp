@@ -1248,6 +1248,25 @@ QVector<CadSelectionHandleInfo> buildSelectionHandleInfo(const CadItem* item)
         appendSelectionHandle(handles, QVector3D(line->secPoint.x, line->secPoint.y, line->secPoint.z), false, true, 1);
         break;
     }
+    case DRW::ETYPE::XLINE:
+    {
+        const DRW_Xline* xline = static_cast<const DRW_Xline*>(item->m_nativeEntity);
+        QVector3D direction(xline->secPoint.x, xline->secPoint.y, xline->secPoint.z);
+
+        if (direction.lengthSquared() <= kVisualEpsilon)
+        {
+            direction = QVector3D(1.0f, 0.0f, 0.0f);
+        }
+        else
+        {
+            direction.normalize();
+        }
+
+        const QVector3D basePoint(xline->basePoint.x, xline->basePoint.y, xline->basePoint.z);
+        appendSelectionHandle(handles, basePoint, true, true, 0);
+        appendSelectionHandle(handles, basePoint + direction * 50.0f, false, true, 1);
+        break;
+    }
     case DRW::ETYPE::CIRCLE:
     {
         const DRW_Circle* circle = static_cast<const DRW_Circle*>(item->m_nativeEntity);

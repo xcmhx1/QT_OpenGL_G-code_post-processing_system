@@ -156,6 +156,10 @@
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
     </ClCompile>
+    <ClCompile Include="src\CadXlineItem.cpp">
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+    </ClCompile>
     <ClCompile Include="src\CadLWPolylineItem.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
@@ -290,6 +294,7 @@
     <ClInclude Include="include\CadEllipseItem.h" />
     <QtMoc Include="include\CadItem.h" />
     <ClInclude Include="include\CadLineItem.h" />
+    <ClInclude Include="include\CadXlineItem.h" />
     <ClInclude Include="include\CadLWPolylineItem.h" />
     <ClInclude Include="include\CadOverlayRenderer.h" />
     <ClInclude Include="include\CadPointItem.h" />

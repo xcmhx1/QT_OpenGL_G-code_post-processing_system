@@ -253,6 +253,9 @@
     <ClCompile Include="src\CadLineItem.cpp">
       <Filter>Source Files\Item</Filter>
     </ClCompile>
+    <ClCompile Include="src\CadXlineItem.cpp">
+      <Filter>Source Files\Item</Filter>
+    </ClCompile>
     <ClCompile Include="src\CadLWPolylineItem.cpp">
       <Filter>Source Files\Item</Filter>
     </ClCompile>
@@ -442,6 +445,9 @@
       <Filter>Header Files\Item</Filter>
     </ClInclude>
     <ClInclude Include="include\CadLineItem.h">
+      <Filter>Header Files\Item</Filter>
+    </ClInclude>
+    <ClInclude Include="include\CadXlineItem.h">
       <Filter>Header Files\Item</Filter>
     </ClInclude>
     <ClInclude Include="include\CadLWPolylineItem.h">

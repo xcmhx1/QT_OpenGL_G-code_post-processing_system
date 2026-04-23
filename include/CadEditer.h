@@ -167,6 +167,9 @@ private:
     // 处理直线绘制命令
     bool handleLineDrawing(const DrawStateMachine& previousState, DrawStateMachine& currentState, const QVector3D& worldPos);
 
+    // 处理构造线绘制命令
+    bool handleXlineDrawing(const DrawStateMachine& previousState, DrawStateMachine& currentState, const QVector3D& worldPos);
+
     // 处理圆绘制命令
     bool handleCircleDrawing(const DrawStateMachine& previousState, DrawStateMachine& currentState, const QVector3D& worldPos);
 

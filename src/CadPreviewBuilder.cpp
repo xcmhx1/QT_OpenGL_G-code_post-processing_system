@@ -35,6 +35,7 @@ namespace
     constexpr double kTwoPi = 6.28318530717958647692;
     // 椭圆最小短长轴比
     constexpr double kMinEllipseRatio = 1.0e-4;
+    constexpr float kXlinePreviewHalfLength = 65536.0f;
 
     // 夹点编辑预览颜色
     const QVector3D kGripPreviewColor(0.98f, 0.67f, 0.12f);
@@ -566,6 +567,8 @@ namespace
             return std::make_unique<DRW_Point>(*static_cast<const DRW_Point*>(entity));
         case DRW::ETYPE::LINE:
             return std::make_unique<DRW_Line>(*static_cast<const DRW_Line*>(entity));
+        case DRW::ETYPE::XLINE:
+            return std::make_unique<DRW_Xline>(*static_cast<const DRW_Xline*>(entity));
         case DRW::ETYPE::CIRCLE:
             return std::make_unique<DRW_Circle>(*static_cast<const DRW_Circle*>(entity));
         case DRW::ETYPE::ARC:
@@ -622,6 +625,37 @@ namespace
                 line->secPoint.x = point.x();
                 line->secPoint.y = point.y();
                 line->secPoint.z = point.z();
+                return true;
+            }
+
+            return false;
+        }
+        case DRW::ETYPE::XLINE:
+        {
+            DRW_Xline* xline = static_cast<DRW_Xline*>(entity);
+            const QVector3D basePoint(xline->basePoint.x, xline->basePoint.y, xline->basePoint.z);
+
+            if (pointIndex == 0)
+            {
+                xline->basePoint.x = point.x();
+                xline->basePoint.y = point.y();
+                xline->basePoint.z = point.z();
+                return true;
+            }
+
+            if (pointIndex == 1)
+            {
+                QVector3D direction = QVector3D(point.x() - basePoint.x(), point.y() - basePoint.y(), 0.0f);
+
+                if (direction.lengthSquared() <= kGeometryEpsilon)
+                {
+                    return false;
+                }
+
+                direction.normalize();
+                xline->secPoint.x = direction.x();
+                xline->secPoint.y = direction.y();
+                xline->secPoint.z = direction.z();
                 return true;
             }
 
@@ -1038,6 +1072,30 @@ namespace CadPreviewBuilder
                     CadViewerUtils::flattenedToGroundPlane(state.currentPos)
                 };
                 primitives.push_back(std::move(linePreview));
+            }
+            break;
+        }
+        case DrawType::Xline:
+        {
+            if (state.lineSubMode == LineDrawSubMode::AwaitEndPoint && !state.commandPoints.isEmpty())
+            {
+                const QVector3D basePoint = CadViewerUtils::flattenedToGroundPlane(state.commandPoints.front());
+                QVector3D direction = CadViewerUtils::flattenedToGroundPlane(state.currentPos) - basePoint;
+
+                if (direction.lengthSquared() > 1.0e-10f)
+                {
+                    direction.normalize();
+
+                    TransientPrimitive xlinePreview;
+                    xlinePreview.primitiveType = GL_LINES;
+                    xlinePreview.color = QVector3D(0.35f, 0.90f, 1.0f);
+                    xlinePreview.vertices =
+                    {
+                        basePoint - direction * kXlinePreviewHalfLength,
+                        basePoint + direction * kXlinePreviewHalfLength
+                    };
+                    primitives.push_back(std::move(xlinePreview));
+                }
             }
             break;
         }

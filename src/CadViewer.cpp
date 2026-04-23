@@ -412,6 +412,8 @@ namespace
             return QStringLiteral("点位控制点");
         case DRW::ETYPE::LINE:
             return QStringLiteral("拉伸点");
+        case DRW::ETYPE::XLINE:
+            return handle.pointIndex == 1 ? QStringLiteral("方向控制点") : QStringLiteral("拉伸点");
         case DRW::ETYPE::CIRCLE:
             return QStringLiteral("半径控制点");
         case DRW::ETYPE::ARC:

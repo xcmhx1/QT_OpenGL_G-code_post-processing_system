@@ -93,6 +93,7 @@ namespace CadViewerUtils
         case DRW::ETYPE::POINT:
             return GL_POINTS;
         case DRW::ETYPE::LINE:
+        case DRW::ETYPE::XLINE:
             return GL_LINES;
         default:
             return GL_LINE_STRIP;

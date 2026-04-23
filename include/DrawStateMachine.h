@@ -12,6 +12,7 @@ enum class DrawType
     None,     // 无图元
     Point,    // 点
     Line,     // 直线
+    Xline,    // 构造线
     Circle,   // 圆
     Arc,      // 弧
     Ellipse,  // 椭圆

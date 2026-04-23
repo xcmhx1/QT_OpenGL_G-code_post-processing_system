@@ -45,6 +45,8 @@ namespace
             return QStringLiteral("点");
         case DrawType::Line:
             return QStringLiteral("直线");
+        case DrawType::Xline:
+            return QStringLiteral("构造线");
         case DrawType::Circle:
             return QStringLiteral("圆");
         case DrawType::Arc:
@@ -129,6 +131,7 @@ namespace
         static const QVector<DynamicCommandDefinition> definitions
         {
             { QStringLiteral("line"),       QStringLiteral("LINE  直线"),        { QStringLiteral("l"), QStringLiteral("line"), QStringLiteral("直线") } },
+            { QStringLiteral("xline"),      QStringLiteral("XLINE 构造线"),      { QStringLiteral("x"), QStringLiteral("xl"), QStringLiteral("xline"), QStringLiteral("constructionline"), QStringLiteral("构造线"), QStringLiteral("无限线") } },
             { QStringLiteral("point"),      QStringLiteral("POINT 点"),          { QStringLiteral("p"), QStringLiteral("point"), QStringLiteral("点") } },
             { QStringLiteral("circle"),     QStringLiteral("CIRCLE 圆"),         { QStringLiteral("c"), QStringLiteral("circle"), QStringLiteral("圆") } },
             { QStringLiteral("arc"),        QStringLiteral("ARC   圆弧"),        { QStringLiteral("a"), QStringLiteral("arc"), QStringLiteral("圆弧") } },
@@ -1030,6 +1033,9 @@ bool CadController::handleKeyPress(QKeyEvent* event)
     case Qt::Key_L:  // 开始绘制直线
         beginDrawing(DrawType::Line, m_drawState.drawingColor);
         return true;
+    case Qt::Key_X:  // 开始绘制构造线
+        beginDrawing(DrawType::Xline, m_drawState.drawingColor);
+        return true;
     case Qt::Key_C:  // 开始绘制圆
         beginDrawing(DrawType::Circle, m_drawState.drawingColor);
         return true;
@@ -1113,6 +1119,11 @@ QString CadController::currentPrompt() const
         basePrompt = m_drawState.lineSubMode == LineDrawSubMode::AwaitEndPoint
             ? QStringLiteral("LINE: 指定下一点")
             : QStringLiteral("LINE: 指定第一点");
+        break;
+    case DrawType::Xline:
+        basePrompt = m_drawState.lineSubMode == LineDrawSubMode::AwaitEndPoint
+            ? QStringLiteral("XLINE: 指定通过点")
+            : QStringLiteral("XLINE: 指定基点");
         break;
     case DrawType::Circle:
         basePrompt = m_drawState.circleSubMode == CircleDrawSubMode::AwaitRadius
@@ -1422,6 +1433,12 @@ bool CadController::executeIdleCommandByCanonical(const QString& canonicalComman
         return true;
     }
 
+    if (normalized == QStringLiteral("xline"))
+    {
+        beginDrawing(DrawType::Xline, m_drawState.drawingColor);
+        return true;
+    }
+
     if (normalized == QStringLiteral("circle"))
     {
         beginDrawing(DrawType::Circle, m_drawState.drawingColor);
@@ -1647,6 +1664,10 @@ QString CadController::currentPointInputStageKey() const
         return m_drawState.lineSubMode == LineDrawSubMode::AwaitEndPoint
             ? QStringLiteral("LINE_END")
             : QStringLiteral("LINE_START");
+    case DrawType::Xline:
+        return m_drawState.lineSubMode == LineDrawSubMode::AwaitEndPoint
+            ? QStringLiteral("XLINE_THROUGH")
+            : QStringLiteral("XLINE_BASE");
     case DrawType::Circle:
         return m_drawState.circleSubMode == CircleDrawSubMode::AwaitRadius
             ? QStringLiteral("CIRCLE_RADIUS")
@@ -1961,6 +1982,7 @@ bool CadController::isAwaitingPointInput() const
     case DrawType::Point:
         return m_drawState.pointSubMode == PointDrawSubMode::AwaitPosition;
     case DrawType::Line:
+    case DrawType::Xline:
         return m_drawState.lineSubMode == LineDrawSubMode::AwaitStartPoint
             || m_drawState.lineSubMode == LineDrawSubMode::AwaitEndPoint;
     case DrawType::Circle:
@@ -2174,6 +2196,12 @@ bool CadController::commitCommandPoint(const QVector3D& worldPos)
             && m_drawState.lineSubMode == LineDrawSubMode::AwaitEndPoint)
         {
             m_viewer->appendCommandMessage(QStringLiteral("已创建直线图元"));
+        }
+        else if (previousState.drawType == DrawType::Xline
+            && previousState.lineSubMode == LineDrawSubMode::AwaitEndPoint
+            && m_drawState.lineSubMode == LineDrawSubMode::AwaitStartPoint)
+        {
+            m_viewer->appendCommandMessage(QStringLiteral("已创建构造线图元"));
         }
 
         m_viewer->refreshCommandPrompt();
@@ -2490,6 +2518,7 @@ void CadController::preparePrimitiveSubMode()
         m_drawState.pointSubMode = PointDrawSubMode::AwaitPosition;
         break;
     case DrawType::Line:
+    case DrawType::Xline:
         m_drawState.lineSubMode = LineDrawSubMode::AwaitStartPoint;
         break;
     case DrawType::Circle:
@@ -2558,6 +2587,7 @@ void CadController::handleLeftPressInCommand(const QVector3D& worldPos)
         m_drawState.pointSubMode = PointDrawSubMode::AwaitPosition;
         break;
     case DrawType::Line:
+    case DrawType::Xline:
         if (m_drawState.lineSubMode == LineDrawSubMode::AwaitStartPoint)
         {
             m_drawState.lineSubMode = LineDrawSubMode::AwaitEndPoint;

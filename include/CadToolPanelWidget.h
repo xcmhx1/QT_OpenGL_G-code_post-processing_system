@@ -112,6 +112,7 @@ private:
     QCheckBox* m_useDefaultExportPathCheckBox = nullptr;
     QMenu* m_drawMoreMenu = nullptr;
     QAction* m_drawPointAction = nullptr;
+    QAction* m_drawXlineAction = nullptr;
     QToolButton* m_importFileButton = nullptr;
     QToolButton* m_exportGCodeButton = nullptr;
     QToolButton* m_deduplicateButton = nullptr;

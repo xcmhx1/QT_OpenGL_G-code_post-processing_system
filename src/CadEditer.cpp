@@ -21,6 +21,7 @@ namespace
     constexpr double kTwoPi = 6.28318530717958647692;
     constexpr double kGeometryEpsilon = 1.0e-9;
     constexpr double kMinEllipseRatio = 1.0e-4;
+    constexpr double kXlineGripHandleLength = 50.0;
 
     // 将任意点压回二维绘图平面
     // @param point 输入三维点
@@ -28,6 +29,24 @@ namespace
     QVector3D flattenToDrawingPlane(const QVector3D& point)
     {
         return QVector3D(point.x(), point.y(), 0.0f);
+    }
+
+    QVector3D normalizedXlineDirection(const DRW_Xline* xline)
+    {
+        if (xline == nullptr)
+        {
+            return QVector3D(1.0f, 0.0f, 0.0f);
+        }
+
+        QVector3D direction(xline->secPoint.x, xline->secPoint.y, xline->secPoint.z);
+
+        if (direction.lengthSquared() <= kGeometryEpsilon)
+        {
+            return QVector3D(1.0f, 0.0f, 0.0f);
+        }
+
+        direction.normalize();
+        return direction;
     }
 
     double normalizeAnglePositive(double angle)
@@ -311,6 +330,12 @@ namespace
             translateCoord(line->secPoint, delta);
             break;
         }
+        case DRW::ETYPE::XLINE:
+        {
+            DRW_Xline* xline = static_cast<DRW_Xline*>(entity);
+            translateCoord(xline->basePoint, delta);
+            break;
+        }
         case DRW::ETYPE::CIRCLE:
         {
             translateCoord(static_cast<DRW_Circle*>(entity)->basePoint, delta);
@@ -421,6 +446,21 @@ namespace
             rotateCoordAround(line->secPoint, basePoint, radians);
             break;
         }
+        case DRW::ETYPE::XLINE:
+        {
+            DRW_Xline* xline = static_cast<DRW_Xline*>(entity);
+            rotateCoordAround(xline->basePoint, basePoint, radians);
+            const QVector3D rotatedDirection = rotatePlanarPoint
+            (
+                QVector3D(xline->secPoint.x, xline->secPoint.y, xline->secPoint.z),
+                QVector3D(0.0f, 0.0f, 0.0f),
+                radians
+            );
+            xline->secPoint.x = rotatedDirection.x();
+            xline->secPoint.y = rotatedDirection.y();
+            xline->secPoint.z = rotatedDirection.z();
+            break;
+        }
         case DRW::ETYPE::CIRCLE:
             rotateCoordAround(static_cast<DRW_Circle*>(entity)->basePoint, basePoint, radians);
             break;
@@ -498,6 +538,12 @@ namespace
             DRW_Line* line = static_cast<DRW_Line*>(entity);
             scaleCoordAround(line->basePoint, basePoint, scaleFactor);
             scaleCoordAround(line->secPoint, basePoint, scaleFactor);
+            break;
+        }
+        case DRW::ETYPE::XLINE:
+        {
+            DRW_Xline* xline = static_cast<DRW_Xline*>(entity);
+            scaleCoordAround(xline->basePoint, basePoint, scaleFactor);
             break;
         }
         case DRW::ETYPE::CIRCLE:
@@ -589,6 +635,26 @@ namespace
             if (pointIndex == 1)
             {
                 point = QVector3D(line->secPoint.x, line->secPoint.y, 0.0f);
+                return true;
+            }
+
+            return false;
+        }
+        case DRW::ETYPE::XLINE:
+        {
+            const DRW_Xline* xline = static_cast<const DRW_Xline*>(item->m_nativeEntity);
+            const QVector3D basePoint(xline->basePoint.x, xline->basePoint.y, 0.0f);
+            const QVector3D direction = normalizedXlineDirection(xline);
+
+            if (pointIndex == 0)
+            {
+                point = basePoint;
+                return true;
+            }
+
+            if (pointIndex == 1)
+            {
+                point = basePoint + direction * static_cast<float>(kXlineGripHandleLength);
                 return true;
             }
 
@@ -791,6 +857,37 @@ namespace
                 line->secPoint.x = point.x();
                 line->secPoint.y = point.y();
                 line->secPoint.z = point.z();
+                return true;
+            }
+
+            return false;
+        }
+        case DRW::ETYPE::XLINE:
+        {
+            DRW_Xline* xline = static_cast<DRW_Xline*>(entity);
+            const QVector3D basePoint(xline->basePoint.x, xline->basePoint.y, xline->basePoint.z);
+
+            if (pointIndex == 0)
+            {
+                xline->basePoint.x = point.x();
+                xline->basePoint.y = point.y();
+                xline->basePoint.z = point.z();
+                return true;
+            }
+
+            if (pointIndex == 1)
+            {
+                QVector3D direction = flattenToDrawingPlane(point - basePoint);
+
+                if (direction.lengthSquared() <= kGeometryEpsilon)
+                {
+                    return false;
+                }
+
+                direction.normalize();
+                xline->secPoint.x = direction.x();
+                xline->secPoint.y = direction.y();
+                xline->secPoint.z = direction.z();
                 return true;
             }
 
@@ -1033,6 +1130,8 @@ namespace
             return std::make_unique<DRW_Point>(*static_cast<const DRW_Point*>(entity));
         case DRW::ETYPE::LINE:
             return std::make_unique<DRW_Line>(*static_cast<const DRW_Line*>(entity));
+        case DRW::ETYPE::XLINE:
+            return std::make_unique<DRW_Xline>(*static_cast<const DRW_Xline*>(entity));
         case DRW::ETYPE::CIRCLE:
             return std::make_unique<DRW_Circle>(*static_cast<const DRW_Circle*>(entity));
         case DRW::ETYPE::ARC:
@@ -1268,6 +1367,37 @@ namespace
         entity->basePoint.z = 0.0;
         entity->secPoint.x = planarEndPoint.x();
         entity->secPoint.y = planarEndPoint.y();
+        entity->secPoint.z = 0.0;
+        entity->layer = layerName.trimmed().isEmpty() ? "0" : layerName.toUtf8().constData();
+        applyEntityColor(entity.get(), color, colorIndex);
+        return entity;
+    }
+
+    std::unique_ptr<DRW_Entity> createXlineEntity
+    (
+        const QVector3D& basePoint,
+        const QVector3D& throughPoint,
+        const QString& layerName,
+        const QColor& color,
+        int colorIndex
+    )
+    {
+        const QVector3D planarBasePoint = flattenToDrawingPlane(basePoint);
+        QVector3D direction = flattenToDrawingPlane(throughPoint) - planarBasePoint;
+
+        if (direction.lengthSquared() <= kGeometryEpsilon)
+        {
+            return nullptr;
+        }
+
+        direction.normalize();
+
+        auto entity = std::make_unique<DRW_Xline>();
+        entity->basePoint.x = planarBasePoint.x();
+        entity->basePoint.y = planarBasePoint.y();
+        entity->basePoint.z = 0.0;
+        entity->secPoint.x = direction.x();
+        entity->secPoint.y = direction.y();
         entity->secPoint.z = 0.0;
         entity->layer = layerName.trimmed().isEmpty() ? "0" : layerName.toUtf8().constData();
         applyEntityColor(entity.get(), color, colorIndex);
@@ -2486,6 +2616,8 @@ bool CadEditer::handleLeftPress
         return handlePointDrawing(previousState, currentState, worldPos);
     case DrawType::Line:
         return handleLineDrawing(previousState, currentState, worldPos);
+    case DrawType::Xline:
+        return handleXlineDrawing(previousState, currentState, worldPos);
     case DrawType::Circle:
         return handleCircleDrawing(previousState, currentState, worldPos);
     case DrawType::Arc:
@@ -2961,6 +3093,46 @@ bool CadEditer::handleLineDrawing
         // 成功创建一段线后，把终点作为下一段的起点，支持连续折线式输入
         currentState.commandPoints = { worldPos };
         currentState.lineSubMode = LineDrawSubMode::AwaitEndPoint;
+        return true;
+    }
+
+    return false;
+}
+
+bool CadEditer::handleXlineDrawing
+(
+    const DrawStateMachine& previousState,
+    DrawStateMachine& currentState,
+    const QVector3D& worldPos
+)
+{
+    if (previousState.lineSubMode == LineDrawSubMode::AwaitStartPoint)
+    {
+        currentState.commandPoints = { worldPos };
+        return true;
+    }
+
+    if (previousState.lineSubMode == LineDrawSubMode::AwaitEndPoint && !currentState.commandPoints.isEmpty())
+    {
+        const QVector3D basePoint = currentState.commandPoints.front();
+
+        if (!addEntity
+        (
+            createXlineEntity
+            (
+                basePoint,
+                worldPos,
+                previousState.drawingLayerName,
+                previousState.drawingColor,
+                previousState.drawingColorIndex
+            )
+        ))
+        {
+            return false;
+        }
+
+        currentState.commandPoints.clear();
+        currentState.lineSubMode = LineDrawSubMode::AwaitStartPoint;
         return true;
     }
 

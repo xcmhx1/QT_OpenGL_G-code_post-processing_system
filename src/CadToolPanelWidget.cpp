@@ -68,6 +68,23 @@ namespace
         case DrawType::Line:
             painter.drawLine(QPointF(3.5, 13.5), QPointF(14.5, 4.5));
             break;
+        case DrawType::Xline:
+        {
+            painter.drawLine(QPointF(2.5, 13.5), QPointF(13.5, 2.5));
+            QPainterPath headA;
+            headA.moveTo(1.7, 14.4);
+            headA.lineTo(2.9, 11.7);
+            headA.lineTo(4.4, 13.1);
+            headA.closeSubpath();
+            painter.fillPath(headA, pen.color());
+            QPainterPath headB;
+            headB.moveTo(14.3, 1.6);
+            headB.lineTo(11.6, 2.8);
+            headB.lineTo(13.0, 4.3);
+            headB.closeSubpath();
+            painter.fillPath(headB, pen.color());
+            break;
+        }
         case DrawType::Circle:
             painter.drawEllipse(QRectF(3.5, 3.5, 11.0, 11.0));
             break;
@@ -519,6 +536,8 @@ void CadToolPanelWidget::buildUi()
     m_drawMoreMenu = new QMenu(this);
     m_drawPointAction = m_drawMoreMenu->addAction(QStringLiteral("点"));
     connect(m_drawPointAction, &QAction::triggered, this, [this]() { emit drawRequested(DrawType::Point); });
+    m_drawXlineAction = m_drawMoreMenu->addAction(QStringLiteral("构造线"));
+    connect(m_drawXlineAction, &QAction::triggered, this, [this]() { emit drawRequested(DrawType::Xline); });
 
     QVBoxLayout* rootLayout = new QVBoxLayout(this);
     rootLayout->setContentsMargins(0, 0, 0, 0);
@@ -711,6 +730,11 @@ void CadToolPanelWidget::applyTheme()
     if (m_drawPointAction != nullptr)
     {
         m_drawPointAction->setIcon(buildRibbonIcon(DrawType::Point, m_theme.accentColor));
+    }
+
+    if (m_drawXlineAction != nullptr)
+    {
+        m_drawXlineAction->setIcon(buildRibbonIcon(DrawType::Xline, m_theme.accentColor));
     }
 
     if (m_drawMoreMenu != nullptr)
