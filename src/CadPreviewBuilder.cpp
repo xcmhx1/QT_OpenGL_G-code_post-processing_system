@@ -210,6 +210,78 @@ namespace
         }
     }
 
+    void appendRectanglePreview(QVector<QVector3D>& vertices, const QVector3D& firstCorner, const QVector3D& secondCorner)
+    {
+        const QVector3D planarFirstCorner = CadViewerUtils::flattenedToGroundPlane(firstCorner);
+        const QVector3D planarSecondCorner = CadViewerUtils::flattenedToGroundPlane(secondCorner);
+
+        if (std::abs(planarSecondCorner.x() - planarFirstCorner.x()) <= 1.0e-10f
+            || std::abs(planarSecondCorner.y() - planarFirstCorner.y()) <= 1.0e-10f)
+        {
+            return;
+        }
+
+        vertices.reserve(vertices.size() + 5);
+        vertices.append(planarFirstCorner);
+        vertices.append(QVector3D(planarSecondCorner.x(), planarFirstCorner.y(), 0.0f));
+        vertices.append(planarSecondCorner);
+        vertices.append(QVector3D(planarFirstCorner.x(), planarSecondCorner.y(), 0.0f));
+        vertices.append(planarFirstCorner);
+    }
+
+    void appendPolygonPreview
+    (
+        QVector<QVector3D>& vertices,
+        const QVector3D& center,
+        const QVector3D& radiusPoint,
+        int sideCount,
+        bool circumscribedAboutCircle
+    )
+    {
+        if (sideCount < 3 || sideCount > 1024)
+        {
+            return;
+        }
+
+        const QVector3D planarCenter = CadViewerUtils::flattenedToGroundPlane(center);
+        const QVector3D planarRadiusPoint = CadViewerUtils::flattenedToGroundPlane(radiusPoint);
+        const QVector3D radiusVector = planarRadiusPoint - planarCenter;
+        const double referenceRadius = radiusVector.length();
+
+        if (referenceRadius <= kGeometryEpsilon)
+        {
+            return;
+        }
+
+        const double stepAngle = kTwoPi / static_cast<double>(sideCount);
+        const double baseAngle = std::atan2(radiusVector.y(), radiusVector.x());
+        const double startAngle = circumscribedAboutCircle ? (baseAngle + stepAngle * 0.5) : baseAngle;
+        const double polygonRadius = circumscribedAboutCircle
+            ? (referenceRadius / std::cos(stepAngle * 0.5))
+            : referenceRadius;
+
+        if (!std::isfinite(polygonRadius) || polygonRadius <= kGeometryEpsilon)
+        {
+            return;
+        }
+
+        vertices.reserve(vertices.size() + sideCount + 1);
+
+        for (int index = 0; index <= sideCount; ++index)
+        {
+            const double angle = startAngle + stepAngle * static_cast<double>(index % sideCount);
+            vertices.append
+            (
+                QVector3D
+                (
+                    static_cast<float>(planarCenter.x() + polygonRadius * std::cos(angle)),
+                    static_cast<float>(planarCenter.y() + polygonRadius * std::sin(angle)),
+                    0.0f
+                )
+            );
+        }
+    }
+
     // 安全归一化向量，避免对零向量归一化产生NaN
     // @param vector 输入向量
     // @return 归一化后的向量，如果输入向量接近零则返回零向量
@@ -1095,6 +1167,68 @@ namespace CadPreviewBuilder
                         basePoint + direction * kXlinePreviewHalfLength
                     };
                     primitives.push_back(std::move(xlinePreview));
+                }
+            }
+            break;
+        }
+        case DrawType::Rectangle:
+        {
+            if (state.rectangleSubMode == RectangleDrawSubMode::AwaitSecondCorner && !state.commandPoints.isEmpty())
+            {
+                const QVector3D firstCorner = CadViewerUtils::flattenedToGroundPlane(state.commandPoints.front());
+                const QVector3D currentPoint = CadViewerUtils::flattenedToGroundPlane(state.currentPos);
+
+                TransientPrimitive rectanglePreview;
+                rectanglePreview.primitiveType = GL_LINE_STRIP;
+                rectanglePreview.color = QVector3D(0.35f, 0.90f, 1.0f);
+                appendRectanglePreview(rectanglePreview.vertices, firstCorner, currentPoint);
+
+                if (!rectanglePreview.vertices.isEmpty())
+                {
+                    primitives.push_back(std::move(rectanglePreview));
+                }
+            }
+            break;
+        }
+        case DrawType::Polygon:
+        {
+            if (state.polygonSubMode == PolygonDrawSubMode::AwaitRadius && !state.commandPoints.isEmpty())
+            {
+                const QVector3D center = CadViewerUtils::flattenedToGroundPlane(state.commandPoints.front());
+                const QVector3D currentPoint = CadViewerUtils::flattenedToGroundPlane(state.currentPos);
+                const float referenceRadius = (currentPoint - center).length();
+
+                TransientPrimitive radiusGuide;
+                radiusGuide.primitiveType = GL_LINES;
+                radiusGuide.color = QVector3D(0.35f, 0.90f, 1.0f);
+                radiusGuide.vertices = { center, currentPoint };
+                primitives.push_back(std::move(radiusGuide));
+
+                TransientPrimitive circleGuide;
+                circleGuide.primitiveType = GL_LINE_STRIP;
+                circleGuide.color = QVector3D(0.22f, 0.56f, 0.82f);
+                appendCirclePreview(circleGuide.vertices, center, referenceRadius);
+
+                if (!circleGuide.vertices.isEmpty())
+                {
+                    primitives.push_back(std::move(circleGuide));
+                }
+
+                TransientPrimitive polygonPreview;
+                polygonPreview.primitiveType = GL_LINE_STRIP;
+                polygonPreview.color = QVector3D(0.35f, 0.90f, 1.0f);
+                appendPolygonPreview
+                (
+                    polygonPreview.vertices,
+                    center,
+                    currentPoint,
+                    state.polygonSideCount,
+                    state.polygonCircumscribedAboutCircle
+                );
+
+                if (!polygonPreview.vertices.isEmpty())
+                {
+                    primitives.push_back(std::move(polygonPreview));
                 }
             }
             break;

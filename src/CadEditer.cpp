@@ -1324,6 +1324,17 @@ namespace
         return std::tan(alpha * 0.5);
     }
 
+    std::unique_ptr<DRW_Entity> createPolylineEntity
+    (
+        const QVector<QVector3D>& points,
+        const QVector<double>& bulges,
+        const QString& layerName,
+        const QColor& color,
+        int colorIndex,
+        bool closePolyline,
+        bool lightweight
+    );
+
     // 创建点实体
     std::unique_ptr<DRW_Entity> createPointEntity
     (
@@ -1402,6 +1413,87 @@ namespace
         entity->layer = layerName.trimmed().isEmpty() ? "0" : layerName.toUtf8().constData();
         applyEntityColor(entity.get(), color, colorIndex);
         return entity;
+    }
+
+    std::unique_ptr<DRW_Entity> createRectangleEntity
+    (
+        const QVector3D& firstCorner,
+        const QVector3D& secondCorner,
+        const QString& layerName,
+        const QColor& color,
+        int colorIndex
+    )
+    {
+        const QVector3D planarFirstCorner = flattenToDrawingPlane(firstCorner);
+        const QVector3D planarSecondCorner = flattenToDrawingPlane(secondCorner);
+
+        if (std::abs(planarSecondCorner.x() - planarFirstCorner.x()) <= kGeometryEpsilon
+            || std::abs(planarSecondCorner.y() - planarFirstCorner.y()) <= kGeometryEpsilon)
+        {
+            return nullptr;
+        }
+
+        QVector<QVector3D> points;
+        points.reserve(4);
+        points.append(planarFirstCorner);
+        points.append(QVector3D(planarSecondCorner.x(), planarFirstCorner.y(), 0.0f));
+        points.append(planarSecondCorner);
+        points.append(QVector3D(planarFirstCorner.x(), planarSecondCorner.y(), 0.0f));
+
+        return createPolylineEntity(points, {}, layerName, color, colorIndex, true, true);
+    }
+
+    std::unique_ptr<DRW_Entity> createPolygonEntity
+    (
+        const QVector3D& center,
+        const QVector3D& radiusPoint,
+        int sideCount,
+        bool circumscribedAboutCircle,
+        const QString& layerName,
+        const QColor& color,
+        int colorIndex
+    )
+    {
+        const QVector3D planarCenter = flattenToDrawingPlane(center);
+        const QVector3D planarRadiusPoint = flattenToDrawingPlane(radiusPoint);
+        const QVector3D radiusVector = planarRadiusPoint - planarCenter;
+        const double referenceRadius = radiusVector.length();
+
+        if (sideCount < 3 || sideCount > 1024 || referenceRadius <= kGeometryEpsilon)
+        {
+            return nullptr;
+        }
+
+        const double stepAngle = kTwoPi / static_cast<double>(sideCount);
+        const double baseAngle = std::atan2(radiusVector.y(), radiusVector.x());
+        const double startAngle = circumscribedAboutCircle ? (baseAngle + stepAngle * 0.5) : baseAngle;
+        const double polygonRadius = circumscribedAboutCircle
+            ? (referenceRadius / std::cos(stepAngle * 0.5))
+            : referenceRadius;
+
+        if (!std::isfinite(polygonRadius) || polygonRadius <= kGeometryEpsilon)
+        {
+            return nullptr;
+        }
+
+        QVector<QVector3D> points;
+        points.reserve(sideCount);
+
+        for (int index = 0; index < sideCount; ++index)
+        {
+            const double angle = startAngle + stepAngle * static_cast<double>(index);
+            points.append
+            (
+                QVector3D
+                (
+                    static_cast<float>(planarCenter.x() + polygonRadius * std::cos(angle)),
+                    static_cast<float>(planarCenter.y() + polygonRadius * std::sin(angle)),
+                    0.0f
+                )
+            );
+        }
+
+        return createPolylineEntity(points, {}, layerName, color, colorIndex, true, true);
     }
 
     // 创建圆实体
@@ -2618,6 +2710,10 @@ bool CadEditer::handleLeftPress
         return handleLineDrawing(previousState, currentState, worldPos);
     case DrawType::Xline:
         return handleXlineDrawing(previousState, currentState, worldPos);
+    case DrawType::Rectangle:
+        return handleRectangleDrawing(previousState, currentState, worldPos);
+    case DrawType::Polygon:
+        return handlePolygonDrawing(previousState, currentState, worldPos);
     case DrawType::Circle:
         return handleCircleDrawing(previousState, currentState, worldPos);
     case DrawType::Arc:
@@ -3133,6 +3229,88 @@ bool CadEditer::handleXlineDrawing
 
         currentState.commandPoints.clear();
         currentState.lineSubMode = LineDrawSubMode::AwaitStartPoint;
+        return true;
+    }
+
+    return false;
+}
+
+bool CadEditer::handleRectangleDrawing
+(
+    const DrawStateMachine& previousState,
+    DrawStateMachine& currentState,
+    const QVector3D& worldPos
+)
+{
+    if (previousState.rectangleSubMode == RectangleDrawSubMode::AwaitFirstCorner)
+    {
+        currentState.commandPoints = { flattenToDrawingPlane(worldPos) };
+        return true;
+    }
+
+    if (previousState.rectangleSubMode == RectangleDrawSubMode::AwaitSecondCorner && !currentState.commandPoints.isEmpty())
+    {
+        const QVector3D firstCorner = flattenToDrawingPlane(currentState.commandPoints.front());
+
+        if (!addEntity
+        (
+            createRectangleEntity
+            (
+                firstCorner,
+                worldPos,
+                previousState.drawingLayerName,
+                previousState.drawingColor,
+                previousState.drawingColorIndex
+            )
+        ))
+        {
+            return false;
+        }
+
+        currentState.commandPoints.clear();
+        currentState.rectangleSubMode = RectangleDrawSubMode::AwaitFirstCorner;
+        return true;
+    }
+
+    return false;
+}
+
+bool CadEditer::handlePolygonDrawing
+(
+    const DrawStateMachine& previousState,
+    DrawStateMachine& currentState,
+    const QVector3D& worldPos
+)
+{
+    if (previousState.polygonSubMode == PolygonDrawSubMode::AwaitCenter)
+    {
+        currentState.commandPoints = { flattenToDrawingPlane(worldPos) };
+        return true;
+    }
+
+    if (previousState.polygonSubMode == PolygonDrawSubMode::AwaitRadius && !currentState.commandPoints.isEmpty())
+    {
+        const QVector3D center = flattenToDrawingPlane(currentState.commandPoints.front());
+
+        if (!addEntity
+        (
+            createPolygonEntity
+            (
+                center,
+                worldPos,
+                previousState.polygonSideCount,
+                previousState.polygonCircumscribedAboutCircle,
+                previousState.drawingLayerName,
+                previousState.drawingColor,
+                previousState.drawingColorIndex
+            )
+        ))
+        {
+            return false;
+        }
+
+        currentState.commandPoints.clear();
+        currentState.polygonSubMode = PolygonDrawSubMode::AwaitCenter;
         return true;
     }
 

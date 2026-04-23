@@ -239,6 +239,9 @@ private:
     // 按规范命令名执行空闲态命令。
     bool executeIdleCommandByCanonical(const QString& canonicalCommand);
 
+    // 为多边形命令请求并保存当前配置。
+    bool configurePolygonDrawing();
+
     // 删除当前选中图元。
     bool deleteSelectedEntity();
 

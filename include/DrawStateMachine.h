@@ -13,6 +13,8 @@ enum class DrawType
     Point,    // 点
     Line,     // 直线
     Xline,    // 构造线
+    Rectangle,// 矩形
+    Polygon,  // 多边形
     Circle,   // 圆
     Arc,      // 弧
     Ellipse,  // 椭圆
@@ -41,6 +43,20 @@ enum class CircleDrawSubMode
     Idle,        // 空闲状态
     AwaitCenter, // 等待用户指定圆心
     AwaitRadius, // 等待用户指定半径
+};
+
+enum class RectangleDrawSubMode
+{
+    Idle,             // 空闲状态
+    AwaitFirstCorner, // 等待用户指定第一个角点
+    AwaitSecondCorner,// 等待用户指定对角点
+};
+
+enum class PolygonDrawSubMode
+{
+    Idle,        // 空闲状态
+    AwaitCenter, // 等待用户指定中心
+    AwaitRadius, // 等待用户指定参考圆半径
 };
 
 // 定义弧绘图子模式的枚举
@@ -155,6 +171,10 @@ public:
     LineDrawSubMode lineSubMode = LineDrawSubMode::Idle;
     // 圆状态机
     CircleDrawSubMode circleSubMode = CircleDrawSubMode::Idle;
+    // 矩形状态机
+    RectangleDrawSubMode rectangleSubMode = RectangleDrawSubMode::Idle;
+    // 多边形状态机
+    PolygonDrawSubMode polygonSubMode = PolygonDrawSubMode::Idle;
     // 圆弧状态机
     ArcDrawSubMode arcSubMode = ArcDrawSubMode::Idle;
     // 椭圆状态机
@@ -209,6 +229,12 @@ public:
 
     // 正交约束开关（F8）。
     bool orthoEnabled = false;
+
+    // 多边形默认边数，跨命令保留。
+    int polygonSideCount = 6;
+
+    // 多边形是否外切于参考圆；false 表示内切于圆。
+    bool polygonCircumscribedAboutCircle = false;
 
     // 静态成员变量，在程序启动时即被初始化
     static DrawStateMachine s_instance;

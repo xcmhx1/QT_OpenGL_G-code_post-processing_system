@@ -9,6 +9,9 @@
 // Qt 核心模块
 #include <QColorDialog>
 #include <QCursor>
+#include <QInputDialog>
+#include <QMessageBox>
+#include <QPushButton>
 
 // CAD 模块内部依赖
 #include "CadEditer.h"
@@ -47,6 +50,10 @@ namespace
             return QStringLiteral("直线");
         case DrawType::Xline:
             return QStringLiteral("构造线");
+        case DrawType::Rectangle:
+            return QStringLiteral("矩形");
+        case DrawType::Polygon:
+            return QStringLiteral("多边形");
         case DrawType::Circle:
             return QStringLiteral("圆");
         case DrawType::Arc:
@@ -60,6 +67,13 @@ namespace
         default:
             return QStringLiteral("空闲");
         }
+    }
+
+    QString polygonConstructionModeText(bool circumscribedAboutCircle)
+    {
+        return circumscribedAboutCircle
+            ? QStringLiteral("外切于圆")
+            : QStringLiteral("内切于圆");
     }
 
     // 判断是否属于坐标表达式字符（兼容输入：x,y / @dx,dy / d<a）。
@@ -132,6 +146,8 @@ namespace
         {
             { QStringLiteral("line"),       QStringLiteral("LINE  直线"),        { QStringLiteral("l"), QStringLiteral("line"), QStringLiteral("直线") } },
             { QStringLiteral("xline"),      QStringLiteral("XLINE 构造线"),      { QStringLiteral("x"), QStringLiteral("xl"), QStringLiteral("xline"), QStringLiteral("constructionline"), QStringLiteral("构造线"), QStringLiteral("无限线") } },
+            { QStringLiteral("rectangle"),  QStringLiteral("RECTANGLE 矩形"),    { QStringLiteral("r"), QStringLiteral("rect"), QStringLiteral("rectangle"), QStringLiteral("矩形") } },
+            { QStringLiteral("polygon"),    QStringLiteral("POLYGON 多边形"),    { QStringLiteral("g"), QStringLiteral("pg"), QStringLiteral("polygon"), QStringLiteral("多边形"), QStringLiteral("正多边形") } },
             { QStringLiteral("point"),      QStringLiteral("POINT 点"),          { QStringLiteral("p"), QStringLiteral("point"), QStringLiteral("点") } },
             { QStringLiteral("circle"),     QStringLiteral("CIRCLE 圆"),         { QStringLiteral("c"), QStringLiteral("circle"), QStringLiteral("圆") } },
             { QStringLiteral("arc"),        QStringLiteral("ARC   圆弧"),        { QStringLiteral("a"), QStringLiteral("arc"), QStringLiteral("圆弧") } },
@@ -225,6 +241,11 @@ void CadController::setDefaultDrawingProperties(const QString& layerName, const 
 // @param color 图元颜色，默认为白色
 void CadController::beginDrawing(DrawType drawType, const QColor& color)
 {
+    if (drawType == DrawType::Polygon && !configurePolygonDrawing())
+    {
+        return;
+    }
+
     // 如果有编辑器，取消其临时命令
     if (m_editer != nullptr)
     {
@@ -252,9 +273,61 @@ void CadController::beginDrawing(DrawType drawType, const QColor& color)
     // 如果有视图，发送消息并刷新提示
     if (m_viewer != nullptr)
     {
-        m_viewer->appendCommandMessage(QStringLiteral("已进入%1命令").arg(drawTypeName(drawType)));
+        if (drawType == DrawType::Polygon)
+        {
+            m_viewer->appendCommandMessage
+            (
+                QStringLiteral("已进入多边形命令（%1 边，%2）")
+                .arg(m_drawState.polygonSideCount)
+                .arg(polygonConstructionModeText(m_drawState.polygonCircumscribedAboutCircle))
+            );
+        }
+        else
+        {
+            m_viewer->appendCommandMessage(QStringLiteral("已进入%1命令").arg(drawTypeName(drawType)));
+        }
+
         m_viewer->refreshCommandPrompt();
     }
+}
+
+bool CadController::configurePolygonDrawing()
+{
+    QWidget* parentWidget = m_viewer != nullptr ? static_cast<QWidget*>(m_viewer) : nullptr;
+    bool sideCountAccepted = false;
+    const int sideCount = QInputDialog::getInt
+    (
+        parentWidget,
+        QStringLiteral("多边形"),
+        QStringLiteral("请输入边数（3-1024）:"),
+        std::clamp(m_drawState.polygonSideCount, 3, 1024),
+        3,
+        1024,
+        1,
+        &sideCountAccepted
+    );
+
+    if (!sideCountAccepted)
+    {
+        return false;
+    }
+
+    QMessageBox modeDialog(parentWidget);
+    modeDialog.setWindowTitle(QStringLiteral("多边形"));
+    modeDialog.setText(QStringLiteral("选择与参考圆的关系"));
+    QAbstractButton* inscribedButton = modeDialog.addButton(QStringLiteral("内切于圆"), QMessageBox::AcceptRole);
+    QAbstractButton* circumscribedButton = modeDialog.addButton(QStringLiteral("外切于圆"), QMessageBox::AcceptRole);
+    modeDialog.addButton(QMessageBox::Cancel);
+    modeDialog.exec();
+
+    if (modeDialog.clickedButton() != inscribedButton && modeDialog.clickedButton() != circumscribedButton)
+    {
+        return false;
+    }
+
+    m_drawState.polygonSideCount = sideCount;
+    m_drawState.polygonCircumscribedAboutCircle = modeDialog.clickedButton() == circumscribedButton;
+    return true;
 }
 
 bool CadController::beginMoveSelected()
@@ -830,6 +903,9 @@ bool CadController::handleKeyPress(QKeyEvent* event)
         case Qt::Key_Underscore: // 缩小
         case Qt::Key_P:     // 点
         case Qt::Key_L:     // 直线
+        case Qt::Key_X:     // 构造线
+        case Qt::Key_R:     // 矩形
+        case Qt::Key_G:     // 多边形
         case Qt::Key_C:     // 圆
         case Qt::Key_A:     // 圆弧
         case Qt::Key_E:     // 椭圆
@@ -1036,6 +1112,12 @@ bool CadController::handleKeyPress(QKeyEvent* event)
     case Qt::Key_X:  // 开始绘制构造线
         beginDrawing(DrawType::Xline, m_drawState.drawingColor);
         return true;
+    case Qt::Key_R:  // 开始绘制矩形
+        beginDrawing(DrawType::Rectangle, m_drawState.drawingColor);
+        return true;
+    case Qt::Key_G:  // 开始绘制多边形
+        beginDrawing(DrawType::Polygon, m_drawState.drawingColor);
+        return true;
     case Qt::Key_C:  // 开始绘制圆
         beginDrawing(DrawType::Circle, m_drawState.drawingColor);
         return true;
@@ -1124,6 +1206,22 @@ QString CadController::currentPrompt() const
         basePrompt = m_drawState.lineSubMode == LineDrawSubMode::AwaitEndPoint
             ? QStringLiteral("XLINE: 指定通过点")
             : QStringLiteral("XLINE: 指定基点");
+        break;
+    case DrawType::Rectangle:
+        basePrompt = m_drawState.rectangleSubMode == RectangleDrawSubMode::AwaitSecondCorner
+            ? QStringLiteral("RECTANGLE: 指定另一个角点")
+            : QStringLiteral("RECTANGLE: 指定第一个角点");
+        break;
+    case DrawType::Polygon:
+        basePrompt = QStringLiteral("POLYGON[%1边/%2]: %3")
+            .arg(m_drawState.polygonSideCount)
+            .arg(polygonConstructionModeText(m_drawState.polygonCircumscribedAboutCircle))
+            .arg
+            (
+                m_drawState.polygonSubMode == PolygonDrawSubMode::AwaitRadius
+                    ? QStringLiteral("指定参考圆半径")
+                    : QStringLiteral("指定中心")
+            );
         break;
     case DrawType::Circle:
         basePrompt = m_drawState.circleSubMode == CircleDrawSubMode::AwaitRadius
@@ -1439,6 +1537,18 @@ bool CadController::executeIdleCommandByCanonical(const QString& canonicalComman
         return true;
     }
 
+    if (normalized == QStringLiteral("rectangle"))
+    {
+        beginDrawing(DrawType::Rectangle, m_drawState.drawingColor);
+        return true;
+    }
+
+    if (normalized == QStringLiteral("polygon"))
+    {
+        beginDrawing(DrawType::Polygon, m_drawState.drawingColor);
+        return true;
+    }
+
     if (normalized == QStringLiteral("circle"))
     {
         beginDrawing(DrawType::Circle, m_drawState.drawingColor);
@@ -1668,6 +1778,14 @@ QString CadController::currentPointInputStageKey() const
         return m_drawState.lineSubMode == LineDrawSubMode::AwaitEndPoint
             ? QStringLiteral("XLINE_THROUGH")
             : QStringLiteral("XLINE_BASE");
+    case DrawType::Rectangle:
+        return m_drawState.rectangleSubMode == RectangleDrawSubMode::AwaitSecondCorner
+            ? QStringLiteral("RECTANGLE_SECOND")
+            : QStringLiteral("RECTANGLE_FIRST");
+    case DrawType::Polygon:
+        return m_drawState.polygonSubMode == PolygonDrawSubMode::AwaitRadius
+            ? QStringLiteral("POLYGON_RADIUS")
+            : QStringLiteral("POLYGON_CENTER");
     case DrawType::Circle:
         return m_drawState.circleSubMode == CircleDrawSubMode::AwaitRadius
             ? QStringLiteral("CIRCLE_RADIUS")
@@ -1985,6 +2103,12 @@ bool CadController::isAwaitingPointInput() const
     case DrawType::Xline:
         return m_drawState.lineSubMode == LineDrawSubMode::AwaitStartPoint
             || m_drawState.lineSubMode == LineDrawSubMode::AwaitEndPoint;
+    case DrawType::Rectangle:
+        return m_drawState.rectangleSubMode == RectangleDrawSubMode::AwaitFirstCorner
+            || m_drawState.rectangleSubMode == RectangleDrawSubMode::AwaitSecondCorner;
+    case DrawType::Polygon:
+        return m_drawState.polygonSubMode == PolygonDrawSubMode::AwaitCenter
+            || m_drawState.polygonSubMode == PolygonDrawSubMode::AwaitRadius;
     case DrawType::Circle:
         return m_drawState.circleSubMode == CircleDrawSubMode::AwaitCenter
             || m_drawState.circleSubMode == CircleDrawSubMode::AwaitRadius;
@@ -2172,6 +2296,23 @@ bool CadController::commitCommandPoint(const QVector3D& worldPos)
         else if (previousState.drawType == DrawType::Point)
         {
             m_viewer->appendCommandMessage(QStringLiteral("已创建点图元"));
+        }
+        else if (previousState.drawType == DrawType::Rectangle
+            && previousState.rectangleSubMode == RectangleDrawSubMode::AwaitSecondCorner
+            && m_drawState.rectangleSubMode == RectangleDrawSubMode::AwaitFirstCorner)
+        {
+            m_viewer->appendCommandMessage(QStringLiteral("已创建矩形图元"));
+        }
+        else if (previousState.drawType == DrawType::Polygon
+            && previousState.polygonSubMode == PolygonDrawSubMode::AwaitRadius
+            && m_drawState.polygonSubMode == PolygonDrawSubMode::AwaitCenter)
+        {
+            m_viewer->appendCommandMessage
+            (
+                QStringLiteral("已创建多边形图元（%1 边，%2）")
+                .arg(previousState.polygonSideCount)
+                .arg(polygonConstructionModeText(previousState.polygonCircumscribedAboutCircle))
+            );
         }
         else if (previousState.drawType == DrawType::Circle
             && previousState.circleSubMode == CircleDrawSubMode::AwaitRadius
@@ -2499,6 +2640,8 @@ void CadController::resetSubModes()
     m_drawState.pointSubMode = PointDrawSubMode::Idle;
     m_drawState.lineSubMode = LineDrawSubMode::Idle;
     m_drawState.circleSubMode = CircleDrawSubMode::Idle;
+    m_drawState.rectangleSubMode = RectangleDrawSubMode::Idle;
+    m_drawState.polygonSubMode = PolygonDrawSubMode::Idle;
     m_drawState.arcSubMode = ArcDrawSubMode::Idle;
     m_drawState.ellipseSubMode = EllipseDrawSubMode::Idle;
     m_drawState.polylineSubMode = PolylineDrawSubMode::Idle;
@@ -2520,6 +2663,12 @@ void CadController::preparePrimitiveSubMode()
     case DrawType::Line:
     case DrawType::Xline:
         m_drawState.lineSubMode = LineDrawSubMode::AwaitStartPoint;
+        break;
+    case DrawType::Rectangle:
+        m_drawState.rectangleSubMode = RectangleDrawSubMode::AwaitFirstCorner;
+        break;
+    case DrawType::Polygon:
+        m_drawState.polygonSubMode = PolygonDrawSubMode::AwaitCenter;
         break;
     case DrawType::Circle:
         m_drawState.circleSubMode = CircleDrawSubMode::AwaitCenter;
@@ -2595,6 +2744,26 @@ void CadController::handleLeftPressInCommand(const QVector3D& worldPos)
         else
         {
             m_drawState.lineSubMode = LineDrawSubMode::AwaitStartPoint;
+        }
+        break;
+    case DrawType::Rectangle:
+        if (m_drawState.rectangleSubMode == RectangleDrawSubMode::AwaitFirstCorner)
+        {
+            m_drawState.rectangleSubMode = RectangleDrawSubMode::AwaitSecondCorner;
+        }
+        else
+        {
+            m_drawState.rectangleSubMode = RectangleDrawSubMode::AwaitFirstCorner;
+        }
+        break;
+    case DrawType::Polygon:
+        if (m_drawState.polygonSubMode == PolygonDrawSubMode::AwaitCenter)
+        {
+            m_drawState.polygonSubMode = PolygonDrawSubMode::AwaitRadius;
+        }
+        else
+        {
+            m_drawState.polygonSubMode = PolygonDrawSubMode::AwaitCenter;
         }
         break;
     case DrawType::Circle:

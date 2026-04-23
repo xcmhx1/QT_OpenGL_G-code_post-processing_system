@@ -13,6 +13,8 @@ void DrawStateMachine::reset()
     const QString preservedLayerName = drawingLayerName;
     const int preservedColorIndex = drawingColorIndex;
     const bool preservedOrthoEnabled = orthoEnabled;
+    const int preservedPolygonSideCount = polygonSideCount;
+    const bool preservedPolygonCircumscribedAboutCircle = polygonCircumscribedAboutCircle;
 
     // 重置基本状态
     isDrawing = false;
@@ -33,6 +35,8 @@ void DrawStateMachine::reset()
     pointSubMode = PointDrawSubMode::Idle;
     lineSubMode = LineDrawSubMode::Idle;
     circleSubMode = CircleDrawSubMode::Idle;
+    rectangleSubMode = RectangleDrawSubMode::Idle;
+    polygonSubMode = PolygonDrawSubMode::Idle;
     arcSubMode = ArcDrawSubMode::Idle;
     ellipseSubMode = EllipseDrawSubMode::Idle;
     polylineSubMode = PolylineDrawSubMode::Idle;
@@ -61,6 +65,8 @@ void DrawStateMachine::reset()
     dynamicCommandBuffer.clear();
     dynamicCommandActiveIndex = 0;
     orthoEnabled = preservedOrthoEnabled;
+    polygonSideCount = preservedPolygonSideCount;
+    polygonCircumscribedAboutCircle = preservedPolygonCircumscribedAboutCircle;
 }
 
 bool DrawStateMachine::hasActiveCommand() const

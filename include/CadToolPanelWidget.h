@@ -113,6 +113,8 @@ private:
     QMenu* m_drawMoreMenu = nullptr;
     QAction* m_drawPointAction = nullptr;
     QAction* m_drawXlineAction = nullptr;
+    QAction* m_drawRectangleAction = nullptr;
+    QAction* m_drawPolygonAction = nullptr;
     QToolButton* m_importFileButton = nullptr;
     QToolButton* m_exportGCodeButton = nullptr;
     QToolButton* m_deduplicateButton = nullptr;

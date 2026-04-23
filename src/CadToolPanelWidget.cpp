@@ -85,6 +85,21 @@ namespace
             painter.fillPath(headB, pen.color());
             break;
         }
+        case DrawType::Rectangle:
+            painter.drawRect(QRectF(3.5, 4.5, 10.0, 8.0));
+            break;
+        case DrawType::Polygon:
+        {
+            QPainterPath polygonPath;
+            polygonPath.moveTo(9.0, 2.8);
+            polygonPath.lineTo(14.2, 6.0);
+            polygonPath.lineTo(12.9, 12.3);
+            polygonPath.lineTo(5.1, 12.3);
+            polygonPath.lineTo(3.8, 6.0);
+            polygonPath.closeSubpath();
+            painter.drawPath(polygonPath);
+            break;
+        }
         case DrawType::Circle:
             painter.drawEllipse(QRectF(3.5, 3.5, 11.0, 11.0));
             break;
@@ -538,6 +553,10 @@ void CadToolPanelWidget::buildUi()
     connect(m_drawPointAction, &QAction::triggered, this, [this]() { emit drawRequested(DrawType::Point); });
     m_drawXlineAction = m_drawMoreMenu->addAction(QStringLiteral("构造线"));
     connect(m_drawXlineAction, &QAction::triggered, this, [this]() { emit drawRequested(DrawType::Xline); });
+    m_drawRectangleAction = m_drawMoreMenu->addAction(QStringLiteral("矩形"));
+    connect(m_drawRectangleAction, &QAction::triggered, this, [this]() { emit drawRequested(DrawType::Rectangle); });
+    m_drawPolygonAction = m_drawMoreMenu->addAction(QStringLiteral("多边形"));
+    connect(m_drawPolygonAction, &QAction::triggered, this, [this]() { emit drawRequested(DrawType::Polygon); });
 
     QVBoxLayout* rootLayout = new QVBoxLayout(this);
     rootLayout->setContentsMargins(0, 0, 0, 0);
@@ -735,6 +754,16 @@ void CadToolPanelWidget::applyTheme()
     if (m_drawXlineAction != nullptr)
     {
         m_drawXlineAction->setIcon(buildRibbonIcon(DrawType::Xline, m_theme.accentColor));
+    }
+
+    if (m_drawRectangleAction != nullptr)
+    {
+        m_drawRectangleAction->setIcon(buildRibbonIcon(DrawType::Rectangle, m_theme.accentColor));
+    }
+
+    if (m_drawPolygonAction != nullptr)
+    {
+        m_drawPolygonAction->setIcon(buildRibbonIcon(DrawType::Polygon, m_theme.accentColor));
     }
 
     if (m_drawMoreMenu != nullptr)

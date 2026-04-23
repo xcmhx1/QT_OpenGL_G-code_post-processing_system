@@ -170,6 +170,12 @@ private:
     // 处理构造线绘制命令
     bool handleXlineDrawing(const DrawStateMachine& previousState, DrawStateMachine& currentState, const QVector3D& worldPos);
 
+    // 处理矩形绘制命令
+    bool handleRectangleDrawing(const DrawStateMachine& previousState, DrawStateMachine& currentState, const QVector3D& worldPos);
+
+    // 处理多边形绘制命令
+    bool handlePolygonDrawing(const DrawStateMachine& previousState, DrawStateMachine& currentState, const QVector3D& worldPos);
+
     // 处理圆绘制命令
     bool handleCircleDrawing(const DrawStateMachine& previousState, DrawStateMachine& currentState, const QVector3D& worldPos);
 
