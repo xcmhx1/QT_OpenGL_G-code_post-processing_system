@@ -178,6 +178,9 @@
     <ClCompile Include="src\CadController.cpp">
       <Filter>Source Files\View\Interaction</Filter>
     </ClCompile>
+    <ClCompile Include="src\CadController_KeyHandling.cpp">
+      <Filter>Source Files\View\Interaction</Filter>
+    </ClCompile>
     <ClCompile Include="src\CadController_DynamicInput.cpp">
       <Filter>Source Files\View\Interaction</Filter>
     </ClCompile>
