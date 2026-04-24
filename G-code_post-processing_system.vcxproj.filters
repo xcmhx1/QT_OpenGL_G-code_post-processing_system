@@ -148,6 +148,9 @@
     <ClCompile Include="src\Gcode_postprocessing_system_FileActions.cpp">
       <Filter>Source Files\Application</Filter>
     </ClCompile>
+    <ClCompile Include="src\Gcode_postprocessing_system_GCodeActions.cpp">
+      <Filter>Source Files\Application</Filter>
+    </ClCompile>
     <ClCompile Include="src\Gcode_postprocessing_system_EditActions.cpp">
       <Filter>Source Files\Application</Filter>
     </ClCompile>
