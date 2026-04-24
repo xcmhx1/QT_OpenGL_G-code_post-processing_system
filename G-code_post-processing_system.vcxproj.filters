@@ -163,6 +163,9 @@
     <ClCompile Include="src\CadViewer.cpp">
       <Filter>Source Files\View</Filter>
     </ClCompile>
+    <ClCompile Include="src\CadViewer_InteractionOverlays.cpp">
+      <Filter>Source Files\View</Filter>
+    </ClCompile>
     <ClCompile Include="src\CadCommandLineWidget.cpp">
       <Filter>Source Files\View</Filter>
     </ClCompile>

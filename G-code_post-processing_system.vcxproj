@@ -249,6 +249,10 @@
     <ClCompile Include="src\CadViewInteractionController.cpp" />
     <ClCompile Include="src\CadViewTransform.cpp" />
     <ClCompile Include="src\CadViewer.cpp" />
+    <ClCompile Include="src\CadViewer_InteractionOverlays.cpp">
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+    </ClCompile>
     <ClCompile Include="src\CadViewerUtils.cpp" />
     <ClCompile Include="src\CadOpenGLState.cpp" />
     <ClCompile Include="src\CadController.cpp">
