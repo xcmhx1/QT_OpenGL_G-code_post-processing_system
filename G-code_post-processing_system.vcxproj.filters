@@ -244,6 +244,9 @@
     <ClCompile Include="src\CadEditer_DrawHandlers.cpp">
       <Filter>Source Files\Editing</Filter>
     </ClCompile>
+    <ClCompile Include="src\CadEditer_EntityTransformHelpers.cpp">
+      <Filter>Source Files\Editing</Filter>
+    </ClCompile>
     <ClCompile Include="src\CadEditer_GeometryHelpers.cpp">
       <Filter>Source Files\Editing</Filter>
     </ClCompile>
