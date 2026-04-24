@@ -531,6 +531,34 @@ namespace
         );
     }
 
+    bool resolveCurrentAndOtherSelectedItems(CadViewer* viewer, CadItem*& currentItem, CadItem*& otherItem)
+    {
+        currentItem = nullptr;
+        otherItem = nullptr;
+
+        if (viewer == nullptr)
+        {
+            return false;
+        }
+
+        const QVector<CadItem*> selectedItems = viewer->selectedEntities();
+
+        if (selectedItems.size() != 2)
+        {
+            return false;
+        }
+
+        currentItem = viewer->selectedEntity();
+
+        if (currentItem == nullptr || !selectedItems.contains(currentItem))
+        {
+            currentItem = selectedItems.front();
+        }
+
+        otherItem = selectedItems.front() == currentItem ? selectedItems.back() : selectedItems.front();
+        return currentItem != nullptr && otherItem != nullptr;
+    }
+
     QString entityLayerName(const CadItem* item)
     {
         if (item == nullptr || item->m_nativeEntity == nullptr)
@@ -2879,10 +2907,29 @@ Gcode_postprocessing_system::Gcode_postprocessing_system(QWidget* parent)
 
     QAction* exportDxfAction = new QAction(QStringLiteral("导出为DXF..."), this);
     QAction* exportSafeDxfAction = new QAction(QStringLiteral("导出为DXF（安全模式）..."), this);
+    QAction* mirrorAction = new QAction(QStringLiteral("镜像..."), this);
+    QAction* offsetAction = new QAction(QStringLiteral("偏移..."), this);
+    QAction* rectangularArrayAction = new QAction(QStringLiteral("矩形阵列..."), this);
+    QAction* circularArrayAction = new QAction(QStringLiteral("环形阵列..."), this);
+    QAction* trimAction = new QAction(QStringLiteral("修剪..."), this);
+    QAction* extendAction = new QAction(QStringLiteral("延申..."), this);
+    QAction* joinAction = new QAction(QStringLiteral("合并..."), this);
+    QAction* filletAction = new QAction(QStringLiteral("圆角..."), this);
+    QAction* chamferAction = new QAction(QStringLiteral("直角（倒角）..."), this);
 
     ui->menuFile->insertAction(ui->action_File_Export_G, exportDxfAction);
     ui->menuFile->insertAction(ui->action_File_Export_G, exportSafeDxfAction);
     ui->menuFile->insertSeparator(ui->action_File_Export_G);
+    ui->menuEdit->addSeparator();
+    ui->menuEdit->addAction(mirrorAction);
+    ui->menuEdit->addAction(offsetAction);
+    ui->menuEdit->addAction(rectangularArrayAction);
+    ui->menuEdit->addAction(circularArrayAction);
+    ui->menuEdit->addAction(trimAction);
+    ui->menuEdit->addAction(extendAction);
+    ui->menuEdit->addAction(joinAction);
+    ui->menuEdit->addAction(filletAction);
+    ui->menuEdit->addAction(chamferAction);
 
     ui->action_File_Export_G->setText(QStringLiteral("导出G代码"));
 
@@ -2891,6 +2938,15 @@ Gcode_postprocessing_system::Gcode_postprocessing_system(QWidget* parent)
     connect(exportSafeDxfAction, &QAction::triggered, this, [this]() { exportDxfDocument(true); });
     connect(ui->action_File_Export_G, &QAction::triggered, this, [this]() { exportGCode(); });
     connect(ui->action_Edit_ReversePeocess, &QAction::triggered, this, [this]() { toggleSelectedEntityReverse(); });
+    connect(mirrorAction, &QAction::triggered, this, [this]() { mirrorSelectedEntities(); });
+    connect(offsetAction, &QAction::triggered, this, [this]() { offsetSelectedEntity(); });
+    connect(rectangularArrayAction, &QAction::triggered, this, [this]() { arraySelectedEntity(); });
+    connect(circularArrayAction, &QAction::triggered, this, [this]() { circularArraySelectedEntity(); });
+    connect(trimAction, &QAction::triggered, this, [this]() { trimSelectedEntity(); });
+    connect(extendAction, &QAction::triggered, this, [this]() { extendSelectedEntity(); });
+    connect(joinAction, &QAction::triggered, this, [this]() { joinSelectedEntities(); });
+    connect(filletAction, &QAction::triggered, this, [this]() { filletSelectedEntities(); });
+    connect(chamferAction, &QAction::triggered, this, [this]() { chamferSelectedEntities(); });
     connect(ui->action_Sort_2D_Assign, &QAction::triggered, this, [this]() { sortEntitiesByCurrentMode(false); });
     connect(ui->action_Sort_2D_Smart, &QAction::triggered, this, [this]() { sortEntitiesByCurrentMode(true); });
 
@@ -3757,6 +3813,484 @@ bool Gcode_postprocessing_system::arraySelectedEntity()
         QStringLiteral("已对 %1 个图元执行 %2 x %3 矩形阵列。").arg(arrayedCount).arg(rowCount).arg(columnCount)
     );
     statusBar()->showMessage(QStringLiteral("矩形阵列完成（%1）").arg(arrayedCount), 4000);
+    return true;
+}
+
+bool Gcode_postprocessing_system::circularArraySelectedEntity()
+{
+    const QVector<CadItem*> selectedItems = ui->openGLWidget->selectedEntities();
+
+    if (selectedItems.isEmpty())
+    {
+        QMessageBox::warning(this, QStringLiteral("环形阵列"), QStringLiteral("请先选择图元。"));
+        return false;
+    }
+
+    const QVector3D centerPoint = geometryBoundsCenter(selectedItems);
+    bool ok = false;
+    const int itemCount = QInputDialog::getInt
+    (
+        this,
+        QStringLiteral("环形阵列"),
+        QStringLiteral("请输入项目总数:"),
+        6,
+        2,
+        1024,
+        1,
+        &ok
+    );
+
+    if (!ok)
+    {
+        return false;
+    }
+
+    const double totalAngle = QInputDialog::getDouble
+    (
+        this,
+        QStringLiteral("环形阵列"),
+        QStringLiteral("请输入填充角度（度）:"),
+        360.0,
+        -3600.0,
+        3600.0,
+        3,
+        &ok
+    );
+
+    if (!ok)
+    {
+        return false;
+    }
+
+    const double centerX = QInputDialog::getDouble
+    (
+        this,
+        QStringLiteral("环形阵列"),
+        QStringLiteral("请输入阵列中心 X:"),
+        centerPoint.x(),
+        -1000000.0,
+        1000000.0,
+        3,
+        &ok
+    );
+
+    if (!ok)
+    {
+        return false;
+    }
+
+    const double centerY = QInputDialog::getDouble
+    (
+        this,
+        QStringLiteral("环形阵列"),
+        QStringLiteral("请输入阵列中心 Y:"),
+        centerPoint.y(),
+        -1000000.0,
+        1000000.0,
+        3,
+        &ok
+    );
+
+    if (!ok)
+    {
+        return false;
+    }
+
+    const QStringList rotateChoices
+    {
+        QStringLiteral("旋转副本方向"),
+        QStringLiteral("保持原方向")
+    };
+    const QString rotateChoice = QInputDialog::getItem
+    (
+        this,
+        QStringLiteral("环形阵列"),
+        QStringLiteral("请选择阵列方式:"),
+        rotateChoices,
+        0,
+        false,
+        &ok
+    );
+
+    if (!ok)
+    {
+        return false;
+    }
+
+    const bool rotateItems = rotateChoice == rotateChoices.front();
+
+    if (!m_editer.polarArrayEntities(selectedItems, QVector3D(static_cast<float>(centerX), static_cast<float>(centerY), 0.0f), itemCount, totalAngle, rotateItems))
+    {
+        QMessageBox::warning(this, QStringLiteral("环形阵列"), QStringLiteral("选中图元环形阵列失败。"));
+        return false;
+    }
+
+    ui->openGLWidget->appendCommandMessage
+    (
+        QStringLiteral("已对 %1 个图元执行 %2 项环形阵列。").arg(selectedItems.size()).arg(itemCount)
+    );
+    statusBar()->showMessage(QStringLiteral("环形阵列完成"), 4000);
+    return true;
+}
+
+bool Gcode_postprocessing_system::mirrorSelectedEntities()
+{
+    const QVector<CadItem*> selectedItems = ui->openGLWidget->selectedEntities();
+
+    if (selectedItems.isEmpty())
+    {
+        QMessageBox::warning(this, QStringLiteral("镜像图元"), QStringLiteral("请先选择图元。"));
+        return false;
+    }
+
+    const QVector3D centerPoint = geometryBoundsCenter(selectedItems);
+    bool ok = false;
+    const double firstX = QInputDialog::getDouble
+    (
+        this,
+        QStringLiteral("镜像图元"),
+        QStringLiteral("请输入镜像线第一点 X:"),
+        centerPoint.x(),
+        -1000000.0,
+        1000000.0,
+        3,
+        &ok
+    );
+
+    if (!ok)
+    {
+        return false;
+    }
+
+    const double firstY = QInputDialog::getDouble
+    (
+        this,
+        QStringLiteral("镜像图元"),
+        QStringLiteral("请输入镜像线第一点 Y:"),
+        centerPoint.y() - 10.0,
+        -1000000.0,
+        1000000.0,
+        3,
+        &ok
+    );
+
+    if (!ok)
+    {
+        return false;
+    }
+
+    const double secondX = QInputDialog::getDouble
+    (
+        this,
+        QStringLiteral("镜像图元"),
+        QStringLiteral("请输入镜像线第二点 X:"),
+        centerPoint.x(),
+        -1000000.0,
+        1000000.0,
+        3,
+        &ok
+    );
+
+    if (!ok)
+    {
+        return false;
+    }
+
+    const double secondY = QInputDialog::getDouble
+    (
+        this,
+        QStringLiteral("镜像图元"),
+        QStringLiteral("请输入镜像线第二点 Y:"),
+        centerPoint.y() + 10.0,
+        -1000000.0,
+        1000000.0,
+        3,
+        &ok
+    );
+
+    if (!ok)
+    {
+        return false;
+    }
+
+    const bool eraseSource = QMessageBox::question
+    (
+        this,
+        QStringLiteral("镜像图元"),
+        QStringLiteral("是否删除原图元？"),
+        QMessageBox::Yes | QMessageBox::No,
+        QMessageBox::No
+    ) == QMessageBox::Yes;
+
+    if (!m_editer.mirrorEntities
+    (
+        selectedItems,
+        QVector3D(static_cast<float>(firstX), static_cast<float>(firstY), 0.0f),
+        QVector3D(static_cast<float>(secondX), static_cast<float>(secondY), 0.0f),
+        eraseSource
+    ))
+    {
+        QMessageBox::warning(this, QStringLiteral("镜像图元"), QStringLiteral("选中图元镜像失败。"));
+        return false;
+    }
+
+    ui->openGLWidget->appendCommandMessage(QStringLiteral("已执行镜像操作。"));
+    statusBar()->showMessage(QStringLiteral("镜像完成"), 4000);
+    return true;
+}
+
+bool Gcode_postprocessing_system::offsetSelectedEntity()
+{
+    CadItem* targetItem = ui->openGLWidget->selectedEntity();
+
+    if (targetItem == nullptr)
+    {
+        const QVector<CadItem*> selectedItems = ui->openGLWidget->selectedEntities();
+
+        if (selectedItems.isEmpty())
+        {
+            QMessageBox::warning(this, QStringLiteral("偏移图元"), QStringLiteral("请先选择图元。"));
+            return false;
+        }
+
+        targetItem = selectedItems.front();
+    }
+
+    bool ok = false;
+    const double distance = QInputDialog::getDouble
+    (
+        this,
+        QStringLiteral("偏移图元"),
+        QStringLiteral("请输入偏移距离（正负决定方向）:"),
+        10.0,
+        -1000000.0,
+        1000000.0,
+        3,
+        &ok
+    );
+
+    if (!ok)
+    {
+        return false;
+    }
+
+    if (!m_editer.offsetEntity(targetItem, distance))
+    {
+        QMessageBox::warning(this, QStringLiteral("偏移图元"), QStringLiteral("当前图元不支持偏移，或偏移失败。"));
+        return false;
+    }
+
+    ui->openGLWidget->appendCommandMessage(QStringLiteral("已创建偏移图元，距离为 %1。").arg(distance));
+    statusBar()->showMessage(QStringLiteral("偏移完成"), 4000);
+    return true;
+}
+
+bool Gcode_postprocessing_system::trimSelectedEntity()
+{
+    CadItem* targetItem = nullptr;
+    CadItem* boundaryItem = nullptr;
+
+    if (!resolveCurrentAndOtherSelectedItems(ui->openGLWidget, targetItem, boundaryItem))
+    {
+        QMessageBox::warning(this, QStringLiteral("修剪图元"), QStringLiteral("请选中 2 个图元，并保持当前高亮图元作为修剪目标。"));
+        return false;
+    }
+
+    bool ok = false;
+    const QStringList sideChoices
+    {
+        QStringLiteral("起点端"),
+        QStringLiteral("终点端")
+    };
+    const QString sideChoice = QInputDialog::getItem
+    (
+        this,
+        QStringLiteral("修剪图元"),
+        QStringLiteral("请选择要修剪的端点:"),
+        sideChoices,
+        1,
+        false,
+        &ok
+    );
+
+    if (!ok)
+    {
+        return false;
+    }
+
+    if (!m_editer.trimEntity(boundaryItem, targetItem, sideChoice == sideChoices.front()))
+    {
+        QMessageBox::warning(this, QStringLiteral("修剪图元"), QStringLiteral("当前仅支持将直线修剪到直线、圆或圆弧边界。"));
+        return false;
+    }
+
+    ui->openGLWidget->appendCommandMessage(QStringLiteral("已执行修剪操作。"));
+    statusBar()->showMessage(QStringLiteral("修剪完成"), 4000);
+    return true;
+}
+
+bool Gcode_postprocessing_system::extendSelectedEntity()
+{
+    CadItem* targetItem = nullptr;
+    CadItem* boundaryItem = nullptr;
+
+    if (!resolveCurrentAndOtherSelectedItems(ui->openGLWidget, targetItem, boundaryItem))
+    {
+        QMessageBox::warning(this, QStringLiteral("延申图元"), QStringLiteral("请选中 2 个图元，并保持当前高亮图元作为延申目标。"));
+        return false;
+    }
+
+    bool ok = false;
+    const QStringList sideChoices
+    {
+        QStringLiteral("起点端"),
+        QStringLiteral("终点端")
+    };
+    const QString sideChoice = QInputDialog::getItem
+    (
+        this,
+        QStringLiteral("延申图元"),
+        QStringLiteral("请选择要延申的端点:"),
+        sideChoices,
+        1,
+        false,
+        &ok
+    );
+
+    if (!ok)
+    {
+        return false;
+    }
+
+    if (!m_editer.extendEntity(boundaryItem, targetItem, sideChoice == sideChoices.front()))
+    {
+        QMessageBox::warning(this, QStringLiteral("延申图元"), QStringLiteral("当前仅支持将直线延申到直线、圆或圆弧边界。"));
+        return false;
+    }
+
+    ui->openGLWidget->appendCommandMessage(QStringLiteral("已执行延申操作。"));
+    statusBar()->showMessage(QStringLiteral("延申完成"), 4000);
+    return true;
+}
+
+bool Gcode_postprocessing_system::joinSelectedEntities()
+{
+    const QVector<CadItem*> selectedItems = ui->openGLWidget->selectedEntities();
+
+    if (selectedItems.size() < 2)
+    {
+        QMessageBox::warning(this, QStringLiteral("合并图元"), QStringLiteral("请至少选择 2 个线性图元。"));
+        return false;
+    }
+
+    if (!m_editer.joinEntities(selectedItems))
+    {
+        QMessageBox::warning(this, QStringLiteral("合并图元"), QStringLiteral("当前仅支持合并相接的直线/直线多段线。"));
+        return false;
+    }
+
+    ui->openGLWidget->appendCommandMessage(QStringLiteral("已合并选中图元。"));
+    statusBar()->showMessage(QStringLiteral("合并完成"), 4000);
+    return true;
+}
+
+bool Gcode_postprocessing_system::filletSelectedEntities()
+{
+    CadItem* secondItem = nullptr;
+    CadItem* firstItem = nullptr;
+
+    if (!resolveCurrentAndOtherSelectedItems(ui->openGLWidget, secondItem, firstItem))
+    {
+        QMessageBox::warning(this, QStringLiteral("圆角图元"), QStringLiteral("请选中 2 个图元，并保持当前高亮图元作为第二条边。"));
+        return false;
+    }
+
+    bool ok = false;
+    const double radius = QInputDialog::getDouble
+    (
+        this,
+        QStringLiteral("圆角图元"),
+        QStringLiteral("请输入圆角半径:"),
+        5.0,
+        0.001,
+        1000000.0,
+        3,
+        &ok
+    );
+
+    if (!ok)
+    {
+        return false;
+    }
+
+    if (!m_editer.filletEntities(firstItem, secondItem, radius))
+    {
+        QMessageBox::warning(this, QStringLiteral("圆角图元"), QStringLiteral("当前仅支持 2 条直线的圆角。"));
+        return false;
+    }
+
+    ui->openGLWidget->appendCommandMessage(QStringLiteral("已执行圆角操作，半径 %1。").arg(radius));
+    statusBar()->showMessage(QStringLiteral("圆角完成"), 4000);
+    return true;
+}
+
+bool Gcode_postprocessing_system::chamferSelectedEntities()
+{
+    CadItem* secondItem = nullptr;
+    CadItem* firstItem = nullptr;
+
+    if (!resolveCurrentAndOtherSelectedItems(ui->openGLWidget, secondItem, firstItem))
+    {
+        QMessageBox::warning(this, QStringLiteral("直角（倒角）"), QStringLiteral("请选中 2 个图元，并保持当前高亮图元作为第二条边。"));
+        return false;
+    }
+
+    bool ok = false;
+    const double firstDistance = QInputDialog::getDouble
+    (
+        this,
+        QStringLiteral("直角（倒角）"),
+        QStringLiteral("请输入第一条边距离:"),
+        5.0,
+        0.0,
+        1000000.0,
+        3,
+        &ok
+    );
+
+    if (!ok)
+    {
+        return false;
+    }
+
+    const double secondDistance = QInputDialog::getDouble
+    (
+        this,
+        QStringLiteral("直角（倒角）"),
+        QStringLiteral("请输入第二条边距离:"),
+        5.0,
+        0.0,
+        1000000.0,
+        3,
+        &ok
+    );
+
+    if (!ok)
+    {
+        return false;
+    }
+
+    if (!m_editer.chamferEntities(firstItem, secondItem, firstDistance, secondDistance))
+    {
+        QMessageBox::warning(this, QStringLiteral("直角（倒角）"), QStringLiteral("当前仅支持 2 条直线的倒角。"));
+        return false;
+    }
+
+    ui->openGLWidget->appendCommandMessage
+    (
+        QStringLiteral("已执行直角（倒角）操作，距离为 %1 / %2。").arg(firstDistance).arg(secondDistance)
+    );
+    statusBar()->showMessage(QStringLiteral("直角（倒角）完成"), 4000);
     return true;
 }
 

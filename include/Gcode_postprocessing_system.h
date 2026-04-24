@@ -94,6 +94,14 @@ private:
     bool rotateSelectedEntity();
     bool scaleSelectedEntity();
     bool arraySelectedEntity();
+    bool circularArraySelectedEntity();
+    bool mirrorSelectedEntities();
+    bool offsetSelectedEntity();
+    bool trimSelectedEntity();
+    bool extendSelectedEntity();
+    bool joinSelectedEntities();
+    bool filletSelectedEntities();
+    bool chamferSelectedEntities();
     bool removeDuplicateEntities();
     bool sortEntitiesByCurrentDirection();
     bool assignSelectedEntityProcessOrder();

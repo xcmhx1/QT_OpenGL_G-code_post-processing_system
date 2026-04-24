@@ -109,6 +109,26 @@ public:
     // 对指定实体执行矩形阵列
     bool arrayEntity(CadItem* item, int rowCount, int columnCount, const QVector3D& rowOffset, const QVector3D& columnOffset);
 
+    // 对指定实体集合执行镜像；eraseSource=true 时删除原图元。
+    bool mirrorEntities(const QVector<CadItem*>& items, const QVector3D& firstPoint, const QVector3D& secondPoint, bool eraseSource);
+
+    // 对指定实体集合执行环形阵列。
+    bool polarArrayEntities(const QVector<CadItem*>& items, const QVector3D& center, int itemCount, double totalAngleDegrees, bool rotateItems);
+
+    // 偏移一个实体，返回是否成功。
+    bool offsetEntity(CadItem* item, double distance);
+
+    // 按边界修剪或延伸目标实体。
+    bool trimEntity(CadItem* boundaryItem, CadItem* targetItem, bool trimStart);
+    bool extendEntity(CadItem* boundaryItem, CadItem* targetItem, bool extendStart);
+
+    // 合并选中线/直线型多段线为一条轻量多段线。
+    bool joinEntities(const QVector<CadItem*>& items);
+
+    // 两条直线执行圆角或直角(倒角)。
+    bool filletEntities(CadItem* firstItem, CadItem* secondItem, double radius);
+    bool chamferEntities(CadItem* firstItem, CadItem* secondItem, double firstDistance, double secondDistance);
+
     // 修改指定实体颜色
     // @param item 目标实体
     // @param color 新颜色
