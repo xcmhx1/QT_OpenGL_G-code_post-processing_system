@@ -8,9 +8,22 @@
 namespace CadEditerWorkflowInternal
 {
     inline constexpr double kPi = 3.14159265358979323846;
+    inline constexpr double kTwoPi = 6.28318530717958647692;
     inline constexpr double kGeometryEpsilon = 1.0e-9;
+    inline constexpr double kMinEllipseRatio = 1.0e-4;
 
     QVector3D flattenToDrawingPlane(const QVector3D& point);
+    QVector3D normalizedXlineDirection(const DRW_Xline* xline);
+    double normalizeAnglePositive(double angle);
+    QVector3D resolveEntityNormal(const DRW_Coord& extPoint);
+    void buildPlaneBasis(const QVector3D& normal, QVector3D& axisX, QVector3D& axisY);
+    QVector3D circlePointAt(const DRW_Circle* circle, double parameter);
+    QVector3D arcPointAt(const DRW_Arc* arc, double angle);
+    double arcMidAngle(const DRW_Arc* arc);
+    double angleFromPointOnCircle(const DRW_Circle* circle, const QVector3D& point, bool* valid = nullptr);
+    bool tryBuildEllipseAxes(const DRW_Ellipse* ellipse, QVector3D& majorAxis, QVector3D& minorAxis);
+    QVector3D ellipsePointAt(const DRW_Ellipse* ellipse, double parameter);
+    bool ellipseParameterFromPoint(const DRW_Ellipse* ellipse, const QVector3D& worldPoint, double& parameter);
     void translateEntity(DRW_Entity* entity, const QVector3D& delta);
     QVector3D rotatePlanarPoint(const QVector3D& point, const QVector3D& basePoint, double radians);
     void rotateEntity(DRW_Entity* entity, const QVector3D& basePoint, double angleDegrees);

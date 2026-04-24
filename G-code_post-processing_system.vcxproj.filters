@@ -247,6 +247,9 @@
     <ClCompile Include="src\CadEditer_GeometryHelpers.cpp">
       <Filter>Source Files\Editing</Filter>
     </ClCompile>
+    <ClCompile Include="src\CadEditer_GeometryMath.cpp">
+      <Filter>Source Files\Editing</Filter>
+    </ClCompile>
     <ClCompile Include="src\CadDocument.cpp">
       <Filter>Source Files\Document</Filter>
     </ClCompile>
