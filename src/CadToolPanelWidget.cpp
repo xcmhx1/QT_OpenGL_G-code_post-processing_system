@@ -20,6 +20,7 @@
 #include <QTabWidget>
 #include <QToolButton>
 #include <QVBoxLayout>
+#include <QWidgetAction>
 
 namespace
 {
@@ -34,6 +35,9 @@ namespace
     constexpr int kDividerHeight = 78;
     constexpr int kLauncherSize = 12;
     constexpr int kRibbonIconSize = 16;
+    constexpr int kPopupGridButtonWidth = 72;
+    constexpr int kPopupGridButtonHeight = 54;
+    constexpr int kPopupGridIconSize = 18;
 
     void addColorOption(QComboBox* comboBox, const QString& text, int colorIndex)
     {
@@ -292,6 +296,213 @@ namespace
         return QIcon(pixmap);
     }
 
+    QIcon buildCircularArrayIcon(const QColor& strokeColor)
+    {
+        QPixmap pixmap(kRibbonIconSize, kRibbonIconSize);
+        pixmap.fill(Qt::transparent);
+
+        QPainter painter(&pixmap);
+        painter.setRenderHint(QPainter::Antialiasing, true);
+        QPen pen(strokeColor);
+        pen.setWidthF(1.2);
+        pen.setCapStyle(Qt::RoundCap);
+        pen.setJoinStyle(Qt::RoundJoin);
+        painter.setPen(pen);
+
+        painter.drawEllipse(QRectF(3.5, 3.5, 9.0, 9.0));
+        painter.drawRect(QRectF(7.6, 1.8, 2.1, 2.1));
+        painter.drawRect(QRectF(11.5, 7.0, 2.1, 2.1));
+        painter.drawRect(QRectF(7.6, 12.1, 2.1, 2.1));
+        painter.drawRect(QRectF(1.8, 7.0, 2.1, 2.1));
+
+        QPainterPath arrowHead;
+        arrowHead.moveTo(13.6, 4.6);
+        arrowHead.lineTo(14.8, 2.3);
+        arrowHead.lineTo(12.3, 2.8);
+        arrowHead.closeSubpath();
+        painter.fillPath(arrowHead, pen.color());
+        return QIcon(pixmap);
+    }
+
+    QIcon buildMirrorIcon(const QColor& strokeColor)
+    {
+        QPixmap pixmap(kRibbonIconSize, kRibbonIconSize);
+        pixmap.fill(Qt::transparent);
+
+        QPainter painter(&pixmap);
+        painter.setRenderHint(QPainter::Antialiasing, true);
+        QPen pen(strokeColor);
+        pen.setWidthF(1.3);
+        pen.setCapStyle(Qt::RoundCap);
+        pen.setJoinStyle(Qt::RoundJoin);
+        painter.setPen(pen);
+
+        QPen dashPen = pen;
+        dashPen.setStyle(Qt::DashLine);
+        dashPen.setDashPattern({ 2.0, 2.0 });
+        painter.setPen(dashPen);
+        painter.drawLine(QPointF(8.0, 2.0), QPointF(8.0, 14.0));
+
+        painter.setPen(pen);
+        QPainterPath leftShape;
+        leftShape.moveTo(3.0, 11.5);
+        leftShape.lineTo(5.2, 5.0);
+        leftShape.lineTo(7.1, 11.5);
+        painter.drawPath(leftShape);
+
+        QPainterPath rightShape;
+        rightShape.moveTo(13.0, 11.5);
+        rightShape.lineTo(10.8, 5.0);
+        rightShape.lineTo(8.9, 11.5);
+        painter.drawPath(rightShape);
+        return QIcon(pixmap);
+    }
+
+    QIcon buildOffsetIcon(const QColor& strokeColor)
+    {
+        QPixmap pixmap(kRibbonIconSize, kRibbonIconSize);
+        pixmap.fill(Qt::transparent);
+
+        QPainter painter(&pixmap);
+        painter.setRenderHint(QPainter::Antialiasing, true);
+        QPen pen(strokeColor);
+        pen.setWidthF(1.3);
+        pen.setCapStyle(Qt::RoundCap);
+        pen.setJoinStyle(Qt::RoundJoin);
+        painter.setPen(pen);
+
+        painter.drawRect(QRectF(2.8, 5.4, 7.4, 6.2));
+        painter.drawRect(QRectF(6.4, 2.4, 7.4, 6.2));
+        painter.drawLine(QPointF(10.3, 11.6), QPointF(13.5, 14.0));
+
+        QPainterPath arrowHead;
+        arrowHead.moveTo(13.9, 14.3);
+        arrowHead.lineTo(11.2, 13.8);
+        arrowHead.lineTo(12.7, 11.8);
+        arrowHead.closeSubpath();
+        painter.fillPath(arrowHead, pen.color());
+        return QIcon(pixmap);
+    }
+
+    QIcon buildTrimIcon(const QColor& strokeColor)
+    {
+        QPixmap pixmap(kRibbonIconSize, kRibbonIconSize);
+        pixmap.fill(Qt::transparent);
+
+        QPainter painter(&pixmap);
+        painter.setRenderHint(QPainter::Antialiasing, true);
+        QPen pen(strokeColor);
+        pen.setWidthF(1.3);
+        pen.setCapStyle(Qt::RoundCap);
+        pen.setJoinStyle(Qt::RoundJoin);
+        painter.setPen(pen);
+
+        painter.drawLine(QPointF(2.5, 8.5), QPointF(13.5, 8.5));
+        painter.drawLine(QPointF(8.0, 2.5), QPointF(8.0, 13.5));
+
+        QPen cutPen(QColor(224, 92, 92));
+        cutPen.setWidthF(1.6);
+        cutPen.setCapStyle(Qt::RoundCap);
+        painter.setPen(cutPen);
+        painter.drawLine(QPointF(8.2, 8.5), QPointF(13.5, 8.5));
+        return QIcon(pixmap);
+    }
+
+    QIcon buildExtendIcon(const QColor& strokeColor)
+    {
+        QPixmap pixmap(kRibbonIconSize, kRibbonIconSize);
+        pixmap.fill(Qt::transparent);
+
+        QPainter painter(&pixmap);
+        painter.setRenderHint(QPainter::Antialiasing, true);
+        QPen pen(strokeColor);
+        pen.setWidthF(1.3);
+        pen.setCapStyle(Qt::RoundCap);
+        pen.setJoinStyle(Qt::RoundJoin);
+        painter.setPen(pen);
+
+        painter.drawLine(QPointF(3.0, 11.5), QPointF(8.0, 6.5));
+
+        QPen guidePen = pen;
+        guidePen.setStyle(Qt::DashLine);
+        guidePen.setDashPattern({ 2.0, 2.0 });
+        painter.setPen(guidePen);
+        painter.drawLine(QPointF(8.0, 6.5), QPointF(13.8, 2.2));
+
+        painter.setPen(pen);
+        QPainterPath arrowHead;
+        arrowHead.moveTo(14.1, 2.0);
+        arrowHead.lineTo(11.5, 2.7);
+        arrowHead.lineTo(13.0, 4.3);
+        arrowHead.closeSubpath();
+        painter.fillPath(arrowHead, pen.color());
+        return QIcon(pixmap);
+    }
+
+    QIcon buildJoinIcon(const QColor& strokeColor)
+    {
+        QPixmap pixmap(kRibbonIconSize, kRibbonIconSize);
+        pixmap.fill(Qt::transparent);
+
+        QPainter painter(&pixmap);
+        painter.setRenderHint(QPainter::Antialiasing, true);
+        QPen pen(strokeColor);
+        pen.setWidthF(1.4);
+        pen.setCapStyle(Qt::RoundCap);
+        pen.setJoinStyle(Qt::RoundJoin);
+        painter.setPen(pen);
+
+        QPainterPath path;
+        path.moveTo(2.8, 10.8);
+        path.lineTo(6.2, 7.4);
+        path.lineTo(9.0, 9.8);
+        path.lineTo(13.4, 4.2);
+        painter.drawPath(path);
+
+        painter.setBrush(strokeColor);
+        painter.drawEllipse(QPointF(6.2, 7.4), 1.0, 1.0);
+        painter.drawEllipse(QPointF(9.0, 9.8), 1.0, 1.0);
+        return QIcon(pixmap);
+    }
+
+    QIcon buildFilletIcon(const QColor& strokeColor)
+    {
+        QPixmap pixmap(kRibbonIconSize, kRibbonIconSize);
+        pixmap.fill(Qt::transparent);
+
+        QPainter painter(&pixmap);
+        painter.setRenderHint(QPainter::Antialiasing, true);
+        QPen pen(strokeColor);
+        pen.setWidthF(1.3);
+        pen.setCapStyle(Qt::RoundCap);
+        pen.setJoinStyle(Qt::RoundJoin);
+        painter.setPen(pen);
+
+        painter.drawLine(QPointF(3.0, 12.8), QPointF(3.0, 5.8));
+        painter.drawLine(QPointF(3.0, 12.8), QPointF(10.0, 12.8));
+        painter.drawArc(QRectF(3.0, 5.8, 7.0, 7.0), 270 * 16, 90 * 16);
+        return QIcon(pixmap);
+    }
+
+    QIcon buildChamferIcon(const QColor& strokeColor)
+    {
+        QPixmap pixmap(kRibbonIconSize, kRibbonIconSize);
+        pixmap.fill(Qt::transparent);
+
+        QPainter painter(&pixmap);
+        painter.setRenderHint(QPainter::Antialiasing, true);
+        QPen pen(strokeColor);
+        pen.setWidthF(1.3);
+        pen.setCapStyle(Qt::RoundCap);
+        pen.setJoinStyle(Qt::RoundJoin);
+        painter.setPen(pen);
+
+        painter.drawLine(QPointF(3.0, 12.8), QPointF(3.0, 5.6));
+        painter.drawLine(QPointF(3.0, 12.8), QPointF(10.2, 12.8));
+        painter.drawLine(QPointF(3.0, 5.6), QPointF(10.2, 12.8));
+        return QIcon(pixmap);
+    }
+
     QIcon buildColorChipIcon(const QColor& color)
     {
         constexpr int kChipSize = 12;
@@ -305,6 +516,47 @@ namespace
         painter.setBrush(color);
         painter.drawRect(QRectF(1.0, 1.0, kChipSize - 2.0, kChipSize - 2.0));
         return QIcon(pixmap);
+    }
+
+    QMenu* buildGridPopupMenu(QWidget* parent, const QList<QAction*>& actions, int columns)
+    {
+        QMenu* menu = new QMenu(parent);
+        menu->setProperty("gridPopupMenu", true);
+
+        QWidget* panel = new QWidget(menu);
+        panel->setProperty("popupGridPanel", true);
+
+        QGridLayout* layout = new QGridLayout(panel);
+        layout->setContentsMargins(6, 6, 6, 6);
+        layout->setHorizontalSpacing(4);
+        layout->setVerticalSpacing(4);
+
+        int visibleIndex = 0;
+
+        for (QAction* action : actions)
+        {
+            if (action == nullptr)
+            {
+                continue;
+            }
+
+            QToolButton* button = new QToolButton(panel);
+            button->setProperty("popupGridButton", true);
+            button->setDefaultAction(action);
+            button->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
+            button->setIconSize(QSize(kPopupGridIconSize, kPopupGridIconSize));
+            button->setFixedSize(kPopupGridButtonWidth, kPopupGridButtonHeight);
+            button->setAutoRaise(false);
+            QObject::connect(button, &QToolButton::clicked, menu, &QMenu::close);
+
+            layout->addWidget(button, visibleIndex / columns, visibleIndex % columns);
+            ++visibleIndex;
+        }
+
+        QWidgetAction* panelAction = new QWidgetAction(menu);
+        panelAction->setDefaultWidget(panel);
+        menu->addAction(panelAction);
+        return menu;
     }
 
 }
@@ -593,36 +845,57 @@ bool CadToolPanelWidget::useDefaultExportPathEnabled() const
 
 void CadToolPanelWidget::buildUi()
 {
-    m_drawMoreMenu = new QMenu(this);
-    m_drawPointAction = m_drawMoreMenu->addAction(QStringLiteral("点"));
+    m_drawPointAction = new QAction(QStringLiteral("点"), this);
     connect(m_drawPointAction, &QAction::triggered, this, [this]() { emit drawRequested(DrawType::Point); });
-    m_drawXlineAction = m_drawMoreMenu->addAction(QStringLiteral("构造线"));
+    m_drawXlineAction = new QAction(QStringLiteral("构造线"), this);
     connect(m_drawXlineAction, &QAction::triggered, this, [this]() { emit drawRequested(DrawType::Xline); });
-    m_drawRectangleAction = m_drawMoreMenu->addAction(QStringLiteral("矩形"));
+    m_drawRectangleAction = new QAction(QStringLiteral("矩形"), this);
     connect(m_drawRectangleAction, &QAction::triggered, this, [this]() { emit drawRequested(DrawType::Rectangle); });
-    m_drawPolygonAction = m_drawMoreMenu->addAction(QStringLiteral("多边形"));
+    m_drawPolygonAction = new QAction(QStringLiteral("多边形"), this);
     connect(m_drawPolygonAction, &QAction::triggered, this, [this]() { emit drawRequested(DrawType::Polygon); });
+    m_drawMoreMenu = buildGridPopupMenu
+    (
+        this,
+        QList<QAction*>{ m_drawPointAction, m_drawXlineAction, m_drawRectangleAction, m_drawPolygonAction },
+        2
+    );
 
-    m_modifyMoreMenu = new QMenu(this);
-    m_rectangularArrayAction = m_modifyMoreMenu->addAction(QStringLiteral("矩形阵列"));
+    m_rectangularArrayAction = new QAction(QStringLiteral("矩形阵列"), this);
     connect(m_rectangularArrayAction, &QAction::triggered, this, [this]() { emit arrayRequested(); });
-    m_circularArrayAction = m_modifyMoreMenu->addAction(QStringLiteral("环形阵列"));
+    m_circularArrayAction = new QAction(QStringLiteral("环形阵列"), this);
     connect(m_circularArrayAction, &QAction::triggered, this, [this]() { emit circularArrayRequested(); });
-    m_modifyMoreMenu->addSeparator();
-    m_mirrorAction = m_modifyMoreMenu->addAction(QStringLiteral("镜像"));
+    m_mirrorAction = new QAction(QStringLiteral("镜像"), this);
     connect(m_mirrorAction, &QAction::triggered, this, [this]() { emit mirrorRequested(); });
-    m_offsetAction = m_modifyMoreMenu->addAction(QStringLiteral("偏移"));
+    m_offsetAction = new QAction(QStringLiteral("偏移"), this);
     connect(m_offsetAction, &QAction::triggered, this, [this]() { emit offsetRequested(); });
-    m_trimAction = m_modifyMoreMenu->addAction(QStringLiteral("修剪"));
+    m_trimAction = new QAction(QStringLiteral("修剪"), this);
     connect(m_trimAction, &QAction::triggered, this, [this]() { emit trimRequested(); });
-    m_extendAction = m_modifyMoreMenu->addAction(QStringLiteral("延申"));
+    m_extendAction = new QAction(QStringLiteral("延申"), this);
     connect(m_extendAction, &QAction::triggered, this, [this]() { emit extendRequested(); });
-    m_joinAction = m_modifyMoreMenu->addAction(QStringLiteral("合并"));
+    m_joinAction = new QAction(QStringLiteral("合并"), this);
     connect(m_joinAction, &QAction::triggered, this, [this]() { emit joinRequested(); });
-    m_filletAction = m_modifyMoreMenu->addAction(QStringLiteral("圆角"));
+    m_filletAction = new QAction(QStringLiteral("圆角"), this);
     connect(m_filletAction, &QAction::triggered, this, [this]() { emit filletRequested(); });
-    m_chamferAction = m_modifyMoreMenu->addAction(QStringLiteral("直角（倒角）"));
+    m_chamferAction = new QAction(QStringLiteral("倒角"), this);
+    m_chamferAction->setToolTip(QStringLiteral("直角（倒角）"));
     connect(m_chamferAction, &QAction::triggered, this, [this]() { emit chamferRequested(); });
+    m_modifyMoreMenu = buildGridPopupMenu
+    (
+        this,
+        QList<QAction*>
+        {
+            m_rectangularArrayAction,
+            m_circularArrayAction,
+            m_mirrorAction,
+            m_offsetAction,
+            m_trimAction,
+            m_extendAction,
+            m_joinAction,
+            m_filletAction,
+            m_chamferAction
+        },
+        3
+    );
     setModifyActionsEnabled(false);
 
     QVBoxLayout* rootLayout = new QVBoxLayout(this);
@@ -833,37 +1106,99 @@ void CadToolPanelWidget::applyTheme()
         m_drawPolygonAction->setIcon(buildRibbonIcon(DrawType::Polygon, m_theme.accentColor));
     }
 
+    if (m_rectangularArrayAction != nullptr)
+    {
+        m_rectangularArrayAction->setIcon(buildArrayIcon(m_theme.accentColor));
+    }
+
+    if (m_circularArrayAction != nullptr)
+    {
+        m_circularArrayAction->setIcon(buildCircularArrayIcon(m_theme.accentColor));
+    }
+
+    if (m_mirrorAction != nullptr)
+    {
+        m_mirrorAction->setIcon(buildMirrorIcon(m_theme.accentColor));
+    }
+
+    if (m_offsetAction != nullptr)
+    {
+        m_offsetAction->setIcon(buildOffsetIcon(m_theme.accentColor));
+    }
+
+    if (m_trimAction != nullptr)
+    {
+        m_trimAction->setIcon(buildTrimIcon(m_theme.accentColor));
+    }
+
+    if (m_extendAction != nullptr)
+    {
+        m_extendAction->setIcon(buildExtendIcon(m_theme.accentColor));
+    }
+
+    if (m_joinAction != nullptr)
+    {
+        m_joinAction->setIcon(buildJoinIcon(m_theme.accentColor));
+    }
+
+    if (m_filletAction != nullptr)
+    {
+        m_filletAction->setIcon(buildFilletIcon(m_theme.accentColor));
+    }
+
+    if (m_chamferAction != nullptr)
+    {
+        m_chamferAction->setIcon(buildChamferIcon(m_theme.accentColor));
+    }
+
+    const QString popupMenuStyle =
+        QStringLiteral
+        (
+            "QMenu[gridPopupMenu=\"true\"] {"
+            " background-color: %1;"
+            " border: 1px solid %3;"
+            " padding: 0px;"
+            "}"
+            "QWidget[popupGridPanel=\"true\"] {"
+            " background-color: %1;"
+            "}"
+            "QToolButton[popupGridButton=\"true\"] {"
+            " border: 1px solid transparent;"
+            " border-radius: 3px;"
+            " padding: 3px;"
+            " background: transparent;"
+            " color: %2;"
+            " font-size: 10px;"
+            "}"
+            "QToolButton[popupGridButton=\"true\"]:hover {"
+            " border-color: %4;"
+            " background: %5;"
+            "}"
+            "QToolButton[popupGridButton=\"true\"]:pressed {"
+            " border-color: %6;"
+            " background: %7;"
+            "}"
+            "QToolButton[popupGridButton=\"true\"]:disabled {"
+            " color: %8;"
+            "}"
+        )
+        .arg(cssRgb(m_theme.surfaceBackground))
+        .arg(cssRgb(m_theme.textPrimaryColor))
+        .arg(cssRgb(m_theme.borderColor))
+        .arg(cssRgb(m_theme.borderStrongColor))
+        .arg(cssRgb(m_theme.hoverBackgroundColor))
+        .arg(cssRgb(m_theme.accentColor))
+        .arg(cssRgb(m_theme.pressedBackgroundColor))
+        .arg(cssRgb(m_theme.textSecondaryColor));
+
     if (m_drawMoreMenu != nullptr)
     {
-        m_drawMoreMenu->setStyleSheet
-        (
-            QStringLiteral
-            (
-                "QMenu {"
-                " background-color: %1;"
-                " color: %2;"
-                " border: 1px solid %3;"
-                " padding: 4px 0px;"
-                "}"
-                "QMenu::item {"
-                " padding: 5px 20px 5px 24px;"
-                "}"
-                "QMenu::item:selected {"
-                " background-color: %4;"
-                " color: %5;"
-                "}"
-                "QMenu::separator {"
-                " height: 1px;"
-                " margin: 4px 8px;"
-                " background: %3;"
-                "}"
-            )
-            .arg(cssRgb(m_theme.surfaceBackground))
-            .arg(cssRgb(m_theme.textPrimaryColor))
-            .arg(cssRgb(m_theme.borderColor))
-            .arg(cssRgb(m_theme.accentColor))
-            .arg(cssRgb(m_theme.accentTextColor))
-        );
+        m_drawMoreMenu->setStyleSheet(popupMenuStyle);
+    }
+
+    if (m_modifyMoreMenu != nullptr)
+    {
+        m_modifyMoreMenu->setStyleSheet(popupMenuStyle);
     }
 }
 
