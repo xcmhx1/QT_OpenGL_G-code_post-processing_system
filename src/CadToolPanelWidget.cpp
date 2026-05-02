@@ -413,6 +413,51 @@ void CadToolPanelWidget::setModifyActionsEnabled(bool enabled)
     {
         m_arrayButton->setEnabled(enabled);
     }
+
+    if (m_rectangularArrayAction != nullptr)
+    {
+        m_rectangularArrayAction->setEnabled(enabled);
+    }
+
+    if (m_circularArrayAction != nullptr)
+    {
+        m_circularArrayAction->setEnabled(enabled);
+    }
+
+    if (m_mirrorAction != nullptr)
+    {
+        m_mirrorAction->setEnabled(enabled);
+    }
+
+    if (m_offsetAction != nullptr)
+    {
+        m_offsetAction->setEnabled(enabled);
+    }
+
+    if (m_trimAction != nullptr)
+    {
+        m_trimAction->setEnabled(enabled);
+    }
+
+    if (m_extendAction != nullptr)
+    {
+        m_extendAction->setEnabled(enabled);
+    }
+
+    if (m_joinAction != nullptr)
+    {
+        m_joinAction->setEnabled(enabled);
+    }
+
+    if (m_filletAction != nullptr)
+    {
+        m_filletAction->setEnabled(enabled);
+    }
+
+    if (m_chamferAction != nullptr)
+    {
+        m_chamferAction->setEnabled(enabled);
+    }
 }
 
 void CadToolPanelWidget::setTheme(const AppThemeColors& theme)
@@ -558,6 +603,28 @@ void CadToolPanelWidget::buildUi()
     m_drawPolygonAction = m_drawMoreMenu->addAction(QStringLiteral("多边形"));
     connect(m_drawPolygonAction, &QAction::triggered, this, [this]() { emit drawRequested(DrawType::Polygon); });
 
+    m_modifyMoreMenu = new QMenu(this);
+    m_rectangularArrayAction = m_modifyMoreMenu->addAction(QStringLiteral("矩形阵列"));
+    connect(m_rectangularArrayAction, &QAction::triggered, this, [this]() { emit arrayRequested(); });
+    m_circularArrayAction = m_modifyMoreMenu->addAction(QStringLiteral("环形阵列"));
+    connect(m_circularArrayAction, &QAction::triggered, this, [this]() { emit circularArrayRequested(); });
+    m_modifyMoreMenu->addSeparator();
+    m_mirrorAction = m_modifyMoreMenu->addAction(QStringLiteral("镜像"));
+    connect(m_mirrorAction, &QAction::triggered, this, [this]() { emit mirrorRequested(); });
+    m_offsetAction = m_modifyMoreMenu->addAction(QStringLiteral("偏移"));
+    connect(m_offsetAction, &QAction::triggered, this, [this]() { emit offsetRequested(); });
+    m_trimAction = m_modifyMoreMenu->addAction(QStringLiteral("修剪"));
+    connect(m_trimAction, &QAction::triggered, this, [this]() { emit trimRequested(); });
+    m_extendAction = m_modifyMoreMenu->addAction(QStringLiteral("延申"));
+    connect(m_extendAction, &QAction::triggered, this, [this]() { emit extendRequested(); });
+    m_joinAction = m_modifyMoreMenu->addAction(QStringLiteral("合并"));
+    connect(m_joinAction, &QAction::triggered, this, [this]() { emit joinRequested(); });
+    m_filletAction = m_modifyMoreMenu->addAction(QStringLiteral("圆角"));
+    connect(m_filletAction, &QAction::triggered, this, [this]() { emit filletRequested(); });
+    m_chamferAction = m_modifyMoreMenu->addAction(QStringLiteral("直角（倒角）"));
+    connect(m_chamferAction, &QAction::triggered, this, [this]() { emit chamferRequested(); });
+    setModifyActionsEnabled(false);
+
     QVBoxLayout* rootLayout = new QVBoxLayout(this);
     rootLayout->setContentsMargins(0, 0, 0, 0);
     rootLayout->setSpacing(0);
@@ -574,7 +641,7 @@ void CadToolPanelWidget::buildUi()
     defaultLayout->setSpacing(0);
     defaultLayout->addWidget(buildPanelFrame(QStringLiteral("绘图"), buildDrawPanel(), -1, m_drawMoreMenu), 0, Qt::AlignLeft | Qt::AlignTop);
     defaultLayout->addWidget(buildDivider(), 0, Qt::AlignLeft | Qt::AlignVCenter);
-    defaultLayout->addWidget(buildPanelFrame(QStringLiteral("修改"), buildModifyPanel()), 0, Qt::AlignLeft | Qt::AlignTop);
+    defaultLayout->addWidget(buildPanelFrame(QStringLiteral("修改"), buildModifyPanel(), -1, m_modifyMoreMenu), 0, Qt::AlignLeft | Qt::AlignTop);
     defaultLayout->addWidget(buildDivider(), 0, Qt::AlignLeft | Qt::AlignVCenter);
     defaultLayout->addWidget(buildPanelFrame(QStringLiteral("图层"), buildLayerPanel(), 176), 0, Qt::AlignLeft | Qt::AlignTop);
     defaultLayout->addWidget(buildDivider(), 0, Qt::AlignLeft | Qt::AlignVCenter);

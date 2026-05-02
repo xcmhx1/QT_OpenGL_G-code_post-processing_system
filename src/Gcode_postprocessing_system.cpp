@@ -889,6 +889,14 @@ void Gcode_postprocessing_system::initializeToolPanel()
     connect(m_toolPanelWidget, &CadToolPanelWidget::rotateRequested, this, [this]() { rotateSelectedEntity(); });
     connect(m_toolPanelWidget, &CadToolPanelWidget::scaleRequested, this, [this]() { scaleSelectedEntity(); });
     connect(m_toolPanelWidget, &CadToolPanelWidget::arrayRequested, this, [this]() { arraySelectedEntity(); });
+    connect(m_toolPanelWidget, &CadToolPanelWidget::circularArrayRequested, this, [this]() { circularArraySelectedEntity(); });
+    connect(m_toolPanelWidget, &CadToolPanelWidget::mirrorRequested, this, [this]() { mirrorSelectedEntities(); });
+    connect(m_toolPanelWidget, &CadToolPanelWidget::offsetRequested, this, [this]() { offsetSelectedEntity(); });
+    connect(m_toolPanelWidget, &CadToolPanelWidget::trimRequested, this, [this]() { trimSelectedEntity(); });
+    connect(m_toolPanelWidget, &CadToolPanelWidget::extendRequested, this, [this]() { extendSelectedEntity(); });
+    connect(m_toolPanelWidget, &CadToolPanelWidget::joinRequested, this, [this]() { joinSelectedEntities(); });
+    connect(m_toolPanelWidget, &CadToolPanelWidget::filletRequested, this, [this]() { filletSelectedEntities(); });
+    connect(m_toolPanelWidget, &CadToolPanelWidget::chamferRequested, this, [this]() { chamferSelectedEntities(); });
     connect(m_toolPanelWidget, &CadToolPanelWidget::importFileRequested, this, [this]() { ui->action_File_Import_Dxf->trigger(); });
     connect(m_toolPanelWidget, &CadToolPanelWidget::exportGCodeRequested, this, [this]() { ui->action_File_Export_G->trigger(); });
     connect(m_toolPanelWidget, &CadToolPanelWidget::deduplicateRequested, this, [this]() { removeDuplicateEntities(); });

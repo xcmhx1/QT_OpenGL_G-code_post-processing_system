@@ -2,7 +2,7 @@
 
 [G/M 代码参考](./technical_file/G-M_Code.md)
 
-本项目是一个基于 Qt 6 Widgets、OpenGL 4.5 Core Profile、Visual Studio 2026 的 Windows 桌面 CAD / G-code 后处理程序。当前代码主线已经具备 CAD 文件导入、位图矢量化导入、二维图元显示、基础交互、简单绘图与编辑命令，并提供 `2D` / `4轴(绕A)` 两条 G 代码导出链与 JSON Profile 配置能力；主窗口已接通导入文件、导入 `DXF`、导入 `DWG`、导入图片、保存文件（`Ctrl+S`）、导出为 `DXF`、导出为 `DXF`（安全模式）、统一的 `导出G代码` 入口、反向加工以及统一的“排序（保留方向）/ 智能排序”入口，具体输出与排序逻辑会按当前 `G代码模式` 自动分流到 `3轴` 或 `4轴(绕A)`。`Mode3D` 当前已重新接入一条面向绕 `X` 轴回转、`A` 轴展开的四轴 G 代码导出链。该链路的机床控制点生成已下沉到各 `CadItem` 子类，由各图元自行负责从原始几何解算 `rawPathPoints3D` 与 `controlPoints4Axis`；`GGenerator` 负责按加工顺序组织图元、消除相接图元空跑、统一安全高度策略并输出最终 NC。当前这条四轴导出链已对 `Line`、`Circle`、`Ellipse` 完成较稳定适配，其余图元仍在继续收敛。同时增加了仿 AutoCAD 风格的紧凑工具面板，当前分为 `默认` 与 `机加工` 两个页签：`默认` 页签承载绘图、修改、图层与特性入口，`机加工` 页签已收束为 `导入导出`、`排序`、`功能`、`配置`、`G代码配置` 五个面板，直接集成 `文件导入`、`G代码导出`、`排序(保留方向)`、`智能排序`、`去重`、`自动去重`、`使用默认导出路径`、`使用dxf文件名`、`当前配置`、`G代码模式`、`G代码配置` 等高频操作，用于减少反复打开菜单栏的步骤；其中“修改”面板现已接通 `移动`、`删除`、`旋转`、`复制`、`缩放`、`矩形阵列` 六类图元编辑操作，并提供显式的浅色 / 深色主题切换。当前“用户设置”菜单下也已接通 `G代码配置` 对话框，可按文件级、实体类型、图层规则、颜色规则四个层级定制导出行为，并已新增面向四轴导出的旋转轴配置字段、四轴默认模板与当前运行目录 JSON 自动识别 / 实时切换入口；其中“实体类型”页已改为与“图层规则 / 颜色规则”一致的左侧列表式浏览，不再需要逐个展开切换。Viewer 层也已支持加工方向箭头、加工顺序编号、选中图元基点/控制点手柄显示、AutoCAD 风格窗口框选（向左拖拽碰选、向右拖拽包含选）与框选过程实时候选高亮，且加工顺序编号框已支持直接交互：双击可切换该图元加工方向，依次点击两个编号框可互换两个图元的加工顺序；底部状态栏已收束为单一“捕捉设置”下拉入口，支持 `基点`、`控制点`、`端点`、`中点`、`圆心/中心`、`交点`、`网格` 七类捕捉开关，并已接入第一阶段控制点编辑（选中后点控点再点目标点，已覆盖 `Point`、`Line`、`Circle`、`Arc`、`Ellipse`、`Polyline`、`LWPolyline`）；夹点编辑现已支持实时几何预览，重叠夹点支持悬停 `1s` 弹出候选选择栏并可用 `Tab / Shift+Tab` 循环切换，候选项文案已改为夹点类型名且宽度自适应显示；近期又对方向箭头样式、主次网格对比、选中角标样式、机加工页签布局、G 代码换行符、导出路径记忆与配置切换入口做了进一步优化。
+本项目是一个基于 Qt 6 Widgets、OpenGL 4.5 Core Profile、Visual Studio 2026 的 Windows 桌面 CAD / G-code 后处理程序。当前代码主线已经具备 CAD 文件导入、位图矢量化导入、二维图元显示、基础交互、简单绘图与编辑命令，并提供 `2D` / `4轴(绕A)` 两条 G 代码导出链与 JSON Profile 配置能力；主窗口已接通导入文件、导入 `DXF`、导入 `DWG`、导入图片、保存文件（`Ctrl+S`）、导出为 `DXF`、导出为 `DXF`（安全模式）、统一的 `导出G代码` 入口、反向加工以及统一的“排序（保留方向）/ 智能排序”入口，具体输出与排序逻辑会按当前 `G代码模式` 自动分流到 `3轴` 或 `4轴(绕A)`。`Mode3D` 当前已重新接入一条面向绕 `X` 轴回转、`A` 轴展开的四轴 G 代码导出链。该链路的机床控制点生成已下沉到各 `CadItem` 子类，由各图元自行负责从原始几何解算 `rawPathPoints3D` 与 `controlPoints4Axis`；`GGenerator` 负责按加工顺序组织图元、消除相接图元空跑、统一安全高度策略并输出最终 NC。当前这条四轴导出链已对 `Line`、`Circle`、`Ellipse` 完成较稳定适配，其余图元仍在继续收敛。同时增加了仿 AutoCAD 风格的紧凑工具面板，当前分为 `默认` 与 `机加工` 两个页签：`默认` 页签承载绘图、修改、图层与特性入口，`机加工` 页签已收束为 `导入导出`、`排序`、`功能`、`配置`、`G代码配置` 五个面板，直接集成 `文件导入`、`G代码导出`、`排序(保留方向)`、`智能排序`、`去重`、`自动去重`、`使用默认导出路径`、`使用dxf文件名`、`当前配置`、`G代码模式`、`G代码配置` 等高频操作，用于减少反复打开菜单栏的步骤；其中“修改”面板现已提供 `移动`、`删除`、`旋转`、`复制`、`缩放`、`阵列` 按钮，并通过标题下拉补充 `矩形阵列`、`环形阵列`、`镜像`、`偏移`、`修剪`、`延申`、`合并`、`圆角`、`直角（倒角）` 入口，并提供显式的浅色 / 深色主题切换。当前“用户设置”菜单下也已接通 `G代码配置` 对话框，可按文件级、实体类型、图层规则、颜色规则四个层级定制导出行为，并已新增面向四轴导出的旋转轴配置字段、四轴默认模板与当前运行目录 JSON 自动识别 / 实时切换入口；其中“实体类型”页已改为与“图层规则 / 颜色规则”一致的左侧列表式浏览，不再需要逐个展开切换。Viewer 层也已支持加工方向箭头、加工顺序编号、选中图元基点/控制点手柄显示、AutoCAD 风格窗口框选（向左拖拽碰选、向右拖拽包含选）与框选过程实时候选高亮，且加工顺序编号框已支持直接交互：双击可切换该图元加工方向，依次点击两个编号框可互换两个图元的加工顺序；底部状态栏已收束为单一“捕捉设置”下拉入口，支持 `基点`、`控制点`、`端点`、`中点`、`圆心/中心`、`交点`、`网格` 七类捕捉开关，并已接入第一阶段控制点编辑（选中后点控点再点目标点，已覆盖 `Point`、`Line`、`Circle`、`Arc`、`Ellipse`、`Polyline`、`LWPolyline`）；夹点编辑现已支持实时几何预览，重叠夹点支持悬停 `1s` 弹出候选选择栏并可用 `Tab / Shift+Tab` 循环切换，候选项文案已改为夹点类型名且宽度自适应显示；近期又对方向箭头样式、主次网格对比、选中角标样式、机加工页签布局、G 代码换行符、导出路径记忆与配置切换入口做了进一步优化。
 
 ## 项目现状
 
@@ -24,7 +24,7 @@
 - `机加工` 页签当前采用左对齐的紧凑布局：`文件导入` 位于 `G代码导出` 上方，`排序(保留方向)` 与 `智能排序` 采用上下布局，`功能` 面板集中承载 `自动去重`、`去重`、`使用默认导出路径`、`使用dxf文件名`
 - 提供统一的浅色 / 深色主题切换，入口位于菜单栏“用户设置”
 - 提供点、线、圆、圆弧、椭圆、多段线、轻量多段线的交互式绘制
-- 提供删除、移动、旋转、复制、缩放、矩形阵列、改色、改图层、Undo / Redo
+- 提供删除、移动、旋转、复制、缩放、矩形阵列、环形阵列、镜像、偏移、修剪、延申、合并、圆角、直角（倒角）、改色、改图层、Undo / Redo
 - 提供第一阶段控制点编辑：在空闲态点击“当前选中图元”的可编辑控制点后，再次点击目标点提交；当前支持 `Point`、`Line`、`Circle`、`Arc`、`Ellipse`、`Polyline`、`LWPolyline`
 - 控制点编辑已支持实时预览：在确认前即可看到图元变形、基点到目标点引导线与目标点高亮
 - 当多个可编辑夹点发生重叠时，支持悬停 `1s` 弹出候选选择栏，并支持 `Tab / Shift+Tab` 循环切换候选
@@ -191,11 +191,33 @@ G-code_post-processing_system/
 |       `-- intern/                         # 第三方内部头文件
 |-- src/                                    # 主要源码
 |   |-- main.cpp                            # 程序入口
-|   |-- Gcode_postprocessing_system.cpp     # 主窗口实现
-|   |-- CadViewer.cpp                       # 视图与 OpenGL 主流程
-|   |-- CadController.cpp                   # 输入解释与快捷键分发
+|   |-- Gcode_postprocessing_system.cpp     # 主窗口装配与共享状态同步
+|   |-- Gcode_postprocessing_system_FileActions.cpp   # 主窗口文件导入/保存/DXF导出
+|   |-- Gcode_postprocessing_system_EditActions.cpp   # 主窗口编辑命令入口
+|   |-- Gcode_postprocessing_system_GCodeActions.cpp  # 主窗口G代码导出与导出前处理
+|   |-- Gcode_postprocessing_system_SortActions.cpp   # 主窗口排序链
+|   |-- CadViewer.cpp                       # Viewer 主渲染/文档接线壳
+|   |-- CadViewer_EventHandling.cpp         # Viewer Qt 事件入口
+|   |-- CadViewer_ViewNavigation.cpp        # Viewer 相机导航/坐标换算/网格步长
+|   |-- CadViewer_SelectionState.cpp        # Viewer 正式选择状态写回
+|   |-- CadViewer_SelectionPreview.cpp      # Viewer 框选预览与候选高亮
+|   |-- CadViewer_ProcessOrderLabels.cpp    # Viewer 加工顺序标签交互
+|   |-- CadViewer_InteractionOverlays.cpp   # Viewer 动态输入/夹点 popup/overlay
+|   |-- CadViewer_TransientPrimitives.cpp   # Viewer 临时图元构建
+|   |-- CadViewer_Snapping.cpp              # Viewer 捕捉解析与吸附高亮
+|   |-- CadController.cpp                   # 输入控制器公共壳与共享状态
+|   |-- CadController_KeyHandling.cpp       # 键盘处理
+|   |-- CadController_MouseHandling.cpp     # 鼠标处理与空闲框选
+|   |-- CadController_DynamicInput.cpp      # 动态输入/命令确认链
 |   |-- DrawStateMachine.cpp                # 状态机默认逻辑
-|   |-- CadEditer.cpp                       # 绘图、编辑、命令栈实现
+|   |-- CadEditer.cpp                       # 编辑器壳（生命周期/Undo/分发）
+|   |-- CadEditer_CommandActions.cpp        # 编辑命令入口与命令类
+|   |-- CadEditer_DrawHandlers.cpp          # 绘图/交互处理
+|   |-- CadEditer_EntityFactories.cpp       # 图元创建工厂
+|   |-- CadEditer_ModifyBuilders.cpp        # 偏移/修剪/合并/圆角/倒角构造
+|   |-- CadEditer_EntityTransformHelpers.cpp # 实体变换/控制点读写
+|   |-- CadEditer_GeometryHelpers.cpp       # 剩余通用几何 helper
+|   |-- CadEditer_GeometryMath.cpp          # 纯几何计算
 |   |-- CadDocument.cpp                     # 文档模型实现
 |   |-- CadBitmapImportDialog.cpp           # 位图导入配置与预览
 |   |-- CadBitmapVectorizer.cpp             # 位图预处理、轮廓提取、图元拟合
@@ -237,7 +259,7 @@ G-code_post-processing_system/
 
 ## 总体架构
 
-项目当前按“主窗口 + Ribbon 工具面板 + Viewer + Controller + Editer + Document + 渲染协调层 + DXF Adapter + Bitmap Vectorizer + G-code Backend”的组合结构组织。相比早期版本，`CadViewer` 内部职责已经进一步拆分给 `CadSceneCoordinator`、`CadGraphicsCoordinator`、`CadEntityRenderer`、`CadEntityPicker` 等子模块。
+项目当前按“主窗口 + Ribbon 工具面板 + Viewer + Controller + Editer + Document + 渲染协调层 + DXF Adapter + Bitmap Vectorizer + G-code Backend”的组合结构组织。相比早期版本，主窗口、`CadViewer`、`CadController`、`CadEditer` 已经按输入链和数据流拆成多组实现文件：主窗口按 `文件/编辑/G代码/排序` 拆分，`CadViewer` 按 `事件/导航/选择/吸附/overlay/标签/临时图元` 拆分，`CadController` 按 `键盘/鼠标/动态输入` 拆分，`CadEditer` 按 `命令/绘图处理/图元工厂/修改构造/变换/几何` 拆分。
 
 ```text
 用户输入 / Qt 菜单 / 拖拽文件 / 键盘鼠标
@@ -354,12 +376,14 @@ CadDocument                                (Model)
 - 接通导入文件/导入DXF/导入DWG/导入图片、保存文件（`Ctrl+S`）、普通/安全两种 DXF 导出、反向加工、排序相关菜单动作
 - 维护默认绘图图层、默认绘图颜色以及工具面板显示状态
 - 持有 `CadDocument` 与 `CadEditer`
+- 当前实现已按 `Gcode_postprocessing_system.cpp`、`Gcode_postprocessing_system_FileActions.cpp`、`Gcode_postprocessing_system_EditActions.cpp`、`Gcode_postprocessing_system_GCodeActions.cpp`、`Gcode_postprocessing_system_SortActions.cpp` 拆分
 
 `CadToolPanelWidget`
 
 - 负责提供仿 AutoCAD 风格的紧凑 Ribbon 面板 UI
 - 当前分为 `默认` 与 `机加工` 两个页签
 - `默认` 页签提供“绘图”“修改”“图层”“特性”四组工具
+- “修改”面板保留 `移动`、`删除`、`旋转`、`复制`、`缩放`、`阵列` 按钮，并通过标题下拉暴露 `矩形阵列`、`环形阵列`、`镜像`、`偏移`、`修剪`、`延申`、`合并`、`圆角`、`直角（倒角）`
 - `机加工` 页签当前收束为“导入导出”“排序”“功能”“配置”“G代码配置”五组工具
 - `机加工` 页签当前提供 `文件导入`、`G代码导出`、`排序(保留方向)`、`智能排序`、`去重`、`当前配置`、`G代码模式`、`G代码配置` 等高频入口
 - `当前配置` 下拉框会自动列出运行目录中的 JSON Profile，并支持运行时实时切换当前生效配置
@@ -378,6 +402,7 @@ CadDocument                                (Model)
 - 负责加工方向箭头 overlay 与加工顺序屏幕编号显示
 - 负责加工顺序编号框的命中检测与交互分发，支持双击切换方向、两次点击交换加工顺序
 - 负责绘制当前选中图元的基点/控制点手柄 overlay
+- 当前实现已按 `CadViewer.cpp`、`CadViewer_EventHandling.cpp`、`CadViewer_ViewNavigation.cpp`、`CadViewer_SelectionState.cpp`、`CadViewer_SelectionPreview.cpp`、`CadViewer_ProcessOrderLabels.cpp`、`CadViewer_InteractionOverlays.cpp`、`CadViewer_TransientPrimitives.cpp`、`CadViewer_Snapping.cpp` 拆分
 
 `CadCommandLineWidget` + `CadStatusPaneWidget`
 
@@ -392,15 +417,17 @@ CadDocument                                (Model)
 - 维护当前命令状态、控制点、提示文本
 - 保存默认绘图图层、默认绘图颜色索引等绘图状态
 - 处理多段线圆弧/直线输入切换
+- 当前实现已按 `CadController.cpp`、`CadController_KeyHandling.cpp`、`CadController_MouseHandling.cpp`、`CadController_DynamicInput.cpp` 拆分
 
 `CadEditer`
 
 - 根据状态机创建新实体
-- 执行删除、移动、旋转、复制、缩放、矩形阵列、改色、改图层
+- 执行删除、移动、旋转、复制、缩放、矩形阵列、环形阵列、镜像、偏移、修剪、延申、合并、圆角、直角（倒角）、改色、改图层
 - 执行反向加工切换、加工顺序写入和批量排序状态提交
 - 执行闭合路径起刀缝点写入，并将其纳入 Undo / Redo
 - 维护 Undo / Redo 命令栈
 - 将模型修改统一提交给 `CadDocument`
+- 当前实现已按 `CadEditer.cpp`、`CadEditer_CommandActions.cpp`、`CadEditer_DrawHandlers.cpp`、`CadEditer_EntityFactories.cpp`、`CadEditer_ModifyBuilders.cpp`、`CadEditer_EntityTransformHelpers.cpp`、`CadEditer_GeometryHelpers.cpp`、`CadEditer_GeometryMath.cpp` 拆分
 
 `CadDocument`
 
