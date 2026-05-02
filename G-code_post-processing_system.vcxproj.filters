@@ -166,7 +166,25 @@
     <ClCompile Include="src\CadViewer_EventHandling.cpp">
       <Filter>Source Files\View</Filter>
     </ClCompile>
+    <ClCompile Include="src\CadViewer_ProcessOrderLabels.cpp">
+      <Filter>Source Files\View</Filter>
+    </ClCompile>
+    <ClCompile Include="src\CadViewer_SelectionState.cpp">
+      <Filter>Source Files\View</Filter>
+    </ClCompile>
+    <ClCompile Include="src\CadViewer_SelectionPreview.cpp">
+      <Filter>Source Files\View</Filter>
+    </ClCompile>
+    <ClCompile Include="src\CadViewer_ViewNavigation.cpp">
+      <Filter>Source Files\View</Filter>
+    </ClCompile>
+    <ClCompile Include="src\CadViewer_TransientPrimitives.cpp">
+      <Filter>Source Files\View</Filter>
+    </ClCompile>
     <ClCompile Include="src\CadViewer_InteractionOverlays.cpp">
+      <Filter>Source Files\View</Filter>
+    </ClCompile>
+    <ClCompile Include="src\CadViewer_Snapping.cpp">
       <Filter>Source Files\View</Filter>
     </ClCompile>
     <ClCompile Include="src\CadCommandLineWidget.cpp">
