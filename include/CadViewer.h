@@ -103,6 +103,39 @@ public:
     // 对当前选中图元开始移动命令。
     bool startMoveSelected();
 
+    // 对当前选中图元开始复制参数输入。
+    bool startCopySelected();
+
+    // 对当前选中图元开始旋转参数输入。
+    bool startRotateSelected();
+
+    // 对当前选中图元开始缩放参数输入。
+    bool startScaleSelected();
+
+    // 对当前选中图元开始矩形阵列参数输入。
+    bool startRectangularArraySelected();
+
+    // 对当前选中图元开始环形阵列参数输入。
+    bool startCircularArraySelected();
+
+    // 对当前选中图元开始镜像参数输入。
+    bool startMirrorSelected();
+
+    // 对当前选中图元开始偏移参数输入。
+    bool startOffsetSelected();
+
+    // 对当前选中图元开始修剪参数输入。
+    bool startTrimSelected();
+
+    // 对当前选中图元开始延申参数输入。
+    bool startExtendSelected();
+
+    // 对当前选中图元开始圆角参数输入。
+    bool startFilletSelected();
+
+    // 对当前选中图元开始倒角参数输入。
+    bool startChamferSelected();
+
     // 视图适配整个场景，调整相机使整个场景可见
     void fitScene();
 

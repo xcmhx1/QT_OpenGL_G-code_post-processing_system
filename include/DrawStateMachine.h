@@ -101,6 +101,7 @@ enum class EditType
     None,
     Move,
     GripEdit,
+    ParameterInput,
 };
 
 enum class MoveEditSubMode

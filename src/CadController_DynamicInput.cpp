@@ -138,9 +138,134 @@ namespace
     }
 }
 
+bool CadController::isParameterInputCommandActive() const
+{
+    return m_drawState.editType == EditType::ParameterInput
+        && m_parameterInputSession.command != ParameterInputCommand::None;
+}
+
+bool CadController::isAwaitingParameterFieldInput() const
+{
+    if (!isParameterInputCommandActive())
+    {
+        return false;
+    }
+
+    return !isAwaitingPointInput();
+}
+
+QString CadController::parameterInputTitle() const
+{
+    switch (m_parameterInputSession.command)
+    {
+    case ParameterInputCommand::Polygon:
+        return QStringLiteral("多边形");
+    case ParameterInputCommand::Copy:
+        return QStringLiteral("复制");
+    case ParameterInputCommand::Rotate:
+        return QStringLiteral("旋转");
+    case ParameterInputCommand::Scale:
+        return QStringLiteral("缩放");
+    case ParameterInputCommand::RectangularArray:
+        return QStringLiteral("矩形阵列");
+    case ParameterInputCommand::CircularArray:
+        return QStringLiteral("环形阵列");
+    case ParameterInputCommand::Mirror:
+        return QStringLiteral("镜像");
+    case ParameterInputCommand::Offset:
+        return QStringLiteral("偏移");
+    case ParameterInputCommand::Trim:
+        return QStringLiteral("修剪");
+    case ParameterInputCommand::Extend:
+        return QStringLiteral("延申");
+    case ParameterInputCommand::Fillet:
+        return QStringLiteral("圆角");
+    case ParameterInputCommand::Chamfer:
+        return QStringLiteral("倒角");
+    default:
+        break;
+    }
+
+    return QStringLiteral("参数输入");
+}
+
+QString CadController::parameterInputPrompt() const
+{
+    switch (m_parameterInputSession.command)
+    {
+    case ParameterInputCommand::Polygon:
+        return m_parameterInputSession.stageIndex == 0
+            ? QStringLiteral("POLYGON: 输入边数（3-1024）")
+            : QStringLiteral("POLYGON: 选择内切于圆或外切于圆");
+    case ParameterInputCommand::Copy:
+        return m_parameterInputSession.stageIndex == 0
+            ? QStringLiteral("COPY: 输入 X 偏移量")
+            : QStringLiteral("COPY: 输入 Y 偏移量");
+    case ParameterInputCommand::Rotate:
+        return QStringLiteral("ROTATE: 输入旋转角度（度）");
+    case ParameterInputCommand::Scale:
+        return QStringLiteral("SCALE: 输入缩放倍率");
+    case ParameterInputCommand::RectangularArray:
+        switch (m_parameterInputSession.stageIndex)
+        {
+        case 0:
+            return QStringLiteral("ARRAYRECT: 输入行数");
+        case 1:
+            return QStringLiteral("ARRAYRECT: 输入列数");
+        case 2:
+            return QStringLiteral("ARRAYRECT: 输入行间距（Y）");
+        default:
+            return QStringLiteral("ARRAYRECT: 输入列间距（X）");
+        }
+    case ParameterInputCommand::CircularArray:
+        switch (m_parameterInputSession.stageIndex)
+        {
+        case 0:
+            return QStringLiteral("ARRAYPOLAR: 输入项目总数");
+        case 1:
+            return QStringLiteral("ARRAYPOLAR: 输入填充角度");
+        case 2:
+            return QStringLiteral("ARRAYPOLAR: 指定阵列中心");
+        default:
+            return QStringLiteral("ARRAYPOLAR: 输入旋转方式");
+        }
+    case ParameterInputCommand::Mirror:
+        switch (m_parameterInputSession.stageIndex)
+        {
+        case 0:
+            return QStringLiteral("MIRROR: 指定镜像线第一点");
+        case 1:
+            return QStringLiteral("MIRROR: 指定镜像线第二点");
+        default:
+            return QStringLiteral("MIRROR: 输入是否删除原图元");
+        }
+    case ParameterInputCommand::Offset:
+        return QStringLiteral("OFFSET: 输入偏移距离");
+    case ParameterInputCommand::Trim:
+        return QStringLiteral("TRIM: 输入要修剪的端点");
+    case ParameterInputCommand::Extend:
+        return QStringLiteral("EXTEND: 输入要延申的端点");
+    case ParameterInputCommand::Fillet:
+        return QStringLiteral("FILLET: 输入圆角半径");
+    case ParameterInputCommand::Chamfer:
+        return m_parameterInputSession.stageIndex == 0
+            ? QStringLiteral("CHAMFER: 输入第一条边距离")
+            : QStringLiteral("CHAMFER: 输入第二条边距离");
+    default:
+        break;
+    }
+
+    return QStringLiteral("参数输入");
+}
+
 QString CadController::currentPrompt() const
 {
     QString basePrompt = QStringLiteral("无活动命令");
+
+    if (isParameterInputCommandActive())
+    {
+        return appendDynamicInputPromptState(parameterInputPrompt());
+    }
 
     if (m_drawState.editType == EditType::Move)
     {
@@ -277,6 +402,11 @@ QString CadController::currentPrompt() const
 
 QString CadController::currentCommandName() const
 {
+    if (isParameterInputCommandActive())
+    {
+        return parameterInputTitle();
+    }
+
     if (m_drawState.editType == EditType::Move)
     {
         return QStringLiteral("移动");
@@ -294,7 +424,7 @@ CadDynamicInputOverlayState CadController::dynamicInputOverlayState() const
 {
     CadDynamicInputOverlayState state;
 
-    if (!m_drawState.hasActiveCommand() || !isAwaitingPointInput())
+    if (!m_drawState.hasActiveCommand())
     {
         return state;
     }
@@ -307,34 +437,177 @@ CadDynamicInputOverlayState CadController::dynamicInputOverlayState() const
         state.title = QStringLiteral("动态输入");
     }
 
+    if (isParameterInputCommandActive() && isAwaitingParameterFieldInput())
+    {
+        QString labelText;
+        QString valueText;
+        QString stageHint = QStringLiteral("Enter/Space确认，Esc清空输入");
+
+        switch (m_parameterInputSession.command)
+        {
+        case ParameterInputCommand::Polygon:
+            if (m_parameterInputSession.stageIndex == 0)
+            {
+                labelText = QStringLiteral("边数");
+                valueText = QString::number(m_parameterInputSession.intValue1);
+                stageHint = QStringLiteral("输入 3-1024，Enter/Space确认，Esc清空输入");
+            }
+            else
+            {
+                labelText = QStringLiteral("构造方式");
+                valueText = m_parameterInputSession.boolValue ? QStringLiteral("外切于圆") : QStringLiteral("内切于圆");
+                stageHint = QStringLiteral("输入 内切/外切 或 0/1，Enter/Space确认");
+            }
+            break;
+        case ParameterInputCommand::Copy:
+            labelText = m_parameterInputSession.stageIndex == 0 ? QStringLiteral("X 偏移") : QStringLiteral("Y 偏移");
+            valueText = formatDynamicInputValue(m_parameterInputSession.stageIndex == 0 ? m_parameterInputSession.doubleValue1 : m_parameterInputSession.doubleValue2);
+            stageHint = QStringLiteral("输入数值后 Enter/Space确认");
+            break;
+        case ParameterInputCommand::Rotate:
+            labelText = QStringLiteral("旋转角度");
+            valueText = formatDynamicInputValue(m_parameterInputSession.doubleValue1);
+            stageHint = QStringLiteral("输入角度后 Enter/Space确认");
+            break;
+        case ParameterInputCommand::Scale:
+            labelText = QStringLiteral("缩放倍率");
+            valueText = formatDynamicInputValue(m_parameterInputSession.doubleValue1);
+            stageHint = QStringLiteral("输入倍率后 Enter/Space确认");
+            break;
+        case ParameterInputCommand::RectangularArray:
+            switch (m_parameterInputSession.stageIndex)
+            {
+            case 0:
+                labelText = QStringLiteral("行数");
+                valueText = QString::number(m_parameterInputSession.intValue1);
+                stageHint = QStringLiteral("输入行数后 Enter/Space确认");
+                break;
+            case 1:
+                labelText = QStringLiteral("列数");
+                valueText = QString::number(m_parameterInputSession.intValue2);
+                stageHint = QStringLiteral("输入列数后 Enter/Space确认");
+                break;
+            case 2:
+                labelText = QStringLiteral("行间距");
+                valueText = formatDynamicInputValue(m_parameterInputSession.doubleValue1);
+                stageHint = QStringLiteral("输入 Y 方向间距后 Enter/Space确认");
+                break;
+            default:
+                labelText = QStringLiteral("列间距");
+                valueText = formatDynamicInputValue(m_parameterInputSession.doubleValue2);
+                stageHint = QStringLiteral("输入 X 方向间距后 Enter/Space确认");
+                break;
+            }
+            break;
+        case ParameterInputCommand::CircularArray:
+            switch (m_parameterInputSession.stageIndex)
+            {
+            case 0:
+                labelText = QStringLiteral("项目总数");
+                valueText = QString::number(m_parameterInputSession.intValue1);
+                stageHint = QStringLiteral("输入项目总数后 Enter/Space确认");
+                break;
+            case 1:
+                labelText = QStringLiteral("填充角度");
+                valueText = formatDynamicInputValue(m_parameterInputSession.doubleValue1);
+                stageHint = QStringLiteral("输入填充角度后 Enter/Space确认");
+                break;
+            default:
+                labelText = QStringLiteral("旋转方式");
+                valueText = m_parameterInputSession.boolValue ? QStringLiteral("旋转副本方向") : QStringLiteral("保持原方向");
+                stageHint = QStringLiteral("输入 旋转/保持 或 0/1，Enter/Space确认");
+                break;
+            }
+            break;
+        case ParameterInputCommand::Mirror:
+            labelText = QStringLiteral("删除原图元");
+            valueText = m_parameterInputSession.boolValue ? QStringLiteral("是") : QStringLiteral("否");
+            stageHint = QStringLiteral("输入 是/否 或 0/1，Enter/Space确认");
+            break;
+        case ParameterInputCommand::Offset:
+            labelText = QStringLiteral("偏移距离");
+            valueText = formatDynamicInputValue(m_parameterInputSession.doubleValue1);
+            stageHint = QStringLiteral("输入距离后 Enter/Space确认");
+            break;
+        case ParameterInputCommand::Trim:
+        case ParameterInputCommand::Extend:
+            labelText = QStringLiteral("目标端点");
+            valueText = m_parameterInputSession.boolValue ? QStringLiteral("起点端") : QStringLiteral("终点端");
+            stageHint = QStringLiteral("输入 起点/终点 或 0/1，Enter/Space确认");
+            break;
+        case ParameterInputCommand::Fillet:
+            labelText = QStringLiteral("圆角半径");
+            valueText = formatDynamicInputValue(m_parameterInputSession.doubleValue1);
+            stageHint = QStringLiteral("输入半径后 Enter/Space确认");
+            break;
+        case ParameterInputCommand::Chamfer:
+            labelText = m_parameterInputSession.stageIndex == 0 ? QStringLiteral("第一边距离") : QStringLiteral("第二边距离");
+            valueText = formatDynamicInputValue(m_parameterInputSession.stageIndex == 0 ? m_parameterInputSession.doubleValue1 : m_parameterInputSession.doubleValue2);
+            stageHint = QStringLiteral("输入距离后 Enter/Space确认");
+            break;
+        default:
+            break;
+        }
+
+        if (!m_parameterInputSession.fieldBuffer.isEmpty())
+        {
+            valueText = m_parameterInputSession.fieldBuffer;
+        }
+
+        state.stageHint = stageHint;
+        state.rows.push_back({ labelText, valueText, true });
+        return state;
+    }
+
+    if (!isAwaitingPointInput())
+    {
+        return state;
+    }
+
     state.stageHint = QStringLiteral("Tab切换字段，Enter/Space确认，Esc清空输入");
-    state.xLocked = m_drawState.dynamicInputXLocked;
-    state.yLocked = m_drawState.dynamicInputYLocked;
-    state.xActive = m_drawState.dynamicInputActiveFieldIndex == 0;
-    state.yActive = m_drawState.dynamicInputActiveFieldIndex == 1;
     state.expressionMode = m_drawState.dynamicInputExpressionMode;
 
     if (state.expressionMode)
     {
+        state.rows.push_back({ QStringLiteral("表达式"), m_drawState.dynamicInputBuffer, true });
         state.expressionText = m_drawState.dynamicInputBuffer;
         return state;
     }
 
     const QVector3D previewPoint = applyPointDynamicFieldOverride(m_drawState.currentPos, true);
-    state.xValueText = formatDynamicInputValue(previewPoint.x());
-    state.yValueText = formatDynamicInputValue(previewPoint.y());
+    QString xValueText = formatDynamicInputValue(previewPoint.x());
+    QString yValueText = formatDynamicInputValue(previewPoint.y());
+    const bool xActive = m_drawState.dynamicInputActiveFieldIndex == 0;
+    const bool yActive = m_drawState.dynamicInputActiveFieldIndex == 1;
 
     if (!m_drawState.dynamicInputFieldBuffer.isEmpty())
     {
-        if (state.xActive)
+        if (xActive)
         {
-            state.xValueText = m_drawState.dynamicInputFieldBuffer;
+            xValueText = m_drawState.dynamicInputFieldBuffer;
         }
         else
         {
-            state.yValueText = m_drawState.dynamicInputFieldBuffer;
+            yValueText = m_drawState.dynamicInputFieldBuffer;
         }
     }
+
+    state.rows.push_back
+    (
+        {
+            m_drawState.dynamicInputXLocked ? QStringLiteral("X [锁]") : QStringLiteral("X"),
+            xValueText,
+            xActive
+        }
+    );
+    state.rows.push_back
+    (
+        {
+            m_drawState.dynamicInputYLocked ? QStringLiteral("Y [锁]") : QStringLiteral("Y"),
+            yValueText,
+            yActive
+        }
+    );
 
     return state;
 }
@@ -625,6 +898,23 @@ QString CadController::currentPointInputStageKey() const
         return QString();
     }
 
+    if (isParameterInputCommandActive())
+    {
+        switch (m_parameterInputSession.command)
+        {
+        case ParameterInputCommand::CircularArray:
+            return QStringLiteral("PARAM_ARRAYPOLAR_CENTER");
+        case ParameterInputCommand::Mirror:
+            return m_parameterInputSession.stageIndex == 0
+                ? QStringLiteral("PARAM_MIRROR_FIRST")
+                : QStringLiteral("PARAM_MIRROR_SECOND");
+        default:
+            break;
+        }
+
+        return QStringLiteral("PARAM_POINT");
+    }
+
     if (m_drawState.editType == EditType::Move)
     {
         if (m_drawState.moveSubMode == MoveEditSubMode::AwaitBasePoint)
@@ -745,6 +1035,11 @@ bool CadController::isPointDynamicFieldModeActive() const
 
 bool CadController::hasPendingDynamicKeyboardInput() const
 {
+    if (isAwaitingParameterFieldInput())
+    {
+        return !m_parameterInputSession.fieldBuffer.isEmpty();
+    }
+
     if (m_drawState.dynamicInputExpressionMode)
     {
         return !m_drawState.dynamicInputBuffer.isEmpty();
@@ -959,6 +1254,14 @@ QString CadController::formatDynamicInputValue(double value)
 
 bool CadController::isAwaitingPointInput() const
 {
+    if (isParameterInputCommandActive())
+    {
+        return (m_parameterInputSession.command == ParameterInputCommand::CircularArray
+                && m_parameterInputSession.stageIndex == 2)
+            || (m_parameterInputSession.command == ParameterInputCommand::Mirror
+                && (m_parameterInputSession.stageIndex == 0 || m_parameterInputSession.stageIndex == 1));
+    }
+
     if (m_drawState.editType == EditType::Move)
     {
         return m_drawState.moveSubMode == MoveEditSubMode::AwaitBasePoint
@@ -1018,6 +1321,13 @@ bool CadController::isAwaitingPointInput() const
 
 QVector3D CadController::dynamicInputReferencePoint() const
 {
+    if (isParameterInputCommandActive()
+        && m_parameterInputSession.command == ParameterInputCommand::Mirror
+        && m_parameterInputSession.stageIndex == 1)
+    {
+        return flattenToDrawingPlane(m_parameterInputSession.point1);
+    }
+
     if (!m_drawState.commandPoints.isEmpty())
     {
         return flattenToDrawingPlane(m_drawState.commandPoints.back());
@@ -1126,7 +1436,7 @@ bool CadController::tryResolveDynamicInputPoint(const QString& inputText, QVecto
 
 bool CadController::commitCommandPoint(const QVector3D& worldPos)
 {
-    if (!m_drawState.hasActiveCommand() || m_editer == nullptr)
+    if (!m_drawState.hasActiveCommand())
     {
         return false;
     }
@@ -1141,6 +1451,17 @@ bool CadController::commitCommandPoint(const QVector3D& worldPos)
     }
 
     m_drawState.currentPos = constrainedWorldPos;
+
+    if (isParameterInputCommandActive())
+    {
+        return commitParameterInputPoint(constrainedWorldPos);
+    }
+
+    if (m_editer == nullptr)
+    {
+        return false;
+    }
+
     const DrawStateMachine previousState = m_drawState;
     handleLeftPressInCommand(constrainedWorldPos);
 
@@ -1273,11 +1594,684 @@ bool CadController::submitDynamicInputBuffer()
     return true;
 }
 
+bool CadController::submitParameterInputField()
+{
+    if (!isAwaitingParameterFieldInput())
+    {
+        return false;
+    }
+
+    const QString trimmedInput = m_parameterInputSession.fieldBuffer.trimmed();
+
+    auto commitIntValue = [&](int& targetValue, int minValue, int maxValue, QString& errorMessage) -> bool
+    {
+        if (trimmedInput.isEmpty())
+        {
+            return true;
+        }
+
+        bool parsedOk = false;
+        const int parsedValue = trimmedInput.toInt(&parsedOk);
+
+        if (!parsedOk || parsedValue < minValue || parsedValue > maxValue)
+        {
+            errorMessage = QStringLiteral("请输入 %1 到 %2 之间的整数").arg(minValue).arg(maxValue);
+            return false;
+        }
+
+        targetValue = parsedValue;
+        return true;
+    };
+
+    auto commitDoubleValue = [&](double& targetValue, double minValue, bool allowEqualMin, QString& errorMessage) -> bool
+    {
+        if (trimmedInput.isEmpty())
+        {
+            return true;
+        }
+
+        bool parsedOk = false;
+        const double parsedValue = trimmedInput.toDouble(&parsedOk);
+
+        if (!parsedOk || parsedValue < minValue || (!allowEqualMin && parsedValue <= minValue))
+        {
+            errorMessage = allowEqualMin
+                ? QStringLiteral("请输入不小于 %1 的数值").arg(formatDynamicInputValue(minValue))
+                : QStringLiteral("请输入大于 %1 的数值").arg(formatDynamicInputValue(minValue));
+            return false;
+        }
+
+        targetValue = parsedValue;
+        return true;
+    };
+
+    auto commitChoiceValue = [&](bool& targetValue, const QStringList& falseTokens, const QStringList& trueTokens, QString& errorMessage) -> bool
+    {
+        if (trimmedInput.isEmpty())
+        {
+            return true;
+        }
+
+        const QString normalized = trimmedInput.trimmed().toLower();
+
+        for (const QString& token : falseTokens)
+        {
+            if (normalized == token.toLower())
+            {
+                targetValue = false;
+                return true;
+            }
+        }
+
+        for (const QString& token : trueTokens)
+        {
+            if (normalized == token.toLower())
+            {
+                targetValue = true;
+                return true;
+            }
+        }
+
+        errorMessage = QStringLiteral("输入值无效");
+        return false;
+    };
+
+    auto finishSession = [&](bool success, const QString& successMessage, const QString& errorMessage) -> bool
+    {
+        if (m_viewer != nullptr)
+        {
+            if (success)
+            {
+                m_viewer->appendCommandMessage(successMessage);
+            }
+            else if (!errorMessage.isEmpty())
+            {
+                m_viewer->appendCommandMessage(errorMessage);
+            }
+
+            m_viewer->refreshCommandPrompt();
+            m_viewer->requestViewUpdate();
+        }
+
+        if (success)
+        {
+            m_drawState.editType = EditType::None;
+            resetParameterInputSession();
+            resetPointDynamicInputSession();
+        }
+
+        return true;
+    };
+
+    QString errorMessage;
+
+    switch (m_parameterInputSession.command)
+    {
+    case ParameterInputCommand::Polygon:
+        if (m_parameterInputSession.stageIndex == 0)
+        {
+            if (!commitIntValue(m_parameterInputSession.intValue1, 3, 1024, errorMessage))
+            {
+                break;
+            }
+
+            m_parameterInputSession.stageIndex = 1;
+            m_parameterInputSession.fieldBuffer.clear();
+            if (m_viewer != nullptr)
+            {
+                m_viewer->refreshCommandPrompt();
+                m_viewer->requestViewUpdate();
+            }
+            return true;
+        }
+
+        if (!commitChoiceValue
+        (
+            m_parameterInputSession.boolValue,
+            { QStringLiteral("0"), QStringLiteral("内"), QStringLiteral("内切"), QStringLiteral("内切于圆"), QStringLiteral("inscribed") },
+            { QStringLiteral("1"), QStringLiteral("外"), QStringLiteral("外切"), QStringLiteral("外切于圆"), QStringLiteral("circumscribed") },
+            errorMessage
+        ))
+        {
+            break;
+        }
+
+        m_drawState.polygonSideCount = m_parameterInputSession.intValue1;
+        m_drawState.polygonCircumscribedAboutCircle = m_parameterInputSession.boolValue;
+        {
+            const QColor drawingColor = m_parameterInputSession.drawingColor;
+            resetParameterInputSession();
+            if (m_editer != nullptr)
+            {
+                m_editer->cancelTransientCommand();
+            }
+
+            m_drawState.isDrawing = true;
+            m_drawState.drawType = DrawType::Polygon;
+            m_drawState.drawingColor = drawingColor;
+            m_drawState.editType = EditType::None;
+            m_drawState.commandPoints.clear();
+            m_drawState.commandBulges.clear();
+            m_drawState.polylineArcMode = false;
+            m_drawState.lwPolylineArcMode = false;
+            clearDynamicCommandMode();
+            resetPointDynamicInputSession();
+            resetSubModes();
+            preparePrimitiveSubMode();
+            resetPointDynamicInputSession(currentPointInputStageKey());
+
+            if (m_viewer != nullptr)
+            {
+                m_viewer->appendCommandMessage
+                (
+                    QStringLiteral("已进入多边形命令（%1 边，%2）")
+                    .arg(m_drawState.polygonSideCount)
+                    .arg(polygonConstructionModeText(m_drawState.polygonCircumscribedAboutCircle))
+                );
+                m_viewer->refreshCommandPrompt();
+                m_viewer->requestViewUpdate();
+            }
+        }
+        return true;
+
+    case ParameterInputCommand::Copy:
+        if (m_parameterInputSession.stageIndex == 0)
+        {
+            if (!commitDoubleValue(m_parameterInputSession.doubleValue1, -1000000.0, true, errorMessage))
+            {
+                break;
+            }
+
+            m_parameterInputSession.stageIndex = 1;
+            m_parameterInputSession.fieldBuffer.clear();
+            if (m_viewer != nullptr)
+            {
+                m_viewer->refreshCommandPrompt();
+                m_viewer->requestViewUpdate();
+            }
+            return true;
+        }
+
+        if (!commitDoubleValue(m_parameterInputSession.doubleValue2, -1000000.0, true, errorMessage))
+        {
+            break;
+        }
+
+        {
+            int copiedCount = 0;
+            const QVector3D delta
+            (
+                static_cast<float>(m_parameterInputSession.doubleValue1),
+                static_cast<float>(m_parameterInputSession.doubleValue2),
+                0.0f
+            );
+
+            for (CadItem* item : m_parameterInputSession.selectedItems)
+            {
+                if (item != nullptr && m_editer != nullptr && m_editer->copyEntity(item, delta))
+                {
+                    ++copiedCount;
+                }
+            }
+
+            return finishSession
+            (
+                copiedCount > 0,
+                QStringLiteral("已复制 %1 个图元，偏移量为 (%2, %3)。")
+                    .arg(copiedCount)
+                    .arg(formatDynamicInputValue(m_parameterInputSession.doubleValue1))
+                    .arg(formatDynamicInputValue(m_parameterInputSession.doubleValue2)),
+                QStringLiteral("选中图元复制失败。")
+            );
+        }
+
+    case ParameterInputCommand::Rotate:
+        if (!commitDoubleValue(m_parameterInputSession.doubleValue1, -3600.0, true, errorMessage))
+        {
+            break;
+        }
+
+        {
+            int rotatedCount = 0;
+
+            for (CadItem* item : m_parameterInputSession.selectedItems)
+            {
+                if (item != nullptr
+                    && m_editer != nullptr
+                    && m_editer->rotateEntity(item, m_parameterInputSession.centerPoint, m_parameterInputSession.doubleValue1))
+                {
+                    ++rotatedCount;
+                }
+            }
+
+            return finishSession
+            (
+                rotatedCount > 0,
+                QStringLiteral("已将 %1 个图元绕中心旋转 %2 度。")
+                    .arg(rotatedCount)
+                    .arg(formatDynamicInputValue(m_parameterInputSession.doubleValue1)),
+                QStringLiteral("选中图元旋转失败。")
+            );
+        }
+
+    case ParameterInputCommand::Scale:
+        if (!commitDoubleValue(m_parameterInputSession.doubleValue1, 0.001, true, errorMessage))
+        {
+            break;
+        }
+
+        {
+            int scaledCount = 0;
+
+            for (CadItem* item : m_parameterInputSession.selectedItems)
+            {
+                if (item != nullptr
+                    && m_editer != nullptr
+                    && m_editer->scaleEntity(item, m_parameterInputSession.centerPoint, m_parameterInputSession.doubleValue1))
+                {
+                    ++scaledCount;
+                }
+            }
+
+            return finishSession
+            (
+                scaledCount > 0,
+                QStringLiteral("已将 %1 个图元绕中心缩放为 %2 倍。")
+                    .arg(scaledCount)
+                    .arg(formatDynamicInputValue(m_parameterInputSession.doubleValue1)),
+                QStringLiteral("选中图元缩放失败。")
+            );
+        }
+
+    case ParameterInputCommand::RectangularArray:
+        switch (m_parameterInputSession.stageIndex)
+        {
+        case 0:
+            if (!commitIntValue(m_parameterInputSession.intValue1, 1, 999, errorMessage))
+            {
+                break;
+            }
+            m_parameterInputSession.stageIndex = 1;
+            m_parameterInputSession.fieldBuffer.clear();
+            if (m_viewer != nullptr)
+            {
+                m_viewer->refreshCommandPrompt();
+                m_viewer->requestViewUpdate();
+            }
+            return true;
+        case 1:
+            if (!commitIntValue(m_parameterInputSession.intValue2, 1, 999, errorMessage))
+            {
+                break;
+            }
+            if (m_parameterInputSession.intValue1 == 1 && m_parameterInputSession.intValue2 == 1)
+            {
+                errorMessage = QStringLiteral("行数和列数不能同时为 1。");
+                break;
+            }
+            m_parameterInputSession.stageIndex = 2;
+            m_parameterInputSession.fieldBuffer.clear();
+            if (m_viewer != nullptr)
+            {
+                m_viewer->refreshCommandPrompt();
+                m_viewer->requestViewUpdate();
+            }
+            return true;
+        case 2:
+            if (!commitDoubleValue(m_parameterInputSession.doubleValue1, -1000000.0, true, errorMessage))
+            {
+                break;
+            }
+            m_parameterInputSession.stageIndex = 3;
+            m_parameterInputSession.fieldBuffer.clear();
+            if (m_viewer != nullptr)
+            {
+                m_viewer->refreshCommandPrompt();
+                m_viewer->requestViewUpdate();
+            }
+            return true;
+        default:
+            if (!commitDoubleValue(m_parameterInputSession.doubleValue2, -1000000.0, true, errorMessage))
+            {
+                break;
+            }
+
+            {
+                int arrayedCount = 0;
+                const QVector3D rowOffset(0.0f, static_cast<float>(m_parameterInputSession.doubleValue1), 0.0f);
+                const QVector3D columnOffset(static_cast<float>(m_parameterInputSession.doubleValue2), 0.0f, 0.0f);
+
+                for (CadItem* item : m_parameterInputSession.selectedItems)
+                {
+                    if (item != nullptr
+                        && m_editer != nullptr
+                        && m_editer->arrayEntity
+                        (
+                            item,
+                            m_parameterInputSession.intValue1,
+                            m_parameterInputSession.intValue2,
+                            rowOffset,
+                            columnOffset
+                        ))
+                    {
+                        ++arrayedCount;
+                    }
+                }
+
+                return finishSession
+                (
+                    arrayedCount > 0,
+                    QStringLiteral("已对 %1 个图元执行 %2 x %3 矩形阵列。")
+                        .arg(arrayedCount)
+                        .arg(m_parameterInputSession.intValue1)
+                        .arg(m_parameterInputSession.intValue2),
+                    QStringLiteral("选中图元阵列失败。")
+                );
+            }
+        }
+        break;
+
+    case ParameterInputCommand::CircularArray:
+        if (m_parameterInputSession.stageIndex == 0)
+        {
+            if (!commitIntValue(m_parameterInputSession.intValue1, 2, 1024, errorMessage))
+            {
+                break;
+            }
+
+            m_parameterInputSession.stageIndex = 1;
+            m_parameterInputSession.fieldBuffer.clear();
+            if (m_viewer != nullptr)
+            {
+                m_viewer->refreshCommandPrompt();
+                m_viewer->requestViewUpdate();
+            }
+            return true;
+        }
+
+        if (m_parameterInputSession.stageIndex == 1)
+        {
+            if (!commitDoubleValue(m_parameterInputSession.doubleValue1, -3600.0, true, errorMessage))
+            {
+                break;
+            }
+
+            m_parameterInputSession.stageIndex = 2;
+            m_parameterInputSession.fieldBuffer.clear();
+            resetPointDynamicInputSession(currentPointInputStageKey());
+            if (m_viewer != nullptr)
+            {
+                syncCurrentPosWithCursor();
+                m_viewer->refreshCommandPrompt();
+                m_viewer->requestViewUpdate();
+            }
+            return true;
+        }
+
+        if (!commitChoiceValue
+        (
+            m_parameterInputSession.boolValue,
+            { QStringLiteral("0"), QStringLiteral("保持"), QStringLiteral("保持原方向"), QStringLiteral("keep") },
+            { QStringLiteral("1"), QStringLiteral("旋转"), QStringLiteral("旋转副本方向"), QStringLiteral("rotate") },
+            errorMessage
+        ))
+        {
+            break;
+        }
+
+        if (m_editer == nullptr || !m_editer->polarArrayEntities
+        (
+            m_parameterInputSession.selectedItems,
+            m_parameterInputSession.point1,
+            m_parameterInputSession.intValue1,
+            m_parameterInputSession.doubleValue1,
+            m_parameterInputSession.boolValue
+        ))
+        {
+            return finishSession(false, QString(), QStringLiteral("选中图元环形阵列失败。"));
+        }
+
+        return finishSession
+        (
+            true,
+            QStringLiteral("已对 %1 个图元执行 %2 项环形阵列。")
+                .arg(m_parameterInputSession.selectedItems.size())
+                .arg(m_parameterInputSession.intValue1),
+            QString()
+        );
+
+    case ParameterInputCommand::Mirror:
+        if (!commitChoiceValue
+        (
+            m_parameterInputSession.boolValue,
+            { QStringLiteral("0"), QStringLiteral("否"), QStringLiteral("不"), QStringLiteral("no") },
+            { QStringLiteral("1"), QStringLiteral("是"), QStringLiteral("删除"), QStringLiteral("yes") },
+            errorMessage
+        ))
+        {
+            break;
+        }
+
+        if (m_editer == nullptr || !m_editer->mirrorEntities
+        (
+            m_parameterInputSession.selectedItems,
+            m_parameterInputSession.point1,
+            m_parameterInputSession.point2,
+            m_parameterInputSession.boolValue
+        ))
+        {
+            return finishSession(false, QString(), QStringLiteral("选中图元镜像失败。"));
+        }
+
+        return finishSession(true, QStringLiteral("已执行镜像操作。"), QString());
+
+    case ParameterInputCommand::Offset:
+        if (!commitDoubleValue(m_parameterInputSession.doubleValue1, -1000000.0, true, errorMessage))
+        {
+            break;
+        }
+
+        if (m_editer == nullptr || !m_editer->offsetEntity(m_parameterInputSession.primaryItem, m_parameterInputSession.doubleValue1))
+        {
+            return finishSession(false, QString(), QStringLiteral("当前图元不支持偏移，或偏移失败。"));
+        }
+
+        return finishSession
+        (
+            true,
+            QStringLiteral("已创建偏移图元，距离为 %1。").arg(formatDynamicInputValue(m_parameterInputSession.doubleValue1)),
+            QString()
+        );
+
+    case ParameterInputCommand::Trim:
+        if (!commitChoiceValue
+        (
+            m_parameterInputSession.boolValue,
+            { QStringLiteral("1"), QStringLiteral("终"), QStringLiteral("终点"), QStringLiteral("终点端"), QStringLiteral("end") },
+            { QStringLiteral("0"), QStringLiteral("起"), QStringLiteral("起点"), QStringLiteral("起点端"), QStringLiteral("start") },
+            errorMessage
+        ))
+        {
+            break;
+        }
+
+        if (m_editer == nullptr || !m_editer->trimEntity(m_parameterInputSession.secondaryItem, m_parameterInputSession.primaryItem, m_parameterInputSession.boolValue))
+        {
+            return finishSession(false, QString(), QStringLiteral("当前仅支持将直线修剪到直线、圆或圆弧边界。"));
+        }
+
+        return finishSession(true, QStringLiteral("已执行修剪操作。"), QString());
+
+    case ParameterInputCommand::Extend:
+        if (!commitChoiceValue
+        (
+            m_parameterInputSession.boolValue,
+            { QStringLiteral("1"), QStringLiteral("终"), QStringLiteral("终点"), QStringLiteral("终点端"), QStringLiteral("end") },
+            { QStringLiteral("0"), QStringLiteral("起"), QStringLiteral("起点"), QStringLiteral("起点端"), QStringLiteral("start") },
+            errorMessage
+        ))
+        {
+            break;
+        }
+
+        if (m_editer == nullptr || !m_editer->extendEntity(m_parameterInputSession.secondaryItem, m_parameterInputSession.primaryItem, m_parameterInputSession.boolValue))
+        {
+            return finishSession(false, QString(), QStringLiteral("当前仅支持将直线延申到直线、圆或圆弧边界。"));
+        }
+
+        return finishSession(true, QStringLiteral("已执行延申操作。"), QString());
+
+    case ParameterInputCommand::Fillet:
+        if (!commitDoubleValue(m_parameterInputSession.doubleValue1, 0.001, true, errorMessage))
+        {
+            break;
+        }
+
+        if (m_editer == nullptr || !m_editer->filletEntities(m_parameterInputSession.primaryItem, m_parameterInputSession.secondaryItem, m_parameterInputSession.doubleValue1))
+        {
+            return finishSession(false, QString(), QStringLiteral("当前仅支持 2 条直线的圆角。"));
+        }
+
+        return finishSession
+        (
+            true,
+            QStringLiteral("已执行圆角操作，半径 %1。").arg(formatDynamicInputValue(m_parameterInputSession.doubleValue1)),
+            QString()
+        );
+
+    case ParameterInputCommand::Chamfer:
+        if (m_parameterInputSession.stageIndex == 0)
+        {
+            if (!commitDoubleValue(m_parameterInputSession.doubleValue1, 0.0, true, errorMessage))
+            {
+                break;
+            }
+            m_parameterInputSession.stageIndex = 1;
+            m_parameterInputSession.fieldBuffer.clear();
+            if (m_viewer != nullptr)
+            {
+                m_viewer->refreshCommandPrompt();
+                m_viewer->requestViewUpdate();
+            }
+            return true;
+        }
+
+        if (!commitDoubleValue(m_parameterInputSession.doubleValue2, 0.0, true, errorMessage))
+        {
+            break;
+        }
+
+        if (m_editer == nullptr || !m_editer->chamferEntities
+        (
+            m_parameterInputSession.primaryItem,
+            m_parameterInputSession.secondaryItem,
+            m_parameterInputSession.doubleValue1,
+            m_parameterInputSession.doubleValue2
+        ))
+        {
+            return finishSession(false, QString(), QStringLiteral("当前仅支持 2 条直线的倒角。"));
+        }
+
+        return finishSession
+        (
+            true,
+            QStringLiteral("已执行倒角操作，距离为 %1 / %2。")
+                .arg(formatDynamicInputValue(m_parameterInputSession.doubleValue1))
+                .arg(formatDynamicInputValue(m_parameterInputSession.doubleValue2)),
+            QString()
+        );
+
+    default:
+        break;
+    }
+
+    if (m_viewer != nullptr)
+    {
+        if (!errorMessage.isEmpty())
+        {
+            m_viewer->appendCommandMessage(errorMessage);
+        }
+        m_viewer->refreshCommandPrompt();
+        m_viewer->requestViewUpdate();
+    }
+
+    return true;
+}
+
+bool CadController::commitParameterInputPoint(const QVector3D& worldPos)
+{
+    if (!isParameterInputCommandActive())
+    {
+        return false;
+    }
+
+    switch (m_parameterInputSession.command)
+    {
+    case ParameterInputCommand::CircularArray:
+        m_parameterInputSession.point1 = flattenToDrawingPlane(worldPos);
+        m_parameterInputSession.stageIndex = 3;
+        break;
+    case ParameterInputCommand::Mirror:
+        if (m_parameterInputSession.stageIndex == 0)
+        {
+            m_parameterInputSession.point1 = flattenToDrawingPlane(worldPos);
+            m_parameterInputSession.stageIndex = 1;
+        }
+        else
+        {
+            m_parameterInputSession.point2 = flattenToDrawingPlane(worldPos);
+            m_parameterInputSession.stageIndex = 2;
+        }
+        break;
+    default:
+        return false;
+    }
+
+    resetPointDynamicInputSession(currentPointInputStageKey());
+
+    if (m_viewer != nullptr)
+    {
+        syncCurrentPosWithCursor();
+        m_viewer->refreshCommandPrompt();
+        m_viewer->requestViewUpdate();
+    }
+
+    return true;
+}
+
 bool CadController::confirmActiveCommand()
 {
     if (!m_drawState.hasActiveCommand())
     {
         return false;
+    }
+
+    if (isParameterInputCommandActive())
+    {
+        syncPointDynamicInputSession();
+        syncCurrentPosWithCursor();
+
+        if (isAwaitingPointInput())
+        {
+            if (isPointDynamicFieldModeActive())
+            {
+                return submitPointDynamicFieldInput();
+            }
+
+            if (!m_drawState.dynamicInputBuffer.isEmpty())
+            {
+                return submitDynamicInputBuffer();
+            }
+
+            if (!commitCommandPoint(m_drawState.currentPos) && m_viewer != nullptr)
+            {
+                m_viewer->refreshCommandPrompt();
+            }
+
+            return true;
+        }
+
+        return submitParameterInputField();
     }
 
     syncPointDynamicInputSession();
@@ -1343,7 +2337,108 @@ QString CadController::appendDynamicInputPromptState(const QString& basePrompt) 
 {
     QString prompt = basePrompt;
 
-    if (m_drawState.hasActiveCommand() && isAwaitingPointInput())
+    if (isParameterInputCommandActive() && isAwaitingParameterFieldInput())
+    {
+        QString labelText;
+        QString valueText;
+
+        switch (m_parameterInputSession.command)
+        {
+        case ParameterInputCommand::Polygon:
+            if (m_parameterInputSession.stageIndex == 0)
+            {
+                labelText = QStringLiteral("边数");
+                valueText = QString::number(m_parameterInputSession.intValue1);
+            }
+            else
+            {
+                labelText = QStringLiteral("构造方式");
+                valueText = m_parameterInputSession.boolValue ? QStringLiteral("外切于圆") : QStringLiteral("内切于圆");
+            }
+            break;
+        case ParameterInputCommand::Copy:
+            labelText = m_parameterInputSession.stageIndex == 0 ? QStringLiteral("X") : QStringLiteral("Y");
+            valueText = formatDynamicInputValue(m_parameterInputSession.stageIndex == 0 ? m_parameterInputSession.doubleValue1 : m_parameterInputSession.doubleValue2);
+            break;
+        case ParameterInputCommand::Rotate:
+            labelText = QStringLiteral("角度");
+            valueText = formatDynamicInputValue(m_parameterInputSession.doubleValue1);
+            break;
+        case ParameterInputCommand::Scale:
+            labelText = QStringLiteral("倍率");
+            valueText = formatDynamicInputValue(m_parameterInputSession.doubleValue1);
+            break;
+        case ParameterInputCommand::RectangularArray:
+            switch (m_parameterInputSession.stageIndex)
+            {
+            case 0:
+                labelText = QStringLiteral("行数");
+                valueText = QString::number(m_parameterInputSession.intValue1);
+                break;
+            case 1:
+                labelText = QStringLiteral("列数");
+                valueText = QString::number(m_parameterInputSession.intValue2);
+                break;
+            case 2:
+                labelText = QStringLiteral("行间距");
+                valueText = formatDynamicInputValue(m_parameterInputSession.doubleValue1);
+                break;
+            default:
+                labelText = QStringLiteral("列间距");
+                valueText = formatDynamicInputValue(m_parameterInputSession.doubleValue2);
+                break;
+            }
+            break;
+        case ParameterInputCommand::CircularArray:
+            switch (m_parameterInputSession.stageIndex)
+            {
+            case 0:
+                labelText = QStringLiteral("项目总数");
+                valueText = QString::number(m_parameterInputSession.intValue1);
+                break;
+            case 1:
+                labelText = QStringLiteral("填充角度");
+                valueText = formatDynamicInputValue(m_parameterInputSession.doubleValue1);
+                break;
+            default:
+                labelText = QStringLiteral("旋转方式");
+                valueText = m_parameterInputSession.boolValue ? QStringLiteral("旋转副本方向") : QStringLiteral("保持原方向");
+                break;
+            }
+            break;
+        case ParameterInputCommand::Mirror:
+            labelText = QStringLiteral("删除原图元");
+            valueText = m_parameterInputSession.boolValue ? QStringLiteral("是") : QStringLiteral("否");
+            break;
+        case ParameterInputCommand::Offset:
+            labelText = QStringLiteral("距离");
+            valueText = formatDynamicInputValue(m_parameterInputSession.doubleValue1);
+            break;
+        case ParameterInputCommand::Trim:
+        case ParameterInputCommand::Extend:
+            labelText = QStringLiteral("端点");
+            valueText = m_parameterInputSession.boolValue ? QStringLiteral("起点端") : QStringLiteral("终点端");
+            break;
+        case ParameterInputCommand::Fillet:
+            labelText = QStringLiteral("半径");
+            valueText = formatDynamicInputValue(m_parameterInputSession.doubleValue1);
+            break;
+        case ParameterInputCommand::Chamfer:
+            labelText = m_parameterInputSession.stageIndex == 0 ? QStringLiteral("距离1") : QStringLiteral("距离2");
+            valueText = formatDynamicInputValue(m_parameterInputSession.stageIndex == 0 ? m_parameterInputSession.doubleValue1 : m_parameterInputSession.doubleValue2);
+            break;
+        default:
+            break;
+        }
+
+        if (!m_parameterInputSession.fieldBuffer.isEmpty())
+        {
+            valueText = m_parameterInputSession.fieldBuffer;
+        }
+
+        prompt += QStringLiteral(" | %1=%2").arg(labelText, valueText);
+    }
+    else if (m_drawState.hasActiveCommand() && isAwaitingPointInput())
     {
         if (m_drawState.dynamicInputExpressionMode)
         {

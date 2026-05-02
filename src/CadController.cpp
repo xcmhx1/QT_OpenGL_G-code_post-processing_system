@@ -9,9 +9,6 @@
 // Qt 核心模块
 #include <QColorDialog>
 #include <QCursor>
-#include <QInputDialog>
-#include <QMessageBox>
-#include <QPushButton>
 
 // CAD 模块内部依赖
 #include "CadEditer.h"
@@ -73,6 +70,84 @@ namespace
             : QStringLiteral("内切于圆");
     }
 
+    QVector3D geometryBoundsCenter(const QVector<CadItem*>& items)
+    {
+        if (items.isEmpty())
+        {
+            return QVector3D();
+        }
+
+        QVector3D minPoint;
+        QVector3D maxPoint;
+        bool initialized = false;
+
+        for (const CadItem* item : items)
+        {
+            if (item == nullptr || item->m_geometry.vertices.isEmpty())
+            {
+                continue;
+            }
+
+            for (const QVector3D& point : item->m_geometry.vertices)
+            {
+                if (!initialized)
+                {
+                    minPoint = point;
+                    maxPoint = point;
+                    initialized = true;
+                    continue;
+                }
+
+                minPoint.setX(std::min(minPoint.x(), point.x()));
+                minPoint.setY(std::min(minPoint.y(), point.y()));
+                minPoint.setZ(std::min(minPoint.z(), point.z()));
+                maxPoint.setX(std::max(maxPoint.x(), point.x()));
+                maxPoint.setY(std::max(maxPoint.y(), point.y()));
+                maxPoint.setZ(std::max(maxPoint.z(), point.z()));
+            }
+        }
+
+        if (!initialized)
+        {
+            return QVector3D();
+        }
+
+        return QVector3D
+        (
+            (minPoint.x() + maxPoint.x()) * 0.5f,
+            (minPoint.y() + maxPoint.y()) * 0.5f,
+            (minPoint.z() + maxPoint.z()) * 0.5f
+        );
+    }
+
+    bool resolveCurrentAndOtherSelectedItems(CadViewer* viewer, CadItem*& currentItem, CadItem*& otherItem)
+    {
+        currentItem = nullptr;
+        otherItem = nullptr;
+
+        if (viewer == nullptr)
+        {
+            return false;
+        }
+
+        const QVector<CadItem*> selectedItems = viewer->selectedEntities();
+
+        if (selectedItems.size() != 2)
+        {
+            return false;
+        }
+
+        currentItem = viewer->selectedEntity();
+
+        if (currentItem == nullptr || !selectedItems.contains(currentItem))
+        {
+            currentItem = selectedItems.front();
+        }
+
+        otherItem = selectedItems.front() == currentItem ? selectedItems.back() : selectedItems.front();
+        return currentItem != nullptr && otherItem != nullptr;
+    }
+
 }
 
 // 设置关联的视图对象
@@ -101,6 +176,7 @@ void CadController::reset()
     // 重置绘图状态机
     m_drawState.reset();
     clearDynamicCommandMode();
+    resetParameterInputSession();
     m_idleWindowSelectionTracking = false;
     m_idleWindowSelectionDragging = false;
     m_idleWindowSelectionAnchor = QPoint();
@@ -126,8 +202,9 @@ void CadController::setDefaultDrawingProperties(const QString& layerName, const 
 // @param color 图元颜色，默认为白色
 void CadController::beginDrawing(DrawType drawType, const QColor& color)
 {
-    if (drawType == DrawType::Polygon && !configurePolygonDrawing())
+    if (drawType == DrawType::Polygon)
     {
+        beginPolygonConfiguration(color);
         return;
     }
 
@@ -147,6 +224,7 @@ void CadController::beginDrawing(DrawType drawType, const QColor& color)
     m_drawState.polylineArcMode = false;
     m_drawState.lwPolylineArcMode = false;
     clearDynamicCommandMode();
+    resetParameterInputSession();
     resetPointDynamicInputSession();
 
     // 重置子模式
@@ -178,41 +256,7 @@ void CadController::beginDrawing(DrawType drawType, const QColor& color)
 
 bool CadController::configurePolygonDrawing()
 {
-    QWidget* parentWidget = m_viewer != nullptr ? static_cast<QWidget*>(m_viewer) : nullptr;
-    bool sideCountAccepted = false;
-    const int sideCount = QInputDialog::getInt
-    (
-        parentWidget,
-        QStringLiteral("多边形"),
-        QStringLiteral("请输入边数（3-1024）:"),
-        std::clamp(m_drawState.polygonSideCount, 3, 1024),
-        3,
-        1024,
-        1,
-        &sideCountAccepted
-    );
-
-    if (!sideCountAccepted)
-    {
-        return false;
-    }
-
-    QMessageBox modeDialog(parentWidget);
-    modeDialog.setWindowTitle(QStringLiteral("多边形"));
-    modeDialog.setText(QStringLiteral("选择与参考圆的关系"));
-    QAbstractButton* inscribedButton = modeDialog.addButton(QStringLiteral("内切于圆"), QMessageBox::AcceptRole);
-    QAbstractButton* circumscribedButton = modeDialog.addButton(QStringLiteral("外切于圆"), QMessageBox::AcceptRole);
-    modeDialog.addButton(QMessageBox::Cancel);
-    modeDialog.exec();
-
-    if (modeDialog.clickedButton() != inscribedButton && modeDialog.clickedButton() != circumscribedButton)
-    {
-        return false;
-    }
-
-    m_drawState.polygonSideCount = sideCount;
-    m_drawState.polygonCircumscribedAboutCircle = modeDialog.clickedButton() == circumscribedButton;
-    return true;
+    return beginPolygonConfiguration(m_drawState.drawingColor);
 }
 
 bool CadController::beginMoveSelected()
@@ -228,6 +272,7 @@ bool CadController::beginMoveSelected()
     if (handled)
     {
         clearDynamicCommandMode();
+        resetParameterInputSession();
         resetPointDynamicInputSession(currentPointInputStageKey());
         m_viewer->appendCommandMessage
         (
@@ -239,6 +284,338 @@ bool CadController::beginMoveSelected()
     }
 
     return handled;
+}
+
+bool CadController::beginPolygonConfiguration(const QColor& color)
+{
+    if (m_viewer == nullptr)
+    {
+        return false;
+    }
+
+    cancelDrawing();
+    m_drawState.isDrawing = false;
+    m_drawState.drawType = DrawType::None;
+    m_drawState.editType = EditType::ParameterInput;
+    m_drawState.currentPos = currentWorldPos(m_drawState.currentScreenPos);
+    clearDynamicCommandMode();
+    resetPointDynamicInputSession();
+    resetParameterInputSession();
+    m_parameterInputSession.command = ParameterInputCommand::Polygon;
+    m_parameterInputSession.drawingColor = color;
+    m_parameterInputSession.intValue1 = std::clamp(m_drawState.polygonSideCount, 3, 1024);
+    m_parameterInputSession.boolValue = m_drawState.polygonCircumscribedAboutCircle;
+    activateParameterInputSession();
+    m_viewer->appendCommandMessage(QStringLiteral("多边形: 请在光标旁输入边数和构造方式"));
+    return true;
+}
+
+void CadController::activateParameterInputSession()
+{
+    m_drawState.isDrawing = false;
+    m_drawState.drawType = DrawType::None;
+    m_drawState.editType = EditType::ParameterInput;
+    m_drawState.commandPoints.clear();
+    m_drawState.commandBulges.clear();
+    m_drawState.polylineArcMode = false;
+    m_drawState.lwPolylineArcMode = false;
+    m_parameterInputSession.stageIndex = std::max(0, m_parameterInputSession.stageIndex);
+    m_parameterInputSession.fieldBuffer.clear();
+    resetPointDynamicInputSession(currentPointInputStageKey());
+
+    if (m_viewer != nullptr)
+    {
+        syncCurrentPosWithCursor();
+        m_viewer->refreshCommandPrompt();
+        m_viewer->requestViewUpdate();
+    }
+}
+
+void CadController::resetParameterInputSession()
+{
+    m_parameterInputSession = ParameterInputSession();
+}
+
+bool CadController::beginCopySelected()
+{
+    if (m_viewer == nullptr)
+    {
+        return false;
+    }
+
+    const QVector<CadItem*> selectedItems = m_viewer->selectedEntities();
+
+    if (selectedItems.isEmpty())
+    {
+        return false;
+    }
+
+    cancelDrawing();
+    m_parameterInputSession.command = ParameterInputCommand::Copy;
+    m_parameterInputSession.selectedItems = selectedItems;
+    m_parameterInputSession.doubleValue1 = 10.0;
+    m_parameterInputSession.doubleValue2 = 10.0;
+    activateParameterInputSession();
+    m_viewer->appendCommandMessage(QStringLiteral("复制: 请在光标旁输入 X/Y 偏移量"));
+    return true;
+}
+
+bool CadController::beginRotateSelected()
+{
+    if (m_viewer == nullptr)
+    {
+        return false;
+    }
+
+    const QVector<CadItem*> selectedItems = m_viewer->selectedEntities();
+
+    if (selectedItems.isEmpty())
+    {
+        return false;
+    }
+
+    cancelDrawing();
+    m_parameterInputSession.command = ParameterInputCommand::Rotate;
+    m_parameterInputSession.selectedItems = selectedItems;
+    m_parameterInputSession.centerPoint = geometryBoundsCenter(selectedItems);
+    m_parameterInputSession.doubleValue1 = 90.0;
+    activateParameterInputSession();
+    m_viewer->appendCommandMessage(QStringLiteral("旋转: 请在光标旁输入角度"));
+    return true;
+}
+
+bool CadController::beginScaleSelected()
+{
+    if (m_viewer == nullptr)
+    {
+        return false;
+    }
+
+    const QVector<CadItem*> selectedItems = m_viewer->selectedEntities();
+
+    if (selectedItems.isEmpty())
+    {
+        return false;
+    }
+
+    cancelDrawing();
+    m_parameterInputSession.command = ParameterInputCommand::Scale;
+    m_parameterInputSession.selectedItems = selectedItems;
+    m_parameterInputSession.centerPoint = geometryBoundsCenter(selectedItems);
+    m_parameterInputSession.doubleValue1 = 2.0;
+    activateParameterInputSession();
+    m_viewer->appendCommandMessage(QStringLiteral("缩放: 请在光标旁输入倍率"));
+    return true;
+}
+
+bool CadController::beginRectangularArraySelected()
+{
+    if (m_viewer == nullptr)
+    {
+        return false;
+    }
+
+    const QVector<CadItem*> selectedItems = m_viewer->selectedEntities();
+
+    if (selectedItems.isEmpty())
+    {
+        return false;
+    }
+
+    cancelDrawing();
+    m_parameterInputSession.command = ParameterInputCommand::RectangularArray;
+    m_parameterInputSession.selectedItems = selectedItems;
+    m_parameterInputSession.intValue1 = 2;
+    m_parameterInputSession.intValue2 = 2;
+    m_parameterInputSession.doubleValue1 = 10.0;
+    m_parameterInputSession.doubleValue2 = 10.0;
+    activateParameterInputSession();
+    m_viewer->appendCommandMessage(QStringLiteral("矩形阵列: 请依次输入行数、列数、行间距、列间距"));
+    return true;
+}
+
+bool CadController::beginCircularArraySelected()
+{
+    if (m_viewer == nullptr)
+    {
+        return false;
+    }
+
+    const QVector<CadItem*> selectedItems = m_viewer->selectedEntities();
+
+    if (selectedItems.isEmpty())
+    {
+        return false;
+    }
+
+    cancelDrawing();
+    m_parameterInputSession.command = ParameterInputCommand::CircularArray;
+    m_parameterInputSession.selectedItems = selectedItems;
+    m_parameterInputSession.centerPoint = geometryBoundsCenter(selectedItems);
+    m_parameterInputSession.intValue1 = 6;
+    m_parameterInputSession.doubleValue1 = 360.0;
+    m_parameterInputSession.point1 = m_parameterInputSession.centerPoint;
+    m_parameterInputSession.boolValue = true;
+    activateParameterInputSession();
+    m_viewer->appendCommandMessage(QStringLiteral("环形阵列: 请依次输入项目数、填充角度、阵列中心和旋转方式"));
+    return true;
+}
+
+bool CadController::beginMirrorSelected()
+{
+    if (m_viewer == nullptr)
+    {
+        return false;
+    }
+
+    const QVector<CadItem*> selectedItems = m_viewer->selectedEntities();
+
+    if (selectedItems.isEmpty())
+    {
+        return false;
+    }
+
+    const QVector3D centerPoint = geometryBoundsCenter(selectedItems);
+    cancelDrawing();
+    m_parameterInputSession.command = ParameterInputCommand::Mirror;
+    m_parameterInputSession.selectedItems = selectedItems;
+    m_parameterInputSession.point1 = QVector3D(centerPoint.x(), centerPoint.y() - 10.0f, 0.0f);
+    m_parameterInputSession.point2 = QVector3D(centerPoint.x(), centerPoint.y() + 10.0f, 0.0f);
+    m_parameterInputSession.boolValue = false;
+    activateParameterInputSession();
+    m_viewer->appendCommandMessage(QStringLiteral("镜像: 请指定镜像线两点，再输入是否删除原图元"));
+    return true;
+}
+
+bool CadController::beginOffsetSelected()
+{
+    if (m_viewer == nullptr)
+    {
+        return false;
+    }
+
+    CadItem* targetItem = m_viewer->selectedEntity();
+
+    if (targetItem == nullptr)
+    {
+        const QVector<CadItem*> selectedItems = m_viewer->selectedEntities();
+
+        if (selectedItems.isEmpty())
+        {
+            return false;
+        }
+
+        targetItem = selectedItems.front();
+    }
+
+    cancelDrawing();
+    m_parameterInputSession.command = ParameterInputCommand::Offset;
+    m_parameterInputSession.primaryItem = targetItem;
+    m_parameterInputSession.doubleValue1 = 10.0;
+    activateParameterInputSession();
+    m_viewer->appendCommandMessage(QStringLiteral("偏移: 请在光标旁输入距离"));
+    return true;
+}
+
+bool CadController::beginTrimSelected()
+{
+    if (m_viewer == nullptr)
+    {
+        return false;
+    }
+
+    CadItem* targetItem = nullptr;
+    CadItem* boundaryItem = nullptr;
+
+    if (!resolveCurrentAndOtherSelectedItems(m_viewer, targetItem, boundaryItem))
+    {
+        return false;
+    }
+
+    cancelDrawing();
+    m_parameterInputSession.command = ParameterInputCommand::Trim;
+    m_parameterInputSession.primaryItem = targetItem;
+    m_parameterInputSession.secondaryItem = boundaryItem;
+    m_parameterInputSession.boolValue = false;
+    activateParameterInputSession();
+    m_viewer->appendCommandMessage(QStringLiteral("修剪: 请在光标旁输入要修剪的端点"));
+    return true;
+}
+
+bool CadController::beginExtendSelected()
+{
+    if (m_viewer == nullptr)
+    {
+        return false;
+    }
+
+    CadItem* targetItem = nullptr;
+    CadItem* boundaryItem = nullptr;
+
+    if (!resolveCurrentAndOtherSelectedItems(m_viewer, targetItem, boundaryItem))
+    {
+        return false;
+    }
+
+    cancelDrawing();
+    m_parameterInputSession.command = ParameterInputCommand::Extend;
+    m_parameterInputSession.primaryItem = targetItem;
+    m_parameterInputSession.secondaryItem = boundaryItem;
+    m_parameterInputSession.boolValue = false;
+    activateParameterInputSession();
+    m_viewer->appendCommandMessage(QStringLiteral("延申: 请在光标旁输入要延申的端点"));
+    return true;
+}
+
+bool CadController::beginFilletSelected()
+{
+    if (m_viewer == nullptr)
+    {
+        return false;
+    }
+
+    CadItem* secondItem = nullptr;
+    CadItem* firstItem = nullptr;
+
+    if (!resolveCurrentAndOtherSelectedItems(m_viewer, secondItem, firstItem))
+    {
+        return false;
+    }
+
+    cancelDrawing();
+    m_parameterInputSession.command = ParameterInputCommand::Fillet;
+    m_parameterInputSession.primaryItem = firstItem;
+    m_parameterInputSession.secondaryItem = secondItem;
+    m_parameterInputSession.doubleValue1 = 5.0;
+    activateParameterInputSession();
+    m_viewer->appendCommandMessage(QStringLiteral("圆角: 请在光标旁输入半径"));
+    return true;
+}
+
+bool CadController::beginChamferSelected()
+{
+    if (m_viewer == nullptr)
+    {
+        return false;
+    }
+
+    CadItem* secondItem = nullptr;
+    CadItem* firstItem = nullptr;
+
+    if (!resolveCurrentAndOtherSelectedItems(m_viewer, secondItem, firstItem))
+    {
+        return false;
+    }
+
+    cancelDrawing();
+    m_parameterInputSession.command = ParameterInputCommand::Chamfer;
+    m_parameterInputSession.primaryItem = firstItem;
+    m_parameterInputSession.secondaryItem = secondItem;
+    m_parameterInputSession.doubleValue1 = 5.0;
+    m_parameterInputSession.doubleValue2 = 5.0;
+    activateParameterInputSession();
+    m_viewer->appendCommandMessage(QStringLiteral("倒角: 请在光标旁输入两条边距离"));
+    return true;
 }
 
 // 取消当前绘制操作
@@ -262,6 +639,7 @@ void CadController::cancelDrawing()
     m_drawState.polylineArcMode = false;
     m_drawState.lwPolylineArcMode = false;
     clearDynamicCommandMode();
+    resetParameterInputSession();
     resetPointDynamicInputSession();
 
     // 重置子模式

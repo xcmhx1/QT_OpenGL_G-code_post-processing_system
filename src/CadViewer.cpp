@@ -252,6 +252,138 @@ bool CadViewer::startMoveSelected()
     return handled;
 }
 
+bool CadViewer::startCopySelected()
+{
+    const bool handled = m_controller.beginCopySelected();
+
+    if (handled)
+    {
+        update();
+    }
+
+    return handled;
+}
+
+bool CadViewer::startRotateSelected()
+{
+    const bool handled = m_controller.beginRotateSelected();
+
+    if (handled)
+    {
+        update();
+    }
+
+    return handled;
+}
+
+bool CadViewer::startScaleSelected()
+{
+    const bool handled = m_controller.beginScaleSelected();
+
+    if (handled)
+    {
+        update();
+    }
+
+    return handled;
+}
+
+bool CadViewer::startRectangularArraySelected()
+{
+    const bool handled = m_controller.beginRectangularArraySelected();
+
+    if (handled)
+    {
+        update();
+    }
+
+    return handled;
+}
+
+bool CadViewer::startCircularArraySelected()
+{
+    const bool handled = m_controller.beginCircularArraySelected();
+
+    if (handled)
+    {
+        update();
+    }
+
+    return handled;
+}
+
+bool CadViewer::startMirrorSelected()
+{
+    const bool handled = m_controller.beginMirrorSelected();
+
+    if (handled)
+    {
+        update();
+    }
+
+    return handled;
+}
+
+bool CadViewer::startOffsetSelected()
+{
+    const bool handled = m_controller.beginOffsetSelected();
+
+    if (handled)
+    {
+        update();
+    }
+
+    return handled;
+}
+
+bool CadViewer::startTrimSelected()
+{
+    const bool handled = m_controller.beginTrimSelected();
+
+    if (handled)
+    {
+        update();
+    }
+
+    return handled;
+}
+
+bool CadViewer::startExtendSelected()
+{
+    const bool handled = m_controller.beginExtendSelected();
+
+    if (handled)
+    {
+        update();
+    }
+
+    return handled;
+}
+
+bool CadViewer::startFilletSelected()
+{
+    const bool handled = m_controller.beginFilletSelected();
+
+    if (handled)
+    {
+        update();
+    }
+
+    return handled;
+}
+
+bool CadViewer::startChamferSelected()
+{
+    const bool handled = m_controller.beginChamferSelected();
+
+    if (handled)
+    {
+        update();
+    }
+
+    return handled;
+}
+
 // 获取当前视图模式
 // @return 相机视图模式
 CameraViewMode CadViewer::viewMode() const

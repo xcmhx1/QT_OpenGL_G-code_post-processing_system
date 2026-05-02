@@ -19,6 +19,14 @@
 // 前向声明
 class CadViewer;
 class CadEditer;
+class CadItem;
+
+struct CadDynamicInputOverlayRow
+{
+    QString label;
+    QString valueText;
+    bool active = false;
+};
 
 // Viewer 动态输入浮框展示数据。
 struct CadDynamicInputOverlayState
@@ -26,12 +34,7 @@ struct CadDynamicInputOverlayState
     bool visible = false;
     QString title;
     QString stageHint;
-    QString xValueText;
-    QString yValueText;
-    bool xLocked = false;
-    bool yLocked = false;
-    bool xActive = false;
-    bool yActive = false;
+    QVector<CadDynamicInputOverlayRow> rows;
     bool expressionMode = false;
     QString expressionText;
 };
@@ -73,6 +76,39 @@ public:
 
     // 开始移动当前选中实体。
     bool beginMoveSelected();
+
+    // 开始复制当前选中实体的参数输入。
+    bool beginCopySelected();
+
+    // 开始旋转当前选中实体的参数输入。
+    bool beginRotateSelected();
+
+    // 开始缩放当前选中实体的参数输入。
+    bool beginScaleSelected();
+
+    // 开始矩形阵列参数输入。
+    bool beginRectangularArraySelected();
+
+    // 开始环形阵列参数输入。
+    bool beginCircularArraySelected();
+
+    // 开始镜像参数输入。
+    bool beginMirrorSelected();
+
+    // 开始偏移参数输入。
+    bool beginOffsetSelected();
+
+    // 开始修剪参数输入。
+    bool beginTrimSelected();
+
+    // 开始延申参数输入。
+    bool beginExtendSelected();
+
+    // 开始圆角参数输入。
+    bool beginFilletSelected();
+
+    // 开始倒角参数输入。
+    bool beginChamferSelected();
 
     // 取消当前绘制操作
     void cancelDrawing();
@@ -164,6 +200,9 @@ private:
     // 当前命令阶段是否正在等待输入一个点。
     bool isAwaitingPointInput() const;
 
+    // 当前是否处于参数输入命令。
+    bool isParameterInputCommandActive() const;
+
     // 对活动命令执行一次“确认”动作（Enter/Space/右键）。
     bool confirmActiveCommand();
 
@@ -184,6 +223,30 @@ private:
 
     // 在提示栏追加动态输入状态说明。
     QString appendDynamicInputPromptState(const QString& basePrompt) const;
+
+    // 获取参数输入命令标题。
+    QString parameterInputTitle() const;
+
+    // 获取参数输入阶段提示文本。
+    QString parameterInputPrompt() const;
+
+    // 开始多边形配置参数输入。
+    bool beginPolygonConfiguration(const QColor& color);
+
+    // 激活参数输入会话。
+    void activateParameterInputSession();
+
+    // 重置参数输入会话。
+    void resetParameterInputSession();
+
+    // 当前参数输入是否正在等待字段值。
+    bool isAwaitingParameterFieldInput() const;
+
+    // 提交当前参数字段输入。
+    bool submitParameterInputField();
+
+    // 提交当前参数命令中的点输入。
+    bool commitParameterInputPoint(const QVector3D& worldPos);
 
     // 当前“点参数输入”阶段键。
     QString currentPointInputStageKey() const;
@@ -257,6 +320,44 @@ private:
 
     // 绘图状态机，管理绘图状态和流程
     DrawStateMachine m_drawState;
+
+    enum class ParameterInputCommand
+    {
+        None,
+        Polygon,
+        Copy,
+        Rotate,
+        Scale,
+        RectangularArray,
+        CircularArray,
+        Mirror,
+        Offset,
+        Trim,
+        Extend,
+        Fillet,
+        Chamfer,
+    };
+
+    struct ParameterInputSession
+    {
+        ParameterInputCommand command = ParameterInputCommand::None;
+        int stageIndex = 0;
+        QString fieldBuffer;
+        QVector<CadItem*> selectedItems;
+        CadItem* primaryItem = nullptr;
+        CadItem* secondaryItem = nullptr;
+        QVector3D centerPoint;
+        QColor drawingColor = QColor(255, 255, 255);
+        int intValue1 = 0;
+        int intValue2 = 0;
+        double doubleValue1 = 0.0;
+        double doubleValue2 = 0.0;
+        double doubleValue3 = 0.0;
+        double doubleValue4 = 0.0;
+        bool boolValue = false;
+        QVector3D point1;
+        QVector3D point2;
+    } m_parameterInputSession;
 
     // 空闲态窗口框选状态。
     bool m_idleWindowSelectionTracking = false;

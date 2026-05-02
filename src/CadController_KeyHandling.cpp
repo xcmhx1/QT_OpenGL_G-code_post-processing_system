@@ -113,7 +113,22 @@ bool CadController::handleKeyPress(QKeyEvent* event)
     {
         if (m_drawState.hasActiveCommand())
         {
-            if (hasPendingDynamicKeyboardInput()
+            if (isParameterInputCommandActive())
+            {
+                if (isAwaitingParameterFieldInput() && !m_parameterInputSession.fieldBuffer.isEmpty())
+                {
+                    m_parameterInputSession.fieldBuffer.clear();
+
+                    if (m_viewer != nullptr)
+                    {
+                        m_viewer->refreshCommandPrompt();
+                        m_viewer->requestViewUpdate();
+                    }
+
+                    return true;
+                }
+            }
+            else if (hasPendingDynamicKeyboardInput()
                 || m_drawState.dynamicInputXLocked
                 || m_drawState.dynamicInputYLocked)
             {
@@ -161,6 +176,95 @@ bool CadController::handleKeyPress(QKeyEvent* event)
     {
         syncPointDynamicInputSession();
         syncCurrentPosWithCursor();
+
+        if (isParameterInputCommandActive() && isAwaitingParameterFieldInput())
+        {
+            if (event->key() == Qt::Key_Backspace)
+            {
+                if (!m_parameterInputSession.fieldBuffer.isEmpty())
+                {
+                    m_parameterInputSession.fieldBuffer.chop(1);
+
+                    if (m_viewer != nullptr)
+                    {
+                        m_viewer->refreshCommandPrompt();
+                        m_viewer->requestViewUpdate();
+                    }
+                }
+
+                return true;
+            }
+
+            const bool isPlainSpaceConfirm = event->key() == Qt::Key_Space
+                && (event->modifiers() & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier)) == 0;
+
+            if (event->key() == Qt::Key_Return
+                || event->key() == Qt::Key_Enter
+                || isPlainSpaceConfirm)
+            {
+                return confirmActiveCommand();
+            }
+
+            if ((event->modifiers() & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier)) == 0)
+            {
+                const QString inputText = event->text();
+                bool consumed = false;
+
+                for (const QChar character : inputText)
+                {
+                    if (character.isNull() || character == QChar::fromLatin1('\r') || character == QChar::fromLatin1('\n'))
+                    {
+                        continue;
+                    }
+
+                    if (character.isSpace())
+                    {
+                        continue;
+                    }
+
+                    m_parameterInputSession.fieldBuffer.append(character);
+                    consumed = true;
+                }
+
+                if (consumed)
+                {
+                    if (m_viewer != nullptr)
+                    {
+                        m_viewer->refreshCommandPrompt();
+                        m_viewer->requestViewUpdate();
+                    }
+
+                    return true;
+                }
+            }
+
+            switch (event->key())
+            {
+            case Qt::Key_F:
+            case Qt::Key_T:
+            case Qt::Key_Home:
+            case Qt::Key_Plus:
+            case Qt::Key_Equal:
+            case Qt::Key_Minus:
+            case Qt::Key_Underscore:
+            case Qt::Key_P:
+            case Qt::Key_L:
+            case Qt::Key_X:
+            case Qt::Key_R:
+            case Qt::Key_G:
+            case Qt::Key_C:
+            case Qt::Key_A:
+            case Qt::Key_E:
+            case Qt::Key_Delete:
+            case Qt::Key_K:
+            case Qt::Key_M:
+            case Qt::Key_O:
+            case Qt::Key_W:
+                return true;
+            default:
+                break;
+            }
+        }
 
         if (event->key() == Qt::Key_Tab
             && (event->modifiers() == Qt::NoModifier || event->modifiers() == Qt::ShiftModifier)

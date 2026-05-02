@@ -666,7 +666,7 @@ void CadViewer::renderDynamicInputOverlay()
     const int valueColumnWidth = 140;
     const int labelColumnWidth = 58;
     const int panelWidth = horizontalPadding * 2 + labelColumnWidth + valueColumnWidth;
-    const int rowCount = overlayState.expressionMode ? 1 : 2;
+    const int rowCount = overlayState.rows.isEmpty() ? 0 : overlayState.rows.size();
     const int panelHeight = verticalPadding * 2 + titleHeight + 4 + rowCount * rowHeight + 4 + hintHeight;
 
     QPoint panelTopLeft = m_cursorScreenPos + QPoint(16, 20);
@@ -720,10 +720,11 @@ void CadViewer::renderDynamicInputOverlay()
     }
     else
     {
-        const QString xLabel = overlayState.xLocked ? QStringLiteral("X [锁]") : QStringLiteral("X");
-        const QString yLabel = overlayState.yLocked ? QStringLiteral("Y [锁]") : QStringLiteral("Y");
-        drawValueRow(0, xLabel, overlayState.xValueText, overlayState.xActive);
-        drawValueRow(1, yLabel, overlayState.yValueText, overlayState.yActive);
+        for (int rowIndex = 0; rowIndex < overlayState.rows.size(); ++rowIndex)
+        {
+            const CadDynamicInputOverlayRow& row = overlayState.rows.at(rowIndex);
+            drawValueRow(rowIndex, row.label, row.valueText, row.active);
+        }
     }
 
     const int hintTop = rowTop + rowCount * rowHeight + 4;
