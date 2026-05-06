@@ -111,6 +111,7 @@ CadBitmapImportDialog::CadBitmapImportDialog(const QString& filePath, QWidget* p
     , m_filePath(filePath)
 {
     setWindowTitle(QStringLiteral("位图导入: %1").arg(QFileInfo(filePath).fileName()));
+    setWindowFlags(windowFlags() | Qt::WindowMinimizeButtonHint | Qt::WindowMaximizeButtonHint);
     setMinimumSize(1180, 760);
     resize(1280, 820);
 
@@ -424,6 +425,7 @@ void CadBitmapImportDialog::buildUi()
     splitter->setCollapsible(1, false);
 
     m_buttonBox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
+    m_resetButton = m_buttonBox->addButton(QStringLiteral("重置默认"), QDialogButtonBox::ResetRole);
     m_buttonBox->button(QDialogButtonBox::Ok)->setText(QStringLiteral("导入"));
     m_buttonBox->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("取消"));
     connect
@@ -438,6 +440,7 @@ void CadBitmapImportDialog::buildUi()
         }
     );
     connect(m_buttonBox, &QDialogButtonBox::rejected, this, &QDialog::reject);
+    connect(m_resetButton, &QPushButton::clicked, this, &CadBitmapImportDialog::resetToDefaultOptions);
     rootLayout->addWidget(m_buttonBox);
 
     m_previewRefreshTimer = new QTimer(this);
@@ -574,6 +577,40 @@ void CadBitmapImportDialog::saveSettings() const
     settings.setValue(QStringLiteral("layerName"), importOptions.layerName);
     settings.setValue(QStringLiteral("entityColor"), importOptions.entityColor);
     settings.endGroup();
+}
+
+void CadBitmapImportDialog::resetToDefaultOptions()
+{
+    setComboCurrentData(m_importModeCombo, static_cast<int>(CadBitmapImportMode::ReplaceDocument));
+    setComboCurrentData(m_operatorCombo, static_cast<int>(CadBitmapPreprocessOperator::AdaptiveThreshold));
+    setComboCurrentData(m_morphologyCombo, static_cast<int>(CadBitmapMorphologyOperator::Erode));
+    setComboCurrentData(m_contourModeCombo, static_cast<int>(CadBitmapContourMode::AllContours));
+    setComboCurrentData(m_fitStrategyCombo, static_cast<int>(CadBitmapFitStrategy::PolylineOnly));
+
+    m_autoFitSceneCheckBox->setChecked(true);
+    m_blurCheckBox->setChecked(false);
+    m_invertCheckBox->setChecked(false);
+    m_blurKernelSpinBox->setValue(5);
+    m_thresholdSpinBox->setValue(140);
+    m_adaptiveBlockSizeSpinBox->setValue(31);
+    m_adaptiveCSpinBox->setValue(5.0);
+    m_cannyLowSpinBox->setValue(50);
+    m_cannyHighSpinBox->setValue(150);
+    m_morphologyKernelSpinBox->setValue(3);
+    m_scaleSpinBox->setValue(1.0);
+    m_insertXSpinBox->setValue(0.0);
+    m_insertYSpinBox->setValue(0.0);
+    m_approxEpsilonSpinBox->setValue(2.5);
+    m_minContourAreaSpinBox->setValue(24.0);
+    m_minLineLengthSpinBox->setValue(4.0);
+    m_lineFitToleranceSpinBox->setValue(1.6);
+    m_arcFitToleranceSpinBox->setValue(1.4);
+    m_minArcAngleSpinBox->setValue(18.0);
+    m_maxEntityCountSpinBox->setValue(5000);
+    m_layerLineEdit->setText(QStringLiteral("BITMAP_IMPORT"));
+    m_selectedColor = QColor(255, 255, 255);
+    updateColorButton();
+    schedulePreviewRefresh();
 }
 
 void CadBitmapImportDialog::schedulePreviewRefresh()

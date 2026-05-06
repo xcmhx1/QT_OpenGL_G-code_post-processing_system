@@ -38,6 +38,7 @@ private:
     void connectSignals();
     void loadSettings();
     void saveSettings() const;
+    void resetToDefaultOptions();
     void schedulePreviewRefresh();
     void refreshPreview();
     void updatePreviewLabel(QLabel* label, const QImage& image, const QString& fallbackText);
@@ -83,6 +84,7 @@ private:
     QDoubleSpinBox* m_minArcAngleSpinBox = nullptr;
     QSpinBox* m_maxEntityCountSpinBox = nullptr;
     QDialogButtonBox* m_buttonBox = nullptr;
+    QPushButton* m_resetButton = nullptr;
     QTimer* m_previewRefreshTimer = nullptr;
     QColor m_selectedColor = QColor(255, 255, 255);
 };
