@@ -20,6 +20,7 @@ namespace Ui { class Gcode_postprocessing_systemClass; }
 QT_END_NAMESPACE
 
 class QAction;
+enum class CadHelpSection;
 
 class Gcode_postprocessing_system : public QMainWindow
 {
@@ -39,6 +40,8 @@ private:
 
 private:
     void initializeThemeMenu();
+    void initializeHelpMenu();
+    void openHelpDialog(CadHelpSection section);
     void openAppearanceSettingsDialog();
     void openProfileSettingsDialog();
     void applyTheme(AppThemeMode mode);

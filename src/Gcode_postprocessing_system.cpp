@@ -2,6 +2,7 @@
 
 #include "Gcode_postprocessing_system.h"
 #include "CadAppearanceSettingsDialog.h"
+#include "CadHelpDialog.h"
 #include "CadItem.h"
 #include "GProfileDialog.h"
 
@@ -407,6 +408,7 @@ Gcode_postprocessing_system::Gcode_postprocessing_system(QWidget* parent)
 
     m_generationPreference = loadGenerationPreference();
     initializeThemeMenu();
+    initializeHelpMenu();
     initializeToolPanel();
     applyDefaultDrawingProperties();
     applyTheme(loadThemeMode());
@@ -500,6 +502,36 @@ void Gcode_postprocessing_system::initializeThemeMenu()
     ui->menuSet->addSeparator();
     m_profileSettingsAction = ui->menuSet->addAction(QStringLiteral("G代码配置..."));
     connect(m_profileSettingsAction, &QAction::triggered, this, [this]() { openProfileSettingsDialog(); });
+}
+
+void Gcode_postprocessing_system::initializeHelpMenu()
+{
+    QMenu* helpMenu = menuBar()->addMenu(QStringLiteral("帮助"));
+
+    auto addHelpAction =
+        [this, helpMenu](const QString& title, CadHelpSection section)
+        {
+            QAction* action = helpMenu->addAction(title);
+            connect(action, &QAction::triggered, this, [this, section]() { openHelpDialog(section); });
+        };
+
+    addHelpAction(QStringLiteral("快速上手"), CadHelpSection::QuickStart);
+    helpMenu->addSeparator();
+    addHelpAction(QStringLiteral("快捷命令"), CadHelpSection::Shortcuts);
+    addHelpAction(QStringLiteral("绘图教程"), CadHelpSection::Drawing);
+    addHelpAction(QStringLiteral("修改教程"), CadHelpSection::Editing);
+    addHelpAction(QStringLiteral("机加工 / G代码"), CadHelpSection::Machining);
+    addHelpAction(QStringLiteral("位图导入"), CadHelpSection::BitmapImport);
+    addHelpAction(QStringLiteral("外观与显示"), CadHelpSection::Appearance);
+    helpMenu->addSeparator();
+    addHelpAction(QStringLiteral("关于"), CadHelpSection::About);
+}
+
+void Gcode_postprocessing_system::openHelpDialog(CadHelpSection section)
+{
+    CadHelpDialog dialog(this);
+    dialog.setCurrentSection(section);
+    dialog.exec();
 }
 
 void Gcode_postprocessing_system::openAppearanceSettingsDialog()
