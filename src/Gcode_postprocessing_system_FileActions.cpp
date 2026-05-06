@@ -5,6 +5,7 @@
 #include "CadBitmapImportDialog.h"
 #include "CadBitmapVectorizer.h"
 
+#include <QApplication>
 #include <QDir>
 #include <QFileDialog>
 #include <QFileInfo>
@@ -101,16 +102,25 @@ bool Gcode_postprocessing_system::importBitmapFile(const QString& filePath)
     CadBitmapImportResult importResult;
     QString errorMessage;
 
+    QApplication::setOverrideCursor(Qt::WaitCursor);
     if (!CadBitmapVectorizer::vectorize(dialog.sourceImage(), importOptions, importResult, &errorMessage))
     {
+        QApplication::restoreOverrideCursor();
         QMessageBox::warning(this, QStringLiteral("位图导入失败"), errorMessage);
         return false;
     }
+    QApplication::restoreOverrideCursor();
 
     const bool replaceExisting = importOptions.importMode == CadBitmapImportMode::ReplaceDocument;
     m_editer.clearHistory();
 
     const int appendedCount = m_document.appendEntities(std::move(importResult.entities), replaceExisting);
+
+    if (replaceExisting)
+    {
+        m_currentDocumentPath.clear();
+        ui->openGLWidget->clearSelection();
+    }
 
     if (importOptions.autoFitScene)
     {

@@ -16,11 +16,77 @@
 #include <QLineEdit>
 #include <QPushButton>
 #include <QResizeEvent>
+#include <QScrollArea>
+#include <QSizePolicy>
 #include <QSpinBox>
 #include <QSplitter>
 #include <QVBoxLayout>
 #include <QComboBox>
 #include <QDoubleSpinBox>
+
+namespace
+{
+    constexpr int kSettingsPanelMinimumWidth = 430;
+    constexpr int kFormLabelMinimumWidth = 92;
+    constexpr int kFormFieldMinimumWidth = 220;
+
+    void configureFormLayout(QFormLayout* layout)
+    {
+        if (layout == nullptr)
+        {
+            return;
+        }
+
+        layout->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+        layout->setRowWrapPolicy(QFormLayout::DontWrapRows);
+        layout->setLabelAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        layout->setFormAlignment(Qt::AlignTop);
+        layout->setHorizontalSpacing(12);
+        layout->setVerticalSpacing(8);
+    }
+
+    void configureFormField(QWidget* widget)
+    {
+        if (widget == nullptr)
+        {
+            return;
+        }
+
+        widget->setMinimumWidth(kFormFieldMinimumWidth);
+        widget->setSizePolicy(QSizePolicy::Expanding, widget->sizePolicy().verticalPolicy());
+    }
+
+    void finalizeFormLayout(QFormLayout* layout)
+    {
+        if (layout == nullptr)
+        {
+            return;
+        }
+
+        for (int row = 0; row < layout->rowCount(); ++row)
+        {
+            QLayoutItem* labelItem = layout->itemAt(row, QFormLayout::LabelRole);
+            QLayoutItem* fieldItem = layout->itemAt(row, QFormLayout::FieldRole);
+
+            if (labelItem != nullptr && labelItem->widget() != nullptr)
+            {
+                QLabel* label = qobject_cast<QLabel*>(labelItem->widget());
+
+                if (label != nullptr)
+                {
+                    label->setMinimumWidth(kFormLabelMinimumWidth);
+                    label->setWordWrap(false);
+                    label->setTextInteractionFlags(Qt::NoTextInteraction);
+                }
+            }
+
+            if (fieldItem != nullptr && fieldItem->widget() != nullptr)
+            {
+                configureFormField(fieldItem->widget());
+            }
+        }
+    }
+}
 
 CadBitmapImportDialog::CadBitmapImportDialog(const QString& filePath, QWidget* parent)
     : QDialog(parent)
@@ -114,18 +180,26 @@ void CadBitmapImportDialog::buildUi()
     previewLayout->addWidget(m_summaryLabel);
 
     QWidget* settingsPanel = new QWidget(splitter);
+    settingsPanel->setMinimumWidth(kSettingsPanelMinimumWidth);
     QVBoxLayout* settingsPanelLayout = new QVBoxLayout(settingsPanel);
     settingsPanelLayout->setContentsMargins(0, 0, 0, 0);
     settingsPanelLayout->setSpacing(10);
 
-    QWidget* settingsContainer = new QWidget(settingsPanel);
+    QScrollArea* settingsScrollArea = new QScrollArea(settingsPanel);
+    settingsScrollArea->setWidgetResizable(true);
+    settingsScrollArea->setFrameShape(QFrame::NoFrame);
+    settingsPanelLayout->addWidget(settingsScrollArea, 1);
+
+    QWidget* settingsContainer = new QWidget(settingsScrollArea);
+    settingsContainer->setMinimumWidth(kSettingsPanelMinimumWidth - 24);
     QVBoxLayout* settingsLayout = new QVBoxLayout(settingsContainer);
     settingsLayout->setContentsMargins(0, 0, 0, 0);
     settingsLayout->setSpacing(10);
-    settingsPanelLayout->addWidget(settingsContainer);
+    settingsScrollArea->setWidget(settingsContainer);
 
     QGroupBox* importGroup = new QGroupBox(QStringLiteral("导入方式"), settingsContainer);
     QFormLayout* importLayout = new QFormLayout(importGroup);
+    configureFormLayout(importLayout);
     m_importModeCombo = new QComboBox(importGroup);
     m_importModeCombo->addItem(QStringLiteral("替换当前文档"), static_cast<int>(CadBitmapImportMode::ReplaceDocument));
     m_importModeCombo->addItem(QStringLiteral("追加到当前文档"), static_cast<int>(CadBitmapImportMode::AppendToDocument));
@@ -138,6 +212,7 @@ void CadBitmapImportDialog::buildUi()
 
     QGroupBox* placementGroup = new QGroupBox(QStringLiteral("放置参数"), settingsContainer);
     QFormLayout* placementLayout = new QFormLayout(placementGroup);
+    configureFormLayout(placementLayout);
 
     m_insertXSpinBox = new QDoubleSpinBox(placementGroup);
     m_insertXSpinBox->setRange(-1000000.0, 1000000.0);
@@ -160,6 +235,7 @@ void CadBitmapImportDialog::buildUi()
 
     QGroupBox* preprocessGroup = new QGroupBox(QStringLiteral("预处理"), settingsContainer);
     QFormLayout* preprocessLayout = new QFormLayout(preprocessGroup);
+    configureFormLayout(preprocessLayout);
     m_operatorCombo = new QComboBox(preprocessGroup);
     m_operatorCombo->addItem(QStringLiteral("Otsu 二值"), static_cast<int>(CadBitmapPreprocessOperator::OtsuThreshold));
     m_operatorCombo->addItem(QStringLiteral("固定阈值"), static_cast<int>(CadBitmapPreprocessOperator::FixedThreshold));
@@ -227,6 +303,7 @@ void CadBitmapImportDialog::buildUi()
 
     QGroupBox* fittingGroup = new QGroupBox(QStringLiteral("图元拟合"), settingsContainer);
     QFormLayout* fittingLayout = new QFormLayout(fittingGroup);
+    configureFormLayout(fittingLayout);
     m_contourModeCombo = new QComboBox(fittingGroup);
     m_contourModeCombo->addItem(QStringLiteral("仅外轮廓"), static_cast<int>(CadBitmapContourMode::ExternalOnly));
     m_contourModeCombo->addItem(QStringLiteral("全部轮廓"), static_cast<int>(CadBitmapContourMode::AllContours));
@@ -292,12 +369,18 @@ void CadBitmapImportDialog::buildUi()
     fittingLayout->addRow(QStringLiteral("最大实体数"), m_maxEntityCountSpinBox);
     settingsLayout->addWidget(fittingGroup);
 
+    finalizeFormLayout(importLayout);
+    finalizeFormLayout(placementLayout);
+    finalizeFormLayout(preprocessLayout);
+    finalizeFormLayout(fittingLayout);
+
     settingsLayout->addStretch(1);
 
     splitter->addWidget(previewPanel);
     splitter->addWidget(settingsPanel);
     splitter->setStretchFactor(0, 3);
     splitter->setStretchFactor(1, 2);
+    splitter->setCollapsible(1, false);
 
     m_buttonBox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
     m_buttonBox->button(QDialogButtonBox::Ok)->setText(QStringLiteral("导入"));
