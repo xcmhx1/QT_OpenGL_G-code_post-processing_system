@@ -260,6 +260,18 @@ void CadViewer::setTheme(const AppThemeColors& theme)
     update();
 }
 
+void CadViewer::setProcessVisualsVisible(bool visible)
+{
+    if (m_processVisualsVisible == visible)
+    {
+        return;
+    }
+
+    m_processVisualsVisible = visible;
+    m_pendingProcessOrderSwapEntityId = 0;
+    update();
+}
+
 void CadViewer::startDrawing(DrawType drawType)
 {
     m_controller.beginDrawing(drawType, m_controller.drawState().drawingColor);

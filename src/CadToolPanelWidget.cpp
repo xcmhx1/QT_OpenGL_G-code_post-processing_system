@@ -843,6 +843,23 @@ bool CadToolPanelWidget::useDefaultExportPathEnabled() const
     return m_useDefaultExportPathCheckBox != nullptr && m_useDefaultExportPathCheckBox->isChecked();
 }
 
+void CadToolPanelWidget::setProcessVisualsVisible(bool enabled)
+{
+    if (m_processVisualsCheckBox == nullptr)
+    {
+        return;
+    }
+
+    m_updatingUi = true;
+    m_processVisualsCheckBox->setChecked(enabled);
+    m_updatingUi = false;
+}
+
+bool CadToolPanelWidget::processVisualsVisible() const
+{
+    return m_processVisualsCheckBox == nullptr || m_processVisualsCheckBox->isChecked();
+}
+
 void CadToolPanelWidget::buildUi()
 {
     m_drawPointAction = new QAction(QStringLiteral("点"), this);
@@ -919,6 +936,8 @@ void CadToolPanelWidget::buildUi()
     defaultLayout->addWidget(buildPanelFrame(QStringLiteral("图层"), buildLayerPanel(), 176), 0, Qt::AlignLeft | Qt::AlignTop);
     defaultLayout->addWidget(buildDivider(), 0, Qt::AlignLeft | Qt::AlignVCenter);
     defaultLayout->addWidget(buildPanelFrame(QStringLiteral("特性"), buildPropertyPanel(), 226), 0, Qt::AlignLeft | Qt::AlignTop);
+    defaultLayout->addWidget(buildDivider(), 0, Qt::AlignLeft | Qt::AlignVCenter);
+    defaultLayout->addWidget(buildPanelFrame(QStringLiteral("显示"), buildDisplayPanel(), 132), 0, Qt::AlignLeft | Qt::AlignTop);
     defaultLayout->addStretch(1);
     m_tabWidget->addTab(defaultTab, QStringLiteral("默认"));
 
@@ -1498,6 +1517,31 @@ QWidget* CadToolPanelWidget::buildPropertyPanel()
             emit colorChangeRequested(m_colorComboBox->itemData(index).toInt());
         }
     );
+
+    return panel;
+}
+
+QWidget* CadToolPanelWidget::buildDisplayPanel()
+{
+    QWidget* panel = new QWidget(this);
+    QVBoxLayout* layout = new QVBoxLayout(panel);
+    layout->setContentsMargins(2, 6, 2, 2);
+    layout->setSpacing(4);
+
+    m_processVisualsCheckBox = new QCheckBox(QStringLiteral("显示机加工相关"), panel);
+    m_processVisualsCheckBox->setProperty("machiningOption", true);
+    m_processVisualsCheckBox->setToolTip(QStringLiteral("控制视图区是否显示加工方向箭头与加工顺序标签"));
+    m_processVisualsCheckBox->setChecked(true);
+    layout->addWidget(m_processVisualsCheckBox, 0, Qt::AlignLeft | Qt::AlignTop);
+    layout->addStretch(1);
+
+    connect(m_processVisualsCheckBox, &QCheckBox::toggled, this, [this](bool checked)
+    {
+        if (!m_updatingUi)
+        {
+            emit processVisualsVisibleChanged(checked);
+        }
+    });
 
     return panel;
 }

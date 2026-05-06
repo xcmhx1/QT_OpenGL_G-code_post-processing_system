@@ -1,6 +1,7 @@
 #include "pch.h"
 
 #include "Gcode_postprocessing_system.h"
+#include "CadAppearanceSettingsDialog.h"
 #include "CadItem.h"
 #include "GProfileDialog.h"
 
@@ -22,6 +23,7 @@
 #include <QStandardPaths>
 #include <QSet>
 #include <QToolBar>
+#include <QVariant>
 #include <QVBoxLayout>
 
 #include <algorithm>
@@ -118,6 +120,79 @@ namespace
 
         const QColor aciColor = colorFromAci(item->m_nativeEntity->color);
         return aciColor.isValid() ? aciColor : item->m_color;
+    }
+
+    struct ThemeColorSetting
+    {
+        const char* key = nullptr;
+        QColor AppThemeColors::* member = nullptr;
+    };
+
+    const ThemeColorSetting* themeColorSettings(int* count = nullptr)
+    {
+        static const ThemeColorSetting settings[] =
+        {
+            { "windowBackground", &AppThemeColors::windowBackground },
+            { "panelBackground", &AppThemeColors::panelBackground },
+            { "surfaceBackground", &AppThemeColors::surfaceBackground },
+            { "surfaceAltBackground", &AppThemeColors::surfaceAltBackground },
+            { "borderColor", &AppThemeColors::borderColor },
+            { "textPrimaryColor", &AppThemeColors::textPrimaryColor },
+            { "textSecondaryColor", &AppThemeColors::textSecondaryColor },
+            { "accentColor", &AppThemeColors::accentColor },
+            { "accentTextColor", &AppThemeColors::accentTextColor },
+            { "hoverBackgroundColor", &AppThemeColors::hoverBackgroundColor },
+            { "pressedBackgroundColor", &AppThemeColors::pressedBackgroundColor },
+            { "viewerBackgroundColor", &AppThemeColors::viewerBackgroundColor },
+            { "viewerGridColor", &AppThemeColors::viewerGridColor },
+            { "processLabelFillColor", &AppThemeColors::processLabelFillColor },
+            { "processLabelBorderColor", &AppThemeColors::processLabelBorderColor },
+            { "processLabelTextColor", &AppThemeColors::processLabelTextColor },
+            { "selectedProcessLabelFillColor", &AppThemeColors::selectedProcessLabelFillColor },
+            { "selectedProcessLabelBorderColor", &AppThemeColors::selectedProcessLabelBorderColor },
+            { "selectedProcessLabelTextColor", &AppThemeColors::selectedProcessLabelTextColor },
+            { "selectedBasePointColor", &AppThemeColors::selectedBasePointColor },
+            { "selectedControlPointColor", &AppThemeColors::selectedControlPointColor }
+        };
+
+        if (count != nullptr)
+        {
+            *count = static_cast<int>(sizeof(settings) / sizeof(settings[0]));
+        }
+
+        return settings;
+    }
+
+    QString themeModeToSettingValue(AppThemeMode mode)
+    {
+        if (mode == AppThemeMode::Dark)
+        {
+            return QStringLiteral("dark");
+        }
+
+        if (mode == AppThemeMode::Custom)
+        {
+            return QStringLiteral("custom");
+        }
+
+        return QStringLiteral("light");
+    }
+
+    AppThemeMode settingValueToThemeMode(const QString& value)
+    {
+        const QString normalizedValue = value.trimmed().toLower();
+
+        if (normalizedValue == QStringLiteral("dark"))
+        {
+            return AppThemeMode::Dark;
+        }
+
+        if (normalizedValue == QStringLiteral("custom"))
+        {
+            return AppThemeMode::Custom;
+        }
+
+        return AppThemeMode::Light;
     }
 
 }
@@ -402,7 +477,8 @@ void Gcode_postprocessing_system::initializeThemeMenu()
     );
 
     ui->menuSet->addSeparator();
-    QMenu* themeMenu = ui->menuSet->addMenu(QStringLiteral("主题"));
+    QMenu* appearanceMenu = ui->menuSet->addMenu(QStringLiteral("外观设置"));
+    QMenu* themeMenu = appearanceMenu->addMenu(QStringLiteral("主题"));
     QActionGroup* themeActionGroup = new QActionGroup(this);
     themeActionGroup->setExclusive(true);
 
@@ -417,9 +493,38 @@ void Gcode_postprocessing_system::initializeThemeMenu()
     connect(m_lightThemeAction, &QAction::triggered, this, [this]() { applyTheme(AppThemeMode::Light); });
     connect(m_darkThemeAction, &QAction::triggered, this, [this]() { applyTheme(AppThemeMode::Dark); });
 
+    appearanceMenu->addSeparator();
+    m_customAppearanceAction = appearanceMenu->addAction(QStringLiteral("自定义外观..."));
+    connect(m_customAppearanceAction, &QAction::triggered, this, [this]() { openAppearanceSettingsDialog(); });
+
     ui->menuSet->addSeparator();
     m_profileSettingsAction = ui->menuSet->addAction(QStringLiteral("G代码配置..."));
     connect(m_profileSettingsAction, &QAction::triggered, this, [this]() { openProfileSettingsDialog(); });
+}
+
+void Gcode_postprocessing_system::openAppearanceSettingsDialog()
+{
+    AppThemeMode baseMode = AppThemeMode::Light;
+    AppThemeColors initialTheme = m_themeMode == AppThemeMode::Custom
+        ? loadCustomThemeColors(&baseMode)
+        : m_themeColors;
+
+    if (m_themeMode == AppThemeMode::Light || m_themeMode == AppThemeMode::Dark)
+    {
+        baseMode = m_themeMode;
+        initialTheme = buildAppThemeColors(m_themeMode);
+    }
+
+    CadAppearanceSettingsDialog dialog(baseMode, initialTheme, this);
+
+    if (dialog.exec() != QDialog::Accepted)
+    {
+        return;
+    }
+
+    saveCustomThemeColors(dialog.baseMode(), dialog.themeColors());
+    applyTheme(AppThemeMode::Custom);
+    statusBar()->showMessage(QStringLiteral("自定义外观已应用"), 3000);
 }
 
 void Gcode_postprocessing_system::openProfileSettingsDialog()
@@ -436,7 +541,7 @@ void Gcode_postprocessing_system::openProfileSettingsDialog()
         m_activeProfile,
         m_document.layerNames(),
         layerColors,
-        buildAppThemeColors(m_themeMode),
+        m_themeColors,
         this
     );
 
@@ -621,8 +726,16 @@ void Gcode_postprocessing_system::saveSelectedProfileId(const QString& profileId
 
 void Gcode_postprocessing_system::applyTheme(AppThemeMode mode)
 {
+    AppThemeColors theme = mode == AppThemeMode::Custom
+        ? loadCustomThemeColors()
+        : buildAppThemeColors(mode);
+    applyThemeColors(theme, mode);
+}
+
+void Gcode_postprocessing_system::applyThemeColors(const AppThemeColors& theme, AppThemeMode mode)
+{
     m_themeMode = mode;
-    const AppThemeColors theme = buildAppThemeColors(mode);
+    m_themeColors = theme;
 
     qApp->setStyle(QStyleFactory::create(QStringLiteral("Fusion")));
     qApp->setPalette(theme.palette);
@@ -667,6 +780,13 @@ void Gcode_postprocessing_system::applyTheme(AppThemeMode mode)
         ui->openGLWidget->setTheme(theme);
     }
 
+    QActionGroup* themeActionGroup = m_lightThemeAction != nullptr ? m_lightThemeAction->actionGroup() : nullptr;
+
+    if (themeActionGroup != nullptr)
+    {
+        themeActionGroup->setExclusive(false);
+    }
+
     if (m_lightThemeAction != nullptr)
     {
         m_lightThemeAction->setChecked(mode == AppThemeMode::Light);
@@ -677,6 +797,11 @@ void Gcode_postprocessing_system::applyTheme(AppThemeMode mode)
         m_darkThemeAction->setChecked(mode == AppThemeMode::Dark);
     }
 
+    if (themeActionGroup != nullptr)
+    {
+        themeActionGroup->setExclusive(true);
+    }
+
     saveThemeMode(mode);
 }
 
@@ -684,13 +809,67 @@ AppThemeMode Gcode_postprocessing_system::loadThemeMode() const
 {
     QSettings settings(QStringLiteral("GCodePostProcessingSystem"), QStringLiteral("GCodePostProcessingSystem"));
     const QString themeValue = settings.value(QStringLiteral("ui/themeMode"), QStringLiteral("light")).toString().trimmed().toLower();
-    return themeValue == QStringLiteral("dark") ? AppThemeMode::Dark : AppThemeMode::Light;
+    return settingValueToThemeMode(themeValue);
 }
 
 void Gcode_postprocessing_system::saveThemeMode(AppThemeMode mode) const
 {
     QSettings settings(QStringLiteral("GCodePostProcessingSystem"), QStringLiteral("GCodePostProcessingSystem"));
-    settings.setValue(QStringLiteral("ui/themeMode"), mode == AppThemeMode::Dark ? QStringLiteral("dark") : QStringLiteral("light"));
+    settings.setValue(QStringLiteral("ui/themeMode"), themeModeToSettingValue(mode));
+}
+
+AppThemeColors Gcode_postprocessing_system::loadCustomThemeColors(AppThemeMode* baseMode) const
+{
+    QSettings settings(QStringLiteral("GCodePostProcessingSystem"), QStringLiteral("GCodePostProcessingSystem"));
+    const AppThemeMode storedBaseMode = settingValueToThemeMode
+    (
+        settings.value(QStringLiteral("ui/customThemeBaseMode"), QStringLiteral("light")).toString()
+    ) == AppThemeMode::Dark ? AppThemeMode::Dark : AppThemeMode::Light;
+
+    if (baseMode != nullptr)
+    {
+        *baseMode = storedBaseMode;
+    }
+
+    AppThemeColors theme = buildAppThemeColors(storedBaseMode);
+    int settingCount = 0;
+    const ThemeColorSetting* colorSettings = themeColorSettings(&settingCount);
+
+    for (int index = 0; index < settingCount; ++index)
+    {
+        const QString key = QStringLiteral("ui/customTheme/%1").arg(QString::fromLatin1(colorSettings[index].key));
+        const QVariant value = settings.value(key);
+
+        if (value.canConvert<QColor>())
+        {
+            const QColor color = value.value<QColor>();
+
+            if (color.isValid())
+            {
+                theme.*(colorSettings[index].member) = color;
+            }
+        }
+    }
+
+    theme.dark = storedBaseMode == AppThemeMode::Dark;
+    finalizeAppThemePalette(theme);
+    return theme;
+}
+
+void Gcode_postprocessing_system::saveCustomThemeColors(AppThemeMode baseMode, const AppThemeColors& theme) const
+{
+    QSettings settings(QStringLiteral("GCodePostProcessingSystem"), QStringLiteral("GCodePostProcessingSystem"));
+    const AppThemeMode storedBaseMode = baseMode == AppThemeMode::Dark ? AppThemeMode::Dark : AppThemeMode::Light;
+    settings.setValue(QStringLiteral("ui/customThemeBaseMode"), themeModeToSettingValue(storedBaseMode));
+
+    int settingCount = 0;
+    const ThemeColorSetting* colorSettings = themeColorSettings(&settingCount);
+
+    for (int index = 0; index < settingCount; ++index)
+    {
+        const QString key = QStringLiteral("ui/customTheme/%1").arg(QString::fromLatin1(colorSettings[index].key));
+        settings.setValue(key, theme.*(colorSettings[index].member));
+    }
 }
 
 quint32 Gcode_postprocessing_system::loadSnapOptionMask() const
@@ -716,6 +895,18 @@ void Gcode_postprocessing_system::saveSnapOptionMask(quint32 mask) const
         QStringLiteral("ui/snapModeMask"),
         static_cast<uint>(mask & CadStatusPaneWidget::allSnapOptionMask())
     );
+}
+
+bool Gcode_postprocessing_system::loadProcessVisualsVisible() const
+{
+    QSettings settings(QStringLiteral("GCodePostProcessingSystem"), QStringLiteral("GCodePostProcessingSystem"));
+    return settings.value(QStringLiteral("ui/processVisualsVisible"), true).toBool();
+}
+
+void Gcode_postprocessing_system::saveProcessVisualsVisible(bool enabled) const
+{
+    QSettings settings(QStringLiteral("GCodePostProcessingSystem"), QStringLiteral("GCodePostProcessingSystem"));
+    settings.setValue(QStringLiteral("ui/processVisualsVisible"), enabled);
 }
 
 Gcode_postprocessing_system::GCodeGenerationPreference Gcode_postprocessing_system::loadGenerationPreference() const
@@ -855,6 +1046,9 @@ void Gcode_postprocessing_system::initializeToolPanel()
     m_toolPanelWidget->setUseDxfFileNameEnabled(loadUseDxfFileNameOnExport());
     m_toolPanelWidget->setUseDefaultImportPathEnabled(loadUseDefaultImportPath());
     m_toolPanelWidget->setUseDefaultExportPathEnabled(loadUseDefaultExportPath());
+    const bool processVisualsVisible = loadProcessVisualsVisible();
+    m_toolPanelWidget->setProcessVisualsVisible(processVisualsVisible);
+    ui->openGLWidget->setProcessVisualsVisible(processVisualsVisible);
     ui->mainToolBar->setMovable(false);
     ui->mainToolBar->setFloatable(false);
     ui->mainToolBar->addWidget(m_toolPanelWidget);
@@ -908,6 +1102,17 @@ void Gcode_postprocessing_system::initializeToolPanel()
     connect(m_toolPanelWidget, &CadToolPanelWidget::useDxfFileNameOptionChanged, this, [this](bool enabled) { saveUseDxfFileNameOnExport(enabled); });
     connect(m_toolPanelWidget, &CadToolPanelWidget::useDefaultImportPathOptionChanged, this, [this](bool enabled) { saveUseDefaultImportPath(enabled); });
     connect(m_toolPanelWidget, &CadToolPanelWidget::useDefaultExportPathOptionChanged, this, [this](bool enabled) { saveUseDefaultExportPath(enabled); });
+    connect
+    (
+        m_toolPanelWidget,
+        &CadToolPanelWidget::processVisualsVisibleChanged,
+        this,
+        [this](bool enabled)
+        {
+            ui->openGLWidget->setProcessVisualsVisible(enabled);
+            saveProcessVisualsVisible(enabled);
+        }
+    );
     connect(m_toolPanelWidget, &CadToolPanelWidget::sortKeepDirectionRequested, this, [this]() { ui->action_Sort_2D_Assign->trigger(); });
     connect(m_toolPanelWidget, &CadToolPanelWidget::smartSortRequested, this, [this]() { ui->action_Sort_2D_Smart->trigger(); });
     connect

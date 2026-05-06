@@ -52,6 +52,8 @@ public:
     bool useDefaultImportPathEnabled() const;
     void setUseDefaultExportPathEnabled(bool enabled);
     bool useDefaultExportPathEnabled() const;
+    void setProcessVisualsVisible(bool enabled);
+    bool processVisualsVisible() const;
 
 signals:
     void drawRequested(DrawType drawType);
@@ -83,6 +85,7 @@ signals:
     void useDxfFileNameOptionChanged(bool enabled);
     void useDefaultImportPathOptionChanged(bool enabled);
     void useDefaultExportPathOptionChanged(bool enabled);
+    void processVisualsVisibleChanged(bool enabled);
 
 private:
     void buildUi();
@@ -93,6 +96,7 @@ private:
     QWidget* buildModifyPanel();
     QWidget* buildLayerPanel();
     QWidget* buildPropertyPanel();
+    QWidget* buildDisplayPanel();
     QWidget* buildMachiningPanel();
     void addDrawButton(QWidget* parent, const QString& text, DrawType drawType, int row, int column);
     void commitLayerChange(QComboBox* comboBox);
@@ -118,6 +122,7 @@ private:
     QCheckBox* m_useDxfFileNameCheckBox = nullptr;
     QCheckBox* m_useDefaultImportPathCheckBox = nullptr;
     QCheckBox* m_useDefaultExportPathCheckBox = nullptr;
+    QCheckBox* m_processVisualsCheckBox = nullptr;
     QMenu* m_drawMoreMenu = nullptr;
     QAction* m_drawPointAction = nullptr;
     QAction* m_drawXlineAction = nullptr;

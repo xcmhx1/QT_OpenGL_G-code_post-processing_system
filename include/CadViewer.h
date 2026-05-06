@@ -103,6 +103,10 @@ public:
     // 设置 Viewer 主题。
     void setTheme(const AppThemeColors& theme);
 
+    // 设置是否显示加工方向箭头与加工顺序标签。
+    void setProcessVisualsVisible(bool visible);
+    bool processVisualsVisible() const { return m_processVisualsVisible; }
+
     // 开始绘制指定类型图元。
     void startDrawing(DrawType drawType);
 
@@ -548,6 +552,9 @@ private:
 
     // 顺序标签交换的首个候选实体 ID。
     EntityId m_pendingProcessOrderSwapEntityId = 0;
+
+    // 是否显示加工方向箭头与加工顺序标签。
+    bool m_processVisualsVisible = true;
 
     // 基点吸附开关
     bool m_basePointSnapEnabled = false;

@@ -39,12 +39,18 @@ private:
 
 private:
     void initializeThemeMenu();
+    void openAppearanceSettingsDialog();
     void openProfileSettingsDialog();
     void applyTheme(AppThemeMode mode);
+    void applyThemeColors(const AppThemeColors& theme, AppThemeMode mode);
     AppThemeMode loadThemeMode() const;
     void saveThemeMode(AppThemeMode mode) const;
+    AppThemeColors loadCustomThemeColors(AppThemeMode* baseMode = nullptr) const;
+    void saveCustomThemeColors(AppThemeMode baseMode, const AppThemeColors& theme) const;
     quint32 loadSnapOptionMask() const;
     void saveSnapOptionMask(quint32 mask) const;
+    bool loadProcessVisualsVisible() const;
+    void saveProcessVisualsVisible(bool enabled) const;
     GCodeGenerationPreference loadGenerationPreference() const;
     void saveGenerationPreference(GCodeGenerationPreference preference) const;
     bool loadAutoDeduplicateOnExport() const;
@@ -117,6 +123,7 @@ private:
     CadToolPanelWidget* m_toolPanelWidget = nullptr;
     QAction* m_lightThemeAction = nullptr;
     QAction* m_darkThemeAction = nullptr;
+    QAction* m_customAppearanceAction = nullptr;
     QAction* m_profileSettingsAction = nullptr;
     QAction* m_generationModeAutoAction = nullptr;
     QAction* m_generationMode2DAction = nullptr;
@@ -128,6 +135,7 @@ private:
     QColor m_currentColor = QColor(Qt::white);
     int m_currentColorIndex = 256;
     AppThemeMode m_themeMode = AppThemeMode::Light;
+    AppThemeColors m_themeColors = buildAppThemeColors(AppThemeMode::Light);
     GCodeGenerationPreference m_generationPreference = GCodeGenerationPreference::Auto;
     QString m_currentDocumentPath;
     QMap<QString, GProfile> m_loadedProfiles;

@@ -6,7 +6,8 @@
 enum class AppThemeMode
 {
     Light,
-    Dark
+    Dark,
+    Custom
 };
 
 struct AppThemeColors
@@ -39,6 +40,36 @@ struct AppThemeColors
     QColor selectedHandleLabelTextColor;
     QPalette palette;
 };
+
+inline void finalizeAppThemePalette(AppThemeColors& theme)
+{
+    QPalette palette;
+    palette.setColor(QPalette::Window, theme.windowBackground);
+    palette.setColor(QPalette::WindowText, theme.textPrimaryColor);
+    palette.setColor(QPalette::Base, theme.surfaceBackground);
+    palette.setColor(QPalette::AlternateBase, theme.surfaceAltBackground);
+    palette.setColor(QPalette::ToolTipBase, theme.surfaceBackground);
+    palette.setColor(QPalette::ToolTipText, theme.textPrimaryColor);
+    palette.setColor(QPalette::Text, theme.textPrimaryColor);
+    palette.setColor(QPalette::Button, theme.panelBackground);
+    palette.setColor(QPalette::ButtonText, theme.textPrimaryColor);
+    palette.setColor(QPalette::BrightText, QColor(255, 255, 255));
+    palette.setColor(QPalette::Highlight, theme.accentColor);
+    palette.setColor(QPalette::HighlightedText, theme.accentTextColor);
+    palette.setColor(QPalette::PlaceholderText, theme.textSecondaryColor);
+    palette.setColor(QPalette::Light, theme.surfaceBackground);
+    palette.setColor(QPalette::Midlight, theme.surfaceAltBackground);
+    palette.setColor(QPalette::Mid, theme.borderColor);
+    palette.setColor(QPalette::Dark, theme.borderStrongColor);
+    palette.setColor(QPalette::Shadow, QColor(0, 0, 0, theme.dark ? 160 : 90));
+
+    const QColor disabledText = theme.dark ? QColor(126, 132, 140) : QColor(146, 152, 160);
+    palette.setColor(QPalette::Disabled, QPalette::WindowText, disabledText);
+    palette.setColor(QPalette::Disabled, QPalette::Text, disabledText);
+    palette.setColor(QPalette::Disabled, QPalette::ButtonText, disabledText);
+
+    theme.palette = palette;
+}
 
 inline AppThemeColors buildAppThemeColors(AppThemeMode mode)
 {
@@ -102,31 +133,6 @@ inline AppThemeColors buildAppThemeColors(AppThemeMode mode)
         theme.selectedHandleLabelTextColor = QColor(26, 34, 42);
     }
 
-    QPalette palette;
-    palette.setColor(QPalette::Window, theme.windowBackground);
-    palette.setColor(QPalette::WindowText, theme.textPrimaryColor);
-    palette.setColor(QPalette::Base, theme.surfaceBackground);
-    palette.setColor(QPalette::AlternateBase, theme.surfaceAltBackground);
-    palette.setColor(QPalette::ToolTipBase, theme.surfaceBackground);
-    palette.setColor(QPalette::ToolTipText, theme.textPrimaryColor);
-    palette.setColor(QPalette::Text, theme.textPrimaryColor);
-    palette.setColor(QPalette::Button, theme.panelBackground);
-    palette.setColor(QPalette::ButtonText, theme.textPrimaryColor);
-    palette.setColor(QPalette::BrightText, QColor(255, 255, 255));
-    palette.setColor(QPalette::Highlight, theme.accentColor);
-    palette.setColor(QPalette::HighlightedText, theme.accentTextColor);
-    palette.setColor(QPalette::PlaceholderText, theme.textSecondaryColor);
-    palette.setColor(QPalette::Light, theme.surfaceBackground);
-    palette.setColor(QPalette::Midlight, theme.surfaceAltBackground);
-    palette.setColor(QPalette::Mid, theme.borderColor);
-    palette.setColor(QPalette::Dark, theme.borderStrongColor);
-    palette.setColor(QPalette::Shadow, QColor(0, 0, 0, theme.dark ? 160 : 90));
-
-    const QColor disabledText = theme.dark ? QColor(126, 132, 140) : QColor(146, 152, 160);
-    palette.setColor(QPalette::Disabled, QPalette::WindowText, disabledText);
-    palette.setColor(QPalette::Disabled, QPalette::Text, disabledText);
-    palette.setColor(QPalette::Disabled, QPalette::ButtonText, disabledText);
-
-    theme.palette = palette;
+    finalizeAppThemePalette(theme);
     return theme;
 }

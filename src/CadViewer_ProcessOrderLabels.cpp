@@ -61,6 +61,11 @@ void CadViewer::renderProcessOrderLabels()
 
 std::vector<CadViewer::ProcessOrderLabelOverlay> CadViewer::buildProcessOrderLabelOverlays() const
 {
+    if (!m_processVisualsVisible)
+    {
+        return {};
+    }
+
     CadDocument* scene = m_sceneCoordinator.document();
 
     if (scene == nullptr || interactionMode() != ViewInteractionMode::Idle)

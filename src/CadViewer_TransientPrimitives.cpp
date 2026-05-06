@@ -76,6 +76,11 @@ std::vector<TransientPrimitive> CadViewer::buildTransientPrimitives() const
 
 std::vector<TransientPrimitive> CadViewer::buildProcessDirectionPrimitives() const
 {
+    if (!m_processVisualsVisible)
+    {
+        return {};
+    }
+
     CadDocument* scene = m_sceneCoordinator.document();
 
     if (scene == nullptr)
