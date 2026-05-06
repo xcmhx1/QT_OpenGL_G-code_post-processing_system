@@ -17,9 +17,11 @@
 #include <QPushButton>
 #include <QResizeEvent>
 #include <QScrollArea>
+#include <QSettings>
 #include <QSizePolicy>
 #include <QSpinBox>
 #include <QSplitter>
+#include <QTimer>
 #include <QVBoxLayout>
 #include <QComboBox>
 #include <QDoubleSpinBox>
@@ -29,6 +31,7 @@ namespace
     constexpr int kSettingsPanelMinimumWidth = 430;
     constexpr int kFormLabelMinimumWidth = 92;
     constexpr int kFormFieldMinimumWidth = 220;
+    constexpr int kPreviewRefreshDelayMs = 280;
 
     void configureFormLayout(QFormLayout* layout)
     {
@@ -86,6 +89,21 @@ namespace
             }
         }
     }
+
+    void setComboCurrentData(QComboBox* comboBox, int value)
+    {
+        if (comboBox == nullptr)
+        {
+            return;
+        }
+
+        const int index = comboBox->findData(value);
+
+        if (index >= 0)
+        {
+            comboBox->setCurrentIndex(index);
+        }
+    }
 }
 
 CadBitmapImportDialog::CadBitmapImportDialog(const QString& filePath, QWidget* parent)
@@ -97,6 +115,7 @@ CadBitmapImportDialog::CadBitmapImportDialog(const QString& filePath, QWidget* p
     resize(1280, 820);
 
     buildUi();
+    loadSettings();
     connectSignals();
 
     if (!CadBitmapVectorizer::loadBitmapImage(filePath, m_sourceImage, &m_errorMessage))
@@ -104,6 +123,7 @@ CadBitmapImportDialog::CadBitmapImportDialog(const QString& filePath, QWidget* p
         m_summaryLabel->setText(m_errorMessage);
         updatePreviewLabel(m_sourcePreviewLabel, QImage(), QStringLiteral("原图加载失败"));
         updatePreviewLabel(m_processedPreviewLabel, QImage(), QStringLiteral("无法生成预览"));
+        updatePreviewLabel(m_vectorPreviewLabel, QImage(), QStringLiteral("无法生成 CAD 拟合预览"));
         m_buttonBox->button(QDialogButtonBox::Ok)->setEnabled(false);
         return;
     }
@@ -136,6 +156,7 @@ void CadBitmapImportDialog::resizeEvent(QResizeEvent* event)
     QDialog::resizeEvent(event);
     updatePreviewLabel(m_sourcePreviewLabel, m_sourcePreviewImage, QStringLiteral("原图预览"));
     updatePreviewLabel(m_processedPreviewLabel, m_processedPreviewImage, QStringLiteral("处理后预览"));
+    updatePreviewLabel(m_vectorPreviewLabel, m_vectorPreviewImage, QStringLiteral("CAD 拟合预览"));
 }
 
 void CadBitmapImportDialog::buildUi()
@@ -155,24 +176,44 @@ void CadBitmapImportDialog::buildUi()
     previewLayout->setContentsMargins(0, 0, 0, 0);
     previewLayout->setSpacing(8);
 
-    QLabel* previewTitle = new QLabel(QStringLiteral("预处理预览"), previewPanel);
+    QLabel* previewTitle = new QLabel(QStringLiteral("导入预览"), previewPanel);
     previewLayout->addWidget(previewTitle);
 
     QHBoxLayout* previewImagesLayout = new QHBoxLayout();
     previewImagesLayout->setSpacing(8);
 
     m_sourcePreviewLabel = new QLabel(previewPanel);
-    m_sourcePreviewLabel->setMinimumSize(480, 320);
+    m_sourcePreviewLabel->setMinimumSize(240, 260);
     m_sourcePreviewLabel->setAlignment(Qt::AlignCenter);
     m_sourcePreviewLabel->setStyleSheet("background-color: rgb(24, 27, 31); border: 1px solid rgb(70, 75, 82);");
 
     m_processedPreviewLabel = new QLabel(previewPanel);
-    m_processedPreviewLabel->setMinimumSize(480, 320);
+    m_processedPreviewLabel->setMinimumSize(240, 260);
     m_processedPreviewLabel->setAlignment(Qt::AlignCenter);
     m_processedPreviewLabel->setStyleSheet("background-color: rgb(24, 27, 31); border: 1px solid rgb(70, 75, 82);");
 
-    previewImagesLayout->addWidget(m_sourcePreviewLabel, 1);
-    previewImagesLayout->addWidget(m_processedPreviewLabel, 1);
+    m_vectorPreviewLabel = new QLabel(previewPanel);
+    m_vectorPreviewLabel->setMinimumSize(240, 260);
+    m_vectorPreviewLabel->setAlignment(Qt::AlignCenter);
+    m_vectorPreviewLabel->setStyleSheet("background-color: rgb(24, 27, 31); border: 1px solid rgb(70, 75, 82);");
+
+    auto createPreviewColumn =
+        [previewPanel](const QString& title, QLabel* imageLabel)
+        {
+            QWidget* column = new QWidget(previewPanel);
+            QVBoxLayout* columnLayout = new QVBoxLayout(column);
+            columnLayout->setContentsMargins(0, 0, 0, 0);
+            columnLayout->setSpacing(4);
+            QLabel* titleLabel = new QLabel(title, column);
+            titleLabel->setAlignment(Qt::AlignCenter);
+            columnLayout->addWidget(titleLabel);
+            columnLayout->addWidget(imageLabel, 1);
+            return column;
+        };
+
+    previewImagesLayout->addWidget(createPreviewColumn(QStringLiteral("原图"), m_sourcePreviewLabel), 1);
+    previewImagesLayout->addWidget(createPreviewColumn(QStringLiteral("预处理"), m_processedPreviewLabel), 1);
+    previewImagesLayout->addWidget(createPreviewColumn(QStringLiteral("CAD 拟合"), m_vectorPreviewLabel), 1);
     previewLayout->addLayout(previewImagesLayout, 1);
 
     m_summaryLabel = new QLabel(QStringLiteral("请配置位图预处理参数。"), previewPanel);
@@ -385,9 +426,24 @@ void CadBitmapImportDialog::buildUi()
     m_buttonBox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
     m_buttonBox->button(QDialogButtonBox::Ok)->setText(QStringLiteral("导入"));
     m_buttonBox->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("取消"));
-    connect(m_buttonBox, &QDialogButtonBox::accepted, this, &QDialog::accept);
+    connect
+    (
+        m_buttonBox,
+        &QDialogButtonBox::accepted,
+        this,
+        [this]()
+        {
+            saveSettings();
+            accept();
+        }
+    );
     connect(m_buttonBox, &QDialogButtonBox::rejected, this, &QDialog::reject);
     rootLayout->addWidget(m_buttonBox);
+
+    m_previewRefreshTimer = new QTimer(this);
+    m_previewRefreshTimer->setSingleShot(true);
+    m_previewRefreshTimer->setInterval(kPreviewRefreshDelayMs);
+    connect(m_previewRefreshTimer, &QTimer::timeout, this, &CadBitmapImportDialog::refreshPreview);
 
     updateColorButton();
 }
@@ -396,7 +452,7 @@ void CadBitmapImportDialog::connectSignals()
 {
     const auto refreshLambda = [this]()
     {
-        refreshPreview();
+        schedulePreviewRefresh();
     };
 
     connect(m_importModeCombo, qOverload<int>(&QComboBox::currentIndexChanged), this, refreshLambda);
@@ -441,9 +497,94 @@ void CadBitmapImportDialog::connectSignals()
 
             m_selectedColor = selectedColor;
             updateColorButton();
-            refreshPreview();
+            schedulePreviewRefresh();
         }
     );
+}
+
+void CadBitmapImportDialog::loadSettings()
+{
+    QSettings settings(QStringLiteral("GCodePostProcessingSystem"), QStringLiteral("GCodePostProcessingSystem"));
+    settings.beginGroup(QStringLiteral("bitmapImport"));
+
+    setComboCurrentData(m_importModeCombo, settings.value(QStringLiteral("importMode"), static_cast<int>(CadBitmapImportMode::ReplaceDocument)).toInt());
+    setComboCurrentData(m_operatorCombo, settings.value(QStringLiteral("preprocessOperator"), static_cast<int>(CadBitmapPreprocessOperator::OtsuThreshold)).toInt());
+    setComboCurrentData(m_morphologyCombo, settings.value(QStringLiteral("morphologyOperator"), static_cast<int>(CadBitmapMorphologyOperator::Close)).toInt());
+    setComboCurrentData(m_contourModeCombo, settings.value(QStringLiteral("contourMode"), static_cast<int>(CadBitmapContourMode::ExternalOnly)).toInt());
+    setComboCurrentData(m_fitStrategyCombo, settings.value(QStringLiteral("fitStrategy"), static_cast<int>(CadBitmapFitStrategy::PreferPrimitives)).toInt());
+    m_invertCheckBox->setChecked(settings.value(QStringLiteral("invert"), true).toBool());
+    m_blurCheckBox->setChecked(settings.value(QStringLiteral("blurEnabled"), true).toBool());
+    m_autoFitSceneCheckBox->setChecked(settings.value(QStringLiteral("autoFitScene"), true).toBool());
+    m_blurKernelSpinBox->setValue(settings.value(QStringLiteral("blurKernelSize"), 5).toInt());
+    m_thresholdSpinBox->setValue(settings.value(QStringLiteral("thresholdValue"), 140).toInt());
+    m_adaptiveBlockSizeSpinBox->setValue(settings.value(QStringLiteral("adaptiveBlockSize"), 31).toInt());
+    m_adaptiveCSpinBox->setValue(settings.value(QStringLiteral("adaptiveC"), 5.0).toDouble());
+    m_cannyLowSpinBox->setValue(settings.value(QStringLiteral("cannyLowThreshold"), 50).toInt());
+    m_cannyHighSpinBox->setValue(settings.value(QStringLiteral("cannyHighThreshold"), 150).toInt());
+    m_morphologyKernelSpinBox->setValue(settings.value(QStringLiteral("morphologyKernelSize"), 3).toInt());
+    m_scaleSpinBox->setValue(settings.value(QStringLiteral("scale"), 1.0).toDouble());
+    m_insertXSpinBox->setValue(settings.value(QStringLiteral("insertOffsetX"), 0.0).toDouble());
+    m_insertYSpinBox->setValue(settings.value(QStringLiteral("insertOffsetY"), 0.0).toDouble());
+    m_approxEpsilonSpinBox->setValue(settings.value(QStringLiteral("approxEpsilon"), 2.5).toDouble());
+    m_minContourAreaSpinBox->setValue(settings.value(QStringLiteral("minContourArea"), 24.0).toDouble());
+    m_minLineLengthSpinBox->setValue(settings.value(QStringLiteral("minLineLength"), 4.0).toDouble());
+    m_lineFitToleranceSpinBox->setValue(settings.value(QStringLiteral("lineFitTolerance"), 1.6).toDouble());
+    m_arcFitToleranceSpinBox->setValue(settings.value(QStringLiteral("arcFitTolerance"), 1.4).toDouble());
+    m_minArcAngleSpinBox->setValue(settings.value(QStringLiteral("minArcAngleDegrees"), 18.0).toDouble());
+    m_maxEntityCountSpinBox->setValue(settings.value(QStringLiteral("maxEntityCount"), 5000).toInt());
+    m_layerLineEdit->setText(settings.value(QStringLiteral("layerName"), QStringLiteral("BITMAP_IMPORT")).toString());
+
+    const QColor savedColor(settings.value(QStringLiteral("entityColor"), QColor(255, 255, 255)).value<QColor>());
+    m_selectedColor = savedColor.isValid() ? savedColor : QColor(255, 255, 255);
+    settings.endGroup();
+    updateColorButton();
+}
+
+void CadBitmapImportDialog::saveSettings() const
+{
+    QSettings settings(QStringLiteral("GCodePostProcessingSystem"), QStringLiteral("GCodePostProcessingSystem"));
+    const CadBitmapImportOptions importOptions = collectOptions();
+
+    settings.beginGroup(QStringLiteral("bitmapImport"));
+    settings.setValue(QStringLiteral("importMode"), static_cast<int>(importOptions.importMode));
+    settings.setValue(QStringLiteral("preprocessOperator"), static_cast<int>(importOptions.preprocessOperator));
+    settings.setValue(QStringLiteral("morphologyOperator"), static_cast<int>(importOptions.morphologyOperator));
+    settings.setValue(QStringLiteral("contourMode"), static_cast<int>(importOptions.contourMode));
+    settings.setValue(QStringLiteral("fitStrategy"), static_cast<int>(importOptions.fitStrategy));
+    settings.setValue(QStringLiteral("invert"), importOptions.invert);
+    settings.setValue(QStringLiteral("blurEnabled"), importOptions.blurEnabled);
+    settings.setValue(QStringLiteral("autoFitScene"), importOptions.autoFitScene);
+    settings.setValue(QStringLiteral("blurKernelSize"), importOptions.blurKernelSize);
+    settings.setValue(QStringLiteral("thresholdValue"), importOptions.thresholdValue);
+    settings.setValue(QStringLiteral("adaptiveBlockSize"), importOptions.adaptiveBlockSize);
+    settings.setValue(QStringLiteral("adaptiveC"), importOptions.adaptiveC);
+    settings.setValue(QStringLiteral("cannyLowThreshold"), importOptions.cannyLowThreshold);
+    settings.setValue(QStringLiteral("cannyHighThreshold"), importOptions.cannyHighThreshold);
+    settings.setValue(QStringLiteral("morphologyKernelSize"), importOptions.morphologyKernelSize);
+    settings.setValue(QStringLiteral("scale"), importOptions.scale);
+    settings.setValue(QStringLiteral("insertOffsetX"), importOptions.insertOffsetX);
+    settings.setValue(QStringLiteral("insertOffsetY"), importOptions.insertOffsetY);
+    settings.setValue(QStringLiteral("approxEpsilon"), importOptions.approxEpsilon);
+    settings.setValue(QStringLiteral("minContourArea"), importOptions.minContourArea);
+    settings.setValue(QStringLiteral("minLineLength"), importOptions.minLineLength);
+    settings.setValue(QStringLiteral("lineFitTolerance"), importOptions.lineFitTolerance);
+    settings.setValue(QStringLiteral("arcFitTolerance"), importOptions.arcFitTolerance);
+    settings.setValue(QStringLiteral("minArcAngleDegrees"), importOptions.minArcAngleDegrees);
+    settings.setValue(QStringLiteral("maxEntityCount"), importOptions.maxEntityCount);
+    settings.setValue(QStringLiteral("layerName"), importOptions.layerName);
+    settings.setValue(QStringLiteral("entityColor"), importOptions.entityColor);
+    settings.endGroup();
+}
+
+void CadBitmapImportDialog::schedulePreviewRefresh()
+{
+    if (m_previewRefreshTimer == nullptr)
+    {
+        refreshPreview();
+        return;
+    }
+
+    m_previewRefreshTimer->start();
 }
 
 void CadBitmapImportDialog::refreshPreview()
@@ -458,16 +599,20 @@ void CadBitmapImportDialog::refreshPreview()
     m_errorMessage = errorMessage;
     m_sourcePreviewImage = previewData.sourcePreview;
     m_processedPreviewImage = previewData.processedPreview;
+    m_vectorPreviewImage = previewData.vectorPreview;
 
     updatePreviewLabel(m_sourcePreviewLabel, m_sourcePreviewImage, QStringLiteral("原图预览"));
     updatePreviewLabel(m_processedPreviewLabel, m_processedPreviewImage, QStringLiteral("处理后预览"));
+    updatePreviewLabel(m_vectorPreviewLabel, m_vectorPreviewImage, QStringLiteral("未生成 CAD 拟合预览"));
 
     if (!errorMessage.isEmpty())
     {
         m_summaryLabel->setText(errorMessage);
+        m_buttonBox->button(QDialogButtonBox::Ok)->setEnabled(false);
         return;
     }
 
+    m_buttonBox->button(QDialogButtonBox::Ok)->setEnabled(!m_vectorPreviewImage.isNull());
     m_summaryLabel->setText(previewData.summaryText);
 }
 

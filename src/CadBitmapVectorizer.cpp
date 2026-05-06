@@ -5,6 +5,9 @@
 #include "CadBitmapVectorizer.h"
 
 #include <QFile>
+#include <QPainter>
+#include <QPainterPath>
+#include <QPen>
 
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
@@ -871,6 +874,137 @@ namespace
         .arg(result.lineCount)
         .arg(result.pointCount);
     }
+
+    QPointF cadToPreviewPoint(double cadX, double cadY, int imageHeight, const CadBitmapImportOptions& options)
+    {
+        const double safeScale = std::abs(options.scale) > 1.0e-9 ? options.scale : 1.0;
+        return QPointF
+        (
+            (cadX - options.insertOffsetX) / safeScale,
+            static_cast<double>(imageHeight) - (cadY - options.insertOffsetY) / safeScale
+        );
+    }
+
+    QRectF cadCirclePreviewRect(double cadX, double cadY, double radius, int imageHeight, const CadBitmapImportOptions& options)
+    {
+        const QPointF center = cadToPreviewPoint(cadX, cadY, imageHeight, options);
+        const double safeScale = std::abs(options.scale) > 1.0e-9 ? options.scale : 1.0;
+        const double previewRadius = std::abs(radius / safeScale);
+        return QRectF
+        (
+            center.x() - previewRadius,
+            center.y() - previewRadius,
+            previewRadius * 2.0,
+            previewRadius * 2.0
+        );
+    }
+
+    QImage buildVectorPreviewImage(const CadBitmapImportResult& result, int imageWidth, int imageHeight, const CadBitmapImportOptions& options)
+    {
+        if (imageWidth <= 0 || imageHeight <= 0 || result.importedEntityCount <= 0)
+        {
+            return QImage();
+        }
+
+        QImage image(imageWidth, imageHeight, QImage::Format_RGB32);
+        image.fill(QColor(18, 22, 28));
+
+        QPainter painter(&image);
+        painter.setRenderHint(QPainter::Antialiasing, true);
+        painter.setPen(QPen(options.entityColor.isValid() ? options.entityColor : QColor(80, 220, 255), 2.0));
+
+        for (const std::unique_ptr<DRW_Entity>& entity : result.entities)
+        {
+            if (entity == nullptr)
+            {
+                continue;
+            }
+
+            switch (entity->eType)
+            {
+            case DRW::ETYPE::POINT:
+            {
+                const auto* point = static_cast<const DRW_Point*>(entity.get());
+                const QPointF previewPoint = cadToPreviewPoint(point->basePoint.x, point->basePoint.y, imageHeight, options);
+                painter.drawEllipse(previewPoint, 2.5, 2.5);
+                break;
+            }
+            case DRW::ETYPE::LINE:
+            {
+                const auto* line = static_cast<const DRW_Line*>(entity.get());
+                painter.drawLine
+                (
+                    cadToPreviewPoint(line->basePoint.x, line->basePoint.y, imageHeight, options),
+                    cadToPreviewPoint(line->secPoint.x, line->secPoint.y, imageHeight, options)
+                );
+                break;
+            }
+            case DRW::ETYPE::CIRCLE:
+            {
+                const auto* circle = static_cast<const DRW_Circle*>(entity.get());
+                painter.drawEllipse(cadCirclePreviewRect(circle->basePoint.x, circle->basePoint.y, circle->radious, imageHeight, options));
+                break;
+            }
+            case DRW::ETYPE::ARC:
+            {
+                const auto* arc = static_cast<const DRW_Arc*>(entity.get());
+                const QRectF rect = cadCirclePreviewRect(arc->basePoint.x, arc->basePoint.y, arc->radious, imageHeight, options);
+                const double startDegrees = -arc->staangle * 180.0 / kPi;
+                const double spanDegrees = -(arc->endangle - arc->staangle) * 180.0 / kPi;
+                painter.drawArc(rect, static_cast<int>(startDegrees * 16.0), static_cast<int>(spanDegrees * 16.0));
+                break;
+            }
+            case DRW::ETYPE::ELLIPSE:
+            {
+                const auto* ellipse = static_cast<const DRW_Ellipse*>(entity.get());
+                const QPointF center = cadToPreviewPoint(ellipse->basePoint.x, ellipse->basePoint.y, imageHeight, options);
+                const double safeScale = std::abs(options.scale) > 1.0e-9 ? options.scale : 1.0;
+                const double majorRadius = std::hypot(ellipse->secPoint.x, ellipse->secPoint.y) / safeScale;
+                const double minorRadius = majorRadius * ellipse->ratio;
+                const double rotationDegrees = -std::atan2(ellipse->secPoint.y, ellipse->secPoint.x) * 180.0 / kPi;
+
+                painter.save();
+                painter.translate(center);
+                painter.rotate(rotationDegrees);
+                painter.drawEllipse(QRectF(-majorRadius, -minorRadius, majorRadius * 2.0, minorRadius * 2.0));
+                painter.restore();
+                break;
+            }
+            case DRW::ETYPE::LWPOLYLINE:
+            {
+                const auto* polyline = static_cast<const DRW_LWPolyline*>(entity.get());
+
+                if (polyline->vertlist.empty())
+                {
+                    break;
+                }
+
+                QPainterPath path;
+                const auto& firstVertex = polyline->vertlist.front();
+                path.moveTo(cadToPreviewPoint(firstVertex->x, firstVertex->y, imageHeight, options));
+
+                for (size_t index = 1; index < polyline->vertlist.size(); ++index)
+                {
+                    const auto& vertex = polyline->vertlist[index];
+                    path.lineTo(cadToPreviewPoint(vertex->x, vertex->y, imageHeight, options));
+                }
+
+                if ((polyline->flags & 1) != 0)
+                {
+                    path.closeSubpath();
+                }
+
+                painter.drawPath(path);
+                break;
+            }
+            default:
+                break;
+            }
+        }
+
+        painter.end();
+        return image;
+    }
 }
 
 bool CadBitmapVectorizer::loadBitmapImage(const QString& filePath, cv::Mat& image, QString* errorMessage)
@@ -918,14 +1052,33 @@ CadBitmapPreviewData CadBitmapVectorizer::buildPreview(const cv::Mat& sourceImag
     }
 
     previewData.processedPreview = matToQImage(mask);
-    previewData.summaryText = QStringLiteral("预览尺寸: %1 x %2，当前比例: %3")
-        .arg(sourceImage.cols)
-        .arg(sourceImage.rows)
-        .arg(options.scale, 0, 'f', 3);
+
+    CadBitmapImportResult previewResult;
+    QString vectorizeError;
+
+    if (vectorize(sourceImage, options, previewResult, &vectorizeError))
+    {
+        previewData.vectorPreview = buildVectorPreviewImage(previewResult, sourceImage.cols, sourceImage.rows, options);
+        previewData.summaryText = previewResult.summaryText;
+    }
+    else
+    {
+        previewData.summaryText = vectorizeError.isEmpty()
+            ? QStringLiteral("预览尺寸: %1 x %2，当前比例: %3").arg(sourceImage.cols).arg(sourceImage.rows).arg(options.scale, 0, 'f', 3)
+            : vectorizeError;
+    }
+
     return previewData;
 }
 
-bool CadBitmapVectorizer::vectorize(const cv::Mat& sourceImage, const CadBitmapImportOptions& options, CadBitmapImportResult& result, QString* errorMessage)
+bool CadBitmapVectorizer::vectorize
+(
+    const cv::Mat& sourceImage,
+    const CadBitmapImportOptions& options,
+    CadBitmapImportResult& result,
+    QString* errorMessage,
+    const std::function<bool(int current, int total)>& progressCallback
+)
 {
     result = CadBitmapImportResult();
 
@@ -941,8 +1094,30 @@ bool CadBitmapVectorizer::vectorize(const cv::Mat& sourceImage, const CadBitmapI
     cv::findContours(mask.clone(), contours, retrievalMode, cv::CHAIN_APPROX_NONE);
     result.contourCount = static_cast<int>(contours.size());
 
-    for (const std::vector<cv::Point>& contour : contours)
+    if (progressCallback && !progressCallback(0, result.contourCount))
     {
+        if (errorMessage != nullptr)
+        {
+            *errorMessage = QStringLiteral("位图导入已取消。");
+        }
+
+        return false;
+    }
+
+    for (int contourIndex = 0; contourIndex < static_cast<int>(contours.size()); ++contourIndex)
+    {
+        if (progressCallback && !progressCallback(contourIndex + 1, result.contourCount))
+        {
+            if (errorMessage != nullptr)
+            {
+                *errorMessage = QStringLiteral("位图导入已取消。");
+            }
+
+            return false;
+        }
+
+        const std::vector<cv::Point>& contour = contours[static_cast<size_t>(contourIndex)];
+
         if (result.importedEntityCount >= options.maxEntityCount)
         {
             break;

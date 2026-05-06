@@ -4,6 +4,7 @@
 
 #include "libdxfrw/drw_entities.h"
 
+#include <functional>
 #include <memory>
 #include <vector>
 
@@ -84,6 +85,7 @@ struct CadBitmapPreviewData
 {
     QImage sourcePreview;
     QImage processedPreview;
+    QImage vectorPreview;
     QString summaryText;
 };
 
@@ -106,5 +108,12 @@ class CadBitmapVectorizer
 public:
     static bool loadBitmapImage(const QString& filePath, cv::Mat& image, QString* errorMessage = nullptr);
     static CadBitmapPreviewData buildPreview(const cv::Mat& sourceImage, const CadBitmapImportOptions& options, QString* errorMessage = nullptr);
-    static bool vectorize(const cv::Mat& sourceImage, const CadBitmapImportOptions& options, CadBitmapImportResult& result, QString* errorMessage = nullptr);
+    static bool vectorize
+    (
+        const cv::Mat& sourceImage,
+        const CadBitmapImportOptions& options,
+        CadBitmapImportResult& result,
+        QString* errorMessage = nullptr,
+        const std::function<bool(int current, int total)>& progressCallback = nullptr
+    );
 };

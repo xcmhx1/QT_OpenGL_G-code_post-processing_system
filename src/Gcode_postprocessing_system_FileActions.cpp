@@ -10,6 +10,7 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QMessageBox>
+#include <QProgressDialog>
 #include <QSettings>
 #include <QStandardPaths>
 
@@ -101,15 +102,42 @@ bool Gcode_postprocessing_system::importBitmapFile(const QString& filePath)
     const CadBitmapImportOptions importOptions = dialog.options();
     CadBitmapImportResult importResult;
     QString errorMessage;
+    QProgressDialog progressDialog(QStringLiteral("正在矢量化位图..."), QStringLiteral("取消"), 0, 100, this);
+    progressDialog.setWindowTitle(QStringLiteral("位图导入"));
+    progressDialog.setWindowModality(Qt::ApplicationModal);
+    progressDialog.setMinimumDuration(300);
 
     QApplication::setOverrideCursor(Qt::WaitCursor);
-    if (!CadBitmapVectorizer::vectorize(dialog.sourceImage(), importOptions, importResult, &errorMessage))
+    const bool vectorizeSuccess = CadBitmapVectorizer::vectorize
+    (
+        dialog.sourceImage(),
+        importOptions,
+        importResult,
+        &errorMessage,
+        [&progressDialog](int current, int total)
+        {
+            if (total > 0)
+            {
+                progressDialog.setRange(0, total);
+                progressDialog.setValue(current);
+            }
+            else
+            {
+                progressDialog.setRange(0, 0);
+            }
+
+            QApplication::processEvents();
+            return !progressDialog.wasCanceled();
+        }
+    );
+    QApplication::restoreOverrideCursor();
+    progressDialog.setValue(progressDialog.maximum());
+
+    if (!vectorizeSuccess)
     {
-        QApplication::restoreOverrideCursor();
         QMessageBox::warning(this, QStringLiteral("位图导入失败"), errorMessage);
         return false;
     }
-    QApplication::restoreOverrideCursor();
 
     const bool replaceExisting = importOptions.importMode == CadBitmapImportMode::ReplaceDocument;
     m_editer.clearHistory();

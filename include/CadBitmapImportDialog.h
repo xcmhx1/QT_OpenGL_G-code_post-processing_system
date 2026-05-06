@@ -18,6 +18,7 @@ class QLabel;
 class QLineEdit;
 class QPushButton;
 class QSpinBox;
+class QTimer;
 
 class CadBitmapImportDialog : public QDialog
 {
@@ -35,6 +36,9 @@ protected:
 private:
     void buildUi();
     void connectSignals();
+    void loadSettings();
+    void saveSettings() const;
+    void schedulePreviewRefresh();
     void refreshPreview();
     void updatePreviewLabel(QLabel* label, const QImage& image, const QString& fallbackText);
     void updateColorButton();
@@ -46,8 +50,10 @@ private:
     cv::Mat m_sourceImage;
     QImage m_sourcePreviewImage;
     QImage m_processedPreviewImage;
+    QImage m_vectorPreviewImage;
     QLabel* m_sourcePreviewLabel = nullptr;
     QLabel* m_processedPreviewLabel = nullptr;
+    QLabel* m_vectorPreviewLabel = nullptr;
     QLabel* m_summaryLabel = nullptr;
     QComboBox* m_importModeCombo = nullptr;
     QComboBox* m_operatorCombo = nullptr;
@@ -77,5 +83,6 @@ private:
     QDoubleSpinBox* m_minArcAngleSpinBox = nullptr;
     QSpinBox* m_maxEntityCountSpinBox = nullptr;
     QDialogButtonBox* m_buttonBox = nullptr;
+    QTimer* m_previewRefreshTimer = nullptr;
     QColor m_selectedColor = QColor(255, 255, 255);
 };
