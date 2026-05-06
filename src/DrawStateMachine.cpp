@@ -13,6 +13,7 @@ void DrawStateMachine::reset()
     const QString preservedLayerName = drawingLayerName;
     const int preservedColorIndex = drawingColorIndex;
     const bool preservedOrthoEnabled = orthoEnabled;
+    const bool preservedPolarTrackingEnabled = polarTrackingEnabled;
     const int preservedPolygonSideCount = polygonSideCount;
     const bool preservedPolygonCircumscribedAboutCircle = polygonCircumscribedAboutCircle;
 
@@ -65,6 +66,7 @@ void DrawStateMachine::reset()
     dynamicCommandBuffer.clear();
     dynamicCommandActiveIndex = 0;
     orthoEnabled = preservedOrthoEnabled;
+    polarTrackingEnabled = preservedPolarTrackingEnabled;
     polygonSideCount = preservedPolygonSideCount;
     polygonCircumscribedAboutCircle = preservedPolygonCircumscribedAboutCircle;
 }

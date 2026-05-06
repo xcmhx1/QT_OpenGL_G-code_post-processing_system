@@ -1338,12 +1338,18 @@ QVector3D CadController::dynamicInputReferencePoint() const
 
 QVector3D CadController::applyOrthoConstraint(const QVector3D& worldPos) const
 {
+    constexpr double kPolarAngleIncrementDegrees = 15.0;
+    constexpr double kDegreesPerRadian = 180.0 / 3.14159265358979323846;
+    constexpr double kRadiansPerDegree = 3.14159265358979323846 / 180.0;
     const QVector3D planarPoint = flattenToDrawingPlane(worldPos);
+    const bool hasConstraintReference = !m_drawState.commandPoints.isEmpty()
+        || (isParameterInputCommandActive()
+            && m_parameterInputSession.command == ParameterInputCommand::Mirror
+            && m_parameterInputSession.stageIndex == 1);
 
-    if (!m_drawState.orthoEnabled
-        || !m_drawState.hasActiveCommand()
+    if (!m_drawState.hasActiveCommand()
         || !isAwaitingPointInput()
-        || m_drawState.commandPoints.isEmpty())
+        || !hasConstraintReference)
     {
         return planarPoint;
     }
@@ -1351,12 +1357,37 @@ QVector3D CadController::applyOrthoConstraint(const QVector3D& worldPos) const
     const QVector3D basePoint = dynamicInputReferencePoint();
     const QVector3D delta = planarPoint - basePoint;
 
-    if (std::abs(delta.x()) >= std::abs(delta.y()))
+    if (m_drawState.orthoEnabled)
     {
-        return QVector3D(planarPoint.x(), basePoint.y(), 0.0f);
+        if (std::abs(delta.x()) >= std::abs(delta.y()))
+        {
+            return QVector3D(planarPoint.x(), basePoint.y(), 0.0f);
+        }
+
+        return QVector3D(basePoint.x(), planarPoint.y(), 0.0f);
     }
 
-    return QVector3D(basePoint.x(), planarPoint.y(), 0.0f);
+    if (!m_drawState.polarTrackingEnabled)
+    {
+        return planarPoint;
+    }
+
+    const double distance = std::hypot(static_cast<double>(delta.x()), static_cast<double>(delta.y()));
+
+    if (distance <= 1.0e-9)
+    {
+        return planarPoint;
+    }
+
+    const double angleDegrees = std::atan2(static_cast<double>(delta.y()), static_cast<double>(delta.x())) * kDegreesPerRadian;
+    const double constrainedDegrees = std::round(angleDegrees / kPolarAngleIncrementDegrees) * kPolarAngleIncrementDegrees;
+    const double constrainedRadians = constrainedDegrees * kRadiansPerDegree;
+    return QVector3D
+    (
+        static_cast<float>(basePoint.x() + distance * std::cos(constrainedRadians)),
+        static_cast<float>(basePoint.y() + distance * std::sin(constrainedRadians)),
+        0.0f
+    );
 }
 
 bool CadController::tryResolveDynamicInputPoint(const QString& inputText, QVector3D& worldPoint, QString& errorMessage) const
@@ -2492,6 +2523,11 @@ QString CadController::appendDynamicInputPromptState(const QString& basePrompt) 
     if (m_drawState.orthoEnabled)
     {
         prompt += QStringLiteral(" | [正交]");
+    }
+
+    if (m_drawState.polarTrackingEnabled)
+    {
+        prompt += QStringLiteral(" | [极轴15°]");
     }
 
     return prompt;

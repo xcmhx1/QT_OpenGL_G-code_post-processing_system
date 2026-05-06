@@ -154,6 +154,11 @@ public:
     // @return 命令名称字符串
     QString currentCommandName() const;
 
+    bool orthoEnabled() const;
+    bool polarTrackingEnabled() const;
+    void setOrthoEnabled(bool enabled);
+    void setPolarTrackingEnabled(bool enabled);
+
     // 查询当前动态输入浮框展示状态。
     CadDynamicInputOverlayState dynamicInputOverlayState() const;
 

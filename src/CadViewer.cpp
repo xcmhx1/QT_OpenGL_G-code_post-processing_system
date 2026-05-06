@@ -227,6 +227,32 @@ void CadViewer::setIntersectionSnapEnabled(bool enabled)
     update();
 }
 
+void CadViewer::setOrthoEnabled(bool enabled)
+{
+    if (m_controller.orthoEnabled() == enabled)
+    {
+        return;
+    }
+
+    m_controller.setOrthoEnabled(enabled);
+    updateHoveredWorldPosition(m_cursorScreenPos);
+    emit orthoEnabledChanged(enabled);
+    update();
+}
+
+void CadViewer::setPolarTrackingEnabled(bool enabled)
+{
+    if (m_controller.polarTrackingEnabled() == enabled)
+    {
+        return;
+    }
+
+    m_controller.setPolarTrackingEnabled(enabled);
+    updateHoveredWorldPosition(m_cursorScreenPos);
+    emit polarTrackingEnabledChanged(enabled);
+    update();
+}
+
 void CadViewer::setTheme(const AppThemeColors& theme)
 {
     m_theme = theme;

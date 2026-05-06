@@ -92,7 +92,7 @@ bool CadController::handleKeyPress(QKeyEvent* event)
     // F8：切换正交约束
     if (event->key() == Qt::Key_F8)
     {
-        m_drawState.orthoEnabled = !m_drawState.orthoEnabled;
+        setOrthoEnabled(!m_drawState.orthoEnabled);
 
         if (m_viewer != nullptr)
         {
@@ -101,6 +101,25 @@ bool CadController::handleKeyPress(QKeyEvent* event)
                 m_drawState.orthoEnabled
                     ? QStringLiteral("正交约束: 开")
                     : QStringLiteral("正交约束: 关")
+            );
+            m_viewer->refreshCommandPrompt();
+        }
+
+        return true;
+    }
+
+    // F10：切换极轴追踪
+    if (event->key() == Qt::Key_F10)
+    {
+        setPolarTrackingEnabled(!m_drawState.polarTrackingEnabled);
+
+        if (m_viewer != nullptr)
+        {
+            m_viewer->appendCommandMessage
+            (
+                m_drawState.polarTrackingEnabled
+                    ? QStringLiteral("极轴追踪: 开（15°）")
+                    : QStringLiteral("极轴追踪: 关")
             );
             m_viewer->refreshCommandPrompt();
         }

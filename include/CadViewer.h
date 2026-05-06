@@ -94,6 +94,12 @@ public:
     // 设置交点吸附开关。
     void setIntersectionSnapEnabled(bool enabled);
 
+    // 设置正交约束开关。
+    void setOrthoEnabled(bool enabled);
+
+    // 设置极轴追踪开关。
+    void setPolarTrackingEnabled(bool enabled);
+
     // 设置 Viewer 主题。
     void setTheme(const AppThemeColors& theme);
 
@@ -269,6 +275,10 @@ signals:
     // 文件拖放请求信号
     // @param filePath 文件路径
     void fileDropRequested(const QString& filePath);
+
+    // 绘图约束模式变化。
+    void orthoEnabledChanged(bool enabled);
+    void polarTrackingEnabledChanged(bool enabled);
 
 protected:
     // OpenGL 初始化，在窗口第一次显示时调用

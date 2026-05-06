@@ -231,6 +231,9 @@ public:
     // 正交约束开关（F8）。
     bool orthoEnabled = false;
 
+    // 极轴追踪开关（F10）。
+    bool polarTrackingEnabled = false;
+
     // 多边形默认边数，跨命令保留。
     int polygonSideCount = 6;
 

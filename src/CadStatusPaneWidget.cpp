@@ -83,17 +83,25 @@ CadStatusPaneWidget::CadStatusPaneWidget(QWidget* parent)
 
     snapLayout->addWidget(m_snapSettingsButton);
 
-    QLabel* orthoReservedLabel = new QLabel(QStringLiteral("正交: 预留"), this);
-    orthoReservedLabel->setFont(valueFont);
+    m_orthoButton = new QToolButton(this);
+    m_orthoButton->setCheckable(true);
+    m_orthoButton->setCursor(Qt::PointingHandCursor);
+    m_orthoButton->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    m_orthoButton->setProperty("snapToggle", true);
+    m_orthoButton->setMinimumHeight(28);
 
-    QLabel* polarReservedLabel = new QLabel(QStringLiteral("极轴: 预留"), this);
-    polarReservedLabel->setFont(valueFont);
+    m_polarButton = new QToolButton(this);
+    m_polarButton->setCheckable(true);
+    m_polarButton->setCursor(Qt::PointingHandCursor);
+    m_polarButton->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    m_polarButton->setProperty("snapToggle", true);
+    m_polarButton->setMinimumHeight(28);
 
     layout->addWidget(coordinateFrame);
     layout->addSpacing(8);
     layout->addWidget(snapContainer);
-    layout->addWidget(orthoReservedLabel);
-    layout->addWidget(polarReservedLabel);
+    layout->addWidget(m_orthoButton);
+    layout->addWidget(m_polarButton);
     layout->addStretch(1);
 
     connect(m_basePointSnapAction, &QAction::toggled, this, &CadStatusPaneWidget::basePointSnapToggled);
@@ -103,6 +111,36 @@ CadStatusPaneWidget::CadStatusPaneWidget(QWidget* parent)
     connect(m_midpointSnapAction, &QAction::toggled, this, &CadStatusPaneWidget::midpointSnapToggled);
     connect(m_centerSnapAction, &QAction::toggled, this, &CadStatusPaneWidget::centerSnapToggled);
     connect(m_intersectionSnapAction, &QAction::toggled, this, &CadStatusPaneWidget::intersectionSnapToggled);
+    connect
+    (
+        m_orthoButton,
+        &QToolButton::toggled,
+        this,
+        [this](bool enabled)
+        {
+            refreshDraftingModeButtons();
+
+            if (!m_applyingDraftingModes)
+            {
+                emit orthoToggled(enabled);
+            }
+        }
+    );
+    connect
+    (
+        m_polarButton,
+        &QToolButton::toggled,
+        this,
+        [this](bool enabled)
+        {
+            refreshDraftingModeButtons();
+
+            if (!m_applyingDraftingModes)
+            {
+                emit polarTrackingToggled(enabled);
+            }
+        }
+    );
 
     const auto updateSummary = [this]()
     {
@@ -130,6 +168,7 @@ CadStatusPaneWidget::CadStatusPaneWidget(QWidget* parent)
 
     setTheme(buildAppThemeColors(AppThemeMode::Light));
     refreshSnapSummary();
+    refreshDraftingModeButtons();
 
     setWorldPosition(QVector3D());
 }
@@ -183,6 +222,12 @@ void CadStatusPaneWidget::setTheme(const AppThemeColors& theme)
             "}"
             "QToolButton[snapToggle=\"true\"]:hover {"
             "background-color: %7;"
+            "}"
+            "QToolButton[snapToggle=\"true\"]:checked {"
+            "background-color: %8;"
+            "color: %9;"
+            "border: 1px solid %8;"
+            "font-weight: 600;"
             "}"
             "QPushButton[snapToggle=\"true\"]:checked {"
             "background-color: %8;"
@@ -301,6 +346,32 @@ void CadStatusPaneWidget::setSnapOptionMask(quint32 mask)
     emit snapOptionMaskChanged(snapOptionMask());
 }
 
+void CadStatusPaneWidget::setOrthoEnabled(bool enabled)
+{
+    if (m_orthoButton == nullptr)
+    {
+        return;
+    }
+
+    m_applyingDraftingModes = true;
+    m_orthoButton->setChecked(enabled);
+    m_applyingDraftingModes = false;
+    refreshDraftingModeButtons();
+}
+
+void CadStatusPaneWidget::setPolarTrackingEnabled(bool enabled)
+{
+    if (m_polarButton == nullptr)
+    {
+        return;
+    }
+
+    m_applyingDraftingModes = true;
+    m_polarButton->setChecked(enabled);
+    m_applyingDraftingModes = false;
+    refreshDraftingModeButtons();
+}
+
 void CadStatusPaneWidget::refreshSnapSummary()
 {
     if (m_snapSettingsButton == nullptr)
@@ -352,4 +423,19 @@ void CadStatusPaneWidget::refreshSnapSummary()
     }
 
     m_snapSettingsButton->setToolTip(QStringLiteral("已启用: %1").arg(enabledOptions.join(QStringLiteral(" | "))));
+}
+
+void CadStatusPaneWidget::refreshDraftingModeButtons()
+{
+    if (m_orthoButton != nullptr)
+    {
+        m_orthoButton->setText(m_orthoButton->isChecked() ? QStringLiteral("正交 开") : QStringLiteral("正交 关"));
+        m_orthoButton->setToolTip(QStringLiteral("正交约束（F8）：将下一点锁定到水平或垂直方向"));
+    }
+
+    if (m_polarButton != nullptr)
+    {
+        m_polarButton->setText(m_polarButton->isChecked() ? QStringLiteral("极轴 15°") : QStringLiteral("极轴 关"));
+        m_polarButton->setToolTip(QStringLiteral("极轴追踪（F10）：将下一点吸附到 15° 增量方向；正交开启时正交优先"));
+    }
 }

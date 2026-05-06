@@ -154,6 +154,8 @@ void CadViewer::keyPressEvent(QKeyEvent* event)
 {
     ensureBlankCursor();
     const bool dynamicCommandOverlayVisible = m_controller.dynamicCommandOverlayState().visible;
+    const bool orthoEnabledBefore = m_controller.orthoEnabled();
+    const bool polarTrackingEnabledBefore = m_controller.polarTrackingEnabled();
 
     if (!dynamicCommandOverlayVisible
         && event->key() == Qt::Key_Tab
@@ -171,6 +173,18 @@ void CadViewer::keyPressEvent(QKeyEvent* event)
     if (!m_controller.handleKeyPress(event))
     {
         QOpenGLWidget::keyPressEvent(event);
+    }
+
+    if (m_controller.orthoEnabled() != orthoEnabledBefore)
+    {
+        emit orthoEnabledChanged(m_controller.orthoEnabled());
+        updateHoveredWorldPosition(m_cursorScreenPos);
+    }
+
+    if (m_controller.polarTrackingEnabled() != polarTrackingEnabledBefore)
+    {
+        emit polarTrackingEnabledChanged(m_controller.polarTrackingEnabled());
+        updateHoveredWorldPosition(m_cursorScreenPos);
     }
 
     updateOverlappedHandleHoverState(m_cursorScreenPos);

@@ -181,6 +181,12 @@ QVector3D CadViewer::resolveInteractiveWorldPosition(const QPoint& screenPos) co
 
 void CadViewer::updateHoveredWorldPosition(const QPoint& screenPos)
 {
+    if (m_controller.drawState().hasActiveCommand())
+    {
+        emit hoveredWorldPositionChanged(m_controller.drawState().currentPos);
+        return;
+    }
+
     emit hoveredWorldPositionChanged(resolveInteractiveWorldPosition(screenPos));
 }
 

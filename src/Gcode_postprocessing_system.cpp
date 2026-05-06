@@ -151,6 +151,10 @@ Gcode_postprocessing_system::Gcode_postprocessing_system(QWidget* parent)
     connect(m_statusPaneWidget, &CadStatusPaneWidget::midpointSnapToggled, ui->openGLWidget, &CadViewer::setMidpointSnapEnabled);
     connect(m_statusPaneWidget, &CadStatusPaneWidget::centerSnapToggled, ui->openGLWidget, &CadViewer::setCenterSnapEnabled);
     connect(m_statusPaneWidget, &CadStatusPaneWidget::intersectionSnapToggled, ui->openGLWidget, &CadViewer::setIntersectionSnapEnabled);
+    connect(m_statusPaneWidget, &CadStatusPaneWidget::orthoToggled, ui->openGLWidget, &CadViewer::setOrthoEnabled);
+    connect(m_statusPaneWidget, &CadStatusPaneWidget::polarTrackingToggled, ui->openGLWidget, &CadViewer::setPolarTrackingEnabled);
+    connect(ui->openGLWidget, &CadViewer::orthoEnabledChanged, m_statusPaneWidget, &CadStatusPaneWidget::setOrthoEnabled);
+    connect(ui->openGLWidget, &CadViewer::polarTrackingEnabledChanged, m_statusPaneWidget, &CadStatusPaneWidget::setPolarTrackingEnabled);
     connect
     (
         m_statusPaneWidget,

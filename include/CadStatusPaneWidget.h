@@ -35,6 +35,8 @@ public:
     void setTheme(const AppThemeColors& theme);
     quint32 snapOptionMask() const;
     void setSnapOptionMask(quint32 mask);
+    void setOrthoEnabled(bool enabled);
+    void setPolarTrackingEnabled(bool enabled);
 
     static constexpr quint32 allSnapOptionMask()
     {
@@ -66,13 +68,18 @@ signals:
     void centerSnapToggled(bool enabled);
     void intersectionSnapToggled(bool enabled);
     void snapOptionMaskChanged(quint32 mask);
+    void orthoToggled(bool enabled);
+    void polarTrackingToggled(bool enabled);
 
 private:
     void refreshSnapSummary();
+    void refreshDraftingModeButtons();
 
 private:
     QLabel* m_coordinateValueLabel = nullptr;
     QToolButton* m_snapSettingsButton = nullptr;
+    QToolButton* m_orthoButton = nullptr;
+    QToolButton* m_polarButton = nullptr;
     QMenu* m_snapSettingsMenu = nullptr;
     QAction* m_basePointSnapAction = nullptr;
     QAction* m_controlPointSnapAction = nullptr;
@@ -82,4 +89,5 @@ private:
     QAction* m_centerSnapAction = nullptr;
     QAction* m_intersectionSnapAction = nullptr;
     bool m_applyingSnapMask = false;
+    bool m_applyingDraftingModes = false;
 };

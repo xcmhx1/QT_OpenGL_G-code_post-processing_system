@@ -701,7 +701,39 @@ const DrawStateMachine& CadController::drawState() const
     return m_drawState;
 }
 
+bool CadController::orthoEnabled() const
+{
+    return m_drawState.orthoEnabled;
+}
 
+bool CadController::polarTrackingEnabled() const
+{
+    return m_drawState.polarTrackingEnabled;
+}
+
+void CadController::setOrthoEnabled(bool enabled)
+{
+    m_drawState.orthoEnabled = enabled;
+
+    if (m_viewer != nullptr)
+    {
+        syncCurrentPosWithCursor();
+        m_viewer->refreshCommandPrompt();
+        m_viewer->requestViewUpdate();
+    }
+}
+
+void CadController::setPolarTrackingEnabled(bool enabled)
+{
+    m_drawState.polarTrackingEnabled = enabled;
+
+    if (m_viewer != nullptr)
+    {
+        syncCurrentPosWithCursor();
+        m_viewer->refreshCommandPrompt();
+        m_viewer->requestViewUpdate();
+    }
+}
 
 bool CadController::deleteSelectedEntity()
 {
