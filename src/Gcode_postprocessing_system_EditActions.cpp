@@ -56,17 +56,7 @@ bool Gcode_postprocessing_system::deleteSelectedEntity()
         return false;
     }
 
-    int deletedCount = 0;
-
-    for (CadItem* item : selectedItems)
-    {
-        if (item != nullptr && m_editer.deleteEntity(item))
-        {
-            ++deletedCount;
-        }
-    }
-
-    if (deletedCount <= 0)
+    if (!m_editer.deleteEntities(selectedItems))
     {
         QMessageBox::warning(this, QStringLiteral("删除图元"), QStringLiteral("选中图元删除失败。"));
         return false;
@@ -74,11 +64,11 @@ bool Gcode_postprocessing_system::deleteSelectedEntity()
 
     ui->openGLWidget->appendCommandMessage
     (
-        deletedCount > 1
-            ? QStringLiteral("已删除 %1 个图元。").arg(deletedCount)
+        selectedItems.size() > 1
+            ? QStringLiteral("已删除 %1 个图元。").arg(selectedItems.size())
             : QStringLiteral("已删除选中图元。")
     );
-    statusBar()->showMessage(QStringLiteral("图元删除完成（%1）").arg(deletedCount), 4000);
+    statusBar()->showMessage(QStringLiteral("图元删除完成（%1）").arg(selectedItems.size()), 4000);
     return true;
 }
 

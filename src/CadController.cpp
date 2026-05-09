@@ -749,22 +749,12 @@ bool CadController::deleteSelectedEntity()
         return false;
     }
 
-    int deletedCount = 0;
-
-    for (CadItem* item : selectedItems)
-    {
-        if (item != nullptr && m_editer->deleteEntity(item))
-        {
-            ++deletedCount;
-        }
-    }
-
-    if (deletedCount > 0)
+    if (m_editer->deleteEntities(selectedItems))
     {
         m_viewer->appendCommandMessage
         (
-            deletedCount > 1
-                ? QStringLiteral("已删除 %1 个图元").arg(deletedCount)
+            selectedItems.size() > 1
+                ? QStringLiteral("已删除 %1 个图元").arg(selectedItems.size())
                 : QStringLiteral("已删除选中图元")
         );
         m_viewer->refreshCommandPrompt();
