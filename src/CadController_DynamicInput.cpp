@@ -77,6 +77,27 @@ namespace
         return true;
     }
 
+    bool appendInfiniteEntityReferenceDistance(const CadItem* item, const QVector3D& basePoint, double& maxDistance)
+    {
+        if (item == nullptr || item->m_nativeEntity == nullptr)
+        {
+            return false;
+        }
+
+        if (item->m_type != DRW::ETYPE::RAY && item->m_type != DRW::ETYPE::XLINE)
+        {
+            return false;
+        }
+
+        const DRW_Ray* ray = static_cast<const DRW_Ray*>(item->m_nativeEntity);
+        const QVector3D rayBase(
+            static_cast<float>(ray->basePoint.x),
+            static_cast<float>(ray->basePoint.y),
+            static_cast<float>(ray->basePoint.z));
+        maxDistance = std::max(maxDistance, static_cast<double>((flattenToDrawingPlane(rayBase) - basePoint).length()));
+        return true;
+    }
+
     double scaleReferenceDistance(const QVector<CadItem*>& items, const QVector3D& basePoint)
     {
         double maxDistance = 0.0;
@@ -84,6 +105,11 @@ namespace
         for (const CadItem* item : items)
         {
             if (item == nullptr)
+            {
+                continue;
+            }
+
+            if (appendInfiniteEntityReferenceDistance(item, basePoint, maxDistance))
             {
                 continue;
             }
