@@ -42,6 +42,9 @@ void DrawStateMachine::reset()
     ellipseSubMode = EllipseDrawSubMode::Idle;
     polylineSubMode = PolylineDrawSubMode::Idle;
     lwPolylineSubMode = LWPolylineDrawSubMode::Idle; 
+    scalePreviewActive = false;
+    scalePreviewBasePoint = QVector3D();
+    scalePreviewFactor = 1.0;
 
     // 重置鼠标相关的世界坐标位置
     pressScreenPos = QPoint();

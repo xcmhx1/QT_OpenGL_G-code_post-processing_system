@@ -4,6 +4,7 @@
 #include "CadController.h"
 
 #include "CadEditer.h"
+#include "CadItem.h"
 #include "CadViewer.h"
 
 #include <algorithm>
@@ -76,6 +77,26 @@ namespace
         return true;
     }
 
+    double scaleReferenceDistance(const QVector<CadItem*>& items, const QVector3D& basePoint)
+    {
+        double maxDistance = 0.0;
+
+        for (const CadItem* item : items)
+        {
+            if (item == nullptr)
+            {
+                continue;
+            }
+
+            for (const QVector3D& vertex : item->m_geometry.vertices)
+            {
+                maxDistance = std::max(maxDistance, static_cast<double>((flattenToDrawingPlane(vertex) - basePoint).length()));
+            }
+        }
+
+        return std::max(maxDistance, 1.0);
+    }
+
     struct DynamicCommandDefinition
     {
         QString canonical;
@@ -103,6 +124,7 @@ namespace
             { QStringLiteral("polyline"),   QStringLiteral("POLYLINE 多段线"),   { QStringLiteral("o"), QStringLiteral("polyline"), QStringLiteral("pline"), QStringLiteral("多段线") } },
             { QStringLiteral("lwpolyline"), QStringLiteral("LWPOLYLINE 轻量多段线"), { QStringLiteral("w"), QStringLiteral("lwpolyline"), QStringLiteral("轻量多段线") } },
             { QStringLiteral("move"),       QStringLiteral("MOVE  移动"),        { QStringLiteral("m"), QStringLiteral("move"), QStringLiteral("移动") } },
+            { QStringLiteral("scale"),      QStringLiteral("SCALE 缩放"),        { QStringLiteral("sc"), QStringLiteral("scale"), QStringLiteral("缩放") } },
             { QStringLiteral("delete"),     QStringLiteral("DELETE 删除"),       { QStringLiteral("del"), QStringLiteral("delete"), QStringLiteral("erase"), QStringLiteral("删除") } },
             { QStringLiteral("color"),      QStringLiteral("COLOR 改色"),        { QStringLiteral("k"), QStringLiteral("color"), QStringLiteral("改色"), QStringLiteral("颜色") } },
             { QStringLiteral("fit"),        QStringLiteral("FIT   适配视图"),    { QStringLiteral("f"), QStringLiteral("fit"), QStringLiteral("zoomextents"), QStringLiteral("适配") } },
@@ -204,7 +226,9 @@ QString CadController::parameterInputPrompt() const
     case ParameterInputCommand::Rotate:
         return QStringLiteral("ROTATE: 输入旋转角度（度）");
     case ParameterInputCommand::Scale:
-        return QStringLiteral("SCALE: 输入缩放倍率");
+        return m_parameterInputSession.stageIndex == 0
+            ? QStringLiteral("SCALE: 指定缩放基点")
+            : QStringLiteral("SCALE: 指定缩放因子或输入倍率");
     case ParameterInputCommand::RectangularArray:
         switch (m_parameterInputSession.stageIndex)
         {
@@ -472,7 +496,7 @@ CadDynamicInputOverlayState CadController::dynamicInputOverlayState() const
         case ParameterInputCommand::Scale:
             labelText = QStringLiteral("缩放倍率");
             valueText = formatDynamicInputValue(m_parameterInputSession.doubleValue1);
-            stageHint = QStringLiteral("输入倍率后 Enter/Space确认");
+            stageHint = QStringLiteral("移动鼠标预览，左键或 Enter/Space确认，也可输入倍率");
             break;
         case ParameterInputCommand::RectangularArray:
             switch (m_parameterInputSession.stageIndex)
@@ -834,6 +858,11 @@ bool CadController::executeIdleCommandByCanonical(const QString& canonicalComman
         return beginMoveSelected();
     }
 
+    if (normalized == QStringLiteral("scale"))
+    {
+        return beginScaleSelected();
+    }
+
     if (normalized == QStringLiteral("delete"))
     {
         return deleteSelectedEntity();
@@ -891,6 +920,83 @@ bool CadController::executeIdleCommandByCanonical(const QString& canonicalComman
     return false;
 }
 
+void CadController::clearScalePreview()
+{
+    m_drawState.scalePreviewActive = false;
+    m_drawState.scalePreviewBasePoint = QVector3D();
+    m_drawState.scalePreviewFactor = 1.0;
+}
+
+bool CadController::updateScalePreviewFromCursor()
+{
+    if (!isParameterInputCommandActive()
+        || m_parameterInputSession.command != ParameterInputCommand::Scale
+        || m_parameterInputSession.stageIndex != 1)
+    {
+        return false;
+    }
+
+    const QVector3D basePoint = flattenToDrawingPlane(m_parameterInputSession.point1);
+    const double referenceDistance = std::max(m_parameterInputSession.doubleValue2, 0.001);
+
+    if (m_parameterInputSession.fieldBuffer.isEmpty())
+    {
+        const double cursorDistance = static_cast<double>((flattenToDrawingPlane(m_drawState.currentPos) - basePoint).length());
+        m_parameterInputSession.doubleValue1 = std::max(cursorDistance / referenceDistance, 0.001);
+    }
+
+    m_drawState.scalePreviewActive = true;
+    m_drawState.scalePreviewBasePoint = basePoint;
+    m_drawState.scalePreviewFactor = m_parameterInputSession.doubleValue1;
+    return true;
+}
+
+bool CadController::finishScaleParameterInput(double scaleFactor)
+{
+    if (scaleFactor < 0.001 || m_editer == nullptr)
+    {
+        if (m_viewer != nullptr)
+        {
+            m_viewer->appendCommandMessage(QStringLiteral("选中图元缩放失败。"));
+            m_viewer->refreshCommandPrompt();
+            m_viewer->requestViewUpdate();
+        }
+
+        return true;
+    }
+
+    const int requestedCount = m_parameterInputSession.selectedItems.size();
+    const bool success = m_editer->scaleEntities
+    (
+        m_parameterInputSession.selectedItems,
+        flattenToDrawingPlane(m_parameterInputSession.point1),
+        scaleFactor
+    );
+
+    if (m_viewer != nullptr)
+    {
+        m_viewer->appendCommandMessage
+        (
+            success
+                ? QStringLiteral("已将 %1 个图元按基点缩放为 %2 倍。")
+                    .arg(requestedCount)
+                    .arg(formatDynamicInputValue(scaleFactor))
+                : QStringLiteral("选中图元缩放失败。")
+        );
+        m_viewer->refreshCommandPrompt();
+        m_viewer->requestViewUpdate();
+    }
+
+    if (success)
+    {
+        m_drawState.editType = EditType::None;
+        resetParameterInputSession();
+        resetPointDynamicInputSession();
+    }
+
+    return true;
+}
+
 QString CadController::currentPointInputStageKey() const
 {
     if (!m_drawState.hasActiveCommand() || !isAwaitingPointInput())
@@ -908,6 +1014,8 @@ QString CadController::currentPointInputStageKey() const
             return m_parameterInputSession.stageIndex == 0
                 ? QStringLiteral("PARAM_MIRROR_FIRST")
                 : QStringLiteral("PARAM_MIRROR_SECOND");
+        case ParameterInputCommand::Scale:
+            return QStringLiteral("PARAM_SCALE_BASE");
         default:
             break;
         }
@@ -1257,9 +1365,11 @@ bool CadController::isAwaitingPointInput() const
     if (isParameterInputCommandActive())
     {
         return (m_parameterInputSession.command == ParameterInputCommand::CircularArray
-                && m_parameterInputSession.stageIndex == 2)
+            && m_parameterInputSession.stageIndex == 2)
             || (m_parameterInputSession.command == ParameterInputCommand::Mirror
-                && (m_parameterInputSession.stageIndex == 0 || m_parameterInputSession.stageIndex == 1));
+                && (m_parameterInputSession.stageIndex == 0 || m_parameterInputSession.stageIndex == 1))
+            || (m_parameterInputSession.command == ParameterInputCommand::Scale
+                && m_parameterInputSession.stageIndex == 0);
     }
 
     if (m_drawState.editType == EditType::Move)
@@ -1891,28 +2001,7 @@ bool CadController::submitParameterInputField()
             break;
         }
 
-        {
-            int scaledCount = 0;
-
-            for (CadItem* item : m_parameterInputSession.selectedItems)
-            {
-                if (item != nullptr
-                    && m_editer != nullptr
-                    && m_editer->scaleEntity(item, m_parameterInputSession.centerPoint, m_parameterInputSession.doubleValue1))
-                {
-                    ++scaledCount;
-                }
-            }
-
-            return finishSession
-            (
-                scaledCount > 0,
-                QStringLiteral("已将 %1 个图元绕中心缩放为 %2 倍。")
-                    .arg(scaledCount)
-                    .arg(formatDynamicInputValue(m_parameterInputSession.doubleValue1)),
-                QStringLiteral("选中图元缩放失败。")
-            );
-        }
+        return finishScaleParameterInput(m_parameterInputSession.doubleValue1);
 
     case ParameterInputCommand::RectangularArray:
         switch (m_parameterInputSession.stageIndex)
@@ -2242,6 +2331,24 @@ bool CadController::commitParameterInputPoint(const QVector3D& worldPos)
         m_parameterInputSession.point1 = flattenToDrawingPlane(worldPos);
         m_parameterInputSession.stageIndex = 3;
         break;
+    case ParameterInputCommand::Scale:
+        if (m_parameterInputSession.stageIndex == 0)
+        {
+            m_parameterInputSession.point1 = flattenToDrawingPlane(worldPos);
+            m_parameterInputSession.doubleValue1 = 1.0;
+            m_parameterInputSession.doubleValue2 = scaleReferenceDistance
+            (
+                m_parameterInputSession.selectedItems,
+                m_parameterInputSession.point1
+            );
+            m_parameterInputSession.stageIndex = 1;
+            m_parameterInputSession.fieldBuffer.clear();
+            updateScalePreviewFromCursor();
+            break;
+        }
+
+        updateScalePreviewFromCursor();
+        return finishScaleParameterInput(m_parameterInputSession.doubleValue1);
     case ParameterInputCommand::Mirror:
         if (m_parameterInputSession.stageIndex == 0)
         {

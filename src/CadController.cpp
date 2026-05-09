@@ -334,6 +334,7 @@ void CadController::activateParameterInputSession()
 void CadController::resetParameterInputSession()
 {
     m_parameterInputSession = ParameterInputSession();
+    clearScalePreview();
 }
 
 bool CadController::beginCopySelected()
@@ -402,9 +403,10 @@ bool CadController::beginScaleSelected()
     m_parameterInputSession.command = ParameterInputCommand::Scale;
     m_parameterInputSession.selectedItems = selectedItems;
     m_parameterInputSession.centerPoint = geometryBoundsCenter(selectedItems);
-    m_parameterInputSession.doubleValue1 = 2.0;
+    m_parameterInputSession.doubleValue1 = 1.0;
+    m_parameterInputSession.doubleValue2 = 1.0;
     activateParameterInputSession();
-    m_viewer->appendCommandMessage(QStringLiteral("缩放: 请在光标旁输入倍率"));
+    m_viewer->appendCommandMessage(QStringLiteral("缩放: 请指定缩放基点"));
     return true;
 }
 

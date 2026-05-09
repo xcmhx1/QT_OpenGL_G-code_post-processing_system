@@ -106,6 +106,9 @@ public:
     // 围绕基点按统一倍率缩放指定实体
     bool scaleEntity(CadItem* item, const QVector3D& basePoint, double scaleFactor);
 
+    // 围绕基点按统一倍率批量缩放指定实体
+    bool scaleEntities(const QVector<CadItem*>& items, const QVector3D& basePoint, double scaleFactor);
+
     // 对指定实体执行矩形阵列
     bool arrayEntity(CadItem* item, int rowCount, int columnCount, const QVector3D& rowOffset, const QVector3D& columnOffset);
 

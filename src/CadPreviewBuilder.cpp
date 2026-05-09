@@ -1154,6 +1154,55 @@ namespace CadPreviewBuilder
             return primitives;
         }
 
+        if (state.scalePreviewActive && !selectedItems.isEmpty())
+        {
+            const QVector3D basePoint = CadViewerUtils::flattenedToGroundPlane(state.scalePreviewBasePoint);
+            const QVector3D currentPoint = CadViewerUtils::flattenedToGroundPlane(state.currentPos);
+            const double factor = std::max(state.scalePreviewFactor, 0.001);
+
+            for (CadItem* item : selectedItems)
+            {
+                if (item == nullptr || item->m_geometry.vertices.isEmpty())
+                {
+                    continue;
+                }
+
+                TransientPrimitive scaledEntityPreview;
+                scaledEntityPreview.primitiveType = CadViewerUtils::primitiveTypeForEntity(item);
+                scaledEntityPreview.color = QVector3D(0.98f, 0.67f, 0.12f);
+                scaledEntityPreview.pointSize = scaledEntityPreview.primitiveType == GL_POINTS ? 12.0f : 1.0f;
+                scaledEntityPreview.roundPoint = scaledEntityPreview.primitiveType == GL_POINTS;
+                scaledEntityPreview.vertices.reserve(item->m_geometry.vertices.size());
+
+                for (const QVector3D& vertex : item->m_geometry.vertices)
+                {
+                    const QVector3D planarVertex = CadViewerUtils::flattenedToGroundPlane(vertex);
+                    scaledEntityPreview.vertices.append(basePoint + (planarVertex - basePoint) * static_cast<float>(factor));
+                }
+
+                if (!scaledEntityPreview.vertices.isEmpty())
+                {
+                    primitives.push_back(std::move(scaledEntityPreview));
+                }
+            }
+
+            TransientPrimitive guideLine;
+            guideLine.primitiveType = GL_LINES;
+            guideLine.color = QVector3D(0.35f, 0.90f, 1.0f);
+            guideLine.vertices = { basePoint, currentPoint };
+            primitives.push_back(std::move(guideLine));
+
+            TransientPrimitive basePointMarker;
+            basePointMarker.primitiveType = GL_POINTS;
+            basePointMarker.color = QVector3D(1.0f, 0.92f, 0.25f);
+            basePointMarker.pointSize = 11.0f;
+            basePointMarker.roundPoint = true;
+            basePointMarker.vertices = { basePoint };
+            primitives.push_back(std::move(basePointMarker));
+
+            return primitives;
+        }
+
         // 处理各种绘制命令的预览
         switch (state.drawType)
         {

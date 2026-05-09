@@ -185,6 +185,11 @@ public:
     // 轻量多段线状态机
     LWPolylineDrawSubMode lwPolylineSubMode = LWPolylineDrawSubMode::Idle;
 
+    // 缩放命令预览状态。实际提交仍由编辑器命令栈完成。
+    bool scalePreviewActive = false;
+    QVector3D scalePreviewBasePoint;
+    double scalePreviewFactor = 1.0;
+
     // 鼠标上一次的世界坐标（3D）
     QPoint lastScreenPos;
     // 鼠标当前的屏幕坐标

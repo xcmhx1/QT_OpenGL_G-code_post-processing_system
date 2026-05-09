@@ -764,6 +764,68 @@ private:
     double m_scaleFactor = 1.0;
 };
 
+class ScaleEntitiesCommand final : public CadEditer::EditCommand
+{
+public:
+    ScaleEntitiesCommand(CadDocument* document, const QVector<CadItem*>& items, const QVector3D& basePoint, double scaleFactor)
+        : m_document(document)
+        , m_items(items)
+        , m_basePoint(basePoint)
+        , m_scaleFactor(scaleFactor)
+    {
+    }
+
+    bool execute() override
+    {
+        return apply(m_scaleFactor);
+    }
+
+    bool undo() override
+    {
+        if (std::abs(m_scaleFactor) <= kGeometryEpsilon)
+        {
+            return false;
+        }
+
+        return apply(1.0 / m_scaleFactor);
+    }
+
+private:
+    bool apply(double scaleFactor)
+    {
+        if (m_document == nullptr || m_items.isEmpty() || scaleFactor <= kGeometryEpsilon)
+        {
+            return false;
+        }
+
+        for (CadItem* item : m_items)
+        {
+            if (item == nullptr || !m_document->containsEntity(item))
+            {
+                return false;
+            }
+        }
+
+        for (CadItem* item : m_items)
+        {
+            CadEditerWorkflowInternal::scaleEntity(item->m_nativeEntity, m_basePoint, scaleFactor);
+
+            if (!m_document->refreshEntity(item))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+private:
+    CadDocument* m_document = nullptr;
+    QVector<CadItem*> m_items;
+    QVector3D m_basePoint;
+    double m_scaleFactor = 1.0;
+};
+
 class ArrayEntityCommand final : public CadEditer::EditCommand
 {
 public:
@@ -1236,6 +1298,35 @@ bool CadEditer::scaleEntity(CadItem* item, const QVector3D& basePoint, double sc
     }
 
     return executeCommand(std::make_unique<ScaleEntityCommand>(m_document, item, basePoint, scaleFactor));
+}
+
+bool CadEditer::scaleEntities(const QVector<CadItem*>& items, const QVector3D& basePoint, double scaleFactor)
+{
+    if (m_document == nullptr || items.isEmpty() || scaleFactor <= kGeometryEpsilon)
+    {
+        return false;
+    }
+
+    QVector<CadItem*> validItems;
+    QSet<CadItem*> deduplicated;
+
+    for (CadItem* item : items)
+    {
+        if (item == nullptr || !m_document->containsEntity(item) || deduplicated.contains(item))
+        {
+            continue;
+        }
+
+        deduplicated.insert(item);
+        validItems.push_back(item);
+    }
+
+    if (validItems.isEmpty())
+    {
+        return false;
+    }
+
+    return executeCommand(std::make_unique<ScaleEntitiesCommand>(m_document, validItems, basePoint, scaleFactor));
 }
 
 bool CadEditer::arrayEntity(CadItem* item, int rowCount, int columnCount, const QVector3D& rowOffset, const QVector3D& columnOffset)
