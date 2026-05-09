@@ -8,6 +8,7 @@
 #include "CadItem.h"
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 
 // 析构时断开已绑定的文档信号连接
@@ -37,37 +38,58 @@ void CadSceneContext::refreshBounds()
         return;
     }
 
-    QVector3D minPoint
-    (
-        std::numeric_limits<float>::max(),
-        std::numeric_limits<float>::max(),
-        std::numeric_limits<float>::max()
-    );
+    QVector3D minPoint;
+    QVector3D maxPoint;
+    bool hasValidPoint = false;
 
-    QVector3D maxPoint
-    (
-        -std::numeric_limits<float>::max(),
-        -std::numeric_limits<float>::max(),
-        -std::numeric_limits<float>::max()
-    );
+    const auto includePoint = [&minPoint, &maxPoint, &hasValidPoint](const QVector3D& point)
+    {
+        if (!std::isfinite(point.x()) || !std::isfinite(point.y()) || !std::isfinite(point.z()))
+        {
+            return;
+        }
+
+        if (!hasValidPoint)
+        {
+            minPoint = point;
+            maxPoint = point;
+            hasValidPoint = true;
+            return;
+        }
+
+        minPoint.setX(std::min(minPoint.x(), point.x()));
+        minPoint.setY(std::min(minPoint.y(), point.y()));
+        minPoint.setZ(std::min(minPoint.z(), point.z()));
+
+        maxPoint.setX(std::max(maxPoint.x(), point.x()));
+        maxPoint.setY(std::max(maxPoint.y(), point.y()));
+        maxPoint.setZ(std::max(maxPoint.z(), point.z()));
+    };
 
     for (const std::unique_ptr<CadItem>& entity : m_document->m_entities)
     {
+        if (entity == nullptr)
+        {
+            continue;
+        }
+
+        if (entity->m_type == DRW::ETYPE::XLINE && entity->m_nativeEntity != nullptr)
+        {
+            // XLINE 的显示几何是人为拉长的线段，不能用它参与自动缩放边界。
+            const DRW_Xline* xline = static_cast<const DRW_Xline*>(entity->m_nativeEntity);
+            includePoint(QVector3D(xline->basePoint.x, xline->basePoint.y, xline->basePoint.z));
+            continue;
+        }
+
         // 直接遍历离散后的几何顶点，得到当前场景的轴对齐包围盒
         for (const QVector3D& vertex : entity->m_geometry.vertices)
         {
-            minPoint.setX(std::min(minPoint.x(), vertex.x()));
-            minPoint.setY(std::min(minPoint.y(), vertex.y()));
-            minPoint.setZ(std::min(minPoint.z(), vertex.z()));
-
-            maxPoint.setX(std::max(maxPoint.x(), vertex.x()));
-            maxPoint.setY(std::max(maxPoint.y(), vertex.y()));
-            maxPoint.setZ(std::max(maxPoint.z(), vertex.z()));
+            includePoint(vertex);
         }
     }
 
     // 没有任何有效顶点时不产生包围盒
-    if (minPoint.x() > maxPoint.x())
+    if (!hasValidPoint)
     {
         return;
     }
