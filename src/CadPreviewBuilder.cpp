@@ -73,6 +73,21 @@ namespace
         return center + direction * radius;
     }
 
+    QVector3D rotatePlanarPreviewPoint(const QVector3D& point, const QVector3D& basePoint, double radians)
+    {
+        const double cosineValue = std::cos(radians);
+        const double sineValue = std::sin(radians);
+        const double dx = static_cast<double>(point.x() - basePoint.x());
+        const double dy = static_cast<double>(point.y() - basePoint.y());
+
+        return QVector3D
+        (
+            static_cast<float>(basePoint.x() + dx * cosineValue - dy * sineValue),
+            static_cast<float>(basePoint.y() + dx * sineValue + dy * cosineValue),
+            point.z()
+        );
+    }
+
     void appendDashedLinePreview(QVector<QVector3D>& vertices, const QVector3D& startPoint, const QVector3D& endPoint)
     {
         constexpr int kDashCount = 16;
@@ -1150,6 +1165,56 @@ namespace CadPreviewBuilder
                 targetPointMarker.vertices = { targetPoint };
                 primitives.push_back(std::move(targetPointMarker));
             }
+
+            return primitives;
+        }
+
+        if (state.rotatePreviewActive && !selectedItems.isEmpty())
+        {
+            constexpr double kRadiansPerDegree = 3.14159265358979323846 / 180.0;
+            const QVector3D basePoint = CadViewerUtils::flattenedToGroundPlane(state.rotatePreviewBasePoint);
+            const QVector3D currentPoint = CadViewerUtils::flattenedToGroundPlane(state.currentPos);
+            const double radians = state.rotatePreviewAngleDegrees * kRadiansPerDegree;
+
+            for (CadItem* item : selectedItems)
+            {
+                if (item == nullptr || item->m_geometry.vertices.isEmpty())
+                {
+                    continue;
+                }
+
+                TransientPrimitive rotatedEntityPreview;
+                rotatedEntityPreview.primitiveType = CadViewerUtils::primitiveTypeForEntity(item);
+                rotatedEntityPreview.color = QVector3D(0.98f, 0.67f, 0.12f);
+                rotatedEntityPreview.pointSize = rotatedEntityPreview.primitiveType == GL_POINTS ? 12.0f : 1.0f;
+                rotatedEntityPreview.roundPoint = rotatedEntityPreview.primitiveType == GL_POINTS;
+                rotatedEntityPreview.vertices.reserve(item->m_geometry.vertices.size());
+
+                for (const QVector3D& vertex : item->m_geometry.vertices)
+                {
+                    const QVector3D planarVertex = CadViewerUtils::flattenedToGroundPlane(vertex);
+                    rotatedEntityPreview.vertices.append(rotatePlanarPreviewPoint(planarVertex, basePoint, radians));
+                }
+
+                if (!rotatedEntityPreview.vertices.isEmpty())
+                {
+                    primitives.push_back(std::move(rotatedEntityPreview));
+                }
+            }
+
+            TransientPrimitive guideLine;
+            guideLine.primitiveType = GL_LINES;
+            guideLine.color = QVector3D(0.35f, 0.90f, 1.0f);
+            guideLine.vertices = { basePoint, currentPoint };
+            primitives.push_back(std::move(guideLine));
+
+            TransientPrimitive basePointMarker;
+            basePointMarker.primitiveType = GL_POINTS;
+            basePointMarker.color = QVector3D(1.0f, 0.92f, 0.25f);
+            basePointMarker.pointSize = 11.0f;
+            basePointMarker.roundPoint = true;
+            basePointMarker.vertices = { basePoint };
+            primitives.push_back(std::move(basePointMarker));
 
             return primitives;
         }

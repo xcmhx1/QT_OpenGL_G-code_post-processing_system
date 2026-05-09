@@ -103,6 +103,9 @@ public:
     // 围绕基点旋转指定实体，角度单位为度
     bool rotateEntity(CadItem* item, const QVector3D& basePoint, double angleDegrees);
 
+    // 围绕基点批量旋转指定实体，角度单位为度
+    bool rotateEntities(const QVector<CadItem*>& items, const QVector3D& basePoint, double angleDegrees);
+
     // 围绕基点按统一倍率缩放指定实体
     bool scaleEntity(CadItem* item, const QVector3D& basePoint, double scaleFactor);
 

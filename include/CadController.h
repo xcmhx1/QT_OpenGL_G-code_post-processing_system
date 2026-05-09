@@ -205,6 +205,15 @@ private:
     // 尝试把 currentPos 与当前光标位置同步，避免键盘确认后预览滞后。
     void syncCurrentPosWithCursor();
 
+    // 根据当前鼠标位置刷新旋转命令的角度预览。
+    bool updateRotatePreviewFromCursor();
+
+    // 清理旋转命令预览状态。
+    void clearRotatePreview();
+
+    // 按当前旋转会话提交旋转操作。
+    bool finishRotateParameterInput(double angleDegrees);
+
     // 根据当前鼠标位置刷新缩放命令的倍率预览。
     bool updateScalePreviewFromCursor();
 

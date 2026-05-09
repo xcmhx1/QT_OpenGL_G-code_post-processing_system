@@ -98,6 +98,19 @@ namespace
         return true;
     }
 
+    double rotationAngleFromBaseToPoint(const QVector3D& basePoint, const QVector3D& worldPoint)
+    {
+        constexpr double kDegreesPerRadian = 180.0 / 3.14159265358979323846;
+        const QVector3D delta = flattenToDrawingPlane(worldPoint) - flattenToDrawingPlane(basePoint);
+
+        if (delta.lengthSquared() <= 0.000001f)
+        {
+            return 0.0;
+        }
+
+        return std::atan2(static_cast<double>(delta.y()), static_cast<double>(delta.x())) * kDegreesPerRadian;
+    }
+
     double scaleReferenceDistance(const QVector<CadItem*>& items, const QVector3D& basePoint)
     {
         double maxDistance = 0.0;
@@ -150,6 +163,7 @@ namespace
             { QStringLiteral("polyline"),   QStringLiteral("POLYLINE 多段线"),   { QStringLiteral("o"), QStringLiteral("polyline"), QStringLiteral("pline"), QStringLiteral("多段线") } },
             { QStringLiteral("lwpolyline"), QStringLiteral("LWPOLYLINE 轻量多段线"), { QStringLiteral("w"), QStringLiteral("lwpolyline"), QStringLiteral("轻量多段线") } },
             { QStringLiteral("move"),       QStringLiteral("MOVE  移动"),        { QStringLiteral("m"), QStringLiteral("move"), QStringLiteral("移动") } },
+            { QStringLiteral("rotate"),     QStringLiteral("ROTATE 旋转"),        { QStringLiteral("ro"), QStringLiteral("rotate"), QStringLiteral("旋转") } },
             { QStringLiteral("scale"),      QStringLiteral("SCALE 缩放"),        { QStringLiteral("sc"), QStringLiteral("scale"), QStringLiteral("缩放") } },
             { QStringLiteral("delete"),     QStringLiteral("DELETE 删除"),       { QStringLiteral("del"), QStringLiteral("delete"), QStringLiteral("erase"), QStringLiteral("删除") } },
             { QStringLiteral("color"),      QStringLiteral("COLOR 改色"),        { QStringLiteral("k"), QStringLiteral("color"), QStringLiteral("改色"), QStringLiteral("颜色") } },
@@ -250,7 +264,9 @@ QString CadController::parameterInputPrompt() const
             ? QStringLiteral("COPY: 输入 X 偏移量")
             : QStringLiteral("COPY: 输入 Y 偏移量");
     case ParameterInputCommand::Rotate:
-        return QStringLiteral("ROTATE: 输入旋转角度（度）");
+        return m_parameterInputSession.stageIndex == 0
+            ? QStringLiteral("ROTATE: 指定旋转基点")
+            : QStringLiteral("ROTATE: 指定旋转角度或输入角度");
     case ParameterInputCommand::Scale:
         return m_parameterInputSession.stageIndex == 0
             ? QStringLiteral("SCALE: 指定缩放基点")
@@ -517,7 +533,7 @@ CadDynamicInputOverlayState CadController::dynamicInputOverlayState() const
         case ParameterInputCommand::Rotate:
             labelText = QStringLiteral("旋转角度");
             valueText = formatDynamicInputValue(m_parameterInputSession.doubleValue1);
-            stageHint = QStringLiteral("输入角度后 Enter/Space确认");
+            stageHint = QStringLiteral("移动鼠标预览，左键或 Enter/Space确认，也可输入角度");
             break;
         case ParameterInputCommand::Scale:
             labelText = QStringLiteral("缩放倍率");
@@ -884,6 +900,11 @@ bool CadController::executeIdleCommandByCanonical(const QString& canonicalComman
         return beginMoveSelected();
     }
 
+    if (normalized == QStringLiteral("rotate"))
+    {
+        return beginRotateSelected();
+    }
+
     if (normalized == QStringLiteral("scale"))
     {
         return beginScaleSelected();
@@ -951,6 +972,96 @@ void CadController::clearScalePreview()
     m_drawState.scalePreviewActive = false;
     m_drawState.scalePreviewBasePoint = QVector3D();
     m_drawState.scalePreviewFactor = 1.0;
+}
+
+void CadController::clearRotatePreview()
+{
+    m_drawState.rotatePreviewActive = false;
+    m_drawState.rotatePreviewBasePoint = QVector3D();
+    m_drawState.rotatePreviewAngleDegrees = 0.0;
+}
+
+bool CadController::updateRotatePreviewFromCursor()
+{
+    if (!isParameterInputCommandActive()
+        || m_parameterInputSession.command != ParameterInputCommand::Rotate
+        || m_parameterInputSession.stageIndex != 1)
+    {
+        return false;
+    }
+
+    const QVector3D basePoint = flattenToDrawingPlane(m_parameterInputSession.point1);
+
+    if (m_parameterInputSession.fieldBuffer.isEmpty())
+    {
+        m_parameterInputSession.doubleValue1 = rotationAngleFromBaseToPoint(basePoint, m_drawState.currentPos);
+    }
+
+    m_drawState.rotatePreviewActive = true;
+    m_drawState.rotatePreviewBasePoint = basePoint;
+    m_drawState.rotatePreviewAngleDegrees = m_parameterInputSession.doubleValue1;
+    return true;
+}
+
+bool CadController::finishRotateParameterInput(double angleDegrees)
+{
+    if (std::abs(angleDegrees) <= 0.000001)
+    {
+        if (m_viewer != nullptr)
+        {
+            m_viewer->appendCommandMessage(QStringLiteral("旋转角度为 0，未修改图元。"));
+            m_viewer->refreshCommandPrompt();
+            m_viewer->requestViewUpdate();
+        }
+
+        m_drawState.editType = EditType::None;
+        resetParameterInputSession();
+        resetPointDynamicInputSession();
+        return true;
+    }
+
+    if (m_editer == nullptr)
+    {
+        if (m_viewer != nullptr)
+        {
+            m_viewer->appendCommandMessage(QStringLiteral("选中图元旋转失败。"));
+            m_viewer->refreshCommandPrompt();
+            m_viewer->requestViewUpdate();
+        }
+
+        return true;
+    }
+
+    const int requestedCount = m_parameterInputSession.selectedItems.size();
+    const bool success = m_editer->rotateEntities
+    (
+        m_parameterInputSession.selectedItems,
+        flattenToDrawingPlane(m_parameterInputSession.point1),
+        angleDegrees
+    );
+
+    if (m_viewer != nullptr)
+    {
+        m_viewer->appendCommandMessage
+        (
+            success
+                ? QStringLiteral("已将 %1 个图元绕基点旋转 %2 度。")
+                    .arg(requestedCount)
+                    .arg(formatDynamicInputValue(angleDegrees))
+                : QStringLiteral("选中图元旋转失败。")
+        );
+        m_viewer->refreshCommandPrompt();
+        m_viewer->requestViewUpdate();
+    }
+
+    if (success)
+    {
+        m_drawState.editType = EditType::None;
+        resetParameterInputSession();
+        resetPointDynamicInputSession();
+    }
+
+    return true;
 }
 
 bool CadController::updateScalePreviewFromCursor()
@@ -1040,6 +1151,8 @@ QString CadController::currentPointInputStageKey() const
             return m_parameterInputSession.stageIndex == 0
                 ? QStringLiteral("PARAM_MIRROR_FIRST")
                 : QStringLiteral("PARAM_MIRROR_SECOND");
+        case ParameterInputCommand::Rotate:
+            return QStringLiteral("PARAM_ROTATE_BASE");
         case ParameterInputCommand::Scale:
             return QStringLiteral("PARAM_SCALE_BASE");
         default:
@@ -1392,6 +1505,8 @@ bool CadController::isAwaitingPointInput() const
     {
         return (m_parameterInputSession.command == ParameterInputCommand::CircularArray
             && m_parameterInputSession.stageIndex == 2)
+            || (m_parameterInputSession.command == ParameterInputCommand::Rotate
+                && m_parameterInputSession.stageIndex == 0)
             || (m_parameterInputSession.command == ParameterInputCommand::Mirror
                 && (m_parameterInputSession.stageIndex == 0 || m_parameterInputSession.stageIndex == 1))
             || (m_parameterInputSession.command == ParameterInputCommand::Scale
@@ -1998,28 +2113,7 @@ bool CadController::submitParameterInputField()
             break;
         }
 
-        {
-            int rotatedCount = 0;
-
-            for (CadItem* item : m_parameterInputSession.selectedItems)
-            {
-                if (item != nullptr
-                    && m_editer != nullptr
-                    && m_editer->rotateEntity(item, m_parameterInputSession.centerPoint, m_parameterInputSession.doubleValue1))
-                {
-                    ++rotatedCount;
-                }
-            }
-
-            return finishSession
-            (
-                rotatedCount > 0,
-                QStringLiteral("已将 %1 个图元绕中心旋转 %2 度。")
-                    .arg(rotatedCount)
-                    .arg(formatDynamicInputValue(m_parameterInputSession.doubleValue1)),
-                QStringLiteral("选中图元旋转失败。")
-            );
-        }
+        return finishRotateParameterInput(m_parameterInputSession.doubleValue1);
 
     case ParameterInputCommand::Scale:
         if (!commitDoubleValue(m_parameterInputSession.doubleValue1, 0.001, true, errorMessage))
@@ -2357,6 +2451,19 @@ bool CadController::commitParameterInputPoint(const QVector3D& worldPos)
         m_parameterInputSession.point1 = flattenToDrawingPlane(worldPos);
         m_parameterInputSession.stageIndex = 3;
         break;
+    case ParameterInputCommand::Rotate:
+        if (m_parameterInputSession.stageIndex == 0)
+        {
+            m_parameterInputSession.point1 = flattenToDrawingPlane(worldPos);
+            m_parameterInputSession.doubleValue1 = rotationAngleFromBaseToPoint(m_parameterInputSession.point1, m_drawState.currentPos);
+            m_parameterInputSession.stageIndex = 1;
+            m_parameterInputSession.fieldBuffer.clear();
+            updateRotatePreviewFromCursor();
+            break;
+        }
+
+        updateRotatePreviewFromCursor();
+        return finishRotateParameterInput(m_parameterInputSession.doubleValue1);
     case ParameterInputCommand::Scale:
         if (m_parameterInputSession.stageIndex == 0)
         {

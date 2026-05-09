@@ -719,6 +719,63 @@ private:
     double m_angleDegrees = 0.0;
 };
 
+class RotateEntitiesCommand final : public CadEditer::EditCommand
+{
+public:
+    RotateEntitiesCommand(CadDocument* document, const QVector<CadItem*>& items, const QVector3D& basePoint, double angleDegrees)
+        : m_document(document)
+        , m_items(items)
+        , m_basePoint(basePoint)
+        , m_angleDegrees(angleDegrees)
+    {
+    }
+
+    bool execute() override
+    {
+        return apply(m_angleDegrees);
+    }
+
+    bool undo() override
+    {
+        return apply(-m_angleDegrees);
+    }
+
+private:
+    bool apply(double angleDegrees)
+    {
+        if (m_document == nullptr || m_items.isEmpty())
+        {
+            return false;
+        }
+
+        for (CadItem* item : m_items)
+        {
+            if (item == nullptr || !m_document->containsEntity(item))
+            {
+                return false;
+            }
+        }
+
+        for (CadItem* item : m_items)
+        {
+            CadEditerWorkflowInternal::rotateEntity(item->m_nativeEntity, m_basePoint, angleDegrees);
+
+            if (!m_document->refreshEntity(item))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+private:
+    CadDocument* m_document = nullptr;
+    QVector<CadItem*> m_items;
+    QVector3D m_basePoint;
+    double m_angleDegrees = 0.0;
+};
+
 class ScaleEntityCommand final : public CadEditer::EditCommand
 {
 public:
@@ -1288,6 +1345,35 @@ bool CadEditer::rotateEntity(CadItem* item, const QVector3D& basePoint, double a
     }
 
     return executeCommand(std::make_unique<RotateEntityCommand>(m_document, item, basePoint, angleDegrees));
+}
+
+bool CadEditer::rotateEntities(const QVector<CadItem*>& items, const QVector3D& basePoint, double angleDegrees)
+{
+    if (m_document == nullptr || items.isEmpty() || std::abs(angleDegrees) <= kGeometryEpsilon)
+    {
+        return false;
+    }
+
+    QVector<CadItem*> validItems;
+    QSet<CadItem*> deduplicated;
+
+    for (CadItem* item : items)
+    {
+        if (item == nullptr || !m_document->containsEntity(item) || deduplicated.contains(item))
+        {
+            continue;
+        }
+
+        deduplicated.insert(item);
+        validItems.push_back(item);
+    }
+
+    if (validItems.isEmpty())
+    {
+        return false;
+    }
+
+    return executeCommand(std::make_unique<RotateEntitiesCommand>(m_document, validItems, basePoint, angleDegrees));
 }
 
 bool CadEditer::scaleEntity(CadItem* item, const QVector3D& basePoint, double scaleFactor)

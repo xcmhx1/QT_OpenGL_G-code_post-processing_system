@@ -185,6 +185,11 @@ public:
     // 轻量多段线状态机
     LWPolylineDrawSubMode lwPolylineSubMode = LWPolylineDrawSubMode::Idle;
 
+    // 旋转命令预览状态。实际提交仍由编辑器命令栈完成。
+    bool rotatePreviewActive = false;
+    QVector3D rotatePreviewBasePoint;
+    double rotatePreviewAngleDegrees = 0.0;
+
     // 缩放命令预览状态。实际提交仍由编辑器命令栈完成。
     bool scalePreviewActive = false;
     QVector3D scalePreviewBasePoint;

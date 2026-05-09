@@ -42,6 +42,9 @@ void DrawStateMachine::reset()
     ellipseSubMode = EllipseDrawSubMode::Idle;
     polylineSubMode = PolylineDrawSubMode::Idle;
     lwPolylineSubMode = LWPolylineDrawSubMode::Idle; 
+    rotatePreviewActive = false;
+    rotatePreviewBasePoint = QVector3D();
+    rotatePreviewAngleDegrees = 0.0;
     scalePreviewActive = false;
     scalePreviewBasePoint = QVector3D();
     scalePreviewFactor = 1.0;

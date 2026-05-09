@@ -334,6 +334,7 @@ void CadController::activateParameterInputSession()
 void CadController::resetParameterInputSession()
 {
     m_parameterInputSession = ParameterInputSession();
+    clearRotatePreview();
     clearScalePreview();
 }
 
@@ -379,9 +380,9 @@ bool CadController::beginRotateSelected()
     m_parameterInputSession.command = ParameterInputCommand::Rotate;
     m_parameterInputSession.selectedItems = selectedItems;
     m_parameterInputSession.centerPoint = geometryBoundsCenter(selectedItems);
-    m_parameterInputSession.doubleValue1 = 90.0;
+    m_parameterInputSession.doubleValue1 = 0.0;
     activateParameterInputSession();
-    m_viewer->appendCommandMessage(QStringLiteral("旋转: 请在光标旁输入角度"));
+    m_viewer->appendCommandMessage(QStringLiteral("旋转: 请指定旋转基点"));
     return true;
 }
 
