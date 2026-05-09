@@ -423,39 +423,27 @@ bool CadEditer::handleArcDrawing
         return true;
 
     case ArcDrawSubMode::AwaitStartAngle:
+        return true;
+
+    case ArcDrawSubMode::AwaitEndAngle:
         if (currentState.commandPoints.size() < 2)
         {
             return false;
         }
 
-        if (currentState.commandPoints.size() == 2)
-        {
-            currentState.commandPoints.append(worldPos);
-        }
-        else
-        {
-            currentState.commandPoints[2] = worldPos;
-        }
-        return true;
-
-    case ArcDrawSubMode::AwaitEndAngle:
-        if (currentState.commandPoints.size() < 3)
-        {
-            return false;
-        }
-
-        // 圆弧绘制按“圆心 -> 半径 -> 起始角 -> 终止角”四步完成
+        // 圆弧绘制按“圆心 -> 起点/半径 -> 终点”三步完成；Ctrl 切换补弧。
         if (!addEntity
         (
             createArcEntity
             (
                 currentState.commandPoints[0],
                 currentState.commandPoints[1],
-                currentState.commandPoints[2],
+                currentState.commandPoints[1],
                 worldPos,
                 previousState.drawingLayerName,
                 previousState.drawingColor,
-                previousState.drawingColorIndex
+                previousState.drawingColorIndex,
+                (previousState.keyboardModifiers & Qt::ControlModifier) != 0
             )
         ))
         {

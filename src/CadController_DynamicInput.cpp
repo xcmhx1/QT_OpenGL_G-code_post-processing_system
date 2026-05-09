@@ -336,13 +336,13 @@ QString CadController::currentPrompt() const
         switch (m_drawState.arcSubMode)
         {
         case ArcDrawSubMode::AwaitRadius:
-            basePrompt = QStringLiteral("ARC: 指定半径");
+            basePrompt = QStringLiteral("ARC: 指定起点");
             break;
         case ArcDrawSubMode::AwaitStartAngle:
             basePrompt = QStringLiteral("ARC: 指定起始角");
             break;
         case ArcDrawSubMode::AwaitEndAngle:
-            basePrompt = QStringLiteral("ARC: 指定终止角");
+            basePrompt = QStringLiteral("ARC: 指定终点（按住 Ctrl 切换补弧）");
             break;
         default:
             basePrompt = QStringLiteral("ARC: 指定圆心");
@@ -964,7 +964,7 @@ QString CadController::currentPointInputStageKey() const
         switch (m_drawState.arcSubMode)
         {
         case ArcDrawSubMode::AwaitRadius:
-            return QStringLiteral("ARC_RADIUS");
+            return QStringLiteral("ARC_START");
         case ArcDrawSubMode::AwaitStartAngle:
             return QStringLiteral("ARC_START");
         case ArcDrawSubMode::AwaitEndAngle:

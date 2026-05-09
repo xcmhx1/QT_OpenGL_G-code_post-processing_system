@@ -333,6 +333,9 @@ protected:
     // @param event 键盘事件
     void keyPressEvent(QKeyEvent* event) override;
 
+    // 键盘释放事件处理，用于刷新依赖修饰键的命令预览。
+    void keyReleaseEvent(QKeyEvent* event) override;
+
     // 禁止 Tab/Shift+Tab 触发焦点跳转，保证其可用于 CAD 交互。
     bool focusNextPrevChild(bool next) override;
 

@@ -64,8 +64,8 @@ enum class ArcDrawSubMode
 {
     Idle,          // 空闲状态
     AwaitCenter,   // 等待用户指定圆心
-    AwaitRadius,   // 等待用户指定半径
-    AwaitStartAngle, // 等待用户指定弧的启始角度
+    AwaitRadius,   // 等待用户指定起点，同时确定半径
+    AwaitStartAngle, // 历史状态：曾用于单独指定起始角度
     AwaitEndAngle,   // 等待用户指定弧的终点角度
 };
 

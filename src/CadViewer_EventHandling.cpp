@@ -192,6 +192,20 @@ void CadViewer::keyPressEvent(QKeyEvent* event)
     update();
 }
 
+void CadViewer::keyReleaseEvent(QKeyEvent* event)
+{
+    ensureBlankCursor();
+
+    if (!m_controller.handleKeyRelease(event))
+    {
+        QOpenGLWidget::keyReleaseEvent(event);
+    }
+
+    updateOverlappedHandleHoverState(m_cursorScreenPos);
+    refreshCommandPrompt();
+    update();
+}
+
 bool CadViewer::focusNextPrevChild(bool next)
 {
     Q_UNUSED(next);

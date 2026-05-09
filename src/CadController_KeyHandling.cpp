@@ -6,6 +6,8 @@
 #include "CadEditer.h"
 #include "CadViewer.h"
 
+#include <QGuiApplication>
+
 namespace
 {
     bool isDynamicExpressionCharacter(QChar character)
@@ -704,5 +706,12 @@ bool CadController::handleKeyPress(QKeyEvent* event)
         break;
     }
 
+    return false;
+}
+
+bool CadController::handleKeyRelease(QKeyEvent* event)
+{
+    Q_UNUSED(event);
+    m_drawState.keyboardModifiers = QGuiApplication::keyboardModifiers();
     return false;
 }

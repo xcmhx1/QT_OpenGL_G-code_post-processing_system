@@ -259,7 +259,8 @@ namespace CadEditerWorkflowInternal
         const QVector3D& endAnglePoint,
         const QString& layerName,
         const QColor& color,
-        int colorIndex
+        int colorIndex,
+        bool useComplementArc
     )
     {
         const QVector3D planarCenter = flattenToDrawingPlane(center);
@@ -280,8 +281,12 @@ namespace CadEditerWorkflowInternal
         entity->basePoint.y = planarCenter.y();
         entity->basePoint.z = 0.0;
         entity->radious = radius;
-        entity->staangle = std::atan2(startPoint.y() - planarCenter.y(), startPoint.x() - planarCenter.x());
-        entity->endangle = std::atan2(endPoint.y() - planarCenter.y(), endPoint.x() - planarCenter.x());
+        entity->staangle = useComplementArc
+            ? std::atan2(endPoint.y() - planarCenter.y(), endPoint.x() - planarCenter.x())
+            : std::atan2(startPoint.y() - planarCenter.y(), startPoint.x() - planarCenter.x());
+        entity->endangle = useComplementArc
+            ? std::atan2(startPoint.y() - planarCenter.y(), startPoint.x() - planarCenter.x())
+            : std::atan2(endPoint.y() - planarCenter.y(), endPoint.x() - planarCenter.x());
         entity->extPoint.x = 0.0;
         entity->extPoint.y = 0.0;
         entity->extPoint.z = 1.0;

@@ -106,7 +106,8 @@ namespace CadEditerWorkflowInternal
         const QVector3D& endAnglePoint,
         const QString& layerName,
         const QColor& color,
-        int colorIndex
+        int colorIndex,
+        bool useComplementArc = false
     );
     std::unique_ptr<DRW_Entity> createEllipseEntity
     (

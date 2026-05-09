@@ -980,9 +980,6 @@ void CadController::handleLeftPressInCommand(const QVector3D& worldPos)
             m_drawState.arcSubMode = ArcDrawSubMode::AwaitRadius;
             break;
         case ArcDrawSubMode::AwaitRadius:
-            m_drawState.arcSubMode = ArcDrawSubMode::AwaitStartAngle;
-            break;
-        case ArcDrawSubMode::AwaitStartAngle:
             m_drawState.arcSubMode = ArcDrawSubMode::AwaitEndAngle;
             break;
         default:

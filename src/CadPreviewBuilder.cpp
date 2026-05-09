@@ -73,6 +73,29 @@ namespace
         return center + direction * radius;
     }
 
+    void appendDashedLinePreview(QVector<QVector3D>& vertices, const QVector3D& startPoint, const QVector3D& endPoint)
+    {
+        constexpr int kDashCount = 16;
+        constexpr float kDashRatio = 0.55f;
+
+        const QVector3D delta = endPoint - startPoint;
+
+        if (delta.lengthSquared() <= 1.0e-10f)
+        {
+            return;
+        }
+
+        vertices.reserve(vertices.size() + kDashCount * 2);
+
+        for (int index = 0; index < kDashCount; ++index)
+        {
+            const float segmentStart = static_cast<float>(index) / static_cast<float>(kDashCount);
+            const float segmentEnd = (static_cast<float>(index) + kDashRatio) / static_cast<float>(kDashCount);
+            vertices.append(startPoint + delta * segmentStart);
+            vertices.append(startPoint + delta * std::min(segmentEnd, 1.0f));
+        }
+    }
+
     // 将圆预览离散为闭合折线
     // @param vertices 输出顶点列表
     // @param center 圆心坐标
@@ -116,11 +139,14 @@ namespace
         const QVector3D& center,
         const QVector3D& startPoint,
         const QVector3D& endPoint,
+        bool useComplementArc = false,
         int segments = kPreviewCurveSegments
     )
     {
+        const QVector3D previewStartPoint = useComplementArc ? endPoint : startPoint;
+        const QVector3D previewEndPoint = useComplementArc ? startPoint : endPoint;
         // 计算圆弧半径
-        const float radius = (startPoint - center).length();
+        const float radius = (previewStartPoint - center).length();
 
         if (radius <= 1.0e-6f)
         {
@@ -128,8 +154,8 @@ namespace
         }
 
         // 计算起始角度和终止角度
-        float startAngle = std::atan2(startPoint.y() - center.y(), startPoint.x() - center.x());
-        float endAngle = std::atan2(endPoint.y() - center.y(), endPoint.x() - center.x());
+        float startAngle = std::atan2(previewStartPoint.y() - center.y(), previewStartPoint.x() - center.x());
+        float endAngle = std::atan2(previewEndPoint.y() - center.y(), previewEndPoint.x() - center.x());
 
         // 展开到正向区间，避免结束角小于开始角时预览反向跳变
         while (endAngle <= startAngle)
@@ -1260,63 +1286,47 @@ namespace CadPreviewBuilder
         }
         case DrawType::Arc:
         {
-            // 圆弧命令会随着子状态不同，分别显示半径线、起始半径线和弧线轮廓
+            // 圆弧命令按“圆心 -> 起点/半径 -> 终点”三步预览。
             if (state.arcSubMode == ArcDrawSubMode::AwaitRadius && !state.commandPoints.isEmpty())
             {
-                // 半径线预览
-                TransientPrimitive radiusLine;
-                radiusLine.primitiveType = GL_LINES;
-                radiusLine.color = QVector3D(0.35f, 0.90f, 1.0f);
-                radiusLine.vertices =
-                {
-                    state.commandPoints.front(),
-                    CadViewerUtils::flattenedToGroundPlane(state.currentPos)
-                };
-                primitives.push_back(std::move(radiusLine));
-            }
-            else if (state.arcSubMode == ArcDrawSubMode::AwaitStartAngle && state.commandPoints.size() >= 2)
-            {
-                const QVector3D center = state.commandPoints[0];
-                const QVector3D radiusPoint = state.commandPoints[1];
-                const QVector3D startPoint = projectPointToRadius
+                // 圆心确定后仅显示半径方向虚线，不提前显示完整圆。
+                TransientPrimitive radiusGuide;
+                radiusGuide.primitiveType = GL_LINES;
+                radiusGuide.color = QVector3D(0.35f, 0.90f, 1.0f);
+                appendDashedLinePreview
                 (
-                    center,
-                    radiusPoint,
+                    radiusGuide.vertices,
+                    state.commandPoints.front(),
                     CadViewerUtils::flattenedToGroundPlane(state.currentPos)
                 );
 
-                // 完整圆轮廓预览
-                TransientPrimitive circlePreview;
-                circlePreview.primitiveType = GL_LINE_STRIP;
-                circlePreview.color = QVector3D(0.35f, 0.90f, 1.0f);
-                appendCirclePreview(circlePreview.vertices, center, (radiusPoint - center).length());
-                primitives.push_back(std::move(circlePreview));
-
-                // 起始半径线
-                TransientPrimitive startLine;
-                startLine.primitiveType = GL_LINES;
-                startLine.color = QVector3D(0.35f, 0.90f, 1.0f);
-                startLine.vertices = { center, startPoint };
-                primitives.push_back(std::move(startLine));
+                if (!radiusGuide.vertices.isEmpty())
+                {
+                    primitives.push_back(std::move(radiusGuide));
+                }
             }
-            else if (state.arcSubMode == ArcDrawSubMode::AwaitEndAngle && state.commandPoints.size() >= 3)
+            else if (state.arcSubMode == ArcDrawSubMode::AwaitEndAngle && state.commandPoints.size() >= 2)
             {
                 const QVector3D center = state.commandPoints[0];
-                const QVector3D radiusPoint = state.commandPoints[1];
-                const QVector3D startPoint = projectPointToRadius(center, radiusPoint, state.commandPoints[2]);
+                const QVector3D startPoint = state.commandPoints[1];
                 const QVector3D endPoint = projectPointToRadius
                 (
                     center,
-                    radiusPoint,
+                    startPoint,
                     CadViewerUtils::flattenedToGroundPlane(state.currentPos)
                 );
+                const bool useComplementArc = (state.keyboardModifiers & Qt::ControlModifier) != 0;
 
                 // 圆弧轮廓预览
                 TransientPrimitive arcPreview;
                 arcPreview.primitiveType = GL_LINE_STRIP;
                 arcPreview.color = QVector3D(0.35f, 0.90f, 1.0f);
-                appendArcPreview(arcPreview.vertices, center, startPoint, endPoint);
-                primitives.push_back(std::move(arcPreview));
+                appendArcPreview(arcPreview.vertices, center, startPoint, endPoint, useComplementArc);
+
+                if (!arcPreview.vertices.isEmpty())
+                {
+                    primitives.push_back(std::move(arcPreview));
+                }
             }
             break;
         }

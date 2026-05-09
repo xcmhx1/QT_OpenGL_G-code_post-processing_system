@@ -138,6 +138,9 @@ public:
     // @return 如果事件被处理返回 true，否则返回 false
     bool handleKeyPress(QKeyEvent* event);
 
+    // 处理键盘释放事件，用于同步 Ctrl 等修饰键驱动的命令预览状态。
+    bool handleKeyRelease(QKeyEvent* event);
+
     // 获取绘图状态机（可修改）
     // @return 绘图状态机引用
     DrawStateMachine& drawState();
