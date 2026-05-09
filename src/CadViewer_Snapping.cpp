@@ -287,7 +287,7 @@ QVector3D CadViewer::applySnapToGroundPosition
 
         if (selectedItem != nullptr)
         {
-            const QVector<CadSelectionHandleInfo> handles = buildSelectionHandleInfo(selectedItem);
+            const QVector<CadSelectionHandleInfo> handles = buildSelectionHandleInfo(selectedItem, xlineHandleWorldLength());
 
             for (const CadSelectionHandleInfo& handle : handles)
             {

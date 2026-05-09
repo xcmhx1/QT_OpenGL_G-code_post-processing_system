@@ -15,6 +15,7 @@ namespace
     constexpr float kTargetGridSpacingPixels = 40.0f;
     // 单个方向上允许绘制的最大网格线数量
     constexpr float kMaxGridLineCountPerAxis = 240.0f;
+    constexpr float kXlineHandleDistancePixels = 72.0f;
 
     // 采用二分层级网格步长，保证细分后不会丢失上一级网格点。
     // 示例：100 -> 50 -> 25 -> 12.5 -> 6.25
@@ -233,4 +234,16 @@ float CadViewer::aspectRatio() const
 float CadViewer::pixelToWorldScale() const
 {
     return CadViewTransform::pixelToWorldScale(m_camera, m_viewportHeight);
+}
+
+float CadViewer::xlineHandleWorldLength() const
+{
+    const float pixelScale = pixelToWorldScale();
+
+    if (!std::isfinite(pixelScale) || pixelScale <= 0.0f)
+    {
+        return 50.0f;
+    }
+
+    return pixelScale * kXlineHandleDistancePixels;
 }

@@ -122,9 +122,11 @@ namespace
         case DRW::ETYPE::POINT:
             return QStringLiteral("点位控制点");
         case DRW::ETYPE::LINE:
-            return QStringLiteral("拉伸点");
+            return handle.pointIndex == 2 ? QStringLiteral("中心移动点") : QStringLiteral("端点拉伸点");
         case DRW::ETYPE::XLINE:
-            return handle.pointIndex == 1 ? QStringLiteral("方向控制点") : QStringLiteral("拉伸点");
+            return (handle.pointIndex == 1 || handle.pointIndex == 2)
+                ? QStringLiteral("方向控制点")
+                : QStringLiteral("拉伸点");
         case DRW::ETYPE::CIRCLE:
             return QStringLiteral("半径控制点");
         case DRW::ETYPE::ARC:
@@ -307,7 +309,7 @@ void CadViewer::updateOverlappedHandleHoverState(const QPoint& screenPos)
         return;
     }
 
-    const QVector<CadSelectionHandleInfo> handles = buildSelectionHandleInfo(selectedItem);
+    const QVector<CadSelectionHandleInfo> handles = buildSelectionHandleInfo(selectedItem, xlineHandleWorldLength());
 
     if (handles.isEmpty())
     {
@@ -436,7 +438,7 @@ bool CadViewer::handleOverlappedHandlePopupPress(const QPoint& screenPos)
         return false;
     }
 
-    const QVector<CadSelectionHandleInfo> handles = buildSelectionHandleInfo(selectedItem);
+    const QVector<CadSelectionHandleInfo> handles = buildSelectionHandleInfo(selectedItem, xlineHandleWorldLength());
 
     if (handles.isEmpty())
     {
@@ -542,7 +544,7 @@ void CadViewer::renderOverlappedHandlePopup()
         return;
     }
 
-    const QVector<CadSelectionHandleInfo> handles = buildSelectionHandleInfo(selectedItem);
+    const QVector<CadSelectionHandleInfo> handles = buildSelectionHandleInfo(selectedItem, xlineHandleWorldLength());
 
     if (handles.isEmpty())
     {
@@ -834,7 +836,7 @@ bool CadViewer::pickSelectedHandle(const QPoint& screenPos, CadSelectionHandleIn
         return false;
     }
 
-    const QVector<CadSelectionHandleInfo> handles = buildSelectionHandleInfo(selectedItem);
+    const QVector<CadSelectionHandleInfo> handles = buildSelectionHandleInfo(selectedItem, xlineHandleWorldLength());
 
     if (handles.isEmpty())
     {

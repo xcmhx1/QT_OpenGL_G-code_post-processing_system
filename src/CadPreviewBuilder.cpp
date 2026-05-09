@@ -726,6 +726,20 @@ namespace
                 return true;
             }
 
+            if (pointIndex == 2)
+            {
+                const QVector3D startPoint(line->basePoint.x, line->basePoint.y, line->basePoint.z);
+                const QVector3D endPoint(line->secPoint.x, line->secPoint.y, line->secPoint.z);
+                const QVector3D delta = point - (startPoint + endPoint) * 0.5f;
+                line->basePoint.x += delta.x();
+                line->basePoint.y += delta.y();
+                line->basePoint.z += delta.z();
+                line->secPoint.x += delta.x();
+                line->secPoint.y += delta.y();
+                line->secPoint.z += delta.z();
+                return true;
+            }
+
             return false;
         }
         case DRW::ETYPE::XLINE:
@@ -741,9 +755,11 @@ namespace
                 return true;
             }
 
-            if (pointIndex == 1)
+            if (pointIndex == 1 || pointIndex == 2)
             {
-                QVector3D direction = QVector3D(point.x() - basePoint.x(), point.y() - basePoint.y(), 0.0f);
+                QVector3D direction = pointIndex == 1
+                    ? QVector3D(point.x() - basePoint.x(), point.y() - basePoint.y(), 0.0f)
+                    : QVector3D(basePoint.x() - point.x(), basePoint.y() - point.y(), 0.0f);
 
                 if (direction.lengthSquared() <= kGeometryEpsilon)
                 {

@@ -180,7 +180,7 @@ std::vector<TransientPrimitive> CadViewer::buildSelectedEntityHandlePrimitives()
         return {};
     }
 
-    const QVector<CadSelectionHandleInfo> handles = buildSelectionHandleInfo(selectedItem);
+    const QVector<CadSelectionHandleInfo> handles = buildSelectionHandleInfo(selectedItem, xlineHandleWorldLength());
 
     if (handles.isEmpty())
     {

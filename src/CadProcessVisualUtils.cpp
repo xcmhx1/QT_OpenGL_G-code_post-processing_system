@@ -1224,7 +1224,7 @@ CadProcessVisualInfo buildProcessVisualInfo(const CadItem* item)
     return info;
 }
 
-QVector<CadSelectionHandleInfo> buildSelectionHandleInfo(const CadItem* item)
+QVector<CadSelectionHandleInfo> buildSelectionHandleInfo(const CadItem* item, float xlineHandleLength)
 {
     QVector<CadSelectionHandleInfo> handles;
 
@@ -1244,8 +1244,11 @@ QVector<CadSelectionHandleInfo> buildSelectionHandleInfo(const CadItem* item)
     case DRW::ETYPE::LINE:
     {
         const DRW_Line* line = static_cast<const DRW_Line*>(item->m_nativeEntity);
-        appendSelectionHandle(handles, QVector3D(line->basePoint.x, line->basePoint.y, line->basePoint.z), true, true, 0);
-        appendSelectionHandle(handles, QVector3D(line->secPoint.x, line->secPoint.y, line->secPoint.z), false, true, 1);
+        const QVector3D startPoint(line->basePoint.x, line->basePoint.y, line->basePoint.z);
+        const QVector3D endPoint(line->secPoint.x, line->secPoint.y, line->secPoint.z);
+        appendSelectionHandle(handles, startPoint, true, true, 0);
+        appendSelectionHandle(handles, endPoint, false, true, 1);
+        appendSelectionHandle(handles, (startPoint + endPoint) * 0.5f, false, true, 2);
         break;
     }
     case DRW::ETYPE::XLINE:
@@ -1263,8 +1266,12 @@ QVector<CadSelectionHandleInfo> buildSelectionHandleInfo(const CadItem* item)
         }
 
         const QVector3D basePoint(xline->basePoint.x, xline->basePoint.y, xline->basePoint.z);
+        const float handleLength = std::isfinite(xlineHandleLength) && xlineHandleLength > kVisualEpsilon
+            ? xlineHandleLength
+            : 50.0f;
         appendSelectionHandle(handles, basePoint, true, true, 0);
-        appendSelectionHandle(handles, basePoint + direction * 50.0f, false, true, 1);
+        appendSelectionHandle(handles, basePoint + direction * handleLength, false, true, 1);
+        appendSelectionHandle(handles, basePoint - direction * handleLength, false, true, 2);
         break;
     }
     case DRW::ETYPE::CIRCLE:

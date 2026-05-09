@@ -333,16 +333,24 @@ namespace CadEditerWorkflowInternal
         case DRW::ETYPE::LINE:
         {
             const DRW_Line* line = static_cast<const DRW_Line*>(item->m_nativeEntity);
+            const QVector3D startPoint(line->basePoint.x, line->basePoint.y, 0.0f);
+            const QVector3D endPoint(line->secPoint.x, line->secPoint.y, 0.0f);
 
             if (pointIndex == 0)
             {
-                point = QVector3D(line->basePoint.x, line->basePoint.y, 0.0f);
+                point = startPoint;
                 return true;
             }
 
             if (pointIndex == 1)
             {
-                point = QVector3D(line->secPoint.x, line->secPoint.y, 0.0f);
+                point = endPoint;
+                return true;
+            }
+
+            if (pointIndex == 2)
+            {
+                point = (startPoint + endPoint) * 0.5f;
                 return true;
             }
 
@@ -363,6 +371,12 @@ namespace CadEditerWorkflowInternal
             if (pointIndex == 1)
             {
                 point = basePoint + direction * static_cast<float>(kXlineGripHandleLength);
+                return true;
+            }
+
+            if (pointIndex == 2)
+            {
+                point = basePoint - direction * static_cast<float>(kXlineGripHandleLength);
                 return true;
             }
 
@@ -568,6 +582,16 @@ namespace CadEditerWorkflowInternal
                 return true;
             }
 
+            if (pointIndex == 2)
+            {
+                const QVector3D startPoint(line->basePoint.x, line->basePoint.y, line->basePoint.z);
+                const QVector3D endPoint(line->secPoint.x, line->secPoint.y, line->secPoint.z);
+                const QVector3D delta = point - (startPoint + endPoint) * 0.5f;
+                translateCoord(line->basePoint, delta);
+                translateCoord(line->secPoint, delta);
+                return true;
+            }
+
             return false;
         }
         case DRW::ETYPE::XLINE:
@@ -583,9 +607,11 @@ namespace CadEditerWorkflowInternal
                 return true;
             }
 
-            if (pointIndex == 1)
+            if (pointIndex == 1 || pointIndex == 2)
             {
-                QVector3D direction = flattenToDrawingPlane(point - basePoint);
+                QVector3D direction = pointIndex == 1
+                    ? flattenToDrawingPlane(point - basePoint)
+                    : flattenToDrawingPlane(basePoint - point);
 
                 if (direction.lengthSquared() <= kGeometryEpsilon)
                 {

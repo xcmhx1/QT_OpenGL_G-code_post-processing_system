@@ -39,4 +39,4 @@ bool isProcessVisualizable(const CadItem* item);
 
 CadProcessVisualInfo buildProcessVisualInfo(const CadItem* item);
 
-QVector<CadSelectionHandleInfo> buildSelectionHandleInfo(const CadItem* item);
+QVector<CadSelectionHandleInfo> buildSelectionHandleInfo(const CadItem* item, float xlineHandleLength = 50.0f);

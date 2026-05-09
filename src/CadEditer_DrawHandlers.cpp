@@ -144,6 +144,7 @@ bool CadEditer::beginGripEdit(DrawStateMachine& drawState, CadItem* item, const 
         return false;
     }
 
+    currentPoint = handle.position;
     drawState.commandPoints = { currentPoint };
     drawState.commandBulges.clear();
     drawState.isDrawing = false;

@@ -498,6 +498,9 @@ private:
     // @return 缩放比例
     float pixelToWorldScale() const;
 
+    // 构造线方向控制点与基点之间的世界距离，保持屏幕距离稳定。
+    float xlineHandleWorldLength() const;
+
 private:
     // 视图相机，管理观察变换
     OrbitalCamera m_camera;
