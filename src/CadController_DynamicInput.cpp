@@ -111,6 +111,59 @@ namespace
         return std::atan2(static_cast<double>(delta.y()), static_cast<double>(delta.x())) * kDegreesPerRadian;
     }
 
+    double sideSignForLineLikeEntity(const QVector3D& firstPoint, const QVector3D& secondPoint, const QVector3D& sidePoint)
+    {
+        const QVector3D direction = flattenToDrawingPlane(secondPoint) - flattenToDrawingPlane(firstPoint);
+        const QVector3D offset = flattenToDrawingPlane(sidePoint) - flattenToDrawingPlane(firstPoint);
+        const double cross = static_cast<double>(direction.x()) * static_cast<double>(offset.y())
+            - static_cast<double>(direction.y()) * static_cast<double>(offset.x());
+        return cross >= 0.0 ? 1.0 : -1.0;
+    }
+
+    double signedOffsetDistanceForSide(const CadItem* item, double distance, const QVector3D& sidePoint)
+    {
+        const double absoluteDistance = std::abs(distance);
+
+        if (item == nullptr || item->m_nativeEntity == nullptr)
+        {
+            return absoluteDistance;
+        }
+
+        if (item->m_type == DRW::ETYPE::LINE)
+        {
+            const DRW_Line* line = static_cast<const DRW_Line*>(item->m_nativeEntity);
+            return absoluteDistance * sideSignForLineLikeEntity
+            (
+                QVector3D(line->basePoint.x, line->basePoint.y, line->basePoint.z),
+                QVector3D(line->secPoint.x, line->secPoint.y, line->secPoint.z),
+                sidePoint
+            );
+        }
+
+        if (item->m_type == DRW::ETYPE::XLINE || item->m_type == DRW::ETYPE::RAY)
+        {
+            const DRW_Ray* ray = static_cast<const DRW_Ray*>(item->m_nativeEntity);
+            const QVector3D basePoint(ray->basePoint.x, ray->basePoint.y, ray->basePoint.z);
+            const QVector3D direction(ray->secPoint.x, ray->secPoint.y, ray->secPoint.z);
+            return absoluteDistance * sideSignForLineLikeEntity(basePoint, basePoint + direction, sidePoint);
+        }
+
+        if (item->m_type == DRW::ETYPE::CIRCLE || item->m_type == DRW::ETYPE::ARC)
+        {
+            const DRW_Circle* circle = static_cast<const DRW_Circle*>(item->m_nativeEntity);
+            const QVector3D center(circle->basePoint.x, circle->basePoint.y, circle->basePoint.z);
+            const double sideRadius = static_cast<double>((flattenToDrawingPlane(sidePoint) - flattenToDrawingPlane(center)).length());
+            return sideRadius >= circle->radious ? absoluteDistance : -absoluteDistance;
+        }
+
+        if (item->m_geometry.vertices.size() >= 2)
+        {
+            return absoluteDistance * sideSignForLineLikeEntity(item->m_geometry.vertices.front(), item->m_geometry.vertices.back(), sidePoint);
+        }
+
+        return absoluteDistance;
+    }
+
     double scaleReferenceDistance(const QVector<CadItem*>& items, const QVector3D& basePoint)
     {
         double maxDistance = 0.0;
@@ -163,8 +216,18 @@ namespace
             { QStringLiteral("polyline"),   QStringLiteral("POLYLINE 多段线"),   { QStringLiteral("o"), QStringLiteral("polyline"), QStringLiteral("pline"), QStringLiteral("多段线") } },
             { QStringLiteral("lwpolyline"), QStringLiteral("LWPOLYLINE 轻量多段线"), { QStringLiteral("w"), QStringLiteral("lwpolyline"), QStringLiteral("轻量多段线") } },
             { QStringLiteral("move"),       QStringLiteral("MOVE  移动"),        { QStringLiteral("m"), QStringLiteral("move"), QStringLiteral("移动") } },
+            { QStringLiteral("copy"),       QStringLiteral("COPY  复制"),        { QStringLiteral("co"), QStringLiteral("cp"), QStringLiteral("copy"), QStringLiteral("复制") } },
             { QStringLiteral("rotate"),     QStringLiteral("ROTATE 旋转"),        { QStringLiteral("ro"), QStringLiteral("rotate"), QStringLiteral("旋转") } },
             { QStringLiteral("scale"),      QStringLiteral("SCALE 缩放"),        { QStringLiteral("sc"), QStringLiteral("scale"), QStringLiteral("缩放") } },
+            { QStringLiteral("mirror"),     QStringLiteral("MIRROR 镜像"),        { QStringLiteral("mi"), QStringLiteral("mirror"), QStringLiteral("镜像") } },
+            { QStringLiteral("offset"),     QStringLiteral("OFFSET 偏移"),        { QStringLiteral("o"), QStringLiteral("offset"), QStringLiteral("偏移") } },
+            { QStringLiteral("arrayrect"),  QStringLiteral("ARRAYRECT 矩形阵列"), { QStringLiteral("arrayrect"), QStringLiteral("ar"), QStringLiteral("矩形阵列") } },
+            { QStringLiteral("arraypolar"), QStringLiteral("ARRAYPOLAR 环形阵列"), { QStringLiteral("arraypolar"), QStringLiteral("环形阵列") } },
+            { QStringLiteral("trim"),       QStringLiteral("TRIM  修剪"),        { QStringLiteral("tr"), QStringLiteral("trim"), QStringLiteral("修剪") } },
+            { QStringLiteral("extend"),     QStringLiteral("EXTEND 延申"),        { QStringLiteral("ex"), QStringLiteral("extend"), QStringLiteral("延申"), QStringLiteral("延伸") } },
+            { QStringLiteral("join"),       QStringLiteral("JOIN  合并"),        { QStringLiteral("j"), QStringLiteral("join"), QStringLiteral("合并") } },
+            { QStringLiteral("fillet"),     QStringLiteral("FILLET 圆角"),        { QStringLiteral("f"), QStringLiteral("fillet"), QStringLiteral("圆角") } },
+            { QStringLiteral("chamfer"),    QStringLiteral("CHAMFER 倒角"),       { QStringLiteral("cha"), QStringLiteral("chamfer"), QStringLiteral("倒角"), QStringLiteral("直角") } },
             { QStringLiteral("delete"),     QStringLiteral("DELETE 删除"),       { QStringLiteral("del"), QStringLiteral("delete"), QStringLiteral("erase"), QStringLiteral("删除") } },
             { QStringLiteral("color"),      QStringLiteral("COLOR 改色"),        { QStringLiteral("k"), QStringLiteral("color"), QStringLiteral("改色"), QStringLiteral("颜色") } },
             { QStringLiteral("fit"),        QStringLiteral("FIT   适配视图"),    { QStringLiteral("f"), QStringLiteral("fit"), QStringLiteral("zoomextents"), QStringLiteral("适配") } },
@@ -261,8 +324,8 @@ QString CadController::parameterInputPrompt() const
             : QStringLiteral("POLYGON: 选择内切于圆或外切于圆");
     case ParameterInputCommand::Copy:
         return m_parameterInputSession.stageIndex == 0
-            ? QStringLiteral("COPY: 输入 X 偏移量")
-            : QStringLiteral("COPY: 输入 Y 偏移量");
+            ? QStringLiteral("COPY: 指定基点")
+            : QStringLiteral("COPY: 指定第二点或输入位移");
     case ParameterInputCommand::Rotate:
         return m_parameterInputSession.stageIndex == 0
             ? QStringLiteral("ROTATE: 指定旋转基点")
@@ -306,7 +369,9 @@ QString CadController::parameterInputPrompt() const
             return QStringLiteral("MIRROR: 输入是否删除原图元");
         }
     case ParameterInputCommand::Offset:
-        return QStringLiteral("OFFSET: 输入偏移距离");
+        return m_parameterInputSession.stageIndex == 0
+            ? QStringLiteral("OFFSET: 输入偏移距离")
+            : QStringLiteral("OFFSET: 指定偏移侧");
     case ParameterInputCommand::Trim:
         return QStringLiteral("TRIM: 输入要修剪的端点");
     case ParameterInputCommand::Extend:
@@ -526,9 +591,11 @@ CadDynamicInputOverlayState CadController::dynamicInputOverlayState() const
             }
             break;
         case ParameterInputCommand::Copy:
-            labelText = m_parameterInputSession.stageIndex == 0 ? QStringLiteral("X 偏移") : QStringLiteral("Y 偏移");
-            valueText = formatDynamicInputValue(m_parameterInputSession.stageIndex == 0 ? m_parameterInputSession.doubleValue1 : m_parameterInputSession.doubleValue2);
-            stageHint = QStringLiteral("输入数值后 Enter/Space确认");
+            labelText = QStringLiteral("位移");
+            valueText = QStringLiteral("%1, %2")
+                .arg(formatDynamicInputValue(m_parameterInputSession.doubleValue1))
+                .arg(formatDynamicInputValue(m_parameterInputSession.doubleValue2));
+            stageHint = QStringLiteral("指定第二点，或输入相对坐标后 Enter/Space确认");
             break;
         case ParameterInputCommand::Rotate:
             labelText = QStringLiteral("旋转角度");
@@ -593,7 +660,9 @@ CadDynamicInputOverlayState CadController::dynamicInputOverlayState() const
         case ParameterInputCommand::Offset:
             labelText = QStringLiteral("偏移距离");
             valueText = formatDynamicInputValue(m_parameterInputSession.doubleValue1);
-            stageHint = QStringLiteral("输入距离后 Enter/Space确认");
+            stageHint = m_parameterInputSession.stageIndex == 0
+                ? QStringLiteral("输入距离后 Enter/Space确认")
+                : QStringLiteral("点击图元偏移侧确认");
             break;
         case ParameterInputCommand::Trim:
         case ParameterInputCommand::Extend:
@@ -900,6 +969,11 @@ bool CadController::executeIdleCommandByCanonical(const QString& canonicalComman
         return beginMoveSelected();
     }
 
+    if (normalized == QStringLiteral("copy"))
+    {
+        return beginCopySelected();
+    }
+
     if (normalized == QStringLiteral("rotate"))
     {
         return beginRotateSelected();
@@ -908,6 +982,51 @@ bool CadController::executeIdleCommandByCanonical(const QString& canonicalComman
     if (normalized == QStringLiteral("scale"))
     {
         return beginScaleSelected();
+    }
+
+    if (normalized == QStringLiteral("mirror"))
+    {
+        return beginMirrorSelected();
+    }
+
+    if (normalized == QStringLiteral("offset"))
+    {
+        return beginOffsetSelected();
+    }
+
+    if (normalized == QStringLiteral("arrayrect"))
+    {
+        return beginRectangularArraySelected();
+    }
+
+    if (normalized == QStringLiteral("arraypolar"))
+    {
+        return beginCircularArraySelected();
+    }
+
+    if (normalized == QStringLiteral("trim"))
+    {
+        return beginTrimSelected();
+    }
+
+    if (normalized == QStringLiteral("extend"))
+    {
+        return beginExtendSelected();
+    }
+
+    if (normalized == QStringLiteral("join"))
+    {
+        return joinSelectedEntities();
+    }
+
+    if (normalized == QStringLiteral("fillet"))
+    {
+        return beginFilletSelected();
+    }
+
+    if (normalized == QStringLiteral("chamfer"))
+    {
+        return beginChamferSelected();
     }
 
     if (normalized == QStringLiteral("delete"))
@@ -974,11 +1093,104 @@ void CadController::clearScalePreview()
     m_drawState.scalePreviewFactor = 1.0;
 }
 
+void CadController::clearCopyPreview()
+{
+    m_drawState.copyPreviewActive = false;
+    m_drawState.copyPreviewBasePoint = QVector3D();
+    m_drawState.copyPreviewDelta = QVector3D();
+}
+
 void CadController::clearRotatePreview()
 {
     m_drawState.rotatePreviewActive = false;
     m_drawState.rotatePreviewBasePoint = QVector3D();
     m_drawState.rotatePreviewAngleDegrees = 0.0;
+}
+
+void CadController::clearModifyPreviews()
+{
+    clearCopyPreview();
+    clearRotatePreview();
+    clearScalePreview();
+    m_drawState.mirrorPreviewActive = false;
+    m_drawState.mirrorPreviewFirstPoint = QVector3D();
+    m_drawState.mirrorPreviewSecondPoint = QVector3D();
+    m_drawState.rectangularArrayPreviewActive = false;
+    m_drawState.rectangularArrayPreviewRows = 1;
+    m_drawState.rectangularArrayPreviewColumns = 1;
+    m_drawState.rectangularArrayPreviewRowOffset = QVector3D();
+    m_drawState.rectangularArrayPreviewColumnOffset = QVector3D();
+    m_drawState.circularArrayPreviewActive = false;
+    m_drawState.circularArrayPreviewCenter = QVector3D();
+    m_drawState.circularArrayPreviewCount = 1;
+    m_drawState.circularArrayPreviewTotalAngleDegrees = 0.0;
+    m_drawState.circularArrayPreviewRotateItems = true;
+    m_drawState.offsetPreviewActive = false;
+    m_drawState.offsetPreviewDistance = 0.0;
+}
+
+bool CadController::updateCopyPreviewFromCursor()
+{
+    if (!isParameterInputCommandActive()
+        || m_parameterInputSession.command != ParameterInputCommand::Copy
+        || m_parameterInputSession.stageIndex != 1)
+    {
+        return false;
+    }
+
+    const QVector3D basePoint = flattenToDrawingPlane(m_parameterInputSession.point1);
+    const QVector3D delta = flattenToDrawingPlane(m_drawState.currentPos) - basePoint;
+    m_parameterInputSession.doubleValue1 = delta.x();
+    m_parameterInputSession.doubleValue2 = delta.y();
+    m_drawState.copyPreviewActive = true;
+    m_drawState.copyPreviewBasePoint = basePoint;
+    m_drawState.copyPreviewDelta = delta;
+    return true;
+}
+
+bool CadController::finishCopyParameterInput(const QVector3D& delta)
+{
+    if (delta.lengthSquared() <= 0.000001f || m_editer == nullptr)
+    {
+        if (m_viewer != nullptr)
+        {
+            m_viewer->appendCommandMessage(QStringLiteral("复制位移为 0，未创建副本。"));
+            m_viewer->refreshCommandPrompt();
+            m_viewer->requestViewUpdate();
+        }
+
+        m_drawState.editType = EditType::None;
+        resetParameterInputSession();
+        resetPointDynamicInputSession();
+        return true;
+    }
+
+    const int requestedCount = m_parameterInputSession.selectedItems.size();
+    const bool success = m_editer->copyEntities(m_parameterInputSession.selectedItems, flattenToDrawingPlane(delta));
+
+    if (m_viewer != nullptr)
+    {
+        m_viewer->appendCommandMessage
+        (
+            success
+                ? QStringLiteral("已复制 %1 个图元，位移为 (%2, %3)。")
+                    .arg(requestedCount)
+                    .arg(formatDynamicInputValue(delta.x()))
+                    .arg(formatDynamicInputValue(delta.y()))
+                : QStringLiteral("选中图元复制失败。")
+        );
+        m_viewer->refreshCommandPrompt();
+        m_viewer->requestViewUpdate();
+    }
+
+    if (success)
+    {
+        m_drawState.editType = EditType::None;
+        resetParameterInputSession();
+        resetPointDynamicInputSession();
+    }
+
+    return true;
 }
 
 bool CadController::updateRotatePreviewFromCursor()
@@ -1134,6 +1346,104 @@ bool CadController::finishScaleParameterInput(double scaleFactor)
     return true;
 }
 
+bool CadController::updateMirrorPreviewFromCursor()
+{
+    if (!isParameterInputCommandActive()
+        || m_parameterInputSession.command != ParameterInputCommand::Mirror
+        || m_parameterInputSession.stageIndex < 1)
+    {
+        return false;
+    }
+
+    m_drawState.mirrorPreviewActive = true;
+    m_drawState.mirrorPreviewFirstPoint = flattenToDrawingPlane(m_parameterInputSession.point1);
+    m_drawState.mirrorPreviewSecondPoint = m_parameterInputSession.stageIndex == 1
+        ? flattenToDrawingPlane(m_drawState.currentPos)
+        : flattenToDrawingPlane(m_parameterInputSession.point2);
+    return true;
+}
+
+bool CadController::updateArrayPreviewState()
+{
+    if (!isParameterInputCommandActive())
+    {
+        return false;
+    }
+
+    if (m_parameterInputSession.command == ParameterInputCommand::RectangularArray)
+    {
+        m_drawState.rectangularArrayPreviewActive = true;
+        m_drawState.rectangularArrayPreviewRows = std::max(m_parameterInputSession.intValue1, 1);
+        m_drawState.rectangularArrayPreviewColumns = std::max(m_parameterInputSession.intValue2, 1);
+        m_drawState.rectangularArrayPreviewRowOffset = QVector3D(0.0f, static_cast<float>(m_parameterInputSession.doubleValue1), 0.0f);
+        m_drawState.rectangularArrayPreviewColumnOffset = QVector3D(static_cast<float>(m_parameterInputSession.doubleValue2), 0.0f, 0.0f);
+        return true;
+    }
+
+    if (m_parameterInputSession.command == ParameterInputCommand::CircularArray
+        && m_parameterInputSession.stageIndex >= 3)
+    {
+        m_drawState.circularArrayPreviewActive = true;
+        m_drawState.circularArrayPreviewCenter = flattenToDrawingPlane(m_parameterInputSession.point1);
+        m_drawState.circularArrayPreviewCount = std::max(m_parameterInputSession.intValue1, 1);
+        m_drawState.circularArrayPreviewTotalAngleDegrees = m_parameterInputSession.doubleValue1;
+        m_drawState.circularArrayPreviewRotateItems = m_parameterInputSession.boolValue;
+        return true;
+    }
+
+    return false;
+}
+
+bool CadController::updateOffsetPreviewFromCursor()
+{
+    if (!isParameterInputCommandActive()
+        || m_parameterInputSession.command != ParameterInputCommand::Offset
+        || m_parameterInputSession.stageIndex != 1)
+    {
+        return false;
+    }
+
+    m_drawState.offsetPreviewActive = true;
+    m_drawState.offsetPreviewDistance = signedOffsetDistanceForSide
+    (
+        m_parameterInputSession.primaryItem,
+        m_parameterInputSession.doubleValue1,
+        m_drawState.currentPos
+    );
+    return true;
+}
+
+bool CadController::finishOffsetParameterInput(double signedDistance)
+{
+    if (m_editer == nullptr || !m_editer->offsetEntity(m_parameterInputSession.primaryItem, signedDistance))
+    {
+        if (m_viewer != nullptr)
+        {
+            m_viewer->appendCommandMessage(QStringLiteral("当前图元不支持偏移，或偏移失败。"));
+            m_viewer->refreshCommandPrompt();
+            m_viewer->requestViewUpdate();
+        }
+
+        return true;
+    }
+
+    if (m_viewer != nullptr)
+    {
+        m_viewer->appendCommandMessage
+        (
+            QStringLiteral("已创建偏移图元，距离为 %1。")
+                .arg(formatDynamicInputValue(signedDistance))
+        );
+        m_viewer->refreshCommandPrompt();
+        m_viewer->requestViewUpdate();
+    }
+
+    m_drawState.editType = EditType::None;
+    resetParameterInputSession();
+    resetPointDynamicInputSession();
+    return true;
+}
+
 QString CadController::currentPointInputStageKey() const
 {
     if (!m_drawState.hasActiveCommand() || !isAwaitingPointInput())
@@ -1145,6 +1455,10 @@ QString CadController::currentPointInputStageKey() const
     {
         switch (m_parameterInputSession.command)
         {
+        case ParameterInputCommand::Copy:
+            return m_parameterInputSession.stageIndex == 0
+                ? QStringLiteral("PARAM_COPY_BASE")
+                : QStringLiteral("PARAM_COPY_TARGET");
         case ParameterInputCommand::CircularArray:
             return QStringLiteral("PARAM_ARRAYPOLAR_CENTER");
         case ParameterInputCommand::Mirror:
@@ -1155,6 +1469,8 @@ QString CadController::currentPointInputStageKey() const
             return QStringLiteral("PARAM_ROTATE_BASE");
         case ParameterInputCommand::Scale:
             return QStringLiteral("PARAM_SCALE_BASE");
+        case ParameterInputCommand::Offset:
+            return QStringLiteral("PARAM_OFFSET_SIDE");
         default:
             break;
         }
@@ -1503,14 +1819,18 @@ bool CadController::isAwaitingPointInput() const
 {
     if (isParameterInputCommandActive())
     {
-        return (m_parameterInputSession.command == ParameterInputCommand::CircularArray
-            && m_parameterInputSession.stageIndex == 2)
+        return (m_parameterInputSession.command == ParameterInputCommand::Copy
+                && (m_parameterInputSession.stageIndex == 0 || m_parameterInputSession.stageIndex == 1))
+            || (m_parameterInputSession.command == ParameterInputCommand::CircularArray
+                && m_parameterInputSession.stageIndex == 2)
             || (m_parameterInputSession.command == ParameterInputCommand::Rotate
                 && m_parameterInputSession.stageIndex == 0)
             || (m_parameterInputSession.command == ParameterInputCommand::Mirror
                 && (m_parameterInputSession.stageIndex == 0 || m_parameterInputSession.stageIndex == 1))
             || (m_parameterInputSession.command == ParameterInputCommand::Scale
-                && m_parameterInputSession.stageIndex == 0);
+                && m_parameterInputSession.stageIndex == 0)
+            || (m_parameterInputSession.command == ParameterInputCommand::Offset
+                && m_parameterInputSession.stageIndex == 1);
     }
 
     if (m_drawState.editType == EditType::Move)
@@ -1573,6 +1893,13 @@ bool CadController::isAwaitingPointInput() const
 QVector3D CadController::dynamicInputReferencePoint() const
 {
     if (isParameterInputCommandActive()
+        && m_parameterInputSession.command == ParameterInputCommand::Copy
+        && m_parameterInputSession.stageIndex == 1)
+    {
+        return flattenToDrawingPlane(m_parameterInputSession.point1);
+    }
+
+    if (isParameterInputCommandActive()
         && m_parameterInputSession.command == ParameterInputCommand::Mirror
         && m_parameterInputSession.stageIndex == 1)
     {
@@ -1594,6 +1921,9 @@ QVector3D CadController::applyOrthoConstraint(const QVector3D& worldPos) const
     constexpr double kRadiansPerDegree = 3.14159265358979323846 / 180.0;
     const QVector3D planarPoint = flattenToDrawingPlane(worldPos);
     const bool hasConstraintReference = !m_drawState.commandPoints.isEmpty()
+        || (isParameterInputCommandActive()
+            && m_parameterInputSession.command == ParameterInputCommand::Copy
+            && m_parameterInputSession.stageIndex == 1)
         || (isParameterInputCommandActive()
             && m_parameterInputSession.command == ParameterInputCommand::Mirror
             && m_parameterInputSession.stageIndex == 1);
@@ -1999,6 +2329,7 @@ bool CadController::submitParameterInputField()
 
             m_parameterInputSession.stageIndex = 1;
             m_parameterInputSession.fieldBuffer.clear();
+            updateArrayPreviewState();
             if (m_viewer != nullptr)
             {
                 m_viewer->refreshCommandPrompt();
@@ -2151,6 +2482,7 @@ bool CadController::submitParameterInputField()
             }
             m_parameterInputSession.stageIndex = 2;
             m_parameterInputSession.fieldBuffer.clear();
+            updateArrayPreviewState();
             if (m_viewer != nullptr)
             {
                 m_viewer->refreshCommandPrompt();
@@ -2164,6 +2496,7 @@ bool CadController::submitParameterInputField()
             }
             m_parameterInputSession.stageIndex = 3;
             m_parameterInputSession.fieldBuffer.clear();
+            updateArrayPreviewState();
             if (m_viewer != nullptr)
             {
                 m_viewer->refreshCommandPrompt();
@@ -2176,33 +2509,24 @@ bool CadController::submitParameterInputField()
                 break;
             }
 
+            updateArrayPreviewState();
+
             {
-                int arrayedCount = 0;
                 const QVector3D rowOffset(0.0f, static_cast<float>(m_parameterInputSession.doubleValue1), 0.0f);
                 const QVector3D columnOffset(static_cast<float>(m_parameterInputSession.doubleValue2), 0.0f, 0.0f);
 
-                for (CadItem* item : m_parameterInputSession.selectedItems)
-                {
-                    if (item != nullptr
-                        && m_editer != nullptr
-                        && m_editer->arrayEntity
-                        (
-                            item,
-                            m_parameterInputSession.intValue1,
-                            m_parameterInputSession.intValue2,
-                            rowOffset,
-                            columnOffset
-                        ))
-                    {
-                        ++arrayedCount;
-                    }
-                }
-
                 return finishSession
                 (
-                    arrayedCount > 0,
+                    m_editer != nullptr && m_editer->rectangularArrayEntities
+                    (
+                        m_parameterInputSession.selectedItems,
+                        m_parameterInputSession.intValue1,
+                        m_parameterInputSession.intValue2,
+                        rowOffset,
+                        columnOffset
+                    ),
                     QStringLiteral("已对 %1 个图元执行 %2 x %3 矩形阵列。")
-                        .arg(arrayedCount)
+                        .arg(m_parameterInputSession.selectedItems.size())
                         .arg(m_parameterInputSession.intValue1)
                         .arg(m_parameterInputSession.intValue2),
                     QStringLiteral("选中图元阵列失败。")
@@ -2221,6 +2545,7 @@ bool CadController::submitParameterInputField()
 
             m_parameterInputSession.stageIndex = 1;
             m_parameterInputSession.fieldBuffer.clear();
+            updateArrayPreviewState();
             if (m_viewer != nullptr)
             {
                 m_viewer->refreshCommandPrompt();
@@ -2239,6 +2564,7 @@ bool CadController::submitParameterInputField()
             m_parameterInputSession.stageIndex = 2;
             m_parameterInputSession.fieldBuffer.clear();
             resetPointDynamicInputSession(currentPointInputStageKey());
+            updateArrayPreviewState();
             if (m_viewer != nullptr)
             {
                 syncCurrentPosWithCursor();
@@ -2258,6 +2584,8 @@ bool CadController::submitParameterInputField()
         {
             break;
         }
+
+        updateArrayPreviewState();
 
         if (m_editer == nullptr || !m_editer->polarArrayEntities
         (
@@ -2311,17 +2639,23 @@ bool CadController::submitParameterInputField()
             break;
         }
 
-        if (m_editer == nullptr || !m_editer->offsetEntity(m_parameterInputSession.primaryItem, m_parameterInputSession.doubleValue1))
+        if (std::abs(m_parameterInputSession.doubleValue1) <= 0.000001)
         {
-            return finishSession(false, QString(), QStringLiteral("当前图元不支持偏移，或偏移失败。"));
+            errorMessage = QStringLiteral("偏移距离不能为 0。");
+            break;
         }
 
-        return finishSession
-        (
-            true,
-            QStringLiteral("已创建偏移图元，距离为 %1。").arg(formatDynamicInputValue(m_parameterInputSession.doubleValue1)),
-            QString()
-        );
+        m_parameterInputSession.stageIndex = 1;
+        m_parameterInputSession.fieldBuffer.clear();
+        resetPointDynamicInputSession(currentPointInputStageKey());
+        updateOffsetPreviewFromCursor();
+        if (m_viewer != nullptr)
+        {
+            syncCurrentPosWithCursor();
+            m_viewer->refreshCommandPrompt();
+            m_viewer->requestViewUpdate();
+        }
+        return true;
 
     case ParameterInputCommand::Trim:
         if (!commitChoiceValue
@@ -2447,9 +2781,24 @@ bool CadController::commitParameterInputPoint(const QVector3D& worldPos)
 
     switch (m_parameterInputSession.command)
     {
+    case ParameterInputCommand::Copy:
+        if (m_parameterInputSession.stageIndex == 0)
+        {
+            m_parameterInputSession.point1 = flattenToDrawingPlane(worldPos);
+            m_parameterInputSession.stageIndex = 1;
+            m_parameterInputSession.fieldBuffer.clear();
+            updateCopyPreviewFromCursor();
+            break;
+        }
+
+        {
+            const QVector3D delta = flattenToDrawingPlane(worldPos) - flattenToDrawingPlane(m_parameterInputSession.point1);
+            return finishCopyParameterInput(delta);
+        }
     case ParameterInputCommand::CircularArray:
         m_parameterInputSession.point1 = flattenToDrawingPlane(worldPos);
         m_parameterInputSession.stageIndex = 3;
+        updateArrayPreviewState();
         break;
     case ParameterInputCommand::Rotate:
         if (m_parameterInputSession.stageIndex == 0)
@@ -2487,13 +2836,28 @@ bool CadController::commitParameterInputPoint(const QVector3D& worldPos)
         {
             m_parameterInputSession.point1 = flattenToDrawingPlane(worldPos);
             m_parameterInputSession.stageIndex = 1;
+            updateMirrorPreviewFromCursor();
         }
         else
         {
             m_parameterInputSession.point2 = flattenToDrawingPlane(worldPos);
             m_parameterInputSession.stageIndex = 2;
+            updateMirrorPreviewFromCursor();
         }
         break;
+    case ParameterInputCommand::Offset:
+        if (m_parameterInputSession.stageIndex == 1)
+        {
+            const double signedDistance = signedOffsetDistanceForSide
+            (
+                m_parameterInputSession.primaryItem,
+                m_parameterInputSession.doubleValue1,
+                worldPos
+            );
+            m_drawState.offsetPreviewDistance = signedDistance;
+            return finishOffsetParameterInput(signedDistance);
+        }
+        return false;
     default:
         return false;
     }
@@ -2628,8 +2992,10 @@ QString CadController::appendDynamicInputPromptState(const QString& basePrompt) 
             }
             break;
         case ParameterInputCommand::Copy:
-            labelText = m_parameterInputSession.stageIndex == 0 ? QStringLiteral("X") : QStringLiteral("Y");
-            valueText = formatDynamicInputValue(m_parameterInputSession.stageIndex == 0 ? m_parameterInputSession.doubleValue1 : m_parameterInputSession.doubleValue2);
+            labelText = QStringLiteral("位移");
+            valueText = QStringLiteral("%1, %2")
+                .arg(formatDynamicInputValue(m_parameterInputSession.doubleValue1))
+                .arg(formatDynamicInputValue(m_parameterInputSession.doubleValue2));
             break;
         case ParameterInputCommand::Rotate:
             labelText = QStringLiteral("角度");

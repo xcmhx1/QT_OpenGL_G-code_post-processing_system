@@ -100,6 +100,9 @@ public:
     // 复制指定实体，并按偏移量生成一个副本
     bool copyEntity(CadItem* item, const QVector3D& delta);
 
+    // 批量复制指定实体，并按偏移量生成副本
+    bool copyEntities(const QVector<CadItem*>& items, const QVector3D& delta);
+
     // 围绕基点旋转指定实体，角度单位为度
     bool rotateEntity(CadItem* item, const QVector3D& basePoint, double angleDegrees);
 
@@ -114,6 +117,9 @@ public:
 
     // 对指定实体执行矩形阵列
     bool arrayEntity(CadItem* item, int rowCount, int columnCount, const QVector3D& rowOffset, const QVector3D& columnOffset);
+
+    // 对指定实体集合执行矩形阵列
+    bool rectangularArrayEntities(const QVector<CadItem*>& items, int rowCount, int columnCount, const QVector3D& rowOffset, const QVector3D& columnOffset);
 
     // 对指定实体集合执行镜像；eraseSource=true 时删除原图元。
     bool mirrorEntities(const QVector<CadItem*>& items, const QVector3D& firstPoint, const QVector3D& secondPoint, bool eraseSource);

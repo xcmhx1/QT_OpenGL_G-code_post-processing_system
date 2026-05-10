@@ -88,6 +88,96 @@ namespace
         );
     }
 
+    QVector3D mirrorPlanarPreviewPoint(const QVector3D& point, const QVector3D& lineStart, const QVector3D& lineEnd)
+    {
+        const QVector3D axis = lineEnd - lineStart;
+        const double lengthSquared = static_cast<double>(axis.lengthSquared());
+
+        if (lengthSquared <= kGeometryEpsilon)
+        {
+            return point;
+        }
+
+        const QVector3D fromStart = point - lineStart;
+        const double t = QVector3D::dotProduct(fromStart, axis) / lengthSquared;
+        const QVector3D projected = lineStart + axis * static_cast<float>(t);
+        return projected * 2.0f - point;
+    }
+
+    QVector3D previewGeometryCenter(const CadItem* item)
+    {
+        if (item == nullptr || item->m_geometry.vertices.isEmpty())
+        {
+            return QVector3D();
+        }
+
+        QVector3D center;
+
+        for (const QVector3D& vertex : item->m_geometry.vertices)
+        {
+            center += CadViewerUtils::flattenedToGroundPlane(vertex);
+        }
+
+        return center / static_cast<float>(item->m_geometry.vertices.size());
+    }
+
+    QVector3D offsetPreviewNormal(const QVector<QVector3D>& vertices)
+    {
+        if (vertices.size() < 2)
+        {
+            return QVector3D();
+        }
+
+        QVector3D direction = CadViewerUtils::flattenedToGroundPlane(vertices.back()) - CadViewerUtils::flattenedToGroundPlane(vertices.front());
+
+        if (direction.lengthSquared() <= kBasisEpsilon)
+        {
+            return QVector3D();
+        }
+
+        direction.normalize();
+        return QVector3D(-direction.y(), direction.x(), 0.0f);
+    }
+
+    QVector<QVector3D> buildOffsetPreviewVertices(const CadItem* item, double distance)
+    {
+        QVector<QVector3D> result;
+
+        if (item == nullptr || item->m_geometry.vertices.isEmpty())
+        {
+            return result;
+        }
+
+        result.reserve(item->m_geometry.vertices.size());
+
+        if ((item->m_type == DRW::ETYPE::CIRCLE || item->m_type == DRW::ETYPE::ARC)
+            && item->m_nativeEntity != nullptr)
+        {
+            const DRW_Circle* circle = static_cast<const DRW_Circle*>(item->m_nativeEntity);
+            const QVector3D center(circle->basePoint.x, circle->basePoint.y, circle->basePoint.z);
+            const double targetRadius = std::max(circle->radious + distance, 0.001);
+            const double factor = circle->radious > kGeometryEpsilon ? targetRadius / circle->radious : 1.0;
+
+            for (const QVector3D& vertex : item->m_geometry.vertices)
+            {
+                const QVector3D planarVertex = CadViewerUtils::flattenedToGroundPlane(vertex);
+                result.append(center + (planarVertex - center) * static_cast<float>(factor));
+            }
+
+            return result;
+        }
+
+        const QVector3D normal = offsetPreviewNormal(item->m_geometry.vertices);
+        const QVector3D delta = normal * static_cast<float>(distance);
+
+        for (const QVector3D& vertex : item->m_geometry.vertices)
+        {
+            result.append(CadViewerUtils::flattenedToGroundPlane(vertex) + delta);
+        }
+
+        return result;
+    }
+
     void appendDashedLinePreview(QVector<QVector3D>& vertices, const QVector3D& startPoint, const QVector3D& endPoint)
     {
         constexpr int kDashCount = 16;
@@ -1164,6 +1254,202 @@ namespace CadPreviewBuilder
                 targetPointMarker.roundPoint = true;
                 targetPointMarker.vertices = { targetPoint };
                 primitives.push_back(std::move(targetPointMarker));
+            }
+
+            return primitives;
+        }
+
+        if (state.copyPreviewActive && !selectedItems.isEmpty())
+        {
+            const QVector3D basePoint = CadViewerUtils::flattenedToGroundPlane(state.copyPreviewBasePoint);
+            const QVector3D targetPoint = basePoint + CadViewerUtils::flattenedToGroundPlane(state.copyPreviewDelta);
+
+            for (CadItem* item : selectedItems)
+            {
+                if (item == nullptr || item->m_geometry.vertices.isEmpty())
+                {
+                    continue;
+                }
+
+                TransientPrimitive copiedEntityPreview;
+                copiedEntityPreview.primitiveType = CadViewerUtils::primitiveTypeForEntity(item);
+                copiedEntityPreview.color = QVector3D(0.98f, 0.67f, 0.12f);
+                copiedEntityPreview.pointSize = copiedEntityPreview.primitiveType == GL_POINTS ? 12.0f : 1.0f;
+                copiedEntityPreview.roundPoint = copiedEntityPreview.primitiveType == GL_POINTS;
+                copiedEntityPreview.vertices.reserve(item->m_geometry.vertices.size());
+
+                for (const QVector3D& vertex : item->m_geometry.vertices)
+                {
+                    copiedEntityPreview.vertices.append(CadViewerUtils::flattenedToGroundPlane(vertex) + state.copyPreviewDelta);
+                }
+
+                primitives.push_back(std::move(copiedEntityPreview));
+            }
+
+            TransientPrimitive guideLine;
+            guideLine.primitiveType = GL_LINES;
+            guideLine.color = QVector3D(0.35f, 0.90f, 1.0f);
+            guideLine.vertices = { basePoint, targetPoint };
+            primitives.push_back(std::move(guideLine));
+
+            return primitives;
+        }
+
+        if (state.mirrorPreviewActive && !selectedItems.isEmpty())
+        {
+            const QVector3D firstPoint = CadViewerUtils::flattenedToGroundPlane(state.mirrorPreviewFirstPoint);
+            const QVector3D secondPoint = CadViewerUtils::flattenedToGroundPlane(state.mirrorPreviewSecondPoint);
+
+            for (CadItem* item : selectedItems)
+            {
+                if (item == nullptr || item->m_geometry.vertices.isEmpty())
+                {
+                    continue;
+                }
+
+                TransientPrimitive mirroredEntityPreview;
+                mirroredEntityPreview.primitiveType = CadViewerUtils::primitiveTypeForEntity(item);
+                mirroredEntityPreview.color = QVector3D(0.98f, 0.67f, 0.12f);
+                mirroredEntityPreview.pointSize = mirroredEntityPreview.primitiveType == GL_POINTS ? 12.0f : 1.0f;
+                mirroredEntityPreview.roundPoint = mirroredEntityPreview.primitiveType == GL_POINTS;
+                mirroredEntityPreview.vertices.reserve(item->m_geometry.vertices.size());
+
+                for (const QVector3D& vertex : item->m_geometry.vertices)
+                {
+                    mirroredEntityPreview.vertices.append(mirrorPlanarPreviewPoint(CadViewerUtils::flattenedToGroundPlane(vertex), firstPoint, secondPoint));
+                }
+
+                primitives.push_back(std::move(mirroredEntityPreview));
+            }
+
+            TransientPrimitive mirrorAxis;
+            mirrorAxis.primitiveType = GL_LINES;
+            mirrorAxis.color = QVector3D(0.35f, 0.90f, 1.0f);
+            mirrorAxis.vertices = { firstPoint, secondPoint };
+            primitives.push_back(std::move(mirrorAxis));
+
+            return primitives;
+        }
+
+        if (state.rectangularArrayPreviewActive && !selectedItems.isEmpty())
+        {
+            const int rows = std::max(state.rectangularArrayPreviewRows, 1);
+            const int columns = std::max(state.rectangularArrayPreviewColumns, 1);
+
+            for (int row = 0; row < rows; ++row)
+            {
+                for (int column = 0; column < columns; ++column)
+                {
+                    if (row == 0 && column == 0)
+                    {
+                        continue;
+                    }
+
+                    const QVector3D delta = state.rectangularArrayPreviewRowOffset * static_cast<float>(row)
+                        + state.rectangularArrayPreviewColumnOffset * static_cast<float>(column);
+
+                    for (CadItem* item : selectedItems)
+                    {
+                        if (item == nullptr || item->m_geometry.vertices.isEmpty())
+                        {
+                            continue;
+                        }
+
+                        TransientPrimitive arrayEntityPreview;
+                        arrayEntityPreview.primitiveType = CadViewerUtils::primitiveTypeForEntity(item);
+                        arrayEntityPreview.color = QVector3D(0.98f, 0.67f, 0.12f);
+                        arrayEntityPreview.pointSize = arrayEntityPreview.primitiveType == GL_POINTS ? 12.0f : 1.0f;
+                        arrayEntityPreview.roundPoint = arrayEntityPreview.primitiveType == GL_POINTS;
+                        arrayEntityPreview.vertices.reserve(item->m_geometry.vertices.size());
+
+                        for (const QVector3D& vertex : item->m_geometry.vertices)
+                        {
+                            arrayEntityPreview.vertices.append(CadViewerUtils::flattenedToGroundPlane(vertex) + delta);
+                        }
+
+                        primitives.push_back(std::move(arrayEntityPreview));
+                    }
+                }
+            }
+
+            return primitives;
+        }
+
+        if (state.circularArrayPreviewActive && !selectedItems.isEmpty())
+        {
+            constexpr double kRadiansPerDegree = 3.14159265358979323846 / 180.0;
+            const QVector3D center = CadViewerUtils::flattenedToGroundPlane(state.circularArrayPreviewCenter);
+            const int count = std::max(state.circularArrayPreviewCount, 1);
+            const double divisor = std::abs(std::abs(state.circularArrayPreviewTotalAngleDegrees) - 360.0) <= 1.0e-6
+                ? static_cast<double>(count)
+                : static_cast<double>(std::max(count - 1, 1));
+            const double stepDegrees = state.circularArrayPreviewTotalAngleDegrees / divisor;
+
+            for (int index = 1; index < count; ++index)
+            {
+                const double radians = stepDegrees * static_cast<double>(index) * kRadiansPerDegree;
+
+                for (CadItem* item : selectedItems)
+                {
+                    if (item == nullptr || item->m_geometry.vertices.isEmpty())
+                    {
+                        continue;
+                    }
+
+                    const QVector3D itemCenter = previewGeometryCenter(item);
+                    const QVector3D rotatedCenter = rotatePlanarPreviewPoint(itemCenter, center, radians);
+                    const QVector3D delta = rotatedCenter - itemCenter;
+                    TransientPrimitive arrayEntityPreview;
+                    arrayEntityPreview.primitiveType = CadViewerUtils::primitiveTypeForEntity(item);
+                    arrayEntityPreview.color = QVector3D(0.98f, 0.67f, 0.12f);
+                    arrayEntityPreview.pointSize = arrayEntityPreview.primitiveType == GL_POINTS ? 12.0f : 1.0f;
+                    arrayEntityPreview.roundPoint = arrayEntityPreview.primitiveType == GL_POINTS;
+                    arrayEntityPreview.vertices.reserve(item->m_geometry.vertices.size());
+
+                    for (const QVector3D& vertex : item->m_geometry.vertices)
+                    {
+                        const QVector3D planarVertex = CadViewerUtils::flattenedToGroundPlane(vertex);
+                        arrayEntityPreview.vertices.append
+                        (
+                            state.circularArrayPreviewRotateItems
+                                ? rotatePlanarPreviewPoint(planarVertex, center, radians)
+                                : planarVertex + delta
+                        );
+                    }
+
+                    primitives.push_back(std::move(arrayEntityPreview));
+                }
+            }
+
+            TransientPrimitive centerMarker;
+            centerMarker.primitiveType = GL_POINTS;
+            centerMarker.color = QVector3D(1.0f, 0.92f, 0.25f);
+            centerMarker.pointSize = 11.0f;
+            centerMarker.roundPoint = true;
+            centerMarker.vertices = { center };
+            primitives.push_back(std::move(centerMarker));
+
+            return primitives;
+        }
+
+        if (state.offsetPreviewActive && !selectedItems.isEmpty())
+        {
+            for (CadItem* item : selectedItems)
+            {
+                const QVector<QVector3D> offsetVertices = buildOffsetPreviewVertices(item, state.offsetPreviewDistance);
+
+                if (item == nullptr || offsetVertices.isEmpty())
+                {
+                    continue;
+                }
+
+                TransientPrimitive offsetEntityPreview;
+                offsetEntityPreview.primitiveType = CadViewerUtils::primitiveTypeForEntity(item);
+                offsetEntityPreview.color = QVector3D(0.98f, 0.67f, 0.12f);
+                offsetEntityPreview.pointSize = offsetEntityPreview.primitiveType == GL_POINTS ? 12.0f : 1.0f;
+                offsetEntityPreview.roundPoint = offsetEntityPreview.primitiveType == GL_POINTS;
+                offsetEntityPreview.vertices = offsetVertices;
+                primitives.push_back(std::move(offsetEntityPreview));
             }
 
             return primitives;

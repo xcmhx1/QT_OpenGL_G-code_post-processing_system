@@ -1337,6 +1337,46 @@ bool CadEditer::copyEntity(CadItem* item, const QVector3D& delta)
     return executeCommand(std::make_unique<CopyEntityCommand>(m_document, item, delta));
 }
 
+bool CadEditer::copyEntities(const QVector<CadItem*>& items, const QVector3D& delta)
+{
+    if (m_document == nullptr || items.isEmpty() || delta.lengthSquared() <= kGeometryEpsilon)
+    {
+        return false;
+    }
+
+    QSet<CadItem*> deduplicated;
+    std::vector<std::unique_ptr<DRW_Entity>> copiedEntities;
+
+    for (CadItem* item : items)
+    {
+        if (item == nullptr
+            || !m_document->containsEntity(item)
+            || item->m_nativeEntity == nullptr
+            || deduplicated.contains(item))
+        {
+            continue;
+        }
+
+        std::unique_ptr<DRW_Entity> entity = cloneEntity(item->m_nativeEntity);
+
+        if (entity == nullptr)
+        {
+            return false;
+        }
+
+        translateEntity(entity.get(), delta);
+        deduplicated.insert(item);
+        copiedEntities.push_back(std::move(entity));
+    }
+
+    if (copiedEntities.empty())
+    {
+        return false;
+    }
+
+    return executeCommand(std::make_unique<AddEntitiesCommand>(m_document, std::move(copiedEntities)));
+}
+
 bool CadEditer::rotateEntity(CadItem* item, const QVector3D& basePoint, double angleDegrees)
 {
     if (m_document == nullptr || item == nullptr || !m_document->containsEntity(item) || std::abs(angleDegrees) <= kGeometryEpsilon)
@@ -1431,6 +1471,62 @@ bool CadEditer::arrayEntity(CadItem* item, int rowCount, int columnCount, const 
     (
         std::make_unique<ArrayEntityCommand>(m_document, item, rowCount, columnCount, rowOffset, columnOffset)
     );
+}
+
+bool CadEditer::rectangularArrayEntities(const QVector<CadItem*>& items, int rowCount, int columnCount, const QVector3D& rowOffset, const QVector3D& columnOffset)
+{
+    if (m_document == nullptr
+        || items.isEmpty()
+        || rowCount < 1
+        || columnCount < 1
+        || (rowCount == 1 && columnCount == 1))
+    {
+        return false;
+    }
+
+    QSet<CadItem*> deduplicated;
+    std::vector<std::unique_ptr<DRW_Entity>> arrayEntities;
+
+    for (CadItem* item : items)
+    {
+        if (item == nullptr
+            || !m_document->containsEntity(item)
+            || item->m_nativeEntity == nullptr
+            || deduplicated.contains(item))
+        {
+            continue;
+        }
+
+        deduplicated.insert(item);
+
+        for (int row = 0; row < rowCount; ++row)
+        {
+            for (int column = 0; column < columnCount; ++column)
+            {
+                if (row == 0 && column == 0)
+                {
+                    continue;
+                }
+
+                std::unique_ptr<DRW_Entity> entity = cloneEntity(item->m_nativeEntity);
+
+                if (entity == nullptr)
+                {
+                    return false;
+                }
+
+                translateEntity(entity.get(), rowOffset * static_cast<float>(row) + columnOffset * static_cast<float>(column));
+                arrayEntities.push_back(std::move(entity));
+            }
+        }
+    }
+
+    if (arrayEntities.empty())
+    {
+        return false;
+    }
+
+    return executeCommand(std::make_unique<AddEntitiesCommand>(m_document, std::move(arrayEntities)));
 }
 
 bool CadEditer::mirrorEntities

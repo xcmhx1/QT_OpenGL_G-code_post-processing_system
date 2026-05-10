@@ -334,8 +334,7 @@ void CadController::activateParameterInputSession()
 void CadController::resetParameterInputSession()
 {
     m_parameterInputSession = ParameterInputSession();
-    clearRotatePreview();
-    clearScalePreview();
+    clearModifyPreviews();
 }
 
 bool CadController::beginCopySelected()
@@ -355,10 +354,10 @@ bool CadController::beginCopySelected()
     cancelDrawing();
     m_parameterInputSession.command = ParameterInputCommand::Copy;
     m_parameterInputSession.selectedItems = selectedItems;
-    m_parameterInputSession.doubleValue1 = 10.0;
-    m_parameterInputSession.doubleValue2 = 10.0;
+    m_parameterInputSession.doubleValue1 = 0.0;
+    m_parameterInputSession.doubleValue2 = 0.0;
     activateParameterInputSession();
-    m_viewer->appendCommandMessage(QStringLiteral("复制: 请在光标旁输入 X/Y 偏移量"));
+    m_viewer->appendCommandMessage(QStringLiteral("复制: 请指定基点"));
     return true;
 }
 
@@ -514,9 +513,10 @@ bool CadController::beginOffsetSelected()
     cancelDrawing();
     m_parameterInputSession.command = ParameterInputCommand::Offset;
     m_parameterInputSession.primaryItem = targetItem;
+    m_parameterInputSession.selectedItems = QVector<CadItem*>{ targetItem };
     m_parameterInputSession.doubleValue1 = 10.0;
     activateParameterInputSession();
-    m_viewer->appendCommandMessage(QStringLiteral("偏移: 请在光标旁输入距离"));
+    m_viewer->appendCommandMessage(QStringLiteral("偏移: 请输入距离，然后指定偏移侧"));
     return true;
 }
 
@@ -619,6 +619,33 @@ bool CadController::beginChamferSelected()
     activateParameterInputSession();
     m_viewer->appendCommandMessage(QStringLiteral("倒角: 请在光标旁输入两条边距离"));
     return true;
+}
+
+bool CadController::joinSelectedEntities()
+{
+    if (m_viewer == nullptr || m_editer == nullptr)
+    {
+        return false;
+    }
+
+    const QVector<CadItem*> selectedItems = m_viewer->selectedEntities();
+
+    if (selectedItems.size() < 2)
+    {
+        return false;
+    }
+
+    cancelDrawing();
+    const bool success = m_editer->joinEntities(selectedItems);
+
+    if (success)
+    {
+        m_viewer->appendCommandMessage(QStringLiteral("已合并选中图元。"));
+        m_viewer->refreshCommandPrompt();
+        m_viewer->requestViewUpdate();
+    }
+
+    return success;
 }
 
 // 取消当前绘制操作

@@ -102,8 +102,12 @@ bool CadController::handleMouseMove(QMouseEvent* event)
         m_drawState.currentPos = applyPointDynamicFieldOverride(m_drawState.currentPos, true);
     }
 
+    updateCopyPreviewFromCursor();
     updateRotatePreviewFromCursor();
     updateScalePreviewFromCursor();
+    updateMirrorPreviewFromCursor();
+    updateArrayPreviewState();
+    updateOffsetPreviewFromCursor();
 
     if (m_viewer->interactionMode() == ViewInteractionMode::Orbiting && m_viewer->shouldIgnoreNextOrbitDelta())
     {

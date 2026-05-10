@@ -190,6 +190,34 @@ public:
     QVector3D rotatePreviewBasePoint;
     double rotatePreviewAngleDegrees = 0.0;
 
+    // 复制命令预览状态。
+    bool copyPreviewActive = false;
+    QVector3D copyPreviewBasePoint;
+    QVector3D copyPreviewDelta;
+
+    // 镜像命令预览状态。
+    bool mirrorPreviewActive = false;
+    QVector3D mirrorPreviewFirstPoint;
+    QVector3D mirrorPreviewSecondPoint;
+
+    // 矩形阵列命令预览状态。
+    bool rectangularArrayPreviewActive = false;
+    int rectangularArrayPreviewRows = 1;
+    int rectangularArrayPreviewColumns = 1;
+    QVector3D rectangularArrayPreviewRowOffset;
+    QVector3D rectangularArrayPreviewColumnOffset;
+
+    // 环形阵列命令预览状态。
+    bool circularArrayPreviewActive = false;
+    QVector3D circularArrayPreviewCenter;
+    int circularArrayPreviewCount = 1;
+    double circularArrayPreviewTotalAngleDegrees = 0.0;
+    bool circularArrayPreviewRotateItems = true;
+
+    // 偏移命令预览状态。
+    bool offsetPreviewActive = false;
+    double offsetPreviewDistance = 0.0;
+
     // 缩放命令预览状态。实际提交仍由编辑器命令栈完成。
     bool scalePreviewActive = false;
     QVector3D scalePreviewBasePoint;

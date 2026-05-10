@@ -110,6 +110,9 @@ public:
     // 开始倒角参数输入。
     bool beginChamferSelected();
 
+    // 合并当前选中实体。
+    bool joinSelectedEntities();
+
     // 取消当前绘制操作
     void cancelDrawing();
 
@@ -205,6 +208,15 @@ private:
     // 尝试把 currentPos 与当前光标位置同步，避免键盘确认后预览滞后。
     void syncCurrentPosWithCursor();
 
+    // 根据当前鼠标位置刷新复制命令的位移预览。
+    bool updateCopyPreviewFromCursor();
+
+    // 清理复制命令预览状态。
+    void clearCopyPreview();
+
+    // 按当前复制会话提交复制操作。
+    bool finishCopyParameterInput(const QVector3D& delta);
+
     // 根据当前鼠标位置刷新旋转命令的角度预览。
     bool updateRotatePreviewFromCursor();
 
@@ -222,6 +234,21 @@ private:
 
     // 按当前缩放会话提交缩放操作。
     bool finishScaleParameterInput(double scaleFactor);
+
+    // 刷新镜像命令预览状态。
+    bool updateMirrorPreviewFromCursor();
+
+    // 刷新阵列命令预览状态。
+    bool updateArrayPreviewState();
+
+    // 根据当前鼠标位置刷新偏移命令预览状态。
+    bool updateOffsetPreviewFromCursor();
+
+    // 清理所有修改类命令预览状态。
+    void clearModifyPreviews();
+
+    // 按当前偏移会话提交偏移操作。
+    bool finishOffsetParameterInput(double signedDistance);
 
     // 当前命令阶段是否正在等待输入一个点。
     bool isAwaitingPointInput() const;
