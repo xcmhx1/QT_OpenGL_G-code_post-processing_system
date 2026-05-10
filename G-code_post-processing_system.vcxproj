@@ -132,6 +132,7 @@
     <None Include="license_request.bat" />
     <None Include="license.example.json" />
     <None Include="README.md" />
+    <None Include="tools\Generate-License.bat" />
     <None Include="tools\Generate-License.ps1" />
   </ItemGroup>
   <ItemGroup>

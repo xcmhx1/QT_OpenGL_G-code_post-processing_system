@@ -4,21 +4,48 @@
 
 #include <QCoreApplication>
 #include <QCryptographicHash>
-#include <QDate>
 #include <QDir>
 #include <QFile>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QSettings>
 #include <QSysInfo>
 
 namespace
 {
     constexpr const char* kLicenseSecret = "GCodePostProcessingSystem.LightCommercial.2026";
+    constexpr int kSignatureRounds = 4096;
 
     QString normalizedEdition(const QString& value)
     {
         const QString normalized = value.trimmed().toLower();
         return normalized == QStringLiteral("pro") ? QStringLiteral("pro") : QStringLiteral("lite");
+    }
+
+    QString stableMachineSeed()
+    {
+#ifdef Q_OS_WIN
+        QSettings machineGuidSettings
+        (
+            QStringLiteral("HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Cryptography"),
+            QSettings::NativeFormat
+        );
+        const QString machineGuid = machineGuidSettings.value(QStringLiteral("MachineGuid")).toString().trimmed();
+
+        if (!machineGuid.isEmpty())
+        {
+            return QStringLiteral("win-machine-guid:%1").arg(machineGuid.toUpper());
+        }
+#endif
+
+        const QByteArray uniqueId = QSysInfo::machineUniqueId();
+
+        if (!uniqueId.isEmpty())
+        {
+            return QStringLiteral("qt-machine-id:%1").arg(QString::fromLatin1(uniqueId.toHex()));
+        }
+
+        return QStringLiteral("host:%1").arg(QSysInfo::machineHostName().trimmed().toUpper());
     }
 }
 
@@ -42,14 +69,18 @@ AppLicense AppLicense::load()
     }
 
     const QJsonObject object = document.object();
-    const QString customer = object.value(QStringLiteral("customer")).toString().trimmed();
     const QString edition = normalizedEdition(object.value(QStringLiteral("edition")).toString());
-    const QString expires = object.value(QStringLiteral("expires")).toString().trimmed();
     const QString machineId = object.value(QStringLiteral("machineId")).toString().trimmed();
     const QString licenseId = object.value(QStringLiteral("licenseId")).toString().trimmed();
     const QString signature = object.value(QStringLiteral("signature")).toString().trimmed().toLower();
 
-    const QString payload = signaturePayload(customer, edition, expires, machineId, licenseId);
+    if (machineId.isEmpty() || licenseId.isEmpty())
+    {
+        license.m_message = QStringLiteral("授权文件缺少机器码或授权编号：当前按 Lite 版本运行。");
+        return license;
+    }
+
+    const QString payload = signaturePayload(machineId, licenseId);
     const QString expectedSignature = signatureForPayload(payload);
 
     if (signature.isEmpty() || signature != expectedSignature)
@@ -58,54 +89,27 @@ AppLicense AppLicense::load()
         return license;
     }
 
-    if (!machineId.isEmpty() && machineId != currentMachineId())
+    if (machineId != currentMachineId())
     {
         license.m_message = QStringLiteral("授权文件不属于当前机器：当前按 Lite 版本运行。");
         return license;
     }
 
-    const QDate expiresOn = QDate::fromString(expires, Qt::ISODate);
-
-    if (!expires.isEmpty() && (!expiresOn.isValid() || expiresOn < QDate::currentDate()))
-    {
-        license.m_expired = true;
-        license.m_expiresOn = expiresOn;
-        license.m_message = QStringLiteral("授权已过期：当前按 Lite 版本运行。");
-        return license;
-    }
-
     license.m_valid = true;
     license.m_edition = edition == QStringLiteral("pro") ? AppEdition::Pro : AppEdition::Lite;
-    license.m_customerName = customer;
     license.m_licenseId = licenseId;
-    license.m_expiresOn = expiresOn;
-    license.m_message = QStringLiteral("%1 授权%2%3")
-        .arg(license.editionName())
-        .arg(customer.isEmpty() ? QString() : QStringLiteral(" - %1").arg(customer))
-        .arg(expiresOn.isValid() ? QStringLiteral("，有效期至 %1").arg(expiresOn.toString(Qt::ISODate)) : QString());
+    license.m_message = QStringLiteral("%1 授权").arg(license.editionName());
     return license;
 }
 
 QString AppLicense::currentMachineId()
 {
-    const QByteArray machineId = QSysInfo::machineUniqueId();
-
-    if (!machineId.isEmpty())
-    {
-        return QString::fromLatin1(machineId.toHex());
-    }
-
-    return QString::fromLatin1(QCryptographicHash::hash(QSysInfo::machineHostName().toUtf8(), QCryptographicHash::Sha256).toHex());
+    return QString::fromLatin1(QCryptographicHash::hash(stableMachineSeed().toUtf8(), QCryptographicHash::Sha256).toHex()).toUpper();
 }
 
 bool AppLicense::isValid() const
 {
     return m_valid;
-}
-
-bool AppLicense::isExpired() const
-{
-    return m_expired;
 }
 
 bool AppLicense::allows(AppFeature feature) const
@@ -124,19 +128,9 @@ QString AppLicense::editionName() const
     return m_edition == AppEdition::Pro ? QStringLiteral("Pro") : QStringLiteral("Lite");
 }
 
-QString AppLicense::customerName() const
-{
-    return m_customerName;
-}
-
 QString AppLicense::licenseId() const
 {
     return m_licenseId;
-}
-
-QDate AppLicense::expiresOn() const
-{
-    return m_expiresOn;
 }
 
 QString AppLicense::statusText() const
@@ -144,13 +138,24 @@ QString AppLicense::statusText() const
     return m_message;
 }
 
-QString AppLicense::signaturePayload(const QString& customer, const QString& edition, const QString& expires, const QString& machineId, const QString& licenseId)
+QString AppLicense::signaturePayload(const QString& machineId, const QString& licenseId)
 {
-    return QStringLiteral("customer=%1\nedition=%2\nexpires=%3\nmachineId=%4\nlicenseId=%5")
-        .arg(customer, edition, expires, machineId, licenseId);
+    return QStringLiteral("machineId=%1\nlicenseId=%2")
+        .arg(machineId, licenseId);
 }
 
 QString AppLicense::signatureForPayload(const QString& payload)
 {
-    return QString::fromLatin1(QCryptographicHash::hash((payload + QString::fromLatin1(kLicenseSecret)).toUtf8(), QCryptographicHash::Sha256).toHex());
+    QByteArray digest = (payload + QString::fromLatin1(kLicenseSecret)).toUtf8();
+
+    for (int round = 0; round < kSignatureRounds; ++round)
+    {
+        digest = QCryptographicHash::hash
+        (
+            digest + QByteArray::number(round) + QByteArray(kLicenseSecret),
+            QCryptographicHash::Sha256
+        );
+    }
+
+    return QString::fromLatin1(digest.toHex());
 }

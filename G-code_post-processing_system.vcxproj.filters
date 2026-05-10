@@ -129,6 +129,9 @@
     <None Include="tools\Generate-License.ps1">
       <Filter>Documentation</Filter>
     </None>
+    <None Include="tools\Generate-License.bat">
+      <Filter>Documentation</Filter>
+    </None>
   </ItemGroup>
   <ItemGroup>
     <QtMoc Include="include\Gcode_postprocessing_system.h">
