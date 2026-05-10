@@ -1,4 +1,4 @@
-# G-code Post Processing System
+﻿# G-code Post Processing System
 
 [G/M 代码参考](./technical_file/G-M_Code.md)
 
@@ -80,6 +80,9 @@
 - 圆形默认从顶部起刀，导出的 G 代码会跟随排序阶段确定的方向与缝点语义
 - G 代码导出阶段会过滤无意义空行，减少脏输出
 - 菜单栏新增 `帮助` 菜单，内置 `快速上手`、`快捷命令`、`绘图教程`、`修改教程`、`机加工 / G代码`、`位图导入`、`外观与显示`、`关于` 等分类说明
+- 已接入轻量商业交付配置：运行目录中的 `branding.json` 可调整应用标题、公司名、窗口标题后缀和运行时图标
+- 已接入本机机器码授权：未放置有效 `license.dat` 时按 `Lite` 版本运行，放置与本机机器码匹配的授权文件后开放 `Pro` 功能
+- 客户侧可通过 `license_request.bat` 生成只包含机器码的一行 `机器码.txt`；开发侧通过 `tools/Generate-License.ps1` 或 `tools/Generate-License.bat` 生成对应 `license.dat`
 
 当前未完成或未接线：
 
@@ -143,12 +146,35 @@ devenv .\G-code_post-processing_system.slnx
 
 建议优先使用 `Debug|x64` 进行日常开发和交互验证。
 
+## 商业打包与授权
+
+完整打包步骤见 [COMMERCIAL_RELEASE.md](D:/projects/visual_studio_2026/G-code_post-processing_system/COMMERCIAL_RELEASE.md)。当前商业交付方案按运行目录文件工作：
+
+- `branding.json`：由 `branding.example.json` 复制改名而来，用于配置客户版标题、公司名、标题后缀和运行时窗口图标路径
+- `license_request.bat`：放在 exe 同目录，客户双击后由主程序生成 `机器码.txt`
+- `机器码.txt`：客户侧生成的机器码文件，内容只有一行 64 位十六进制机器码
+- `license.dat`：开发侧根据客户机器码生成的授权文件，客户放到 exe 同目录后重启软件即可启用 `Pro` 功能
+- `tools/Generate-License.ps1` / `tools/Generate-License.bat`：开发侧授权生成工具，不随客户包发布
+
+推荐流程：
+
+1. 使用 `Release|x64` 构建程序。
+2. 在 `x64\Release` 中运行 `windeployqt` 完成 Qt 依赖部署。
+3. 复制 `branding.json`、`app.ico`、`license_request.bat` 到 exe 同目录。
+4. 客户运行 `license_request.bat`，把生成的 `机器码.txt` 发回。
+5. 开发侧把 `机器码.txt` 拖到 `tools\Generate-License.bat`，生成 `license.dat`。
+6. 客户将 `license.dat` 放到 exe 同目录，重新启动程序。
+
+当前授权机制是轻量商业交付方案，用于减少普通复制和误用，不等同于强反逆向或强 DRM。
+
 ## 仓库结构
 
 ```text
 G-code_post-processing_system/
 |-- include/                                # 公共头文件
 |   |-- Gcode_postprocessing_system.h       # 主窗口类声明
+|   |-- AppBranding.h                       # 运行目录品牌配置读取
+|   |-- AppLicense.h                        # 本机机器码授权校验
 |   |-- AppTheme.h                          # 应用主题颜色定义
 |   |-- CadAppearanceSettingsDialog.h       # 自定义外观设置对话框
 |   |-- CadHelpDialog.h                     # 帮助文档对话框
@@ -198,6 +224,8 @@ G-code_post-processing_system/
 |       `-- intern/                         # 第三方内部头文件
 |-- src/                                    # 主要源码
 |   |-- main.cpp                            # 程序入口
+|   |-- AppBranding.cpp                     # branding.json 读取与图标解析
+|   |-- AppLicense.cpp                      # license.dat 读取、机器码与签名校验
 |   |-- Gcode_postprocessing_system.cpp     # 主窗口装配与共享状态同步
 |   |-- Gcode_postprocessing_system_FileActions.cpp   # 主窗口文件导入/保存/DXF导出
 |   |-- Gcode_postprocessing_system_EditActions.cpp   # 主窗口编辑命令入口
@@ -260,6 +288,13 @@ G-code_post-processing_system/
 |-- Gcode_postprocessing_system.qrc         # Qt 资源文件
 |-- G-code_post-processing_system.vcxproj   # VS/Qt 工程
 |-- G-code_post-processing_system.slnx      # 解决方案
+|-- branding.example.json                   # 商业交付品牌配置示例
+|-- license.example.json                    # 授权文件结构示例
+|-- license_request.bat                     # 客户侧机器码生成脚本
+|-- COMMERCIAL_RELEASE.md                   # 商业打包与授权流程
+|-- tools/
+|   |-- Generate-License.ps1                # 开发侧授权生成脚本
+|   `-- Generate-License.bat                # 拖入机器码文件生成授权的包装脚本
 |-- AGENTS.md                               # 仓库协作规则
 |-- README.md                               # 当前文档
 |-- x64/                                    # 构建输出，不提交
