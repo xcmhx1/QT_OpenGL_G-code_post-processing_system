@@ -1,0 +1,8 @@
+{
+  "customer": "客户公司名称",
+  "edition": "pro",
+  "expires": "2027-12-31",
+  "machineId": "",
+  "licenseId": "DEMO-2026-001",
+  "signature": "使用 AppLicense.cpp 中的签名规则生成"
+}

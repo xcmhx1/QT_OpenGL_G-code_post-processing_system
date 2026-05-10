@@ -86,6 +86,11 @@ bool Gcode_postprocessing_system::importDxfFile(const QString& filePath)
 
 bool Gcode_postprocessing_system::importBitmapFile(const QString& filePath)
 {
+    if (!ensureFeatureAvailable(AppFeature::BitmapImport, QStringLiteral("位图导入")))
+    {
+        return false;
+    }
+
     CadBitmapImportDialog dialog(filePath, this);
 
     if (!dialog.isReady())

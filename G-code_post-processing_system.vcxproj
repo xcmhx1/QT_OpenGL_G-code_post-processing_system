@@ -42,7 +42,7 @@
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'Release|x64'" Label="QtSettings">
     <QtInstall>6.9.3_msvc2022_64</QtInstall>
-    <QtModules>core;gui;widgets</QtModules>
+    <QtModules>core;gui;widgets;opengl;openglwidgets</QtModules>
     <QtBuildConfig>release</QtBuildConfig>
   </PropertyGroup>
   <Target Name="QtMsBuildNotFound" BeforeTargets="CustomBuild;ClCompile" Condition="!Exists('$(QtMsBuild)\qt.targets') or !Exists('$(QtMsBuild)\qt.props')">
@@ -127,7 +127,12 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="AGENTS.md" />
+    <None Include="branding.example.json" />
+    <None Include="COMMERCIAL_RELEASE.md" />
+    <None Include="license_request.bat" />
+    <None Include="license.example.json" />
     <None Include="README.md" />
+    <None Include="tools\Generate-License.ps1" />
   </ItemGroup>
   <ItemGroup>
     <QtMoc Include="include\Gcode_postprocessing_system.h" />
@@ -135,6 +140,14 @@
     <QtMoc Include="include\CadStatusPaneWidget.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="src\AppBranding.cpp">
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+    </ClCompile>
+    <ClCompile Include="src\AppLicense.cpp">
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+    </ClCompile>
     <ClCompile Include="src\CadItem.cpp" />
     <ClCompile Include="src\pch.cpp">
       <PrecompiledHeader>Create</PrecompiledHeader>
@@ -372,6 +385,8 @@
   <ItemGroup>
     <QtMoc Include="include\CadViewer.h" />
     <ClInclude Include="include\CadArcItem.h" />
+    <ClInclude Include="include\AppBranding.h" />
+    <ClInclude Include="include\AppLicense.h" />
     <ClInclude Include="include\AppTheme.h" />
     <ClInclude Include="include\CadAppearanceSettingsDialog.h" />
     <ClInclude Include="include\CadHelpDialog.h" />

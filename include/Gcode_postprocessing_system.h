@@ -1,6 +1,8 @@
 #pragma once
 
 #include "AppTheme.h"
+#include "AppBranding.h"
+#include "AppLicense.h"
 #include "CadCommandLineWidget.h"
 #include "CadEditer.h"
 #include "CadDocument.h"
@@ -41,6 +43,8 @@ private:
 private:
     void initializeThemeMenu();
     void initializeHelpMenu();
+    void applyBranding();
+    bool ensureFeatureAvailable(AppFeature feature, const QString& actionName);
     void openHelpDialog(CadHelpSection section);
     void openAppearanceSettingsDialog();
     void openProfileSettingsDialog();
@@ -133,6 +137,8 @@ private:
     QAction* m_generationMode3DAction = nullptr;
     CadEditer m_editer;
     CadDocument m_document;
+    AppBranding m_branding;
+    AppLicense m_license;
     GProfile m_activeProfile = GProfile::createDefaultLaserProfile();
     QString m_currentLayerName = QStringLiteral("0");
     QColor m_currentColor = QColor(Qt::white);

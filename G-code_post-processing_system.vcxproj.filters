@@ -114,6 +114,21 @@
     <None Include="AGENTS.md">
       <Filter>Documentation</Filter>
     </None>
+    <None Include="branding.example.json">
+      <Filter>Documentation</Filter>
+    </None>
+    <None Include="license.example.json">
+      <Filter>Documentation</Filter>
+    </None>
+    <None Include="COMMERCIAL_RELEASE.md">
+      <Filter>Documentation</Filter>
+    </None>
+    <None Include="license_request.bat">
+      <Filter>Documentation</Filter>
+    </None>
+    <None Include="tools\Generate-License.ps1">
+      <Filter>Documentation</Filter>
+    </None>
   </ItemGroup>
   <ItemGroup>
     <QtMoc Include="include\Gcode_postprocessing_system.h">
@@ -140,6 +155,12 @@
       <Filter>Source Files\Application</Filter>
     </ClCompile>
     <ClCompile Include="src\main.cpp">
+      <Filter>Source Files\Application</Filter>
+    </ClCompile>
+    <ClCompile Include="src\AppBranding.cpp">
+      <Filter>Source Files\Application</Filter>
+    </ClCompile>
+    <ClCompile Include="src\AppLicense.cpp">
       <Filter>Source Files\Application</Filter>
     </ClCompile>
     <ClCompile Include="src\Gcode_postprocessing_system.cpp">
@@ -406,6 +427,12 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="include\pch.h">
+      <Filter>Header Files\Application</Filter>
+    </ClInclude>
+    <ClInclude Include="include\AppBranding.h">
+      <Filter>Header Files\Application</Filter>
+    </ClInclude>
+    <ClInclude Include="include\AppLicense.h">
       <Filter>Header Files\Application</Filter>
     </ClInclude>
     <ClInclude Include="include\AppTheme.h">

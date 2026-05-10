@@ -412,6 +412,11 @@ bool Gcode_postprocessing_system::exportGCode
     const QString& modeDisplayName
 )
 {
+    if (generationMode == GGenerator::GenerationMode::Mode3D && !ensureFeatureAvailable(AppFeature::FourAxisExport, QStringLiteral("4轴(绕A) G代码导出")))
+    {
+        return false;
+    }
+
     if (!prepareDocumentForGCodeExport(generationMode))
     {
         return false;

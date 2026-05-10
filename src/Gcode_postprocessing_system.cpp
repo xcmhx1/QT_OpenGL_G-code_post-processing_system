@@ -203,6 +203,9 @@ Gcode_postprocessing_system::Gcode_postprocessing_system(QWidget* parent)
     , ui(new Ui::Gcode_postprocessing_systemClass())
 {
     ui->setupUi(this);
+    m_branding = AppBranding::load();
+    m_license = AppLicense::load();
+    applyBranding();
     loadAvailableProfiles();
 
     m_commandLineWidget = new CadCommandLineWidget(this);
@@ -407,6 +410,12 @@ Gcode_postprocessing_system::Gcode_postprocessing_system(QWidget* parent)
     ui->action_Sort_3D_Smart->setVisible(false);
 
     m_generationPreference = loadGenerationPreference();
+
+    if (m_generationPreference == GCodeGenerationPreference::Force3D && !m_license.allows(AppFeature::FourAxisExport))
+    {
+        m_generationPreference = GCodeGenerationPreference::Auto;
+    }
+
     initializeThemeMenu();
     initializeHelpMenu();
     initializeToolPanel();
@@ -534,8 +543,60 @@ void Gcode_postprocessing_system::openHelpDialog(CadHelpSection section)
     dialog.exec();
 }
 
+void Gcode_postprocessing_system::applyBranding()
+{
+    QCoreApplication::setApplicationName(m_branding.applicationName());
+    QCoreApplication::setOrganizationName(m_branding.companyName());
+
+    QString title = m_branding.applicationName();
+
+    if (!m_branding.windowTitleSuffix().trimmed().isEmpty())
+    {
+        title += QStringLiteral(" - %1").arg(m_branding.windowTitleSuffix().trimmed());
+    }
+
+    title += QStringLiteral(" [%1]").arg(m_license.editionName());
+    setWindowTitle(title);
+
+    const QIcon icon = m_branding.icon();
+
+    if (!icon.isNull())
+    {
+        setWindowIcon(icon);
+        qApp->setWindowIcon(icon);
+    }
+
+    statusBar()->showMessage(m_license.statusText(), 5000);
+}
+
+bool Gcode_postprocessing_system::ensureFeatureAvailable(AppFeature feature, const QString& actionName)
+{
+    if (m_license.allows(feature))
+    {
+        return true;
+    }
+
+    const QString message = QStringLiteral("%1 属于 Pro 功能。\n\n当前授权：%2\n机器码：%3\n\n请将机器码发给软件提供方，获取 license.dat 后放到程序目录。")
+        .arg(actionName, m_license.statusText(), AppLicense::currentMachineId());
+
+    QMessageBox::information(this, QStringLiteral("需要授权"), message);
+
+    if (ui != nullptr && ui->openGLWidget != nullptr)
+    {
+        ui->openGLWidget->appendCommandMessage(QStringLiteral("%1 未执行：需要 Pro 授权。").arg(actionName));
+        ui->openGLWidget->refreshCommandPrompt();
+    }
+
+    return false;
+}
+
 void Gcode_postprocessing_system::openAppearanceSettingsDialog()
 {
+    if (!ensureFeatureAvailable(AppFeature::CustomAppearance, QStringLiteral("自定义外观")))
+    {
+        return;
+    }
+
     AppThemeMode baseMode = AppThemeMode::Light;
     AppThemeColors initialTheme = m_themeMode == AppThemeMode::Custom
         ? loadCustomThemeColors(&baseMode)
@@ -561,6 +622,11 @@ void Gcode_postprocessing_system::openAppearanceSettingsDialog()
 
 void Gcode_postprocessing_system::openProfileSettingsDialog()
 {
+    if (!ensureFeatureAvailable(AppFeature::ProfileSettings, QStringLiteral("G代码配置")))
+    {
+        return;
+    }
+
     QMap<QString, QColor> layerColors;
 
     for (const QString& layerName : m_document.layerNames())
@@ -1026,6 +1092,13 @@ void Gcode_postprocessing_system::saveGenerationPreference(GCodeGenerationPrefer
 
 void Gcode_postprocessing_system::applyGenerationPreference(GCodeGenerationPreference preference)
 {
+    if (preference == GCodeGenerationPreference::Force3D && !ensureFeatureAvailable(AppFeature::FourAxisExport, QStringLiteral("4轴(绕A) G代码导出")))
+    {
+        preference = m_generationPreference == GCodeGenerationPreference::Force3D
+            ? GCodeGenerationPreference::Auto
+            : m_generationPreference;
+    }
+
     m_generationPreference = preference;
     saveGenerationPreference(m_generationPreference);
 
