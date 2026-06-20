@@ -80,6 +80,7 @@ signals:
     void smartSortRequested();
     void gcodeModeSelectionChanged(CadToolPanelWidget::GCodeModeSelection selection);
     void profileSelectionChanged(const QString& profileId);
+    void profileManagerRequested();
     void profileSettingsRequested();
     void autoDeduplicateOptionChanged(bool enabled);
     void useDxfFileNameOptionChanged(bool enabled);
@@ -143,6 +144,7 @@ private:
     QToolButton* m_deduplicateButton = nullptr;
     QToolButton* m_sortKeepDirectionButton = nullptr;
     QToolButton* m_smartSortButton = nullptr;
+    QToolButton* m_profileManagerButton = nullptr;
     QToolButton* m_profileSettingsButton = nullptr;
     QTabWidget* m_tabWidget = nullptr;
     QMap<QString, QColor> m_layerColors;

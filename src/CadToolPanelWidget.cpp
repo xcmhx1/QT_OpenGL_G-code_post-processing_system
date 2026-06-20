@@ -1626,14 +1626,18 @@ QWidget* CadToolPanelWidget::buildMachiningPanel()
     profileLayout->setContentsMargins(0, 0, 0, 0);
     profileLayout->setSpacing(6);
 
-    QLabel* profileLabel = new QLabel(QStringLiteral("当前配置"), profileRow);
-    profileLabel->setProperty("machiningFieldLabel", true);
-    profileLabel->setMinimumWidth(54);
+    m_profileManagerButton = new QToolButton(profileRow);
+    m_profileManagerButton->setText(QStringLiteral("当前配置"));
+    m_profileManagerButton->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    m_profileManagerButton->setProperty("machiningButton", true);
+    m_profileManagerButton->setToolTip(QStringLiteral("管理配置文件与检索路径"));
+    m_profileManagerButton->setFixedHeight(kComboHeight);
+    m_profileManagerButton->setMinimumWidth(62);
     m_profileComboBox = new QComboBox(profileRow);
     m_profileComboBox->setEditable(false);
     m_profileComboBox->setFixedHeight(kComboHeight);
     m_profileComboBox->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-    profileLayout->addWidget(profileLabel, 0);
+    profileLayout->addWidget(m_profileManagerButton, 0);
     profileLayout->addWidget(m_profileComboBox, 1);
     configLayout->addWidget(profileRow);
 
@@ -1701,6 +1705,7 @@ QWidget* CadToolPanelWidget::buildMachiningPanel()
     });
     connect(m_sortKeepDirectionButton, &QToolButton::clicked, this, [this]() { emit sortKeepDirectionRequested(); });
     connect(m_smartSortButton, &QToolButton::clicked, this, [this]() { emit smartSortRequested(); });
+    connect(m_profileManagerButton, &QToolButton::clicked, this, [this]() { emit profileManagerRequested(); });
     connect(m_profileSettingsButton, &QToolButton::clicked, this, [this]() { emit profileSettingsRequested(); });
     connect
     (

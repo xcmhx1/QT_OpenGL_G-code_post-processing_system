@@ -47,6 +47,7 @@ private:
     bool ensureFeatureAvailable(AppFeature feature, const QString& actionName);
     void openHelpDialog(CadHelpSection section);
     void openAppearanceSettingsDialog();
+    void openProfileManagerDialog();
     void openProfileSettingsDialog();
     void applyTheme(AppThemeMode mode);
     void applyThemeColors(const AppThemeColors& theme, AppThemeMode mode);
@@ -77,7 +78,6 @@ private:
     void loadAvailableProfiles();
     void refreshAvailableProfilesUi();
     bool applyLoadedProfileById(const QString& profileId, bool announceChange = true);
-    QString runtimeProfileDirectoryPath() const;
     QString loadSelectedProfileId() const;
     void saveSelectedProfileId(const QString& profileId) const;
     void initializeToolPanel();
@@ -151,5 +151,4 @@ private:
     QMap<QString, QString> m_loadedProfileNames;
     QStringList m_loadedProfileOrder;
     QString m_activeProfileId = QStringLiteral("builtin:3axis");
-    int m_sessionImportedProfileSerial = 0;
 };

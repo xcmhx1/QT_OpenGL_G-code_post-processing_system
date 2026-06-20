@@ -1,12 +1,15 @@
 #include "pch.h"
 
 #include "GProfileDialog.h"
+#include "GProfilePathStore.h"
 
 #include <QColorDialog>
 #include <QComboBox>
 #include <QDialogButtonBox>
 #include <QDoubleSpinBox>
+#include <QDir>
 #include <QFileDialog>
+#include <QFileInfo>
 #include <QFormLayout>
 #include <QHBoxLayout>
 #include <QInputDialog>
@@ -1011,7 +1014,7 @@ void GProfileDialog::importProfileFromFile()
     (
         this,
         QStringLiteral("导入 GProfile 配置"),
-        QString(),
+        GProfilePathStore::lastDirectory(),
         QStringLiteral("JSON 文件 (*.json)")
     );
 
@@ -1030,6 +1033,7 @@ void GProfileDialog::importProfileFromFile()
     }
 
     m_importedProfilePath = QFileInfo(filePath).absoluteFilePath();
+    GProfilePathStore::recordDirectory(QFileInfo(filePath).absolutePath());
     applyProfile(profile);
 }
 
@@ -1048,7 +1052,7 @@ void GProfileDialog::exportProfileToFile()
     (
         this,
         QStringLiteral("导出 GProfile 配置"),
-        defaultFileName,
+        QDir(GProfilePathStore::lastDirectory()).filePath(defaultFileName),
         QStringLiteral("JSON 文件 (*.json)")
     );
 
@@ -1065,6 +1069,7 @@ void GProfileDialog::exportProfileToFile()
         return;
     }
 
+    GProfilePathStore::recordDirectory(QFileInfo(filePath).absolutePath());
     QMessageBox::information(this, QStringLiteral("导出完成"), QStringLiteral("配置已导出到: %1").arg(filePath));
 }
 

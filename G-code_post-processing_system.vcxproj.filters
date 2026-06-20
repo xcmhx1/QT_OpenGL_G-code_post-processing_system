@@ -223,6 +223,12 @@
     <ClCompile Include="src\GProfileDialog.cpp">
       <Filter>Source Files\Application</Filter>
     </ClCompile>
+    <ClCompile Include="src\GProfileManagerDialog.cpp">
+      <Filter>Source Files\Application</Filter>
+    </ClCompile>
+    <ClCompile Include="src\GProfilePathStore.cpp">
+      <Filter>Source Files\Application</Filter>
+    </ClCompile>
     <ClCompile Include="src\CadStatusPaneWidget.cpp">
       <Filter>Source Files\View</Filter>
     </ClCompile>
@@ -454,6 +460,12 @@
       <Filter>Header Files\Application</Filter>
     </ClInclude>
     <ClInclude Include="include\GProfileDialog.h">
+      <Filter>Header Files\Application</Filter>
+    </ClInclude>
+    <ClInclude Include="include\GProfileManagerDialog.h">
+      <Filter>Header Files\Application</Filter>
+    </ClInclude>
+    <ClInclude Include="include\GProfilePathStore.h">
       <Filter>Header Files\Application</Filter>
     </ClInclude>
     <ClInclude Include="include\CadCommandLineWidget.h">

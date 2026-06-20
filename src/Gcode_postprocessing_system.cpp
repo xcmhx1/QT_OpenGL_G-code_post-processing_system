@@ -5,6 +5,8 @@
 #include "CadHelpDialog.h"
 #include "CadItem.h"
 #include "GProfileDialog.h"
+#include "GProfileManagerDialog.h"
+#include "GProfilePathStore.h"
 
 #include <QActionGroup>
 #include <QApplication>
@@ -653,36 +655,24 @@ void Gcode_postprocessing_system::openProfileSettingsDialog()
 
     if (!importedProfilePath.isEmpty())
     {
-        const QString runtimeDirectory = runtimeProfileDirectoryPath();
         const QFileInfo importedFileInfo(importedProfilePath);
         const QString absoluteImportedPath = importedFileInfo.absoluteFilePath();
         const QString displayName = updatedProfile.profileName().trimmed().isEmpty()
             ? importedFileInfo.completeBaseName()
             : updatedProfile.profileName().trimmed();
 
-        if (QFileInfo(absoluteImportedPath).dir().absolutePath().compare(runtimeDirectory, Qt::CaseInsensitive) == 0)
-        {
-            const QString profileId = QStringLiteral("file:%1").arg(QDir::toNativeSeparators(absoluteImportedPath));
-            m_loadedProfiles.insert(profileId, updatedProfile);
-            m_loadedProfileNames.insert(profileId, displayName);
+        GProfilePathStore::recordDirectory(importedFileInfo.absolutePath());
+        const QString profileId = GProfilePathStore::profileIdForFile(absoluteImportedPath);
+        m_loadedProfiles.insert(profileId, updatedProfile);
+        m_loadedProfileNames.insert(profileId, displayName);
 
-            if (!m_loadedProfileOrder.contains(profileId))
-            {
-                m_loadedProfileOrder.append(profileId);
-            }
-
-            m_activeProfile = updatedProfile;
-            m_activeProfileId = profileId;
-        }
-        else
+        if (!m_loadedProfileOrder.contains(profileId))
         {
-            const QString profileId = QStringLiteral("session:%1").arg(++m_sessionImportedProfileSerial);
-            m_loadedProfiles.insert(profileId, updatedProfile);
-            m_loadedProfileNames.insert(profileId, displayName);
             m_loadedProfileOrder.append(profileId);
-            m_activeProfile = updatedProfile;
-            m_activeProfileId = profileId;
         }
+
+        m_activeProfile = updatedProfile;
+        m_activeProfileId = profileId;
     }
     else
     {
@@ -708,12 +698,55 @@ void Gcode_postprocessing_system::openProfileSettingsDialog()
     statusBar()->showMessage(QStringLiteral("当前 G 代码配置已更新为: %1").arg(profileName), 4000);
 }
 
+void Gcode_postprocessing_system::openProfileManagerDialog()
+{
+    if (!ensureFeatureAvailable(AppFeature::ProfileSettings, QStringLiteral("G代码配置管理")))
+    {
+        return;
+    }
+
+    GProfileManagerDialog dialog(m_activeProfileId, m_themeColors, this);
+    const QString previousProfileId = m_activeProfileId;
+    const GProfile previousProfile = m_activeProfile;
+    const QString previousProfileName = m_loadedProfileNames.value(previousProfileId);
+    const int result = dialog.exec();
+    const QString selectedProfilePath = dialog.selectedProfilePath();
+
+    loadAvailableProfiles();
+
+    if ((result != QDialog::Accepted || selectedProfilePath.isEmpty())
+        && m_loadedProfiles.contains(previousProfileId))
+    {
+        m_activeProfileId = previousProfileId;
+        m_activeProfile = previousProfile;
+        m_loadedProfiles[previousProfileId] = previousProfile;
+
+        if (!previousProfileName.isEmpty())
+        {
+            m_loadedProfileNames[previousProfileId] = previousProfileName;
+        }
+
+        saveSelectedProfileId(previousProfileId);
+    }
+
+    refreshAvailableProfilesUi();
+
+    if (result == QDialog::Accepted && !selectedProfilePath.isEmpty())
+    {
+        const QString profileId = GProfilePathStore::profileIdForFile(selectedProfilePath);
+
+        if (!applyLoadedProfileById(profileId))
+        {
+            QMessageBox::warning(this, QStringLiteral("配置不可用"), QStringLiteral("所选配置文件无法加载。"));
+        }
+    }
+}
+
 void Gcode_postprocessing_system::loadAvailableProfiles()
 {
     m_loadedProfiles.clear();
     m_loadedProfileNames.clear();
     m_loadedProfileOrder.clear();
-    m_sessionImportedProfileSerial = 0;
 
     const QString builtinThreeAxisProfileId = QString::fromLatin1(kBuiltinThreeAxisProfileId);
     const QString builtinFourAxisProfileId = QString::fromLatin1(kBuiltinFourAxisProfileId);
@@ -726,27 +759,52 @@ void Gcode_postprocessing_system::loadAvailableProfiles()
     m_loadedProfileNames.insert(builtinFourAxisProfileId, QStringLiteral("内置4轴默认"));
     m_loadedProfileOrder.append(builtinFourAxisProfileId);
 
-    const QDir runtimeDirectory(runtimeProfileDirectoryPath());
-    const QFileInfoList profileFiles = runtimeDirectory.entryInfoList(QStringList() << QStringLiteral("*.json"), QDir::Files | QDir::Readable, QDir::Name);
+    QSet<QString> loadedFilePaths;
 
-    for (const QFileInfo& profileFileInfo : profileFiles)
+    for (const QString& directoryPath : GProfilePathStore::directories())
     {
-        QString errorMessage;
-        const GProfile profile = GProfile::loadFromFile(profileFileInfo.absoluteFilePath(), &errorMessage);
+        const QDir directory(directoryPath);
 
-        if (!errorMessage.trimmed().isEmpty())
+        if (!directory.exists())
         {
             continue;
         }
 
-        const QString profileId = QStringLiteral("file:%1").arg(QDir::toNativeSeparators(profileFileInfo.absoluteFilePath()));
-        const QString displayName = profile.profileName().trimmed().isEmpty()
-            ? profileFileInfo.completeBaseName()
-            : profile.profileName().trimmed();
+        const QFileInfoList profileFiles = directory.entryInfoList
+        (
+            QStringList() << QStringLiteral("*.json"),
+            QDir::Files | QDir::Readable,
+            QDir::Name
+        );
 
-        m_loadedProfiles.insert(profileId, profile);
-        m_loadedProfileNames.insert(profileId, displayName);
-        m_loadedProfileOrder.append(profileId);
+        for (const QFileInfo& profileFileInfo : profileFiles)
+        {
+            const QString normalizedFilePath = QDir::cleanPath(profileFileInfo.absoluteFilePath());
+            const QString filePathKey = normalizedFilePath.toCaseFolded();
+
+            if (loadedFilePaths.contains(filePathKey))
+            {
+                continue;
+            }
+
+            loadedFilePaths.insert(filePathKey);
+            QString errorMessage;
+            const GProfile profile = GProfile::loadFromFile(normalizedFilePath, &errorMessage);
+
+            if (!errorMessage.trimmed().isEmpty())
+            {
+                continue;
+            }
+
+            const QString profileId = GProfilePathStore::profileIdForFile(normalizedFilePath);
+            const QString displayName = profile.profileName().trimmed().isEmpty()
+                ? profileFileInfo.completeBaseName()
+                : profile.profileName().trimmed();
+
+            m_loadedProfiles.insert(profileId, profile);
+            m_loadedProfileNames.insert(profileId, displayName);
+            m_loadedProfileOrder.append(profileId);
+        }
     }
 
     const QString preferredProfileId = loadSelectedProfileId();
@@ -760,6 +818,7 @@ void Gcode_postprocessing_system::loadAvailableProfiles()
 
     m_activeProfileId = builtinThreeAxisProfileId;
     m_activeProfile = m_loadedProfiles.value(m_activeProfileId, GProfile::createDefaultLaserProfile());
+    saveSelectedProfileId(m_activeProfileId);
 }
 
 void Gcode_postprocessing_system::refreshAvailableProfilesUi()
@@ -803,11 +862,6 @@ bool Gcode_postprocessing_system::applyLoadedProfileById(const QString& profileI
     }
 
     return true;
-}
-
-QString Gcode_postprocessing_system::runtimeProfileDirectoryPath() const
-{
-    return QCoreApplication::applicationDirPath();
 }
 
 QString Gcode_postprocessing_system::loadSelectedProfileId() const
@@ -1231,6 +1285,7 @@ void Gcode_postprocessing_system::initializeToolPanel()
         }
     );
     connect(m_toolPanelWidget, &CadToolPanelWidget::profileSettingsRequested, this, [this]() { openProfileSettingsDialog(); });
+    connect(m_toolPanelWidget, &CadToolPanelWidget::profileManagerRequested, this, [this]() { openProfileManagerDialog(); });
     connect
     (
         m_toolPanelWidget,
