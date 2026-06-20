@@ -546,6 +546,9 @@
     <ClInclude Include="include\CadArcItem.h">
       <Filter>Header Files\Item</Filter>
     </ClInclude>
+    <ClInclude Include="include\CadOcsGeometry.h">
+      <Filter>Header Files\Item</Filter>
+    </ClInclude>
     <ClInclude Include="include\CadCircleItem.h">
       <Filter>Header Files\Item</Filter>
     </ClInclude>

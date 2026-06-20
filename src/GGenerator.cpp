@@ -7,6 +7,7 @@
 #include "CadDocument.h"
 #include "CadEllipseItem.h"
 #include "CadItem.h"
+#include "CadOcsGeometry.h"
 #include "CadLineItem.h"
 #include "CadLWPolylineItem.h"
 #include "CadPointItem.h"
@@ -407,6 +408,24 @@ namespace
         stream << "G01 X" << formatCoord(point.x()) << " Y" << formatCoord(point.y()) << "\r\n";
     }
 
+    void writeRapidMove3Axis(QTextStream& stream, const QVector3D& point)
+    {
+        stream
+            << "G00 X" << formatCoord(point.x())
+            << " Y" << formatCoord(point.y())
+            << " Z" << formatCoord(point.z())
+            << "\r\n";
+    }
+
+    void writeLinearMove3Axis(QTextStream& stream, const QVector3D& point)
+    {
+        stream
+            << "G01 X" << formatCoord(point.x())
+            << " Y" << formatCoord(point.y())
+            << " Z" << formatCoord(point.z())
+            << "\r\n";
+    }
+
     void writeRapidMove4Axis(QTextStream& stream, double x, double y, double z, double aDeg)
     {
         stream
@@ -538,31 +557,87 @@ namespace
             return false;
         }
 
-        const double startAngle = item->m_isReverse ? item->m_data->endangle : item->m_data->staangle;
-        const double endAngle = item->m_isReverse ? item->m_data->staangle : item->m_data->endangle;
-        const QVector3D center(item->m_data->basePoint.x, item->m_data->basePoint.y, item->m_data->basePoint.z);
-        const QVector3D startPoint
-        (
-            static_cast<float>(center.x() + std::cos(startAngle) * item->m_data->radious),
-            static_cast<float>(center.y() + std::sin(startAngle) * item->m_data->radious),
-            center.z()
-        );
-        const QVector3D endPoint
-        (
-            static_cast<float>(center.x() + std::cos(endAngle) * item->m_data->radious),
-            static_cast<float>(center.y() + std::sin(endAngle) * item->m_data->radious),
-            center.z()
-        );
+        const DRW_Arc* arc = item->m_data;
+        const double startAngle = item->m_isReverse ? arc->endangle : arc->staangle;
+        const double endAngle = item->m_isReverse ? arc->staangle : arc->endangle;
+        const QVector3D center = CadOcsGeometry::center(arc);
+        const QVector3D startPoint = CadOcsGeometry::pointAt(arc, startAngle);
+        const QVector3D endPoint = CadOcsGeometry::pointAt(arc, endAngle);
+        const QVector3D normal = CadOcsGeometry::normal(arc->extPoint);
+        constexpr float kPlaneTolerance = 1.0e-6f;
 
-        writeRapidMove(stream, startPoint);
+        auto arcCode = [item](float normalComponent)
+            {
+                const bool clockwise = (normalComponent < 0.0f) != item->m_isReverse;
+                return clockwise ? QStringLiteral("G02") : QStringLiteral("G03");
+            };
 
-        stream
-            << (item->m_isReverse ? "G02" : "G03")
-            << " X" << formatCoord(endPoint.x())
-            << " Y" << formatCoord(endPoint.y())
-            << " I" << formatCoord(center.x() - startPoint.x())
-            << " J" << formatCoord(center.y() - startPoint.y())
-            << "\r\n";
+        if (std::abs(normal.x()) <= kPlaneTolerance && std::abs(normal.y()) <= kPlaneTolerance)
+        {
+            writeRapidMove(stream, startPoint);
+            stream
+                << arcCode(normal.z())
+                << " X" << formatCoord(endPoint.x())
+                << " Y" << formatCoord(endPoint.y())
+                << " I" << formatCoord(center.x() - startPoint.x())
+                << " J" << formatCoord(center.y() - startPoint.y())
+                << "\r\n";
+            return true;
+        }
+
+        if (std::abs(normal.x()) <= kPlaneTolerance && std::abs(normal.z()) <= kPlaneTolerance)
+        {
+            writeRapidMove3Axis(stream, startPoint);
+            stream << "G18\r\n";
+            stream
+                // G18 uses the ZX orientation, opposite to the XZ screen order.
+                << arcCode(-normal.y())
+                << " X" << formatCoord(endPoint.x())
+                << " Z" << formatCoord(endPoint.z())
+                << " I" << formatCoord(center.x() - startPoint.x())
+                << " K" << formatCoord(center.z() - startPoint.z())
+                << "\r\n"
+                << "G17\r\n";
+            return true;
+        }
+
+        if (std::abs(normal.y()) <= kPlaneTolerance && std::abs(normal.z()) <= kPlaneTolerance)
+        {
+            writeRapidMove3Axis(stream, startPoint);
+            stream << "G19\r\n";
+            stream
+                << arcCode(normal.x())
+                << " Y" << formatCoord(endPoint.y())
+                << " Z" << formatCoord(endPoint.z())
+                << " J" << formatCoord(center.y() - startPoint.y())
+                << " K" << formatCoord(center.z() - startPoint.z())
+                << "\r\n"
+                << "G17\r\n";
+            return true;
+        }
+
+        const QVector<QVector3D>& vertices = item->m_geometry.vertices;
+        if (vertices.size() < 2)
+        {
+            return false;
+        }
+
+        if (item->m_isReverse)
+        {
+            writeRapidMove3Axis(stream, vertices.constLast());
+            for (int index = vertices.size() - 2; index >= 0; --index)
+            {
+                writeLinearMove3Axis(stream, vertices.at(index));
+            }
+        }
+        else
+        {
+            writeRapidMove3Axis(stream, vertices.constFirst());
+            for (int index = 1; index < vertices.size(); ++index)
+            {
+                writeLinearMove3Axis(stream, vertices.at(index));
+            }
+        }
 
         return true;
     }

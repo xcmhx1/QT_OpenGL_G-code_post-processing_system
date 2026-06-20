@@ -3,6 +3,7 @@
 #include "pch.h"
 
 #include "CadArcItem.h"
+#include "CadOcsGeometry.h"
 
 #include <cmath>
 
@@ -16,67 +17,6 @@ constexpr double kMaxArcStep = 5.0 * kTwoPi / 360.0;
 constexpr int kFullCircleSegments = 128;
 constexpr int kMinRawArcSegments = 8;
 
-QVector3D resolveNormal(const DRW_Coord& extPoint)
-{
-    // extrusion direction 决定圆弧所在平面法向。
-    QVector3D normal(extPoint.x, extPoint.y, extPoint.z);
-
-    if (normal.lengthSquared() <= 1.0e-12f)
-    {
-        return QVector3D(0.0f, 0.0f, 1.0f);
-    }
-
-    normal.normalize();
-    return normal;
-}
-
-void buildPlaneBasis(const QVector3D& normal, QVector3D& axisX, QVector3D& axisY)
-{
-    // 法向接近世界 Z 轴时直接选用世界 X/Y 作为稳定基底。
-    if (std::abs(normal.x()) <= 1.0e-6f && std::abs(normal.y()) <= 1.0e-6f)
-    {
-        axisX = QVector3D(1.0f, 0.0f, 0.0f);
-        axisY = QVector3D::crossProduct(normal, axisX);
-
-        if (axisY.lengthSquared() <= 1.0e-12f)
-        {
-            axisY = QVector3D(0.0f, 1.0f, 0.0f);
-        }
-        else
-        {
-            axisY.normalize();
-        }
-
-        return;
-    }
-
-    // 一般情况先构造一个与法向不平行的辅助向量，再通过叉乘得到局部坐标系。
-    const QVector3D helper = std::abs(normal.z()) < 0.999f
-        ? QVector3D(0.0f, 0.0f, 1.0f)
-        : QVector3D(0.0f, 1.0f, 0.0f);
-
-    axisX = QVector3D::crossProduct(helper, normal);
-
-    if (axisX.lengthSquared() <= 1.0e-12f)
-    {
-        axisX = QVector3D(1.0f, 0.0f, 0.0f);
-    }
-    else
-    {
-        axisX.normalize();
-    }
-
-    axisY = QVector3D::crossProduct(normal, axisX);
-
-    if (axisY.lengthSquared() <= 1.0e-12f)
-    {
-        axisY = QVector3D(0.0f, 1.0f, 0.0f);
-    }
-    else
-    {
-        axisY.normalize();
-    }
-}
 }
 
 CadArcItem::CadArcItem(DRW_Entity* entity, QObject* parent)
@@ -99,12 +39,12 @@ void CadArcItem::buildGeometryDatay()
     }
 
     // 圆弧和圆共享圆心/半径/法向定义，只是额外多了起止角范围。
-    const QVector3D center(m_data->basePoint.x, m_data->basePoint.y, m_data->basePoint.z);
-    const QVector3D normal = resolveNormal(m_data->extPoint);
+    const QVector3D center = CadOcsGeometry::center(m_data);
+    QVector3D normal = CadOcsGeometry::normal(m_data->extPoint);
 
     QVector3D axisX;
     QVector3D axisY;
-    buildPlaneBasis(normal, axisX, axisY);
+    CadOcsGeometry::basis(m_data->extPoint, axisX, axisY, normal);
 
     double startAngle = m_data->staangle;
     double endAngle = m_data->endangle;
@@ -142,12 +82,12 @@ void CadArcItem::rebuildRawPathPoints3D()
         return;
     }
 
-    const QVector3D center(m_data->basePoint.x, m_data->basePoint.y, m_data->basePoint.z);
-    const QVector3D normal = resolveNormal(m_data->extPoint);
+    const QVector3D center = CadOcsGeometry::center(m_data);
+    QVector3D normal = CadOcsGeometry::normal(m_data->extPoint);
 
     QVector3D axisX;
     QVector3D axisY;
-    buildPlaneBasis(normal, axisX, axisY);
+    CadOcsGeometry::basis(m_data->extPoint, axisX, axisY, normal);
 
     double startAngle = m_isReverse ? m_data->endangle : m_data->staangle;
     double endAngle = m_isReverse ? m_data->staangle : m_data->endangle;
@@ -225,10 +165,11 @@ bool CadArcItem::rebuildControlPoints4Axis
     m_controlPoints4Axis.clear();
     m_controlPoints4Axis.reserve(m_rawPathPoints3D.size());
 
-    const QVector3D normal = resolveNormal(m_data->extPoint);
+    const QVector3D normal = CadOcsGeometry::normal(m_data->extPoint);
+    const QVector3D center = CadOcsGeometry::center(m_data);
 
-    const double centerY = m_data->basePoint.y;
-    const double centerZ = m_data->basePoint.z;
+    const double centerY = center.y();
+    const double centerZ = center.z();
 
     bool hasPrevious = false;
     double previousA = 0.0;

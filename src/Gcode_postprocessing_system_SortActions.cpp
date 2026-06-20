@@ -3,6 +3,7 @@
 #include "Gcode_postprocessing_system.h"
 
 #include "CadItem.h"
+#include "CadOcsGeometry.h"
 #include "CadProcessVisualUtils.h"
 
 #include <QMessageBox>
@@ -650,11 +651,11 @@ namespace
             return QVector3D();
         }
 
-        const QVector3D center(arc->basePoint.x, arc->basePoint.y, arc->basePoint.z);
-        const QVector3D normal = resolveNormal(arc->extPoint);
+        const QVector3D center = CadOcsGeometry::center(arc);
+        QVector3D normal = CadOcsGeometry::normal(arc->extPoint);
         QVector3D axisX;
         QVector3D axisY;
-        buildPlaneBasis(normal, axisX, axisY);
+        CadOcsGeometry::basis(arc->extPoint, axisX, axisY, normal);
 
         return center
             + axisX * static_cast<float>(std::cos(angle) * arc->radious)
@@ -668,10 +669,10 @@ namespace
             return QVector3D();
         }
 
-        const QVector3D normal = resolveNormal(arc->extPoint);
+        QVector3D normal = CadOcsGeometry::normal(arc->extPoint);
         QVector3D axisX;
         QVector3D axisY;
-        buildPlaneBasis(normal, axisX, axisY);
+        CadOcsGeometry::basis(arc->extPoint, axisX, axisY, normal);
 
         QVector3D tangent
         (

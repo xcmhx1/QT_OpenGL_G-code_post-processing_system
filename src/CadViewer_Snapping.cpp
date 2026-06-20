@@ -4,6 +4,7 @@
 
 #include "CadDocument.h"
 #include "CadItem.h"
+#include "CadOcsGeometry.h"
 #include "CadProcessVisualUtils.h"
 
 #include <algorithm>
@@ -399,9 +400,8 @@ QVector3D CadViewer::applySnapToGroundPosition
                     case DRW::ETYPE::ARC:
                     {
                         const DRW_Arc* arc = static_cast<const DRW_Arc*>(item->m_nativeEntity);
-                        const QVector3D center(arc->basePoint.x, arc->basePoint.y, arc->basePoint.z);
-                        appendEndpoint(circleLikePointAt(center, arc->radious, arc->extPoint, arc->staangle));
-                        appendEndpoint(circleLikePointAt(center, arc->radious, arc->extPoint, arc->endangle));
+                        appendEndpoint(CadOcsGeometry::pointAt(arc, arc->staangle));
+                        appendEndpoint(CadOcsGeometry::pointAt(arc, arc->endangle));
                         break;
                     }
                     case DRW::ETYPE::ELLIPSE:
@@ -486,8 +486,7 @@ QVector3D CadViewer::applySnapToGroundPosition
                         }
 
                         const double midAngle = (arc->staangle + endAngle) * 0.5;
-                        const QVector3D center(arc->basePoint.x, arc->basePoint.y, arc->basePoint.z);
-                        appendMidpoint(circleLikePointAt(center, arc->radious, arc->extPoint, midAngle));
+                        appendMidpoint(CadOcsGeometry::pointAt(arc, midAngle));
                         break;
                     }
                     case DRW::ETYPE::POLYLINE:
@@ -528,7 +527,7 @@ QVector3D CadViewer::applySnapToGroundPosition
                     case DRW::ETYPE::ARC:
                     {
                         const DRW_Arc* arc = static_cast<const DRW_Arc*>(item->m_nativeEntity);
-                        appendCenter(QVector3D(arc->basePoint.x, arc->basePoint.y, arc->basePoint.z));
+                        appendCenter(CadOcsGeometry::center(arc));
                         break;
                     }
                     case DRW::ETYPE::ELLIPSE:
