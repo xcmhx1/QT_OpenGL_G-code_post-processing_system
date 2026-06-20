@@ -340,6 +340,9 @@
     <ClCompile Include="src\CadArcItem.cpp">
       <Filter>Source Files\Item</Filter>
     </ClCompile>
+    <ClCompile Include="src\CadSplineConverter.cpp">
+      <Filter>Source Files\Model</Filter>
+    </ClCompile>
     <ClCompile Include="src\CadCircleItem.cpp">
       <Filter>Source Files\Item</Filter>
     </ClCompile>
@@ -548,6 +551,9 @@
     </ClInclude>
     <ClInclude Include="include\CadOcsGeometry.h">
       <Filter>Header Files\Item</Filter>
+    </ClInclude>
+    <ClInclude Include="include\CadSplineConverter.h">
+      <Filter>Header Files\Model</Filter>
     </ClInclude>
     <ClInclude Include="include\CadCircleItem.h">
       <Filter>Header Files\Item</Filter>

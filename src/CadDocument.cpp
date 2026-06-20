@@ -11,6 +11,7 @@
 #include "CadLWPolylineItem.h"
 #include "CadPointItem.h"
 #include "CadPolylineItem.h"
+#include "CadSplineConverter.h"
 #include "CadXlineItem.h"
 #include "dx_data.h"
 #include "dx_iface.h"
@@ -404,17 +405,34 @@ void CadDocument::clearAll()
 
 void CadDocument::init()
 {
-    // 当前只从模型空间实体列表构建内部图元。
-    for (auto* entity : m_data->mBlock->ent)
+    // SPLINE 在导入边界转换成 3D POLYLINE，后续统一复用多段线完整链路。
+    for (auto iterator = m_data->mBlock->ent.begin(); iterator != m_data->mBlock->ent.end(); ++iterator)
     {
-        if (!entity)
+        DRW_Entity* entity = *iterator;
+
+        if (entity == nullptr)
         {
             continue;
         }
 
+        if (entity->eType == DRW::ETYPE::SPLINE)
+        {
+            std::unique_ptr<DRW_Polyline> polyline =
+                convertSplineToPolyline(static_cast<const DRW_Spline*>(entity));
+
+            if (polyline == nullptr)
+            {
+                qWarning() << "CadDocument::init() skipped an invalid SPLINE entity.";
+                continue;
+            }
+
+            delete entity;
+            entity = polyline.release();
+            *iterator = entity;
+        }
+
         if (std::unique_ptr<CadItem> item = createCadItemForEntity(entity))
         {
-            // 只有成功适配的实体才会进入场景图元数组。
             item->m_color = resolveEntityDisplayColor(*this, item.get());
             m_entities.push_back(std::move(item));
         }
