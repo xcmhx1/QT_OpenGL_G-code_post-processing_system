@@ -1632,7 +1632,8 @@ QWidget* CadToolPanelWidget::buildMachiningPanel()
     m_profileManagerButton->setProperty("machiningButton", true);
     m_profileManagerButton->setToolTip(QStringLiteral("管理配置文件与检索路径"));
     m_profileManagerButton->setFixedHeight(kComboHeight);
-    m_profileManagerButton->setMinimumWidth(62);
+    m_profileManagerButton->setMinimumWidth(76);
+    m_profileManagerButton->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
     m_profileComboBox = new QComboBox(profileRow);
     m_profileComboBox->setEditable(false);
     m_profileComboBox->setFixedHeight(kComboHeight);
@@ -1674,7 +1675,7 @@ QWidget* CadToolPanelWidget::buildMachiningPanel()
     rootLayout->addWidget(buildDivider(), 0, Qt::AlignLeft | Qt::AlignVCenter);
     rootLayout->addWidget(buildPanelFrame(QStringLiteral("功能"), featurePanel, 148, nullptr, false), 0);
     rootLayout->addWidget(buildDivider(), 0, Qt::AlignLeft | Qt::AlignVCenter);
-    rootLayout->addWidget(buildPanelFrame(QStringLiteral("配置"), configPanel, 196, nullptr, false), 0);
+    rootLayout->addWidget(buildPanelFrame(QStringLiteral("配置"), configPanel, 220, nullptr, true), 1);
     rootLayout->addWidget(buildDivider(), 0, Qt::AlignLeft | Qt::AlignVCenter);
     rootLayout->addWidget(buildPanelFrame(QStringLiteral("G代码配置"), profileSettingsPanel, 128, nullptr, false), 0);
     rootLayout->addStretch(1);
