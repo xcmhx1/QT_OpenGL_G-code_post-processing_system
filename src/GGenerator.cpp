@@ -975,35 +975,6 @@ namespace
         return dx * dx + dy * dy + dz * dz <= tolerance * tolerance;
     }
 
-    bool isXAxisConstantCrossSectionPath(const std::vector<RawPathPoint3D>& rawPoints)
-    {
-        if (rawPoints.size() < 2)
-        {
-            return false;
-        }
-
-        double minX = rawPoints.front().x;
-        double maxX = rawPoints.front().x;
-        double minY = rawPoints.front().y;
-        double maxY = rawPoints.front().y;
-        double minZ = rawPoints.front().z;
-        double maxZ = rawPoints.front().z;
-
-        for (const RawPathPoint3D& point : rawPoints)
-        {
-            minX = std::min(minX, point.x);
-            maxX = std::max(maxX, point.x);
-            minY = std::min(minY, point.y);
-            maxY = std::max(maxY, point.y);
-            minZ = std::min(minZ, point.z);
-            maxZ = std::max(maxZ, point.z);
-        }
-
-        return maxX - minX > kRotarySurfaceJoinTolerance
-            && maxY - minY <= kRotarySurfaceJoinTolerance
-            && maxZ - minZ <= kRotarySurfaceJoinTolerance;
-    }
-
     void setControlPointFromRawPathAndA
     (
         ControlPoint4Axis& controlPoint,
@@ -1025,20 +996,138 @@ namespace
         controlPoint.aDeg = aDeg;
     }
 
-    void unwrapControlPointAnglesSequentially(std::vector<ControlPoint4Axis>& controlPoints)
+    struct RotarySectionBounds
     {
-        if (controlPoints.size() < 2)
+        bool valid = false;
+        double minY = 0.0;
+        double maxY = 0.0;
+        double minZ = 0.0;
+        double maxZ = 0.0;
+    };
+
+    double rotarySectionSideTolerance(const RotarySectionBounds& bounds)
+    {
+        if (!bounds.valid)
+        {
+            return kRotarySurfaceJoinTolerance;
+        }
+
+        const double spanY = bounds.maxY - bounds.minY;
+        const double spanZ = bounds.maxZ - bounds.minZ;
+        return std::max(kRotarySurfaceJoinTolerance, std::max(spanY, spanZ) * 0.01);
+    }
+
+    bool computeRotarySectionBounds(const QVector<CadItem*>& orderedItems, RotarySectionBounds& bounds)
+    {
+        bounds = {};
+
+        for (CadItem* item : orderedItems)
+        {
+            if (item == nullptr || item->m_type == DRW::ETYPE::POINT)
+            {
+                continue;
+            }
+
+            item->rebuildRawPathPoints3D();
+
+            for (const RawPathPoint3D& point : item->rawPathPoints3D())
+            {
+                if (!bounds.valid)
+                {
+                    bounds.valid = true;
+                    bounds.minY = bounds.maxY = point.y;
+                    bounds.minZ = bounds.maxZ = point.z;
+                    continue;
+                }
+
+                bounds.minY = std::min(bounds.minY, point.y);
+                bounds.maxY = std::max(bounds.maxY, point.y);
+                bounds.minZ = std::min(bounds.minZ, point.z);
+                bounds.maxZ = std::max(bounds.maxZ, point.z);
+            }
+        }
+
+        return bounds.valid;
+    }
+
+    double squareTubeRawAForPathPoint
+    (
+        const RawPathPoint3D& point,
+        const RotarySectionBounds& bounds,
+        double axisY,
+        double axisZ
+    )
+    {
+        const double tolerance = rotarySectionSideTolerance(bounds);
+        const bool nearMaxY = std::abs(point.y - bounds.maxY) <= tolerance;
+        const bool nearMinY = std::abs(point.y - bounds.minY) <= tolerance;
+        const bool nearMaxZ = std::abs(point.z - bounds.maxZ) <= tolerance;
+        const bool nearMinZ = std::abs(point.z - bounds.minZ) <= tolerance;
+        const bool onYSide = nearMaxY || nearMinY;
+        const bool onZSide = nearMaxZ || nearMinZ;
+
+        if (onZSide && !onYSide)
+        {
+            return nearMaxZ ? 0.0 : 180.0;
+        }
+
+        if (onYSide && !onZSide)
+        {
+            return nearMaxY ? 90.0 : -90.0;
+        }
+
+        const double dy = point.y - axisY;
+        const double dz = point.z - axisZ;
+
+        if (dy * dy + dz * dz <= 1.0e-12)
+        {
+            return 0.0;
+        }
+
+        return std::atan2(dy, dz) * kRadToDeg;
+    }
+
+    void applySquareTubeToolOrientation
+    (
+        std::vector<ControlPoint4Axis>& controlPoints,
+        const std::vector<RawPathPoint3D>& rawPoints,
+        const RotarySectionBounds& bounds,
+        double axisY,
+        double axisZ,
+        bool invertAAxisDirection,
+        double aAxisOffsetDegrees,
+        bool keepContinuousAngle,
+        const ControlPoint4Axis* previousEndPoint
+    )
+    {
+        if (!bounds.valid || controlPoints.empty() || rawPoints.empty())
         {
             return;
         }
 
-        double previousA = controlPoints.front().aDeg;
+        double previousA = previousEndPoint != nullptr ? previousEndPoint->aDeg : 0.0;
+        bool hasPreviousA = previousEndPoint != nullptr;
+        const size_t count = std::min(controlPoints.size(), rawPoints.size());
 
-        for (size_t index = 1; index < controlPoints.size(); ++index)
+        for (size_t index = 0; index < count; ++index)
         {
-            ControlPoint4Axis& point = controlPoints[index];
-            point.aDeg = unwrapAngleNear(previousA, point.aDeg);
-            previousA = point.aDeg;
+            double rawA = squareTubeRawAForPathPoint(rawPoints[index], bounds, axisY, axisZ);
+
+            if (invertAAxisDirection)
+            {
+                rawA = -rawA;
+            }
+
+            rawA += aAxisOffsetDegrees;
+
+            if (hasPreviousA && keepContinuousAngle)
+            {
+                rawA = unwrapAngleNear(previousA, rawA);
+            }
+
+            setControlPointFromRawPathAndA(controlPoints[index], rawPoints[index], axisY, axisZ, rawA);
+            previousA = rawA;
+            hasPreviousA = true;
         }
     }
 
@@ -1083,40 +1172,15 @@ namespace
         }
     }
 
-    bool applyRotarySurfaceContinuity
+    bool isRotarySurfaceContinuousJoin
     (
-        std::vector<ControlPoint4Axis>& controlPoints,
         const std::vector<RawPathPoint3D>& rawPoints,
-        const RawPathPoint3D* previousRawEndPoint,
-        const ControlPoint4Axis* previousEndPoint,
-        double axisY,
-        double axisZ
+        const RawPathPoint3D* previousRawEndPoint
     )
     {
-        if (controlPoints.empty()
-            || rawPoints.empty()
-            || previousRawEndPoint == nullptr
-            || previousEndPoint == nullptr
-            || !areRawPathPointsNear(*previousRawEndPoint, rawPoints.front()))
-        {
-            return false;
-        }
-
-        const double inheritedA = previousEndPoint->aDeg;
-
-        if (isXAxisConstantCrossSectionPath(rawPoints))
-        {
-            for (size_t index = 0; index < controlPoints.size() && index < rawPoints.size(); ++index)
-            {
-                setControlPointFromRawPathAndA(controlPoints[index], rawPoints[index], axisY, axisZ, inheritedA);
-            }
-
-            return true;
-        }
-
-        setControlPointFromRawPathAndA(controlPoints.front(), rawPoints.front(), axisY, axisZ, inheritedA);
-        unwrapControlPointAnglesSequentially(controlPoints);
-        return true;
+        return !rawPoints.empty()
+            && previousRawEndPoint != nullptr
+            && areRawPathPointsNear(*previousRawEndPoint, rawPoints.front());
     }
 
     void applyMachiningPlaneZOffset(std::vector<ControlPoint4Axis>& controlPoints, double zOffset)
@@ -1148,6 +1212,7 @@ namespace
         double collisionCenterY = 0.0;
         double collisionCenterZ = 0.0;
         double safeMachineZ = 0.0;
+        RotarySectionBounds sectionBounds;
     };
 
     double computeGlobalSafeMachineZ
@@ -1486,17 +1551,28 @@ namespace
 
         std::vector<ControlPoint4Axis>& controlPoints = writableItem->controlPoints4AxisMutable();
         const std::vector<RawPathPoint3D>& rawPoints = writableItem->rawPathPoints3D();
-        const bool surfaceContinuousJoin = applyRotarySurfaceContinuity
+        const bool squareTubeOrientationApplied = exportContext.sectionBounds.valid && !rawPoints.empty();
+
+        applySquareTubeToolOrientation
         (
             controlPoints,
             rawPoints,
-            previousRawEndPoint,
-            previousEndPoint,
+            exportContext.sectionBounds,
             exportContext.axisY,
-            exportContext.axisZ
+            exportContext.axisZ,
+            config.invertAAxisDirection,
+            config.aAxisOffsetDegrees,
+            config.keepContinuousAngle,
+            previousEndPoint
         );
 
-        if (!surfaceContinuousJoin && previousEndPoint != nullptr)
+        const bool surfaceContinuousJoin = isRotarySurfaceContinuousJoin
+        (
+            rawPoints,
+            previousRawEndPoint
+        );
+
+        if (!squareTubeOrientationApplied && previousEndPoint != nullptr)
         {
             alignControlPointsToPreviousA(controlPoints, previousEndPoint->aDeg);
         }
@@ -1637,6 +1713,12 @@ bool GGenerator::generateToFile(const QString& filePath, QString* errorMessage) 
     rotaryExportContext.axisZ = rotaryAxisConfig.centerZ;
     rotaryExportContext.judgeCenterY = rotaryAxisConfig.centerY;
     rotaryExportContext.judgeCenterZ = rotaryAxisConfig.centerZ;
+
+    if (m_generationMode == GenerationMode::Mode3D)
+    {
+        computeRotarySectionBounds(orderedItems, rotaryExportContext.sectionBounds);
+    }
+
     computeRotaryJudgeCenter
     (
         orderedItems,
@@ -1710,6 +1792,24 @@ bool GGenerator::generateToFile(const QString& filePath, QString* errorMessage) 
         writeCommentLine(stream, QStringLiteral("COLLISION CENTER Z: %1").arg(formatDebugValue(rotaryExportContext.collisionCenterZ)));
         writeCommentLine(stream, QStringLiteral("MAX COLLISION RADIUS: %1").arg(formatDebugValue(maxCollisionRadius)));
         writeCommentLine(stream, QStringLiteral("FINAL SAFE MACHINE Z: %1").arg(formatDebugValue(rotaryExportContext.safeMachineZ)));
+
+        if (rotaryExportContext.sectionBounds.valid)
+        {
+            writeCommentLine
+            (
+                stream,
+                QStringLiteral("SQUARE TUBE SECTION Y: %1 -> %2")
+                    .arg(formatDebugValue(rotaryExportContext.sectionBounds.minY))
+                    .arg(formatDebugValue(rotaryExportContext.sectionBounds.maxY))
+            );
+            writeCommentLine
+            (
+                stream,
+                QStringLiteral("SQUARE TUBE SECTION Z: %1 -> %2")
+                    .arg(formatDebugValue(rotaryExportContext.sectionBounds.minZ))
+                    .arg(formatDebugValue(rotaryExportContext.sectionBounds.maxZ))
+            );
+        }
     }
 
     qDebug().noquote()
