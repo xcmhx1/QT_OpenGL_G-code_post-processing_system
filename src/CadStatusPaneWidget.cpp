@@ -42,6 +42,25 @@ CadStatusPaneWidget::CadStatusPaneWidget(QWidget* parent)
     coordinateLayout->addWidget(coordinateTitleLabel);
     coordinateLayout->addWidget(m_coordinateValueLabel);
 
+    QFrame* entityTypeFrame = new QFrame(this);
+    entityTypeFrame->setObjectName("EntityTypeBlock");
+    QHBoxLayout* entityTypeLayout = new QHBoxLayout(entityTypeFrame);
+    entityTypeLayout->setContentsMargins(10, 4, 10, 4);
+    entityTypeLayout->setSpacing(8);
+
+    QLabel* entityTypeTitleLabel = new QLabel(QStringLiteral("图元"), entityTypeFrame);
+    entityTypeTitleLabel->setFont(titleFont);
+
+    m_entityTypeValueLabel = new QLabel(entityTypeFrame);
+    m_entityTypeValueLabel->setFont(valueFont);
+    m_entityTypeValueLabel->setMinimumWidth(180);
+    m_entityTypeValueLabel->setMaximumWidth(360);
+    m_entityTypeValueLabel->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+    m_entityTypeValueLabel->setText(QStringLiteral("无"));
+
+    entityTypeLayout->addWidget(entityTypeTitleLabel);
+    entityTypeLayout->addWidget(m_entityTypeValueLabel);
+
     QWidget* snapContainer = new QWidget(this);
     QHBoxLayout* snapLayout = new QHBoxLayout(snapContainer);
     snapLayout->setContentsMargins(0, 0, 0, 0);
@@ -98,6 +117,7 @@ CadStatusPaneWidget::CadStatusPaneWidget(QWidget* parent)
     m_polarButton->setMinimumHeight(28);
 
     layout->addWidget(coordinateFrame);
+    layout->addWidget(entityTypeFrame);
     layout->addSpacing(8);
     layout->addWidget(snapContainer);
     layout->addWidget(m_orthoButton);
@@ -184,6 +204,18 @@ void CadStatusPaneWidget::setWorldPosition(const QVector3D& worldPos)
     );
 }
 
+void CadStatusPaneWidget::setEntityTypeText(const QString& text)
+{
+    if (m_entityTypeValueLabel == nullptr)
+    {
+        return;
+    }
+
+    const QString normalizedText = text.trimmed().isEmpty() ? QStringLiteral("无") : text.trimmed();
+    m_entityTypeValueLabel->setText(normalizedText);
+    m_entityTypeValueLabel->setToolTip(normalizedText);
+}
+
 void CadStatusPaneWidget::setTheme(const AppThemeColors& theme)
 {
     setStyleSheet
@@ -195,6 +227,11 @@ void CadStatusPaneWidget::setTheme(const AppThemeColors& theme)
             "border-top: 1px solid %2;"
             "}"
             "#CoordinateBlock {"
+            "background-color: %3;"
+            "border: 1px solid %4;"
+            "border-radius: 4px;"
+            "}"
+            "#EntityTypeBlock {"
             "background-color: %3;"
             "border: 1px solid %4;"
             "border-radius: 4px;"

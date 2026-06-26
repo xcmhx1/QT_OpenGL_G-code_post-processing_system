@@ -649,24 +649,52 @@ namespace
             return false;
         }
 
-        const QVector3D center(item->m_data->basePoint.x, item->m_data->basePoint.y, item->m_data->basePoint.z);
+        const DRW_Circle* circle = item->m_data;
+        const QVector3D center = CadOcsGeometry::center(circle);
         const double startParameter = effectiveCircleStartParameter(item);
-        const QVector3D startPoint
-        (
-            static_cast<float>(center.x() + std::cos(startParameter) * item->m_data->radious),
-            static_cast<float>(center.y() + std::sin(startParameter) * item->m_data->radious),
-            center.z()
-        );
+        const QVector3D startPoint = CadOcsGeometry::pointAt(circle, startParameter);
+        const QVector3D normal = CadOcsGeometry::normal(circle->extPoint);
+        constexpr float kPlaneTolerance = 1.0e-6f;
 
-        writeRapidMove(stream, startPoint);
+        if (std::abs(normal.x()) <= kPlaneTolerance && std::abs(normal.y()) <= kPlaneTolerance)
+        {
+            const bool clockwise = (normal.z() < 0.0f) != item->m_isReverse;
 
-        stream
-            << (item->m_isReverse ? "G02" : "G03")
-            << " X" << formatCoord(startPoint.x())
-            << " Y" << formatCoord(startPoint.y())
-            << " I" << formatCoord(center.x() - startPoint.x())
-            << " J" << formatCoord(center.y() - startPoint.y())
-            << "\r\n";
+            writeRapidMove(stream, startPoint);
+
+            stream
+                << (clockwise ? "G02" : "G03")
+                << " X" << formatCoord(startPoint.x())
+                << " Y" << formatCoord(startPoint.y())
+                << " I" << formatCoord(center.x() - startPoint.x())
+                << " J" << formatCoord(center.y() - startPoint.y())
+                << "\r\n";
+
+            return true;
+        }
+
+        const QVector<QVector3D>& vertices = item->m_geometry.vertices;
+        if (vertices.size() < 2)
+        {
+            return false;
+        }
+
+        if (item->m_isReverse)
+        {
+            writeRapidMove3Axis(stream, vertices.constLast());
+            for (int index = vertices.size() - 2; index >= 0; --index)
+            {
+                writeLinearMove3Axis(stream, vertices.at(index));
+            }
+        }
+        else
+        {
+            writeRapidMove3Axis(stream, vertices.constFirst());
+            for (int index = 1; index < vertices.size(); ++index)
+            {
+                writeLinearMove3Axis(stream, vertices.at(index));
+            }
+        }
 
         return true;
     }

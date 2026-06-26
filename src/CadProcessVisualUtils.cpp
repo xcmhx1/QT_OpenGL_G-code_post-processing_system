@@ -219,15 +219,7 @@ namespace
             return QVector3D();
         }
 
-        const QVector3D center(circle->basePoint.x, circle->basePoint.y, circle->basePoint.z);
-        const QVector3D normal = resolveNormal(circle->extPoint);
-        QVector3D axisX;
-        QVector3D axisY;
-        buildPlaneBasis(normal, axisX, axisY);
-
-        return center
-            + axisX * static_cast<float>(std::cos(parameter) * circle->radious)
-            + axisY * static_cast<float>(std::sin(parameter) * circle->radious);
+        return CadOcsGeometry::pointAt(circle, parameter);
     }
 
     QVector3D circleTangentAt(const DRW_Circle* circle, double parameter, bool reverseDirection)
@@ -237,23 +229,7 @@ namespace
             return QVector3D();
         }
 
-        const QVector3D normal = resolveNormal(circle->extPoint);
-        QVector3D axisX;
-        QVector3D axisY;
-        buildPlaneBasis(normal, axisX, axisY);
-
-        QVector3D tangent
-        (
-            axisX * static_cast<float>(-std::sin(parameter))
-            + axisY * static_cast<float>(std::cos(parameter))
-        );
-
-        if (reverseDirection)
-        {
-            tangent = -tangent;
-        }
-
-        return normalizeOrZero(tangent);
+        return CadOcsGeometry::tangentAt(circle, parameter, reverseDirection);
     }
 
     QVector3D arcPointAt(const DRW_Arc* arc, double angle)
@@ -1076,7 +1052,7 @@ CadProcessVisualInfo buildProcessVisualInfo(const CadItem* item)
         info.closedPath = true;
         info.forwardStartPoint = circlePointAt(circle, startParameter);
         info.forwardEndPoint = info.forwardStartPoint;
-        info.labelAnchor = QVector3D(circle->basePoint.x, circle->basePoint.y, circle->basePoint.z);
+        info.labelAnchor = CadOcsGeometry::center(circle);
         info.direction = circleTangentAt(circle, startParameter, false);
         break;
     }
@@ -1278,7 +1254,7 @@ QVector<CadSelectionHandleInfo> buildSelectionHandleInfo(const CadItem* item, fl
     case DRW::ETYPE::CIRCLE:
     {
         const DRW_Circle* circle = static_cast<const DRW_Circle*>(item->m_nativeEntity);
-        appendSelectionHandle(handles, QVector3D(circle->basePoint.x, circle->basePoint.y, circle->basePoint.z), true, true, 0);
+        appendSelectionHandle(handles, CadOcsGeometry::center(circle), true, true, 0);
         appendSelectionHandle(handles, circlePointAt(circle, 0.0), false, true, 1);
         appendSelectionHandle(handles, circlePointAt(circle, kPi * 0.5), false, true, 2);
         appendSelectionHandle(handles, circlePointAt(circle, kPi), false, true, 3);

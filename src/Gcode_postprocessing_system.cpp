@@ -40,6 +40,70 @@ namespace
     constexpr const char* kBuiltinFourAxisProfileId = "builtin:4axis";
     constexpr int kColorByLayer = 256;
 
+    QString entityTypeDisplayName(DRW::ETYPE type)
+    {
+        switch (type)
+        {
+        case DRW::ETYPE::POINT:
+            return QStringLiteral("POINT 点");
+        case DRW::ETYPE::LINE:
+            return QStringLiteral("LINE 直线");
+        case DRW::ETYPE::XLINE:
+            return QStringLiteral("XLINE 构造线");
+        case DRW::ETYPE::RAY:
+            return QStringLiteral("RAY 射线");
+        case DRW::ETYPE::CIRCLE:
+            return QStringLiteral("CIRCLE 圆");
+        case DRW::ETYPE::ARC:
+            return QStringLiteral("ARC 圆弧");
+        case DRW::ETYPE::ELLIPSE:
+            return QStringLiteral("ELLIPSE 椭圆");
+        case DRW::ETYPE::POLYLINE:
+            return QStringLiteral("POLYLINE 多段线");
+        case DRW::ETYPE::LWPOLYLINE:
+            return QStringLiteral("LWPOLYLINE 轻量多段线");
+        case DRW::ETYPE::SPLINE:
+            return QStringLiteral("SPLINE 样条曲线");
+        default:
+            return QStringLiteral("UNKNOWN 未知");
+        }
+    }
+
+    QString selectedEntityTypeSummary(const QVector<CadItem*>& items)
+    {
+        if (items.isEmpty())
+        {
+            return QStringLiteral("无");
+        }
+
+        if (items.size() == 1 && items.first() != nullptr)
+        {
+            return entityTypeDisplayName(items.first()->m_type);
+        }
+
+        QMap<QString, int> typeCounts;
+
+        for (const CadItem* item : items)
+        {
+            if (item == nullptr)
+            {
+                continue;
+            }
+
+            const QString typeName = entityTypeDisplayName(item->m_type);
+            typeCounts[typeName] = typeCounts.value(typeName) + 1;
+        }
+
+        QStringList parts;
+
+        for (auto iterator = typeCounts.cbegin(); iterator != typeCounts.cend(); ++iterator)
+        {
+            parts.push_back(QStringLiteral("%1 x%2").arg(iterator.key()).arg(iterator.value()));
+        }
+
+        return QStringLiteral("已选 %1: %2").arg(items.size()).arg(parts.join(QStringLiteral(", ")));
+    }
+
     QColor colorFromAci(int colorIndex)
     {
         static const QRgb aciStandardColors[] =
@@ -225,6 +289,15 @@ Gcode_postprocessing_system::Gcode_postprocessing_system(QWidget* parent)
     ui->openGLWidget->refreshCommandPrompt();
 
     connect(ui->openGLWidget, &CadViewer::hoveredWorldPositionChanged, m_statusPaneWidget, &CadStatusPaneWidget::setWorldPosition);
+    const auto updateStatusEntityType = [this]()
+    {
+        if (m_statusPaneWidget != nullptr)
+        {
+            m_statusPaneWidget->setEntityTypeText(selectedEntityTypeSummary(ui->openGLWidget->selectedEntities()));
+        }
+    };
+    connect(ui->openGLWidget, &CadViewer::selectedEntityChanged, this, [updateStatusEntityType](CadItem*) { updateStatusEntityType(); });
+    connect(&m_document, &CadDocument::sceneChanged, this, updateStatusEntityType);
     connect(m_statusPaneWidget, &CadStatusPaneWidget::basePointSnapToggled, ui->openGLWidget, &CadViewer::setBasePointSnapEnabled);
     connect(m_statusPaneWidget, &CadStatusPaneWidget::controlPointSnapToggled, ui->openGLWidget, &CadViewer::setControlPointSnapEnabled);
     connect(m_statusPaneWidget, &CadStatusPaneWidget::gridSnapToggled, ui->openGLWidget, &CadViewer::setGridSnapEnabled);
@@ -248,6 +321,7 @@ Gcode_postprocessing_system::Gcode_postprocessing_system(QWidget* parent)
     );
 
     m_statusPaneWidget->setSnapOptionMask(loadSnapOptionMask());
+    updateStatusEntityType();
     connect(ui->openGLWidget, &CadViewer::commandPromptChanged, m_commandLineWidget, &CadCommandLineWidget::setPrompt);
     connect(ui->openGLWidget, &CadViewer::commandMessageAppended, m_commandLineWidget, &CadCommandLineWidget::appendMessage);
     connect

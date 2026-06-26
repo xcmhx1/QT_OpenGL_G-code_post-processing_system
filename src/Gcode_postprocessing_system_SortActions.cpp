@@ -695,15 +695,7 @@ namespace
             return QVector3D();
         }
 
-        const QVector3D center(circle->basePoint.x, circle->basePoint.y, circle->basePoint.z);
-        const QVector3D normal = resolveNormal(circle->extPoint);
-        QVector3D axisX;
-        QVector3D axisY;
-        buildPlaneBasis(normal, axisX, axisY);
-
-        return center
-            + axisX * static_cast<float>(std::cos(parameter) * circle->radious)
-            + axisY * static_cast<float>(std::sin(parameter) * circle->radious);
+        return CadOcsGeometry::pointAt(circle, parameter);
     }
 
     QVector3D circleTangentAt(const DRW_Circle* circle, double parameter, bool reverseDirection)
@@ -713,23 +705,7 @@ namespace
             return QVector3D();
         }
 
-        const QVector3D normal = resolveNormal(circle->extPoint);
-        QVector3D axisX;
-        QVector3D axisY;
-        buildPlaneBasis(normal, axisX, axisY);
-
-        QVector3D tangent
-        (
-            axisX * static_cast<float>(-std::sin(parameter))
-            + axisY * static_cast<float>(std::cos(parameter))
-        );
-
-        if (reverseDirection)
-        {
-            tangent = -tangent;
-        }
-
-        return normalizeOrZero(tangent);
+        return CadOcsGeometry::tangentAt(circle, parameter, reverseDirection);
     }
 
     QVector3D ellipsePointAt(const DRW_Ellipse* ellipse, double parameter)

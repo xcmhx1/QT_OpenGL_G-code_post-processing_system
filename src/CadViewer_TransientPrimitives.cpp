@@ -9,6 +9,7 @@
 #include "CadProcessVisualUtils.h"
 
 #include <algorithm>
+#include <cmath>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -137,6 +138,19 @@ std::vector<TransientPrimitive> CadViewer::buildProcessDirectionPrimitives() con
         const QVector3D tip = info.startPoint;
         const QVector3D headBase = tip - info.direction * headLength;
         const QVector3D notch = tip - info.direction * (headLength * 0.72f);
+
+        const QPoint tipScreen = worldToScreen(tip);
+        const QPoint headBaseScreen = worldToScreen(headBase);
+        const double projectedLength = std::hypot
+        (
+            static_cast<double>(tipScreen.x() - headBaseScreen.x()),
+            static_cast<double>(tipScreen.y() - headBaseScreen.y())
+        );
+
+        if (projectedLength < 3.0)
+        {
+            continue;
+        }
 
         QVector3D arrowColor;
         if (entity->m_isSelected)

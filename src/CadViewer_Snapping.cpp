@@ -521,7 +521,7 @@ QVector3D CadViewer::applySnapToGroundPosition
                     case DRW::ETYPE::CIRCLE:
                     {
                         const DRW_Circle* circle = static_cast<const DRW_Circle*>(item->m_nativeEntity);
-                        appendCenter(QVector3D(circle->basePoint.x, circle->basePoint.y, circle->basePoint.z));
+                        appendCenter(CadOcsGeometry::center(circle));
                         break;
                     }
                     case DRW::ETYPE::ARC:

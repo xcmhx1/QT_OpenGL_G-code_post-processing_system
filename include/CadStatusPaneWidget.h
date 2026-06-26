@@ -32,6 +32,7 @@ public:
     explicit CadStatusPaneWidget(QWidget* parent = nullptr);
 
     void setWorldPosition(const QVector3D& worldPos);
+    void setEntityTypeText(const QString& text);
     void setTheme(const AppThemeColors& theme);
     quint32 snapOptionMask() const;
     void setSnapOptionMask(quint32 mask);
@@ -77,6 +78,7 @@ private:
 
 private:
     QLabel* m_coordinateValueLabel = nullptr;
+    QLabel* m_entityTypeValueLabel = nullptr;
     QToolButton* m_snapSettingsButton = nullptr;
     QToolButton* m_orthoButton = nullptr;
     QToolButton* m_polarButton = nullptr;

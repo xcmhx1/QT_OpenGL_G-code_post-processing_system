@@ -4,6 +4,7 @@
 #include "pch.h"
 
 #include "CadEditerWorkflowInternal.h"
+#include "CadOcsGeometry.h"
 
 #include <cmath>
 
@@ -113,15 +114,7 @@ namespace CadEditerWorkflowInternal
             return QVector3D();
         }
 
-        const QVector3D center(circle->basePoint.x, circle->basePoint.y, circle->basePoint.z);
-        const QVector3D normal = resolveEntityNormal(circle->extPoint);
-        QVector3D axisX;
-        QVector3D axisY;
-        buildPlaneBasis(normal, axisX, axisY);
-
-        return center
-            + axisX * static_cast<float>(std::cos(parameter) * circle->radious)
-            + axisY * static_cast<float>(std::sin(parameter) * circle->radious);
+        return CadOcsGeometry::pointAt(circle, parameter);
     }
 
     QVector3D arcPointAt(const DRW_Arc* arc, double angle)
@@ -171,18 +164,18 @@ namespace CadEditerWorkflowInternal
             return 0.0;
         }
 
-        const QVector3D center(circle->basePoint.x, circle->basePoint.y, circle->basePoint.z);
-        const QVector3D local = flattenToDrawingPlane(point) - center;
+        const QVector3D center = CadOcsGeometry::center(circle);
+        const QVector3D local = point - center;
 
         if (local.lengthSquared() <= kGeometryEpsilon)
         {
             return 0.0;
         }
 
-        const QVector3D normal = resolveEntityNormal(circle->extPoint);
         QVector3D axisX;
         QVector3D axisY;
-        buildPlaneBasis(normal, axisX, axisY);
+        QVector3D axisZ;
+        CadOcsGeometry::basis(circle->extPoint, axisX, axisY, axisZ);
 
         const double x = QVector3D::dotProduct(local, axisX);
         const double y = QVector3D::dotProduct(local, axisY);
