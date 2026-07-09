@@ -227,8 +227,8 @@ void GProfileDialog::buildUi()
     rootLayout->setSpacing(8);
 
     QHBoxLayout* actionLayout = new QHBoxLayout();
-    QPushButton* importButton = new QPushButton(QStringLiteral("导入JSON..."), this);
-    QPushButton* exportButton = new QPushButton(QStringLiteral("导出JSON..."), this);
+    QPushButton* importButton = new QPushButton(QStringLiteral("导入配置..."), this);
+    QPushButton* exportButton = new QPushButton(QStringLiteral("导出配置..."), this);
     QPushButton* reset3AxisButton = new QPushButton(QStringLiteral("恢复3轴默认"), this);
     QPushButton* reset4AxisButton = new QPushButton(QStringLiteral("恢复4轴默认"), this);
 
@@ -238,6 +238,14 @@ void GProfileDialog::buildUi()
     actionLayout->addWidget(reset4AxisButton);
     actionLayout->addStretch(1);
     rootLayout->addLayout(actionLayout);
+
+    QLabel* ruleOrderHintLabel = new QLabel
+    (
+        QStringLiteral("规则应用顺序：文件头 -> 每个图元：定位移动 -> 图层头 -> 颜色头 -> 类型头 -> 图元加工代码 -> 类型尾 -> 颜色尾 -> 图层尾 -> 文件尾。"),
+        this
+    );
+    ruleOrderHintLabel->setWordWrap(true);
+    rootLayout->addWidget(ruleOrderHintLabel);
 
     QTabWidget* tabWidget = new QTabWidget(this);
     rootLayout->addWidget(tabWidget, 1);
@@ -1013,9 +1021,9 @@ void GProfileDialog::importProfileFromFile()
     const QString filePath = QFileDialog::getOpenFileName
     (
         this,
-        QStringLiteral("导入 GProfile 配置"),
+        QStringLiteral("导入G代码配置"),
         GProfilePathStore::lastDirectory(),
-        QStringLiteral("JSON 文件 (*.json)")
+        QStringLiteral("配置文件 (*.json)")
     );
 
     if (filePath.isEmpty())
@@ -1045,15 +1053,15 @@ void GProfileDialog::exportProfileToFile()
     const GProfile profile = collectProfile();
 
     const QString defaultFileName = profile.profileName().trimmed().isEmpty()
-        ? QStringLiteral("gprofile.json")
+        ? QStringLiteral("gcode-profile.json")
         : QStringLiteral("%1.json").arg(profile.profileName().trimmed());
 
     const QString filePath = QFileDialog::getSaveFileName
     (
         this,
-        QStringLiteral("导出 GProfile 配置"),
+        QStringLiteral("导出G代码配置"),
         QDir(GProfilePathStore::lastDirectory()).filePath(defaultFileName),
-        QStringLiteral("JSON 文件 (*.json)")
+        QStringLiteral("配置文件 (*.json)")
     );
 
     if (filePath.isEmpty())

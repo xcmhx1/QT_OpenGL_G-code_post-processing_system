@@ -283,7 +283,7 @@ void GProfileManagerDialog::refreshProfileTree()
 
         if (directoryProfileCount == 0)
         {
-            QTreeWidgetItem* emptyItem = new QTreeWidgetItem(directoryItem, QStringList() << QStringLiteral("未找到有效的 GProfile JSON 配置"));
+            QTreeWidgetItem* emptyItem = new QTreeWidgetItem(directoryItem, QStringList() << QStringLiteral("未找到有效的 G代码配置"));
             emptyItem->setForeground(0, m_theme.textSecondaryColor);
             emptyItem->setDisabled(true);
         }

@@ -30,6 +30,75 @@ namespace
     constexpr const char* kInitialMachineXKey = "initialMachineX";
     constexpr const char* kInitialMachineYKey = "initialMachineY";
     constexpr const char* kInitialMachineZKey = "initialMachineZ";
+
+    QStringList defaultProcessEntityTypes()
+    {
+        return
+        {
+            QStringLiteral("LINE"),
+            QStringLiteral("ARC"),
+            QStringLiteral("CIRCLE"),
+            QStringLiteral("ELLIPSE"),
+            QStringLiteral("POLYLINE"),
+            QStringLiteral("LWPOLYLINE")
+        };
+    }
+
+    QStringList defaultProcessColorKeys()
+    {
+        QStringList colorKeys
+        {
+            QStringLiteral("BYLAYER"),
+            QStringLiteral("BYBLOCK")
+        };
+
+        for (int colorIndex = 1; colorIndex <= 9; ++colorIndex)
+        {
+            colorKeys.append(QStringLiteral("ACI:%1").arg(colorIndex));
+        }
+
+        return colorKeys;
+    }
+
+    void applyDefaultEntityTypeRules(GProfile& profile)
+    {
+        const GProfileCodeBlock entityTypeCode
+        {
+            QString(),
+            QString(),
+            QStringLiteral("默认不按实体类型启停加工；特殊工艺建议优先使用颜色规则")
+        };
+
+        for (const QString& entityType : defaultProcessEntityTypes())
+        {
+            profile.setEntityTypeCode(entityType, entityTypeCode);
+        }
+
+        profile.setEntityTypeCode
+        (
+            QStringLiteral("POINT"),
+            {
+                QString(),
+                QString(),
+                QStringLiteral("点图元默认不输出加工轨迹")
+            }
+        );
+    }
+
+    void applyDefaultColorRules(GProfile& profile)
+    {
+        const GProfileCodeBlock colorCode
+        {
+            QStringLiteral("M03"),
+            QStringLiteral("M05"),
+            QStringLiteral("颜色规则默认加工头尾")
+        };
+
+        for (const QString& colorKey : defaultProcessColorKeys())
+        {
+            profile.setEntityColorCode(colorKey, colorCode);
+        }
+    }
 }
 
 QJsonObject GProfileCodeBlock::toJson() const
@@ -104,38 +173,8 @@ GProfile GProfile::createDefaultLaserProfile()
         }
     );
 
-    const GProfileCodeBlock cuttingCode
-    {
-        QStringLiteral("M03"),
-        QStringLiteral("M05"),
-        QStringLiteral("实体类型默认加工头尾")
-    };
-
-    profile.setEntityTypeCode(QStringLiteral("LINE"), cuttingCode);
-    profile.setEntityTypeCode(QStringLiteral("ARC"), cuttingCode);
-    profile.setEntityTypeCode(QStringLiteral("CIRCLE"), cuttingCode);
-    profile.setEntityTypeCode(QStringLiteral("ELLIPSE"), cuttingCode);
-    profile.setEntityTypeCode(QStringLiteral("POLYLINE"), cuttingCode);
-    profile.setEntityTypeCode(QStringLiteral("LWPOLYLINE"), cuttingCode);
-    profile.setEntityTypeCode
-    (
-        QStringLiteral("POINT"),
-        {
-            QString(),
-            QString(),
-            QStringLiteral("点图元默认不出加工启停指令")
-        }
-    );
-
-    profile.setEntityColorCode
-    (
-        QStringLiteral("ACI:1"),
-        {
-            QStringLiteral("M03"),
-            QStringLiteral("M05"),
-            QStringLiteral("红色实体加工头尾示例")
-        }
-    );
+    applyDefaultEntityTypeRules(profile);
+    applyDefaultColorRules(profile);
 
     return profile;
 }
@@ -153,28 +192,8 @@ GProfile GProfile::createDefaultRotaryProfile()
         }
     );
 
-    const GProfileCodeBlock cuttingCode
-    {
-        QStringLiteral("M03"),
-        QStringLiteral("M05"),
-        QStringLiteral("实体类型默认加工头尾")
-    };
-
-    profile.setEntityTypeCode(QStringLiteral("LINE"), cuttingCode);
-    profile.setEntityTypeCode(QStringLiteral("ARC"), cuttingCode);
-    profile.setEntityTypeCode(QStringLiteral("CIRCLE"), cuttingCode);
-    profile.setEntityTypeCode(QStringLiteral("ELLIPSE"), cuttingCode);
-    profile.setEntityTypeCode(QStringLiteral("POLYLINE"), cuttingCode);
-    profile.setEntityTypeCode(QStringLiteral("LWPOLYLINE"), cuttingCode);
-    profile.setEntityTypeCode
-    (
-        QStringLiteral("POINT"),
-        {
-            QString(),
-            QString(),
-            QStringLiteral("点图元默认不出加工启停指令")
-        }
-    );
+    applyDefaultEntityTypeRules(profile);
+    applyDefaultColorRules(profile);
 
     return profile;
 }
@@ -205,7 +224,7 @@ GProfile GProfile::loadFromFile(const QString& filePath, QString* errorMessage)
     {
         if (errorMessage != nullptr)
         {
-            *errorMessage = QStringLiteral("配置文件 JSON 解析失败: %1").arg(parseError.errorString());
+            *errorMessage = QStringLiteral("配置文件解析失败: %1").arg(parseError.errorString());
         }
 
         return GProfile();
