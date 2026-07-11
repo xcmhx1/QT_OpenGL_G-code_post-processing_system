@@ -1125,6 +1125,82 @@ namespace
         return bounds.valid;
     }
 
+    std::vector<RotaryCornerToolCenter> buildRotaryCornerToolCenters(const RotarySectionBounds& bounds)
+    {
+        std::vector<RotaryCornerToolCenter> result;
+
+        if (!bounds.valid)
+        {
+            return result;
+        }
+
+        const auto appendCorner =
+            [&result]
+            (
+                const RotaryCornerCenter& center,
+                double radiusY,
+                double radiusZ,
+                int yDirection,
+                int zDirection
+            )
+            {
+                if (!center.valid || radiusY <= 0.0 || radiusZ <= 0.0)
+                {
+                    return;
+                }
+
+                const double radius = 0.5 * (radiusY + radiusZ);
+                const double radiusMismatch = std::abs(radiusY - radiusZ);
+                const double radialTolerance = std::max(0.01, radius * 0.01);
+
+                // 只有接近等半径的角部才作为方管圆角处理，避免误改普通空间曲线。
+                if (radiusMismatch > radialTolerance)
+                {
+                    return;
+                }
+
+                result.push_back
+                (
+                    { center.y, center.z, radius, radialTolerance, yDirection, zDirection }
+                );
+            };
+
+        appendCorner
+        (
+            bounds.topRightCorner,
+            bounds.maxY - bounds.topRightCorner.y,
+            bounds.maxZ - bounds.topRightCorner.z,
+            1,
+            1
+        );
+        appendCorner
+        (
+            bounds.topLeftCorner,
+            bounds.topLeftCorner.y - bounds.minY,
+            bounds.maxZ - bounds.topLeftCorner.z,
+            -1,
+            1
+        );
+        appendCorner
+        (
+            bounds.bottomRightCorner,
+            bounds.maxY - bounds.bottomRightCorner.y,
+            bounds.bottomRightCorner.z - bounds.minZ,
+            1,
+            -1
+        );
+        appendCorner
+        (
+            bounds.bottomLeftCorner,
+            bounds.bottomLeftCorner.y - bounds.minY,
+            bounds.bottomLeftCorner.z - bounds.minZ,
+            -1,
+            -1
+        );
+
+        return result;
+    }
+
     bool hasInitialMachinePoint(const GProfileRotaryAxisConfig& config)
     {
         return config.useInitialMachinePoint;
@@ -1196,6 +1272,7 @@ namespace
         double collisionCenterZ = 0.0;
         double safeMachineZ = 0.0;
         RotarySectionBounds sectionBounds;
+        std::vector<RotaryCornerToolCenter> cornerToolCenters;
     };
 
     double computeGlobalSafeMachineZ
@@ -1528,6 +1605,16 @@ namespace
 
         std::vector<ControlPoint4Axis>& controlPoints = writableItem->controlPoints4AxisMutable();
 
+        writableItem->applyRoundedCornerToolOrientation
+        (
+            exportContext.cornerToolCenters,
+            exportContext.axisY,
+            exportContext.axisZ,
+            config.invertAAxisDirection,
+            config.aAxisOffsetDegrees,
+            config.keepContinuousAngle
+        );
+
         applyMachiningPlaneZOffset(controlPoints, config.machiningPlaneZOffset);
 
         if (previousEndPoint != nullptr)
@@ -1672,6 +1759,8 @@ bool GGenerator::generateToFile(const QString& filePath, QString* errorMessage) 
     if (m_generationMode == GenerationMode::Mode3D)
     {
         computeRotarySectionBounds(orderedItems, rotaryExportContext.sectionBounds);
+        rotaryExportContext.cornerToolCenters =
+            buildRotaryCornerToolCenters(rotaryExportContext.sectionBounds);
     }
 
     computeRotaryJudgeCenter

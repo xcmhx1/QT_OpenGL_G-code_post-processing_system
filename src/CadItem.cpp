@@ -189,6 +189,89 @@ std::vector<ControlPoint4Axis>& CadItem::controlPoints4AxisMutable()
     return m_controlPoints4Axis;
 }
 
+void CadItem::applyRoundedCornerToolOrientation
+(
+    const std::vector<RotaryCornerToolCenter>& cornerCenters,
+    double axisY,
+    double axisZ,
+    bool invertAAxisDirection,
+    double aAxisOffsetDegrees,
+    bool keepContinuousAngle
+)
+{
+    if (cornerCenters.empty()
+        || m_rawPathPoints3D.size() != m_controlPoints4Axis.size())
+    {
+        return;
+    }
+
+    for (size_t index = 0; index < m_rawPathPoints3D.size(); ++index)
+    {
+        const RawPathPoint3D& rawPoint = m_rawPathPoints3D[index];
+        const RotaryCornerToolCenter* matchedCorner = nullptr;
+
+        for (const RotaryCornerToolCenter& corner : cornerCenters)
+        {
+            if (corner.radius <= 0.0 || corner.radialTolerance < 0.0)
+            {
+                continue;
+            }
+
+            const double cornerY = rawPoint.y - corner.y;
+            const double cornerZ = rawPoint.z - corner.z;
+
+            if (cornerY * static_cast<double>(corner.yDirection) < -corner.radialTolerance
+                || cornerZ * static_cast<double>(corner.zDirection) < -corner.radialTolerance)
+            {
+                continue;
+            }
+
+            const double radialDistance = std::hypot(cornerY, cornerZ);
+            if (std::abs(radialDistance - corner.radius) <= corner.radialTolerance)
+            {
+                matchedCorner = &corner;
+                break;
+            }
+        }
+
+        if (matchedCorner == nullptr)
+        {
+            continue;
+        }
+
+        double aDeg = std::atan2
+        (
+            rawPoint.y - matchedCorner->y,
+            rawPoint.z - matchedCorner->z
+        ) * 57.2957795130823208768;
+
+        if (invertAAxisDirection)
+        {
+            aDeg = -aDeg;
+        }
+
+        aDeg = normalizeAngle180(aDeg + aAxisOffsetDegrees);
+        if (keepContinuousAngle && index > 0)
+        {
+            aDeg = unwrapAngleNear(m_controlPoints4Axis[index - 1].aDeg, aDeg);
+        }
+
+        const double angleRad = aDeg / 57.2957795130823208768;
+        const double c = std::cos(angleRad);
+        const double s = std::sin(angleRad);
+        const double dy = rawPoint.y - axisY;
+        const double dz = rawPoint.z - axisZ;
+
+        m_controlPoints4Axis[index] =
+        {
+            rawPoint.x,
+            axisY + dy * c - dz * s,
+            axisZ + dy * s + dz * c,
+            aDeg
+        };
+    }
+}
+
 void CadItem::clearPathCaches()
 {
     m_rawPathPoints3D.clear();

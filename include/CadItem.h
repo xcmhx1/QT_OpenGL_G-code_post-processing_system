@@ -35,6 +35,17 @@ struct ControlPoint4Axis
     double aDeg = 0.0;
 };
 
+// 方管圆角的截面圆心，用于将落在圆角圆弧上的路径点定向到该圆心。
+struct RotaryCornerToolCenter
+{
+    double y = 0.0;
+    double z = 0.0;
+    double radius = 0.0;
+    double radialTolerance = 0.0;
+    int yDirection = 0;
+    int zDirection = 0;
+};
+
 // Cad图元基类
 class CadItem : public QObject
 {
@@ -69,6 +80,17 @@ public:
 
     const std::vector<ControlPoint4Axis>& controlPoints4Axis() const;
     std::vector<ControlPoint4Axis>& controlPoints4AxisMutable();
+
+    // 仅对实际落在方管四分之一圆角上的点重算 A 轴，保持其余路径点不变。
+    void applyRoundedCornerToolOrientation
+    (
+        const std::vector<RotaryCornerToolCenter>& cornerCenters,
+        double axisY,
+        double axisZ,
+        bool invertAAxisDirection,
+        double aAxisOffsetDegrees,
+        bool keepContinuousAngle
+    );
 
     // 根据离散后的几何顶点推导一个加工方向向量。
     // 当前实现取首个有效边方向，并按 m_isReverse 决定是否翻转。
