@@ -142,6 +142,7 @@ namespace
         int leftClusterIndex = -1;
         int rightClusterIndex = -1;
         double centerX = 0.0;
+        std::vector<size_t> continuousItems;
         std::vector<size_t> topItems;
         std::vector<size_t> rightItems;
         std::vector<size_t> bottomItems;
@@ -2448,104 +2449,59 @@ namespace
             : (bounds.minZ + bounds.maxZ) * 0.5;
     }
 
-    RotarySurfaceGroup nearestSquareTubeSurface(double y, double z, const RotaryPathBounds& sectionBounds)
+    RotarySurfaceGroup classifySquareTubeSurface
+    (
+        const CadItem* item,
+        const RotaryPathBounds& sectionBounds,
+        double sectionTolerance
+    )
     {
-        const double topDistance = std::abs(sectionBounds.maxZ - z);
-        const double rightDistance = std::abs(sectionBounds.maxY - y);
-        const double bottomDistance = std::abs(z - sectionBounds.minZ);
-        const double leftDistance = std::abs(y - sectionBounds.minY);
-
-        double bestDistance = topDistance;
-        RotarySurfaceGroup bestSurface = RotarySurfaceGroup::Top;
-
-        if (rightDistance < bestDistance)
-        {
-            bestDistance = rightDistance;
-            bestSurface = RotarySurfaceGroup::Right;
-        }
-
-        if (bottomDistance < bestDistance)
-        {
-            bestDistance = bottomDistance;
-            bestSurface = RotarySurfaceGroup::Bottom;
-        }
-
-        if (leftDistance < bestDistance)
-        {
-            bestSurface = RotarySurfaceGroup::Left;
-        }
-
-        return bestSurface;
-    }
-
-    RotarySurfaceGroup classifySquareTubeSurface(const CadItem* item, const RotaryPathBounds& itemBounds, const RotaryPathBounds& sectionBounds)
-    {
-        if (item == nullptr || !itemBounds.valid || !sectionBounds.valid)
+        if (item == nullptr || !sectionBounds.valid)
         {
             return RotarySurfaceGroup::Unknown;
         }
 
-        int topCount = 0;
-        int rightCount = 0;
-        int bottomCount = 0;
-        int leftCount = 0;
-        int totalCount = 0;
+        bool onlyTop = true;
+        bool onlyRight = true;
+        bool onlyBottom = true;
+        bool onlyLeft = true;
+        bool hasPoint = false;
 
         for (const RawPathPoint3D& point : item->rawPathPoints3D())
         {
-            switch (nearestSquareTubeSurface(point.y, point.z, sectionBounds))
-            {
-            case RotarySurfaceGroup::Top:
-                ++topCount;
-                break;
-            case RotarySurfaceGroup::Right:
-                ++rightCount;
-                break;
-            case RotarySurfaceGroup::Bottom:
-                ++bottomCount;
-                break;
-            case RotarySurfaceGroup::Left:
-                ++leftCount;
-                break;
-            case RotarySurfaceGroup::Unknown:
-                break;
-            }
-
-            ++totalCount;
+            hasPoint = true;
+            onlyTop = onlyTop && std::abs(point.z - sectionBounds.maxZ) <= sectionTolerance;
+            onlyRight = onlyRight && std::abs(point.y - sectionBounds.maxY) <= sectionTolerance;
+            onlyBottom = onlyBottom && std::abs(point.z - sectionBounds.minZ) <= sectionTolerance;
+            onlyLeft = onlyLeft && std::abs(point.y - sectionBounds.minY) <= sectionTolerance;
         }
 
-        if (totalCount <= 0)
+        if (!hasPoint)
         {
             return RotarySurfaceGroup::Unknown;
         }
 
-        int bestCount = topCount;
-        RotarySurfaceGroup bestSurface = RotarySurfaceGroup::Top;
-
-        if (rightCount > bestCount)
+        if (onlyTop)
         {
-            bestCount = rightCount;
-            bestSurface = RotarySurfaceGroup::Right;
+            return RotarySurfaceGroup::Top;
         }
 
-        if (bottomCount > bestCount)
+        if (onlyRight)
         {
-            bestCount = bottomCount;
-            bestSurface = RotarySurfaceGroup::Bottom;
+            return RotarySurfaceGroup::Right;
         }
 
-        if (leftCount > bestCount)
+        if (onlyBottom)
         {
-            bestCount = leftCount;
-            bestSurface = RotarySurfaceGroup::Left;
+            return RotarySurfaceGroup::Bottom;
         }
 
-        if (static_cast<double>(bestCount) >= static_cast<double>(totalCount) * 0.40)
+        if (onlyLeft)
         {
-            return bestSurface;
+            return RotarySurfaceGroup::Left;
         }
 
-        return nearestSquareTubeSurface(rotaryBoundsCenterY(itemBounds), rotaryBoundsCenterZ(itemBounds), sectionBounds);
+        return RotarySurfaceGroup::Unknown;
     }
 
     bool componentMatchesSquareTubeEndCut
@@ -2930,7 +2886,6 @@ namespace
 
         flushPendingComponentCluster();
 
-        std::vector<bool> itemIsEndCut(sortableItems.size(), false);
         std::vector<size_t> endCutComponentIndices;
         double maxEndCutSpanX = 0.0;
 
@@ -2944,10 +2899,6 @@ namespace
             endCutComponentIndices.push_back(componentIndex);
             maxEndCutSpanX = std::max(maxEndCutSpanX, components[componentIndex].bounds.maxX - components[componentIndex].bounds.minX);
 
-            for (const size_t itemIndex : components[componentIndex].itemIndices)
-            {
-                itemIsEndCut[itemIndex] = true;
-            }
         }
 
         if (endCutComponentIndices.size() < 2)
@@ -2957,7 +2908,12 @@ namespace
 
         for (RotaryItemAnalysis& analysis : itemAnalyses)
         {
-            analysis.surface = classifySquareTubeSurface(sortableItems[analysis.itemIndex], analysis.bounds, sectionBounds);
+            analysis.surface = classifySquareTubeSurface
+            (
+                sortableItems[analysis.itemIndex],
+                sectionBounds,
+                sectionTolerance
+            );
         }
 
         std::sort
@@ -3003,14 +2959,46 @@ namespace
         std::vector<RotaryLazySegment> segments;
         const double boundaryTolerance = std::max(1.0, spanX * 0.001);
 
-        for (const RotaryItemAnalysis& analysis : itemAnalyses)
+        std::vector<bool> componentRequiresContinuousGroup(components.size(), false);
+
+        for (size_t componentIndex = 0; componentIndex < components.size(); ++componentIndex)
         {
-            if (itemIsEndCut[analysis.itemIndex])
+            if (componentIsEndCut[componentIndex])
             {
                 continue;
             }
 
-            const double itemCenterX = rotaryBoundsCenterX(analysis.bounds);
+            RotarySurfaceGroup sharedSurface = RotarySurfaceGroup::Unknown;
+
+            for (const size_t itemIndex : components[componentIndex].itemIndices)
+            {
+                if (itemIndex >= itemAnalyses.size())
+                {
+                    return false;
+                }
+
+                const RotarySurfaceGroup surface = itemAnalyses[itemIndex].surface;
+
+                if (surface == RotarySurfaceGroup::Unknown
+                    || (sharedSurface != RotarySurfaceGroup::Unknown && surface != sharedSurface))
+                {
+                    componentRequiresContinuousGroup[componentIndex] = true;
+                    break;
+                }
+
+                sharedSurface = surface;
+            }
+        }
+
+        for (size_t componentIndex = 0; componentIndex < components.size(); ++componentIndex)
+        {
+            if (componentIsEndCut[componentIndex])
+            {
+                continue;
+            }
+
+            const RotaryFeatureComponent& component = components[componentIndex];
+            const double componentCenterX = rotaryBoundsCenterX(component.bounds);
             int leftClusterIndex = -1;
             int rightClusterIndex = -1;
 
@@ -3018,13 +3006,13 @@ namespace
             {
                 const double clusterCenterX = cutClusters[clusterIndex].centerX;
 
-                if (clusterCenterX < itemCenterX - boundaryTolerance)
+                if (clusterCenterX < componentCenterX - boundaryTolerance)
                 {
                     leftClusterIndex = static_cast<int>(clusterIndex);
                     continue;
                 }
 
-                if (clusterCenterX > itemCenterX + boundaryTolerance)
+                if (clusterCenterX > componentCenterX + boundaryTolerance)
                 {
                     rightClusterIndex = static_cast<int>(clusterIndex);
                     break;
@@ -3056,7 +3044,26 @@ namespace
                 existingSegment = std::prev(segments.end());
             }
 
-            segmentItemsForSurface(*existingSegment, analysis.surface).push_back(analysis.itemIndex);
+            if (componentRequiresContinuousGroup[componentIndex])
+            {
+                existingSegment->continuousItems.insert
+                (
+                    existingSegment->continuousItems.end(),
+                    component.itemIndices.begin(),
+                    component.itemIndices.end()
+                );
+                continue;
+            }
+
+            for (const size_t itemIndex : component.itemIndices)
+            {
+                if (itemIndex >= itemAnalyses.size())
+                {
+                    return false;
+                }
+
+                segmentItemsForSurface(*existingSegment, itemAnalyses[itemIndex].surface).push_back(itemIndex);
+            }
         }
 
         if (segments.empty())
@@ -3124,6 +3131,7 @@ namespace
             }
 
             if (!appendGroup(cutClusters[static_cast<size_t>(segment.leftClusterIndex)].itemIndices)
+                || !appendGroup(segment.continuousItems)
                 || !appendGroup(segment.topItems)
                 || !appendGroup(segment.rightItems)
                 || !appendGroup(segment.bottomItems)
