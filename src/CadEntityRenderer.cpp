@@ -99,7 +99,8 @@ void CadEntityRenderer::renderEntities
     const std::vector<std::unique_ptr<CadItem>>& entities,
     CadSceneRenderCache& sceneRenderCache,
     EntityId selectedEntityId,
-    const AppThemeColors& theme
+    const AppThemeColors& theme,
+    bool dimExcludedEntities
 )
 {
     QOpenGLFunctions* functions = currentFunctions();
@@ -113,6 +114,7 @@ void CadEntityRenderer::renderEntities
     // 这一轮绘制共享同一个 MVP，颜色和点大小则按实体逐个切换。
     shader.bind();
     shader.setUniformValue("uMvp", mvp);
+    shader.setUniformValue("uOpacity", 1.0f);
     shader.setUniformValue("uRoundPoint", 0);
 
     auto& entityBuffers = sceneRenderCache.entityBuffers();
@@ -131,10 +133,14 @@ void CadEntityRenderer::renderEntities
         EntityGpuBuffer& buffer = it->second;
         // 保持实体原始显示色；选中效果改由 Viewer 的叠加层统一绘制。
         const bool isSelected = entity->m_isSelected || id == selectedEntityId;
-        const QVector3D color = resolveDisplayColor(buffer.color, theme);
+        const bool isDimmed = dimExcludedEntities && entity->m_excludedFromProcessing;
+        const QVector3D color = isDimmed
+            ? (theme.dark ? QVector3D(0.58f, 0.48f, 0.34f) : QVector3D(0.48f, 0.39f, 0.28f))
+            : resolveDisplayColor(buffer.color, theme);
         const float pointSize = buffer.primitiveType == GL_POINTS ? (isSelected ? 9.5f : 8.0f) : 1.0f;
 
         shader.setUniformValue("uColor", color);
+        shader.setUniformValue("uOpacity", isDimmed ? 0.42f : 1.0f);
         shader.setUniformValue("uPointSize", pointSize);
 
         // 每个实体使用自己的 VAO，内部已经绑定好了顶点格式和 VBO。

@@ -25,6 +25,7 @@ void CadShaderManager::initialize()
     static constexpr const char* fragmentShaderSource = R"(
         #version 450 core
         uniform vec3 uColor;
+        uniform float uOpacity;
         uniform int uRoundPoint;
         out vec4 fragColor;
         void main()
@@ -38,7 +39,7 @@ void CadShaderManager::initialize()
                 }
             }
 
-            fragColor = vec4(uColor, 1.0);
+            fragColor = vec4(uColor, uOpacity);
         }
     )";
 

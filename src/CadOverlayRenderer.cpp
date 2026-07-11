@@ -126,6 +126,7 @@ void CadOverlayRenderer::renderOrbitMarker
 
     shader.bind();
     shader.setUniformValue("uMvp", mvp);
+    shader.setUniformValue("uOpacity", 1.0f);
     shader.setUniformValue("uColor", QVector3D(0.10f, 0.95f, 0.25f));
     shader.setUniformValue("uPointSize", 14.0f);
     shader.setUniformValue("uRoundPoint", 1);
@@ -188,6 +189,7 @@ void CadOverlayRenderer::renderTransientPrimitives
             );
 
             shader.setUniformValue("uColor", primitive.color);
+            shader.setUniformValue("uOpacity", primitive.opacity);
             shader.setUniformValue("uPointSize", primitive.pointSize);
             shader.setUniformValue("uRoundPoint", primitive.roundPoint ? 1 : 0);
 

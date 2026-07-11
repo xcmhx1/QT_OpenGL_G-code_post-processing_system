@@ -272,6 +272,37 @@ void CadViewer::setProcessVisualsVisible(bool visible)
     update();
 }
 
+void CadViewer::setProcessDirectionVisible(bool visible)
+{
+    m_processDirectionVisible = visible;
+    update();
+}
+
+void CadViewer::setProcessOrderVisible(bool visible)
+{
+    m_processOrderVisible = visible;
+    m_pendingProcessOrderSwapEntityId = 0;
+    update();
+}
+
+void CadViewer::setRotaryEndCutsVisible(bool visible)
+{
+    m_rotaryEndCutsVisible = visible;
+    update();
+}
+
+void CadViewer::setExcludedEntitiesDimmed(bool dimmed)
+{
+    m_excludedEntitiesDimmed = dimmed;
+    update();
+}
+
+void CadViewer::setBackgroundGridVisible(bool visible)
+{
+    m_backgroundGridVisible = visible;
+    update();
+}
+
 void CadViewer::startDrawing(DrawType drawType)
 {
     m_controller.beginDrawing(drawType, m_controller.drawState().drawingColor);
@@ -550,6 +581,7 @@ void CadViewer::paintGL()
     renderOrbitMarker(viewProjection);
     renderEntitySelectionOverlays();
     renderProcessOrderLabels();
+    renderRotaryEndCutLabels();
     renderSelectionWindowPreview();
     renderOverlappedHandlePopup();
     renderDynamicInputOverlay();
@@ -587,7 +619,7 @@ void CadViewer::ensureBlankCursor()
 // @param viewProjection 视图投影矩阵
 void CadViewer::renderGrid(const QMatrix4x4& viewProjection)
 {
-    if (!m_graphicsCoordinator.isInitialized())
+    if (!m_backgroundGridVisible || !m_graphicsCoordinator.isInitialized())
     {
         return;
     }
@@ -638,7 +670,8 @@ void CadViewer::renderEntities(const QMatrix4x4& viewProjection)
         scene->m_entities,
         m_sceneCoordinator.renderCache(),
         m_selectedEntityId,
-        m_theme
+        m_theme,
+        m_processVisualsVisible && m_excludedEntitiesDimmed
     );
 }
 
@@ -675,7 +708,8 @@ void CadViewer::renderTransientPrimitives(const QMatrix4x4& viewProjection)
         return;
     }
 
-    std::vector<TransientPrimitive> processPrimitives = buildProcessDirectionPrimitives();
+    std::vector<TransientPrimitive> processPrimitives = buildRotaryEndCutPrimitives();
+    const std::vector<TransientPrimitive> processDirectionPrimitives = buildProcessDirectionPrimitives();
     const std::vector<TransientPrimitive> selectedHandlePrimitives = buildSelectedEntityHandlePrimitives();
     const std::vector<TransientPrimitive> snapHighlightPrimitives = buildSnapHighlightPrimitives();
     // 构建命令预览图元
@@ -698,6 +732,7 @@ void CadViewer::renderTransientPrimitives(const QMatrix4x4& viewProjection)
     );
 
     // 如果没有临时图元，则返回
+    processPrimitives.insert(processPrimitives.end(), processDirectionPrimitives.begin(), processDirectionPrimitives.end());
     processPrimitives.insert(processPrimitives.end(), selectedHandlePrimitives.begin(), selectedHandlePrimitives.end());
     processPrimitives.insert(processPrimitives.end(), snapHighlightPrimitives.begin(), snapHighlightPrimitives.end());
     processPrimitives.insert(processPrimitives.end(), commandPrimitives.begin(), commandPrimitives.end());

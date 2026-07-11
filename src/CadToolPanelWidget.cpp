@@ -860,6 +860,31 @@ bool CadToolPanelWidget::processVisualsVisible() const
     return m_processVisualsCheckBox == nullptr || m_processVisualsCheckBox->isChecked();
 }
 
+void CadToolPanelWidget::setProcessDirectionVisible(bool enabled)
+{
+    if (m_processDirectionCheckBox != nullptr) m_processDirectionCheckBox->setChecked(enabled);
+}
+
+void CadToolPanelWidget::setProcessOrderVisible(bool enabled)
+{
+    if (m_processOrderCheckBox != nullptr) m_processOrderCheckBox->setChecked(enabled);
+}
+
+void CadToolPanelWidget::setRotaryEndCutsVisible(bool enabled)
+{
+    if (m_rotaryEndCutsCheckBox != nullptr) m_rotaryEndCutsCheckBox->setChecked(enabled);
+}
+
+void CadToolPanelWidget::setExcludedEntitiesDimmed(bool enabled)
+{
+    if (m_excludedEntitiesDimmedCheckBox != nullptr) m_excludedEntitiesDimmedCheckBox->setChecked(enabled);
+}
+
+void CadToolPanelWidget::setBackgroundGridVisible(bool enabled)
+{
+    if (m_backgroundGridCheckBox != nullptr) m_backgroundGridCheckBox->setChecked(enabled);
+}
+
 void CadToolPanelWidget::buildUi()
 {
     m_drawPointAction = new QAction(QStringLiteral("点"), this);
@@ -936,12 +961,17 @@ void CadToolPanelWidget::buildUi()
     defaultLayout->addWidget(buildPanelFrame(QStringLiteral("图层"), buildLayerPanel(), 176), 0, Qt::AlignLeft | Qt::AlignTop);
     defaultLayout->addWidget(buildDivider(), 0, Qt::AlignLeft | Qt::AlignVCenter);
     defaultLayout->addWidget(buildPanelFrame(QStringLiteral("特性"), buildPropertyPanel(), 226), 0, Qt::AlignLeft | Qt::AlignTop);
-    defaultLayout->addWidget(buildDivider(), 0, Qt::AlignLeft | Qt::AlignVCenter);
-    defaultLayout->addWidget(buildPanelFrame(QStringLiteral("显示"), buildDisplayPanel(), 132), 0, Qt::AlignLeft | Qt::AlignTop);
     defaultLayout->addStretch(1);
     m_tabWidget->addTab(defaultTab, QStringLiteral("默认"));
 
     m_tabWidget->addTab(buildMachiningPanel(), QStringLiteral("机加工"));
+
+    QWidget* displayTab = new QWidget(m_tabWidget);
+    QHBoxLayout* displayLayout = new QHBoxLayout(displayTab);
+    displayLayout->setContentsMargins(0, 0, 0, 0);
+    displayLayout->addWidget(buildPanelFrame(QStringLiteral("画布显示"), buildDisplayPanel(), 430), 0, Qt::AlignLeft | Qt::AlignTop);
+    displayLayout->addStretch(1);
+    m_tabWidget->addTab(displayTab, QStringLiteral("显示"));
 }
 
 void CadToolPanelWidget::applyTheme()
@@ -1524,23 +1554,76 @@ QWidget* CadToolPanelWidget::buildPropertyPanel()
 QWidget* CadToolPanelWidget::buildDisplayPanel()
 {
     QWidget* panel = new QWidget(this);
-    QVBoxLayout* layout = new QVBoxLayout(panel);
-    layout->setContentsMargins(2, 6, 2, 2);
-    layout->setSpacing(4);
+    QGridLayout* layout = new QGridLayout(panel);
+    layout->setContentsMargins(2, 1, 2, 1);
+    layout->setHorizontalSpacing(18);
+    layout->setVerticalSpacing(1);
 
     m_processVisualsCheckBox = new QCheckBox(QStringLiteral("显示机加工相关"), panel);
     m_processVisualsCheckBox->setProperty("machiningOption", true);
-    m_processVisualsCheckBox->setToolTip(QStringLiteral("控制视图区是否显示加工方向箭头与加工顺序标签"));
+    m_processVisualsCheckBox->setToolTip(QStringLiteral("总开关，仅影响画布显示，不影响排序和 G 代码输出"));
     m_processVisualsCheckBox->setChecked(true);
-    layout->addWidget(m_processVisualsCheckBox, 0, Qt::AlignLeft | Qt::AlignTop);
-    layout->addStretch(1);
+    m_backgroundGridCheckBox = new QCheckBox(QStringLiteral("背景网格"), panel);
+    m_processDirectionCheckBox = new QCheckBox(QStringLiteral("加工方向箭头"), panel);
+    m_processOrderCheckBox = new QCheckBox(QStringLiteral("加工顺序编号"), panel);
+    m_rotaryEndCutsCheckBox = new QCheckBox(QStringLiteral("切面标记"), panel);
+    m_excludedEntitiesDimmedCheckBox = new QCheckBox(QStringLiteral("废弃区域弱化"), panel);
 
-    connect(m_processVisualsCheckBox, &QCheckBox::toggled, this, [this](bool checked)
+    const QList<QCheckBox*> defaultChecked
     {
+        m_backgroundGridCheckBox,
+        m_processDirectionCheckBox,
+        m_processOrderCheckBox,
+        m_rotaryEndCutsCheckBox,
+        m_excludedEntitiesDimmedCheckBox
+    };
+    for (QCheckBox* checkBox : defaultChecked)
+    {
+        checkBox->setChecked(true);
+    }
+
+    layout->addWidget(m_processVisualsCheckBox, 0, 0);
+    layout->addWidget(m_backgroundGridCheckBox, 0, 1);
+    layout->addWidget(m_processDirectionCheckBox, 1, 0);
+    layout->addWidget(m_processOrderCheckBox, 1, 1);
+    layout->addWidget(m_rotaryEndCutsCheckBox, 2, 0);
+    layout->addWidget(m_excludedEntitiesDimmedCheckBox, 2, 1);
+
+    QToolButton* resetButton = new QToolButton(panel);
+    resetButton->setText(QStringLiteral("恢复默认显示"));
+    resetButton->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    resetButton->setProperty("machiningButton", true);
+    layout->addWidget(resetButton, 3, 0, 1, 2, Qt::AlignLeft);
+
+    const auto updateMachiningOptionState = [this](bool enabled)
+    {
+        m_processDirectionCheckBox->setEnabled(enabled);
+        m_processOrderCheckBox->setEnabled(enabled);
+        m_rotaryEndCutsCheckBox->setEnabled(enabled);
+        m_excludedEntitiesDimmedCheckBox->setEnabled(enabled);
+    };
+
+    connect(m_processVisualsCheckBox, &QCheckBox::toggled, this, [this, updateMachiningOptionState](bool checked)
+    {
+        updateMachiningOptionState(checked);
         if (!m_updatingUi)
         {
             emit processVisualsVisibleChanged(checked);
         }
+    });
+    connect(m_processDirectionCheckBox, &QCheckBox::toggled, this, &CadToolPanelWidget::processDirectionVisibleChanged);
+    connect(m_processOrderCheckBox, &QCheckBox::toggled, this, &CadToolPanelWidget::processOrderVisibleChanged);
+    connect(m_rotaryEndCutsCheckBox, &QCheckBox::toggled, this, &CadToolPanelWidget::rotaryEndCutsVisibleChanged);
+    connect(m_excludedEntitiesDimmedCheckBox, &QCheckBox::toggled, this, &CadToolPanelWidget::excludedEntitiesDimmedChanged);
+    connect(m_backgroundGridCheckBox, &QCheckBox::toggled, this, &CadToolPanelWidget::backgroundGridVisibleChanged);
+    connect(resetButton, &QToolButton::clicked, this, [this]()
+    {
+        m_processVisualsCheckBox->setChecked(true);
+        m_backgroundGridCheckBox->setChecked(true);
+        m_processDirectionCheckBox->setChecked(true);
+        m_processOrderCheckBox->setChecked(true);
+        m_rotaryEndCutsCheckBox->setChecked(true);
+        m_excludedEntitiesDimmedCheckBox->setChecked(true);
     });
 
     return panel;

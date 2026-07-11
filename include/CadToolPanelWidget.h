@@ -54,6 +54,11 @@ public:
     bool useDefaultExportPathEnabled() const;
     void setProcessVisualsVisible(bool enabled);
     bool processVisualsVisible() const;
+    void setProcessDirectionVisible(bool enabled);
+    void setProcessOrderVisible(bool enabled);
+    void setRotaryEndCutsVisible(bool enabled);
+    void setExcludedEntitiesDimmed(bool enabled);
+    void setBackgroundGridVisible(bool enabled);
 
 signals:
     void drawRequested(DrawType drawType);
@@ -87,6 +92,11 @@ signals:
     void useDefaultImportPathOptionChanged(bool enabled);
     void useDefaultExportPathOptionChanged(bool enabled);
     void processVisualsVisibleChanged(bool enabled);
+    void processDirectionVisibleChanged(bool enabled);
+    void processOrderVisibleChanged(bool enabled);
+    void rotaryEndCutsVisibleChanged(bool enabled);
+    void excludedEntitiesDimmedChanged(bool enabled);
+    void backgroundGridVisibleChanged(bool enabled);
 
 private:
     void buildUi();
@@ -124,6 +134,11 @@ private:
     QCheckBox* m_useDefaultImportPathCheckBox = nullptr;
     QCheckBox* m_useDefaultExportPathCheckBox = nullptr;
     QCheckBox* m_processVisualsCheckBox = nullptr;
+    QCheckBox* m_processDirectionCheckBox = nullptr;
+    QCheckBox* m_processOrderCheckBox = nullptr;
+    QCheckBox* m_rotaryEndCutsCheckBox = nullptr;
+    QCheckBox* m_excludedEntitiesDimmedCheckBox = nullptr;
+    QCheckBox* m_backgroundGridCheckBox = nullptr;
     QMenu* m_drawMoreMenu = nullptr;
     QAction* m_drawPointAction = nullptr;
     QAction* m_drawXlineAction = nullptr;

@@ -59,6 +59,8 @@ private:
     void saveSnapOptionMask(quint32 mask) const;
     bool loadProcessVisualsVisible() const;
     void saveProcessVisualsVisible(bool enabled) const;
+    bool loadDisplayOption(const QString& key, bool defaultValue = true) const;
+    void saveDisplayOption(const QString& key, bool enabled) const;
     GCodeGenerationPreference loadGenerationPreference() const;
     void saveGenerationPreference(GCodeGenerationPreference preference) const;
     bool loadAutoDeduplicateOnExport() const;
@@ -121,6 +123,14 @@ private:
     bool smartSortEntities();
     bool sortEntitiesByCurrentDirection3D();
     bool smartSortEntities3D();
+    bool smartAssignSelectedRotaryEndCut();
+    bool assignSelectedRotaryEndCut(bool leftCut);
+    bool assignSelectedWasteEndCut();
+    bool clearSelectedRotaryEndCutAssignments();
+    bool clearRotaryEndCutAssignments();
+    QVector<CadItem*> expandedSelectedRotaryEndCut(QString* errorMessage = nullptr) const;
+    int refreshWasteProcessingExclusions();
+    void invalidateProcessOrdersAfterEndCutChange();
     bool hasCompleteProcessOrderForExport(GGenerator::GenerationMode generationMode) const;
 
 private:

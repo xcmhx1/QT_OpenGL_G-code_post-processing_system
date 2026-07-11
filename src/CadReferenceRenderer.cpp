@@ -210,6 +210,7 @@ void CadReferenceRenderer::renderGrid
     // 网格仅作为背景参考，不参与深度写入，避免干扰实体显示
     shader.bind();
     shader.setUniformValue("uMvp", mvp);
+    shader.setUniformValue("uOpacity", 1.0f);
     shader.setUniformValue("uPointSize", 1.0f);
     shader.setUniformValue("uRoundPoint", 0);
 
@@ -268,6 +269,7 @@ void CadReferenceRenderer::renderAxis(QOpenGLShaderProgram& shader, const QMatri
 
     shader.bind();
     shader.setUniformValue("uMvp", mvp);
+    shader.setUniformValue("uOpacity", 1.0f);
     shader.setUniformValue("uPointSize", 1.0f);
     shader.setUniformValue("uRoundPoint", 0);
 

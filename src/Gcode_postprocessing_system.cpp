@@ -448,6 +448,12 @@ Gcode_postprocessing_system::Gcode_postprocessing_system(QWidget* parent)
     QAction* joinAction = new QAction(QStringLiteral("合并..."), this);
     QAction* filletAction = new QAction(QStringLiteral("圆角..."), this);
     QAction* chamferAction = new QAction(QStringLiteral("直角（倒角）..."), this);
+    QAction* smartAssignRotaryEndCutAction = new QAction(QStringLiteral("智能指定切面"), this);
+    QAction* assignLeftRotaryEndCutAction = new QAction(QStringLiteral("手动指定为左切面"), this);
+    QAction* assignRightRotaryEndCutAction = new QAction(QStringLiteral("手动指定为右切面"), this);
+    QAction* assignWasteRotaryEndCutAction = new QAction(QStringLiteral("指定为废面"), this);
+    QAction* clearSelectedRotaryEndCutAssignmentsAction = new QAction(QStringLiteral("清除选中切面组"), this);
+    QAction* clearRotaryEndCutAssignmentsAction = new QAction(QStringLiteral("清除全部切面指定"), this);
 
     ui->menuFile->insertAction(ui->action_File_Export_G, exportDxfAction);
     ui->menuFile->insertAction(ui->action_File_Export_G, exportSafeDxfAction);
@@ -462,6 +468,13 @@ Gcode_postprocessing_system::Gcode_postprocessing_system(QWidget* parent)
     ui->menuEdit->addAction(joinAction);
     ui->menuEdit->addAction(filletAction);
     ui->menuEdit->addAction(chamferAction);
+    ui->menuSort->addSeparator();
+    ui->menuSort->addAction(smartAssignRotaryEndCutAction);
+    ui->menuSort->addAction(assignLeftRotaryEndCutAction);
+    ui->menuSort->addAction(assignRightRotaryEndCutAction);
+    ui->menuSort->addAction(assignWasteRotaryEndCutAction);
+    ui->menuSort->addAction(clearSelectedRotaryEndCutAssignmentsAction);
+    ui->menuSort->addAction(clearRotaryEndCutAssignmentsAction);
 
     ui->action_File_Export_G->setText(QStringLiteral("导出G代码"));
 
@@ -479,6 +492,12 @@ Gcode_postprocessing_system::Gcode_postprocessing_system(QWidget* parent)
     connect(joinAction, &QAction::triggered, this, [this]() { joinSelectedEntities(); });
     connect(filletAction, &QAction::triggered, this, [this]() { filletSelectedEntities(); });
     connect(chamferAction, &QAction::triggered, this, [this]() { chamferSelectedEntities(); });
+    connect(smartAssignRotaryEndCutAction, &QAction::triggered, this, [this]() { smartAssignSelectedRotaryEndCut(); });
+    connect(assignLeftRotaryEndCutAction, &QAction::triggered, this, [this]() { assignSelectedRotaryEndCut(true); });
+    connect(assignRightRotaryEndCutAction, &QAction::triggered, this, [this]() { assignSelectedRotaryEndCut(false); });
+    connect(assignWasteRotaryEndCutAction, &QAction::triggered, this, [this]() { assignSelectedWasteEndCut(); });
+    connect(clearSelectedRotaryEndCutAssignmentsAction, &QAction::triggered, this, [this]() { clearSelectedRotaryEndCutAssignments(); });
+    connect(clearRotaryEndCutAssignmentsAction, &QAction::triggered, this, [this]() { clearRotaryEndCutAssignments(); });
     connect(ui->action_Sort_2D_Assign, &QAction::triggered, this, [this]() { sortEntitiesByCurrentMode(false); });
     connect(ui->action_Sort_2D_Smart, &QAction::triggered, this, [this]() { sortEntitiesByCurrentMode(true); });
 
@@ -1135,6 +1154,18 @@ void Gcode_postprocessing_system::saveProcessVisualsVisible(bool enabled) const
     settings.setValue(QStringLiteral("ui/processVisualsVisible"), enabled);
 }
 
+bool Gcode_postprocessing_system::loadDisplayOption(const QString& key, bool defaultValue) const
+{
+    QSettings settings(QStringLiteral("GCodePostProcessingSystem"), QStringLiteral("GCodePostProcessingSystem"));
+    return settings.value(QStringLiteral("ui/display/") + key, defaultValue).toBool();
+}
+
+void Gcode_postprocessing_system::saveDisplayOption(const QString& key, bool enabled) const
+{
+    QSettings settings(QStringLiteral("GCodePostProcessingSystem"), QStringLiteral("GCodePostProcessingSystem"));
+    settings.setValue(QStringLiteral("ui/display/") + key, enabled);
+}
+
 Gcode_postprocessing_system::GCodeGenerationPreference Gcode_postprocessing_system::loadGenerationPreference() const
 {
     QSettings settings(QStringLiteral("GCodePostProcessingSystem"), QStringLiteral("GCodePostProcessingSystem"));
@@ -1282,6 +1313,21 @@ void Gcode_postprocessing_system::initializeToolPanel()
     const bool processVisualsVisible = loadProcessVisualsVisible();
     m_toolPanelWidget->setProcessVisualsVisible(processVisualsVisible);
     ui->openGLWidget->setProcessVisualsVisible(processVisualsVisible);
+    const bool processDirectionVisible = loadDisplayOption(QStringLiteral("processDirection"));
+    const bool processOrderVisible = loadDisplayOption(QStringLiteral("processOrder"));
+    const bool rotaryEndCutsVisible = loadDisplayOption(QStringLiteral("rotaryEndCuts"));
+    const bool excludedEntitiesDimmed = loadDisplayOption(QStringLiteral("excludedEntitiesDimmed"));
+    const bool backgroundGridVisible = loadDisplayOption(QStringLiteral("backgroundGrid"));
+    m_toolPanelWidget->setProcessDirectionVisible(processDirectionVisible);
+    m_toolPanelWidget->setProcessOrderVisible(processOrderVisible);
+    m_toolPanelWidget->setRotaryEndCutsVisible(rotaryEndCutsVisible);
+    m_toolPanelWidget->setExcludedEntitiesDimmed(excludedEntitiesDimmed);
+    m_toolPanelWidget->setBackgroundGridVisible(backgroundGridVisible);
+    ui->openGLWidget->setProcessDirectionVisible(processDirectionVisible);
+    ui->openGLWidget->setProcessOrderVisible(processOrderVisible);
+    ui->openGLWidget->setRotaryEndCutsVisible(rotaryEndCutsVisible);
+    ui->openGLWidget->setExcludedEntitiesDimmed(excludedEntitiesDimmed);
+    ui->openGLWidget->setBackgroundGridVisible(backgroundGridVisible);
     ui->mainToolBar->setMovable(false);
     ui->mainToolBar->setFloatable(false);
     ui->mainToolBar->addWidget(m_toolPanelWidget);
@@ -1346,6 +1392,31 @@ void Gcode_postprocessing_system::initializeToolPanel()
             saveProcessVisualsVisible(enabled);
         }
     );
+    connect(m_toolPanelWidget, &CadToolPanelWidget::processDirectionVisibleChanged, this, [this](bool enabled)
+    {
+        ui->openGLWidget->setProcessDirectionVisible(enabled);
+        saveDisplayOption(QStringLiteral("processDirection"), enabled);
+    });
+    connect(m_toolPanelWidget, &CadToolPanelWidget::processOrderVisibleChanged, this, [this](bool enabled)
+    {
+        ui->openGLWidget->setProcessOrderVisible(enabled);
+        saveDisplayOption(QStringLiteral("processOrder"), enabled);
+    });
+    connect(m_toolPanelWidget, &CadToolPanelWidget::rotaryEndCutsVisibleChanged, this, [this](bool enabled)
+    {
+        ui->openGLWidget->setRotaryEndCutsVisible(enabled);
+        saveDisplayOption(QStringLiteral("rotaryEndCuts"), enabled);
+    });
+    connect(m_toolPanelWidget, &CadToolPanelWidget::excludedEntitiesDimmedChanged, this, [this](bool enabled)
+    {
+        ui->openGLWidget->setExcludedEntitiesDimmed(enabled);
+        saveDisplayOption(QStringLiteral("excludedEntitiesDimmed"), enabled);
+    });
+    connect(m_toolPanelWidget, &CadToolPanelWidget::backgroundGridVisibleChanged, this, [this](bool enabled)
+    {
+        ui->openGLWidget->setBackgroundGridVisible(enabled);
+        saveDisplayOption(QStringLiteral("backgroundGrid"), enabled);
+    });
     connect(m_toolPanelWidget, &CadToolPanelWidget::sortKeepDirectionRequested, this, [this]() { ui->action_Sort_2D_Assign->trigger(); });
     connect(m_toolPanelWidget, &CadToolPanelWidget::smartSortRequested, this, [this]() { ui->action_Sort_2D_Smart->trigger(); });
     connect

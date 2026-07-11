@@ -494,7 +494,7 @@ namespace
 
         for (const std::unique_ptr<CadItem>& entity : document->m_entities)
         {
-            if (entity != nullptr)
+            if (entity != nullptr && !entity->m_excludedFromProcessing)
             {
                 orderedItems.append(entity.get());
             }
@@ -1289,7 +1289,7 @@ namespace
         {
             for (const std::unique_ptr<CadItem>& entity : document->m_entities)
             {
-                if (entity == nullptr)
+                if (entity == nullptr || entity->m_excludedFromProcessing)
                 {
                     continue;
                 }

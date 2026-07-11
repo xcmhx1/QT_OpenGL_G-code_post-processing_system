@@ -1009,7 +1009,7 @@ CadProcessVisualInfo buildProcessVisualInfo(const CadItem* item)
 {
     CadProcessVisualInfo info;
 
-    if (item == nullptr)
+    if (item == nullptr || item->m_excludedFromProcessing)
     {
         return info;
     }

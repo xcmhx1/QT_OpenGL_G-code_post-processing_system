@@ -34,6 +34,7 @@ struct TransientPrimitive
     QVector<QVector3D> vertices;
     GLenum primitiveType = GL_LINE_STRIP;
     QVector3D color = { 0.25f, 0.85f, 1.0f };
+    float opacity = 1.0f;
     float pointSize = 1.0f;
     bool roundPoint = false;
 };

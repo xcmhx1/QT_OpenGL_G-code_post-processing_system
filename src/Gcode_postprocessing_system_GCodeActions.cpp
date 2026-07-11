@@ -298,7 +298,7 @@ namespace
         {
             const CadItem* item = it->get();
 
-            if (item == nullptr || item->m_nativeEntity == nullptr)
+            if (item == nullptr || item->m_excludedFromProcessing || item->m_nativeEntity == nullptr)
             {
                 continue;
             }
@@ -377,6 +377,35 @@ QString Gcode_postprocessing_system::defaultGCodeExportPathForCurrentDocument() 
 
 bool Gcode_postprocessing_system::prepareDocumentForGCodeExport(GGenerator::GenerationMode generationMode)
 {
+    const int excludedCount = refreshWasteProcessingExclusions();
+
+    if (excludedCount > 0)
+    {
+        ui->openGLWidget->appendCommandMessage
+        (
+            QStringLiteral("废面规则已排除 %1 个图元，G代码不会包含这些图元。").arg(excludedCount)
+        );
+    }
+
+    const bool hasProcessableEntity = std::any_of
+    (
+        m_document.m_entities.begin(),
+        m_document.m_entities.end(),
+        [](const std::unique_ptr<CadItem>& entity)
+        {
+            return entity != nullptr
+                && !entity->m_excludedFromProcessing
+                && entity->m_nativeEntity != nullptr
+                && isExportSortableEntityType(entity->m_type);
+        }
+    );
+
+    if (!hasProcessableEntity)
+    {
+        QMessageBox::warning(this, QStringLiteral("导出G代码失败"), QStringLiteral("废面区间过滤后没有可加工图元。"));
+        return false;
+    }
+
     if (m_toolPanelWidget != nullptr && m_toolPanelWidget->autoDeduplicateEnabled() && documentHasRemovableDuplicates(m_document))
     {
         ui->openGLWidget->appendCommandMessage(QStringLiteral("检测到已勾选自动去重，导出前先执行一次去重。"));
@@ -557,7 +586,7 @@ bool Gcode_postprocessing_system::removeDuplicateEntities()
     {
         CadItem* item = it->get();
 
-        if (item == nullptr || item->m_nativeEntity == nullptr)
+        if (item == nullptr || item->m_excludedFromProcessing || item->m_nativeEntity == nullptr)
         {
             continue;
         }
@@ -610,7 +639,10 @@ bool Gcode_postprocessing_system::hasCompleteProcessOrderForExport(GGenerator::G
     {
         const CadItem* item = entity.get();
 
-        if (item == nullptr || item->m_nativeEntity == nullptr || !isExportSortableEntityType(item->m_type))
+        if (item == nullptr
+            || item->m_excludedFromProcessing
+            || item->m_nativeEntity == nullptr
+            || !isExportSortableEntityType(item->m_type))
         {
             continue;
         }

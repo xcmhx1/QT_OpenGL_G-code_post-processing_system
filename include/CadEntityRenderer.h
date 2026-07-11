@@ -33,6 +33,7 @@ public:
         const std::vector<std::unique_ptr<CadItem>>& entities,
         CadSceneRenderCache& sceneRenderCache,
         EntityId selectedEntityId,
-        const AppThemeColors& theme
+        const AppThemeColors& theme,
+        bool dimExcludedEntities
     );
 };

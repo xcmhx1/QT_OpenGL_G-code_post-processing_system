@@ -14,6 +14,7 @@
 #include <QPen>
 
 #include <algorithm>
+#include <map>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -59,9 +60,112 @@ void CadViewer::renderProcessOrderLabels()
     }
 }
 
+void CadViewer::renderRotaryEndCutLabels()
+{
+    if (!m_processVisualsVisible || !m_rotaryEndCutsVisible)
+    {
+        return;
+    }
+
+    CadDocument* scene = m_sceneCoordinator.document();
+
+    if (scene == nullptr || interactionMode() != ViewInteractionMode::Idle)
+    {
+        return;
+    }
+
+    struct CutLabelData
+    {
+        QVector3D pointSum;
+        int pointCount = 0;
+        int pairId = -1;
+        RotaryEndCutRole role = RotaryEndCutRole::None;
+    };
+
+    std::map<int, CutLabelData> labels;
+
+    for (const std::unique_ptr<CadItem>& entity : scene->m_entities)
+    {
+        if (entity == nullptr
+            || entity->m_rotaryEndCutPairId < 0
+            || entity->m_rotaryEndCutRole == RotaryEndCutRole::None)
+        {
+            continue;
+        }
+
+        const int key = entity->m_rotaryEndCutPairId * 4 + static_cast<int>(entity->m_rotaryEndCutRole);
+        CutLabelData& label = labels[key];
+        label.pairId = entity->m_rotaryEndCutPairId;
+        label.role = entity->m_rotaryEndCutRole;
+
+        for (const QVector3D& point : entity->m_geometry.vertices)
+        {
+            label.pointSum += point;
+            ++label.pointCount;
+        }
+    }
+
+    if (labels.empty())
+    {
+        return;
+    }
+
+    QPainter painter(this);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setRenderHint(QPainter::TextAntialiasing, true);
+    QFont labelFont = painter.font();
+    labelFont.setPointSize(9);
+    labelFont.setBold(true);
+    painter.setFont(labelFont);
+    const QFontMetrics metrics(labelFont);
+
+    for (const auto& [key, label] : labels)
+    {
+        Q_UNUSED(key);
+
+        if (label.pointCount <= 0)
+        {
+            continue;
+        }
+
+        const QPoint center = worldToScreen(label.pointSum / static_cast<float>(label.pointCount));
+
+        if (center.x() < -30 || center.x() > width() + 30
+            || center.y() < -30 || center.y() > height() + 30)
+        {
+            continue;
+        }
+
+        const QString roleText = label.role == RotaryEndCutRole::Left
+            ? QStringLiteral("L")
+            : (label.role == RotaryEndCutRole::Right ? QStringLiteral("R") : QStringLiteral("W"));
+        const QString text = QStringLiteral("%1%2")
+            .arg(roleText)
+            .arg(label.pairId + 1);
+        const QRect textRect = metrics.boundingRect(text);
+        const QRect bubbleRect
+        (
+            center.x() - textRect.width() / 2 - 8,
+            center.y() - textRect.height() / 2 - 5,
+            textRect.width() + 16,
+            textRect.height() + 10
+        );
+        const QColor accent = label.role == RotaryEndCutRole::Left
+            ? QColor(36, 205, 106)
+            : (label.role == RotaryEndCutRole::Right ? QColor(236, 67, 61) : QColor(242, 151, 36));
+        QColor fill = m_theme.viewerBackgroundColor;
+        fill.setAlpha(218);
+        painter.setPen(QPen(accent, 1.6));
+        painter.setBrush(fill);
+        painter.drawRoundedRect(bubbleRect, 7.0, 7.0);
+        painter.setPen(accent.lighter(125));
+        painter.drawText(bubbleRect, Qt::AlignCenter, text);
+    }
+}
+
 std::vector<CadViewer::ProcessOrderLabelOverlay> CadViewer::buildProcessOrderLabelOverlays() const
 {
-    if (!m_processVisualsVisible)
+    if (!m_processVisualsVisible || !m_processOrderVisible)
     {
         return {};
     }

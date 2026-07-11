@@ -7,11 +7,13 @@
 #include "CadProcessVisualUtils.h"
 
 #include <QMessageBox>
+#include <QSet>
 #include <QStatusBar>
 
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <map>
 #include <vector>
 
 namespace
@@ -29,6 +31,7 @@ namespace
     constexpr double kRotaryBacktrackPenaltyWeight = 1.35;
     constexpr double kRotaryDirectionPenaltyWeight = 0.2;
     constexpr double kSortConnectionEpsilon = 1.0e-6;
+    constexpr double kEndCutConnectionTolerance = 1.0;
     constexpr double kNearGapPriorityDistance2D = 1.0;
     constexpr double kNearGapPriorityDistance3D = 1.0;
     constexpr double kPreferredStartGapDistance2D = 1.0;
@@ -145,6 +148,15 @@ namespace
         double centerX = 0.0;
     };
 
+    struct ManualRotaryEndCutPair
+    {
+        int pairId = -1;
+        std::vector<size_t> leftItemIndices;
+        std::vector<size_t> rightItemIndices;
+        int leftClusterIndex = -1;
+        int rightClusterIndex = -1;
+    };
+
     struct RotaryLazySegment
     {
         int leftClusterIndex = -1;
@@ -163,6 +175,21 @@ namespace
         size_t removedCount = 0;
         QVector<CadItem*> duplicateItems;
     };
+
+    bool hasManualRotaryEndCutAssignments(const std::vector<CadItem*>& items)
+    {
+        return std::any_of
+        (
+            items.begin(),
+            items.end(),
+            [](const CadItem* item)
+            {
+                return item != nullptr
+                    && (item->m_rotaryEndCutRole == RotaryEndCutRole::Left
+                        || item->m_rotaryEndCutRole == RotaryEndCutRole::Right);
+            }
+        );
+    }
 
     std::vector<ProcessPathOption> buildPathOptionsForItem(const CadItem* item, SortStrategy strategy);
     bool isPointLexicographicallyLess(const QVector3D& left, const QVector3D& right)
@@ -1625,11 +1652,15 @@ namespace
         return looseIndices;
     }
 
-    std::vector<int> buildItemConnectivityComponents(const std::vector<CadItem*>& sortableItems)
+    std::vector<int> buildItemConnectivityComponents
+    (
+        const std::vector<CadItem*>& sortableItems,
+        double connectionDistance = kSortConnectionEpsilon
+    )
     {
         const std::vector<EndpointNode> endpoints = collectOpenEndpointNodes(sortableItems);
         std::vector<std::vector<size_t>> itemEndpointIndices(sortableItems.size());
-        const double exactConnectionDistanceSquared = kSortConnectionEpsilon * kSortConnectionEpsilon;
+        const double exactConnectionDistanceSquared = connectionDistance * connectionDistance;
 
         for (size_t endpointIndex = 0; endpointIndex < endpoints.size(); ++endpointIndex)
         {
@@ -1703,6 +1734,72 @@ namespace
         }
 
         return componentIds;
+    }
+
+    bool itemsFormClosedOrNearlyClosedLoop
+    (
+        const std::vector<CadItem*>& items,
+        double tolerance
+    )
+    {
+        std::vector<QVector3D> openEndpoints;
+        size_t geometryPointCount = 0;
+        const double toleranceSquared = tolerance * tolerance;
+
+        for (const CadItem* item : items)
+        {
+            if (item == nullptr)
+            {
+                return false;
+            }
+
+            geometryPointCount += static_cast<size_t>(item->m_geometry.vertices.size());
+            const std::vector<ProcessPathOption> options = buildPathOptionsForItem(item, SortStrategy::KeepDirection);
+
+            if (options.empty())
+            {
+                return false;
+            }
+
+            const ProcessPathOption& option = options.front();
+
+            if (spatialDistanceSquared(option.startPoint, option.endPoint) > toleranceSquared)
+            {
+                openEndpoints.push_back(option.startPoint);
+                openEndpoints.push_back(option.endPoint);
+            }
+        }
+
+        if (geometryPointCount < 3)
+        {
+            return false;
+        }
+
+        for (size_t endpointIndex = 0; endpointIndex < openEndpoints.size(); ++endpointIndex)
+        {
+            bool matched = false;
+
+            for (size_t otherIndex = 0; otherIndex < openEndpoints.size(); ++otherIndex)
+            {
+                if (endpointIndex == otherIndex)
+                {
+                    continue;
+                }
+
+                if (spatialDistanceSquared(openEndpoints[endpointIndex], openEndpoints[otherIndex]) <= toleranceSquared)
+                {
+                    matched = true;
+                    break;
+                }
+            }
+
+            if (!matched)
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     std::vector<std::vector<QVector3D>> detectPreferredGapStartPointsByComponent
@@ -2610,6 +2707,123 @@ namespace
         return RotarySurfaceGroup::Unknown;
     }
 
+    bool componentLiesOnEndCutPlane
+    (
+        const RotaryFeatureComponent& component,
+        const std::vector<CadItem*>& sortableItems,
+        double sectionTolerance
+    )
+    {
+        // 方管端部切面可表示为 x = a*y + b*z + c；该形式同时覆盖垂直与倾斜切面。
+        double normal[3][4] = {};
+        size_t pointCount = 0;
+
+        size_t coplanarPointCount = 0;
+
+        for (const size_t itemIndex : component.itemIndices)
+        {
+            if (itemIndex >= sortableItems.size() || sortableItems[itemIndex] == nullptr)
+            {
+                continue;
+            }
+
+            for (const RawPathPoint3D& point : sortableItems[itemIndex]->rawPathPoints3D())
+            {
+                const double values[3] = { point.y, point.z, 1.0 };
+
+                for (int row = 0; row < 3; ++row)
+                {
+                    for (int column = 0; column < 3; ++column)
+                    {
+                        normal[row][column] += values[row] * values[column];
+                    }
+
+                    normal[row][3] += values[row] * point.x;
+                }
+
+                ++pointCount;
+            }
+        }
+
+        if (pointCount < 3)
+        {
+            return false;
+        }
+
+        for (int pivotColumn = 0; pivotColumn < 3; ++pivotColumn)
+        {
+            int pivotRow = pivotColumn;
+
+            for (int row = pivotColumn + 1; row < 3; ++row)
+            {
+                if (std::abs(normal[row][pivotColumn]) > std::abs(normal[pivotRow][pivotColumn]))
+                {
+                    pivotRow = row;
+                }
+            }
+
+            if (std::abs(normal[pivotRow][pivotColumn]) <= kSortEpsilon)
+            {
+                return false;
+            }
+
+            if (pivotRow != pivotColumn)
+            {
+                for (int column = pivotColumn; column < 4; ++column)
+                {
+                    std::swap(normal[pivotRow][column], normal[pivotColumn][column]);
+                }
+            }
+
+            const double pivot = normal[pivotColumn][pivotColumn];
+
+            for (int column = pivotColumn; column < 4; ++column)
+            {
+                normal[pivotColumn][column] /= pivot;
+            }
+
+            for (int row = 0; row < 3; ++row)
+            {
+                if (row == pivotColumn)
+                {
+                    continue;
+                }
+
+                const double factor = normal[row][pivotColumn];
+
+                for (int column = pivotColumn; column < 4; ++column)
+                {
+                    normal[row][column] -= factor * normal[pivotColumn][column];
+                }
+            }
+        }
+
+        const double planeTolerance = std::max(sectionTolerance * 2.0, 0.5);
+
+        for (const size_t itemIndex : component.itemIndices)
+        {
+            if (itemIndex >= sortableItems.size() || sortableItems[itemIndex] == nullptr)
+            {
+                continue;
+            }
+
+            for (const RawPathPoint3D& point : sortableItems[itemIndex]->rawPathPoints3D())
+            {
+                const double expectedX = normal[0][3] * point.y + normal[1][3] * point.z + normal[2][3];
+
+                if (std::abs(point.x - expectedX) > planeTolerance)
+                {
+                    continue;
+                }
+
+                ++coplanarPointCount;
+            }
+        }
+
+        // 允许少量引线、断点等辅助路径偏离切面，但主体必须仍是同一切面。
+        return coplanarPointCount * 4 >= pointCount * 3;
+    }
+
     bool componentMatchesSquareTubeEndCut
     (
         const RotaryFeatureComponent& component,
@@ -2635,6 +2849,11 @@ namespace
         const double coverageZ = (component.bounds.maxZ - component.bounds.minZ) / spanZ;
 
         if (coverageY < kSquareTubeEndCutCoverageThreshold || coverageZ < kSquareTubeEndCutCoverageThreshold)
+        {
+            return false;
+        }
+
+        if (!componentLiesOnEndCutPlane(component, sortableItems, sectionTolerance))
         {
             return false;
         }
@@ -2892,6 +3111,105 @@ namespace
 
         std::vector<bool> componentIsEndCut(components.size(), false);
 
+        std::map<int, ManualRotaryEndCutPair> manualPairsById;
+
+        for (size_t itemIndex = 0; itemIndex < sortableItems.size(); ++itemIndex)
+        {
+            const CadItem* item = sortableItems[itemIndex];
+
+            if (item == nullptr
+                || item->m_rotaryEndCutRole == RotaryEndCutRole::None
+                || item->m_rotaryEndCutRole == RotaryEndCutRole::Waste)
+            {
+                continue;
+            }
+
+            if (item->m_rotaryEndCutPairId < 0)
+            {
+                return false;
+            }
+
+            ManualRotaryEndCutPair& pair = manualPairsById[item->m_rotaryEndCutPairId];
+            pair.pairId = item->m_rotaryEndCutPairId;
+
+            if (item->m_rotaryEndCutRole == RotaryEndCutRole::Left)
+            {
+                pair.leftItemIndices.push_back(itemIndex);
+            }
+            else
+            {
+                pair.rightItemIndices.push_back(itemIndex);
+            }
+        }
+
+        std::vector<ManualRotaryEndCutPair> manualEndCutPairs;
+        manualEndCutPairs.reserve(manualPairsById.size());
+
+        for (const auto& [pairId, pair] : manualPairsById)
+        {
+            Q_UNUSED(pairId);
+
+            if (pair.leftItemIndices.empty() || pair.rightItemIndices.empty())
+            {
+                return false;
+            }
+
+            manualEndCutPairs.push_back(pair);
+        }
+
+        const bool useManualEndCutPairs = !manualEndCutPairs.empty();
+
+        if (useManualEndCutPairs)
+        {
+            // 人工指定以完整连通切面为单位，避免将一条连续刀路拆到切面两侧。
+            for (size_t componentIndex = 0; componentIndex < components.size(); ++componentIndex)
+            {
+                RotaryEndCutRole componentRole = RotaryEndCutRole::None;
+                int componentPairId = -1;
+
+                for (const size_t itemIndex : components[componentIndex].itemIndices)
+                {
+                    if (itemIndex >= sortableItems.size() || sortableItems[itemIndex] == nullptr)
+                    {
+                        return false;
+                    }
+
+                    const CadItem* item = sortableItems[itemIndex];
+
+                    if (item->m_rotaryEndCutRole == RotaryEndCutRole::None)
+                    {
+                        if (componentRole != RotaryEndCutRole::None)
+                        {
+                            return false;
+                        }
+
+                        continue;
+                    }
+
+                    if (componentRole == RotaryEndCutRole::None)
+                    {
+                        componentRole = item->m_rotaryEndCutRole;
+                        componentPairId = item->m_rotaryEndCutPairId;
+                        continue;
+                    }
+
+                    if (componentRole != item->m_rotaryEndCutRole
+                        || componentPairId != item->m_rotaryEndCutPairId)
+                    {
+                        return false;
+                    }
+                }
+
+                if (componentRole != RotaryEndCutRole::None)
+                {
+                    componentIsEndCut[componentIndex] = true;
+                    components[componentIndex].isEndCut = true;
+                }
+            }
+        }
+        else
+        {
+
         for (size_t componentIndex = 0; componentIndex < components.size(); ++componentIndex)
         {
             RotaryFeatureComponent& component = components[componentIndex];
@@ -2916,8 +3234,9 @@ namespace
             }
         );
 
-        const double disconnectedCutClusterTolerance = std::max(1.0, std::min(std::max(2.0, spanX * 0.01), sectionSize * 0.35));
-        const double disconnectedCutMaxSpanX = std::max(sectionSize * 1.5, spanX * 0.08);
+        // 倾斜切面中，不同侧面的 X 中心可能相差一个甚至多个截面尺寸。
+        const double disconnectedCutMaxSpanX = std::max(sectionSize * 3.0, spanX * 0.10);
+        const double disconnectedCutClusterTolerance = disconnectedCutMaxSpanX;
         std::vector<size_t> pendingComponentCluster;
         double pendingClusterCenterX = 0.0;
 
@@ -2997,25 +3316,6 @@ namespace
         }
 
         flushPendingComponentCluster();
-
-        std::vector<size_t> endCutComponentIndices;
-        double maxEndCutSpanX = 0.0;
-
-        for (size_t componentIndex = 0; componentIndex < components.size(); ++componentIndex)
-        {
-            if (!componentIsEndCut[componentIndex])
-            {
-                continue;
-            }
-
-            endCutComponentIndices.push_back(componentIndex);
-            maxEndCutSpanX = std::max(maxEndCutSpanX, components[componentIndex].bounds.maxX - components[componentIndex].bounds.minX);
-
-        }
-
-        if (endCutComponentIndices.size() < 2)
-        {
-            return false;
         }
 
         for (RotaryItemAnalysis& analysis : itemAnalyses)
@@ -3028,39 +3328,92 @@ namespace
             );
         }
 
-        std::sort
-        (
-            endCutComponentIndices.begin(),
-            endCutComponentIndices.end(),
-            [&components](size_t left, size_t right)
-            {
-                return rotaryBoundsCenterX(components[left].bounds) < rotaryBoundsCenterX(components[right].bounds);
-            }
-        );
-
-        const double clusterTolerance = std::max(1.0, std::min(std::max(2.0, spanX * 0.01), std::max(2.0, maxEndCutSpanX * 0.75 + 1.0)));
         std::vector<RotaryCutCluster> cutClusters;
+        std::vector<std::pair<int, int>> manualClusterPairs;
 
-        for (const size_t componentIndex : endCutComponentIndices)
+        if (useManualEndCutPairs)
         {
-            const RotaryFeatureComponent& component = components[componentIndex];
-            const double centerX = rotaryBoundsCenterX(component.bounds);
-
-            if (cutClusters.empty() || std::abs(centerX - cutClusters.back().centerX) > clusterTolerance)
+            const auto buildManualCutCluster = [&itemAnalyses](const std::vector<size_t>& itemIndices)
             {
                 RotaryCutCluster cluster;
-                cluster.centerX = centerX;
-                cluster.itemIndices = component.itemIndices;
-                cutClusters.push_back(cluster);
-                continue;
+                RotaryPathBounds bounds;
+
+                for (const size_t itemIndex : itemIndices)
+                {
+                    if (itemIndex < itemAnalyses.size())
+                    {
+                        cluster.itemIndices.push_back(itemIndex);
+                        mergeRotaryBounds(bounds, itemAnalyses[itemIndex].bounds);
+                    }
+                }
+
+                cluster.centerX = rotaryBoundsCenterX(bounds);
+                return cluster;
+            };
+
+            for (ManualRotaryEndCutPair& pair : manualEndCutPairs)
+            {
+                pair.leftClusterIndex = static_cast<int>(cutClusters.size());
+                cutClusters.push_back(buildManualCutCluster(pair.leftItemIndices));
+                pair.rightClusterIndex = static_cast<int>(cutClusters.size());
+                cutClusters.push_back(buildManualCutCluster(pair.rightItemIndices));
+                manualClusterPairs.push_back({ pair.leftClusterIndex, pair.rightClusterIndex });
+            }
+        }
+        else
+        {
+            std::vector<size_t> endCutComponentIndices;
+            double maxEndCutSpanX = 0.0;
+
+            for (size_t componentIndex = 0; componentIndex < components.size(); ++componentIndex)
+            {
+                if (!componentIsEndCut[componentIndex])
+                {
+                    continue;
+                }
+
+                endCutComponentIndices.push_back(componentIndex);
+                maxEndCutSpanX = std::max(maxEndCutSpanX, components[componentIndex].bounds.maxX - components[componentIndex].bounds.minX);
             }
 
-            RotaryCutCluster& cluster = cutClusters.back();
-            const size_t oldCount = cluster.itemIndices.size();
-            cluster.itemIndices.insert(cluster.itemIndices.end(), component.itemIndices.begin(), component.itemIndices.end());
-            cluster.centerX =
-                (cluster.centerX * static_cast<double>(oldCount) + centerX * static_cast<double>(component.itemIndices.size()))
-                / static_cast<double>(cluster.itemIndices.size());
+            if (endCutComponentIndices.size() < 2)
+            {
+                return false;
+            }
+
+            std::sort
+            (
+                endCutComponentIndices.begin(),
+                endCutComponentIndices.end(),
+                [&components](size_t left, size_t right)
+                {
+                    return rotaryBoundsCenterX(components[left].bounds) < rotaryBoundsCenterX(components[right].bounds);
+                }
+            );
+
+            const double clusterTolerance = std::max(1.0, std::min(std::max(2.0, spanX * 0.01), std::max(2.0, maxEndCutSpanX * 0.75 + 1.0)));
+
+            for (const size_t componentIndex : endCutComponentIndices)
+            {
+                const RotaryFeatureComponent& component = components[componentIndex];
+                const double centerX = rotaryBoundsCenterX(component.bounds);
+
+                if (cutClusters.empty() || std::abs(centerX - cutClusters.back().centerX) > clusterTolerance)
+                {
+                    RotaryCutCluster cluster;
+                    cluster.centerX = centerX;
+                    cluster.itemIndices = component.itemIndices;
+                    cutClusters.push_back(cluster);
+                    continue;
+                }
+
+                RotaryCutCluster& cluster = cutClusters.back();
+                const size_t oldCount = cluster.itemIndices.size();
+                cluster.itemIndices.insert(cluster.itemIndices.end(), component.itemIndices.begin(), component.itemIndices.end());
+                cluster.centerX =
+                    (cluster.centerX * static_cast<double>(oldCount) + centerX * static_cast<double>(component.itemIndices.size()))
+                    / static_cast<double>(cluster.itemIndices.size());
+            }
         }
 
         if (cutClusters.size() < 2)
@@ -3070,6 +3423,28 @@ namespace
 
         std::vector<RotaryLazySegment> segments;
         const double boundaryTolerance = std::max(1.0, spanX * 0.001);
+
+        if (useManualEndCutPairs)
+        {
+            for (const std::pair<int, int>& pair : manualClusterPairs)
+            {
+                if (pair.first < 0 || pair.second < 0
+                    || static_cast<size_t>(pair.first) >= cutClusters.size()
+                    || static_cast<size_t>(pair.second) >= cutClusters.size())
+                {
+                    return false;
+                }
+
+                RotaryLazySegment segment;
+                segment.leftClusterIndex = pair.first;
+                segment.rightClusterIndex = pair.second;
+                segment.centerX =
+                    (cutClusters[static_cast<size_t>(pair.first)].centerX
+                        + cutClusters[static_cast<size_t>(pair.second)].centerX)
+                    * 0.5;
+                segments.push_back(segment);
+            }
+        }
 
         std::vector<bool> componentRequiresContinuousGroup(components.size(), false);
 
@@ -3114,20 +3489,57 @@ namespace
             int leftClusterIndex = -1;
             int rightClusterIndex = -1;
 
-            for (size_t clusterIndex = 0; clusterIndex < cutClusters.size(); ++clusterIndex)
+            if (useManualEndCutPairs)
             {
-                const double clusterCenterX = cutClusters[clusterIndex].centerX;
+                double narrowestInterval = std::numeric_limits<double>::max();
 
-                if (clusterCenterX < componentCenterX - boundaryTolerance)
+                for (const std::pair<int, int>& pair : manualClusterPairs)
                 {
-                    leftClusterIndex = static_cast<int>(clusterIndex);
-                    continue;
+                    if (pair.first < 0 || pair.second < 0
+                        || static_cast<size_t>(pair.first) >= cutClusters.size()
+                        || static_cast<size_t>(pair.second) >= cutClusters.size())
+                    {
+                        return false;
+                    }
+
+                    const double leftCenterX = cutClusters[static_cast<size_t>(pair.first)].centerX;
+                    const double rightCenterX = cutClusters[static_cast<size_t>(pair.second)].centerX;
+                    const double intervalMinX = std::min(leftCenterX, rightCenterX);
+                    const double intervalMaxX = std::max(leftCenterX, rightCenterX);
+
+                    if (componentCenterX < intervalMinX - boundaryTolerance
+                        || componentCenterX > intervalMaxX + boundaryTolerance)
+                    {
+                        continue;
+                    }
+
+                    const double intervalSpan = intervalMaxX - intervalMinX;
+
+                    if (intervalSpan < narrowestInterval)
+                    {
+                        leftClusterIndex = pair.first;
+                        rightClusterIndex = pair.second;
+                        narrowestInterval = intervalSpan;
+                    }
                 }
-
-                if (clusterCenterX > componentCenterX + boundaryTolerance)
+            }
+            else
+            {
+                for (size_t clusterIndex = 0; clusterIndex < cutClusters.size(); ++clusterIndex)
                 {
-                    rightClusterIndex = static_cast<int>(clusterIndex);
-                    break;
+                    const double clusterCenterX = cutClusters[clusterIndex].centerX;
+
+                    if (clusterCenterX < componentCenterX - boundaryTolerance)
+                    {
+                        leftClusterIndex = static_cast<int>(clusterIndex);
+                        continue;
+                    }
+
+                    if (clusterCenterX > componentCenterX + boundaryTolerance)
+                    {
+                        rightClusterIndex = static_cast<int>(clusterIndex);
+                        break;
+                    }
                 }
             }
 
@@ -3479,6 +3891,16 @@ namespace
 
 bool Gcode_postprocessing_system::sortEntitiesByCurrentMode(bool smartSort)
 {
+    const int excludedCount = refreshWasteProcessingExclusions();
+
+    if (excludedCount > 0)
+    {
+        ui->openGLWidget->appendCommandMessage
+        (
+            QStringLiteral("废面规则已排除 %1 个图元，本次排序不会处理这些图元。").arg(excludedCount)
+        );
+    }
+
     const GGenerator::GenerationMode generationMode = resolveGenerationMode();
     return smartSort
         ? (generationMode == GGenerator::GenerationMode::Mode3D
@@ -3487,6 +3909,542 @@ bool Gcode_postprocessing_system::sortEntitiesByCurrentMode(bool smartSort)
         : (generationMode == GGenerator::GenerationMode::Mode3D
             ? sortEntitiesByCurrentDirection3D()
             : sortEntitiesByCurrentDirection());
+}
+
+QVector<CadItem*> Gcode_postprocessing_system::expandedSelectedRotaryEndCut(QString* errorMessage) const
+{
+    const QVector<CadItem*> selectedItems = ui->openGLWidget->selectedEntities();
+
+    if (selectedItems.isEmpty())
+    {
+        if (errorMessage != nullptr)
+        {
+            *errorMessage = QStringLiteral("请先选中切面中的一个或部分图元。系统会自动扩展相连图元。");
+        }
+
+        return {};
+    }
+
+    std::vector<CadItem*> documentItems;
+    documentItems.reserve(m_document.m_entities.size());
+
+    for (const std::unique_ptr<CadItem>& entity : m_document.m_entities)
+    {
+        if (entity != nullptr)
+        {
+            documentItems.push_back(entity.get());
+        }
+    }
+
+    const std::vector<int> componentIds = buildItemConnectivityComponents(documentItems, kEndCutConnectionTolerance);
+
+    if (componentIds.size() != documentItems.size())
+    {
+        if (errorMessage != nullptr)
+        {
+            *errorMessage = QStringLiteral("切面连通关系计算失败。");
+        }
+
+        return {};
+    }
+
+    std::vector<int> selectedComponentIds;
+
+    for (const CadItem* selectedItem : selectedItems)
+    {
+        const auto itemIt = std::find(documentItems.begin(), documentItems.end(), selectedItem);
+
+        if (itemIt == documentItems.end())
+        {
+            continue;
+        }
+
+        const size_t itemIndex = static_cast<size_t>(std::distance(documentItems.begin(), itemIt));
+        const int componentId = componentIds[itemIndex];
+
+        if (componentId >= 0
+            && std::find(selectedComponentIds.begin(), selectedComponentIds.end(), componentId) == selectedComponentIds.end())
+        {
+            selectedComponentIds.push_back(componentId);
+        }
+    }
+
+    QVector<CadItem*> expandedItems;
+
+    for (size_t itemIndex = 0; itemIndex < documentItems.size(); ++itemIndex)
+    {
+        if (std::find(selectedComponentIds.begin(), selectedComponentIds.end(), componentIds[itemIndex]) != selectedComponentIds.end())
+        {
+            expandedItems.push_back(documentItems[itemIndex]);
+        }
+    }
+
+    if (expandedItems.empty())
+    {
+        if (errorMessage != nullptr)
+        {
+            *errorMessage = QStringLiteral("未找到与选中图元相连的切面路径。");
+        }
+
+        return {};
+    }
+
+    for (const int selectedComponentId : selectedComponentIds)
+    {
+        std::vector<CadItem*> componentItems;
+
+        for (size_t itemIndex = 0; itemIndex < documentItems.size(); ++itemIndex)
+        {
+            if (componentIds[itemIndex] == selectedComponentId)
+            {
+                componentItems.push_back(documentItems[itemIndex]);
+            }
+        }
+
+        if (!itemsFormClosedOrNearlyClosedLoop(componentItems, kEndCutConnectionTolerance))
+        {
+            if (errorMessage != nullptr)
+            {
+                *errorMessage = QStringLiteral("选中的相连图元没有形成封闭或近似封闭切面。端点间距必须小于或等于 1 mm。");
+            }
+
+            return {};
+        }
+    }
+
+    if (errorMessage != nullptr)
+    {
+        errorMessage->clear();
+    }
+
+    return expandedItems;
+}
+
+bool Gcode_postprocessing_system::assignSelectedRotaryEndCut(bool leftCut)
+{
+    QString selectionError;
+    const QVector<CadItem*> expandedItems = expandedSelectedRotaryEndCut(&selectionError);
+
+    if (expandedItems.isEmpty())
+    {
+        QMessageBox::warning(this, QStringLiteral("指定切面"), selectionError);
+        return false;
+    }
+
+    for (const CadItem* item : expandedItems)
+    {
+        if (item != nullptr && item->m_rotaryEndCutRole != RotaryEndCutRole::None)
+        {
+            QMessageBox::warning
+            (
+                this,
+                QStringLiteral("指定切面"),
+                QStringLiteral("选中的图元已属于一个切面组。如需重新指定，请先清除切面指定。")
+            );
+            return false;
+        }
+    }
+
+    int highestPairId = -1;
+    int pendingLeftPairId = -1;
+
+    for (const std::unique_ptr<CadItem>& entity : m_document.m_entities)
+    {
+        if (entity == nullptr || entity->m_rotaryEndCutRole == RotaryEndCutRole::None)
+        {
+            continue;
+        }
+
+        highestPairId = std::max(highestPairId, entity->m_rotaryEndCutPairId);
+    }
+
+    for (const std::unique_ptr<CadItem>& entity : m_document.m_entities)
+    {
+        if (entity == nullptr || entity->m_rotaryEndCutRole != RotaryEndCutRole::Left)
+        {
+            continue;
+        }
+
+        bool hasMatchingRight = false;
+
+        for (const std::unique_ptr<CadItem>& candidate : m_document.m_entities)
+        {
+            if (candidate != nullptr
+                && candidate->m_rotaryEndCutPairId == entity->m_rotaryEndCutPairId
+                && candidate->m_rotaryEndCutRole == RotaryEndCutRole::Right)
+            {
+                hasMatchingRight = true;
+                break;
+            }
+        }
+
+        if (!hasMatchingRight)
+        {
+            pendingLeftPairId = std::max(pendingLeftPairId, entity->m_rotaryEndCutPairId);
+        }
+    }
+
+    const int pairId = leftCut ? highestPairId + 1 : pendingLeftPairId;
+
+    if (leftCut && pendingLeftPairId >= 0)
+    {
+        QMessageBox::warning
+        (
+            this,
+            QStringLiteral("指定左切面"),
+            QStringLiteral("当前已有尚未配对的左切面，请先指定对应的右切面。")
+        );
+        return false;
+    }
+
+    if (!leftCut && pairId < 0)
+    {
+        QMessageBox::warning
+        (
+            this,
+            QStringLiteral("指定右切面"),
+            QStringLiteral("请先指定一组左切面，再指定对应的右切面。")
+        );
+        return false;
+    }
+
+    for (CadItem* item : expandedItems)
+    {
+        if (item == nullptr)
+        {
+            continue;
+        }
+
+        item->m_rotaryEndCutPairId = pairId;
+        item->m_rotaryEndCutRole = leftCut ? RotaryEndCutRole::Left : RotaryEndCutRole::Right;
+    }
+
+    const QString roleName = leftCut ? QStringLiteral("左切面") : QStringLiteral("右切面");
+    QString message = QStringLiteral("已指定第 %1 组%2，共识别 %3 个相连图元。")
+        .arg(pairId + 1)
+        .arg(roleName)
+        .arg(expandedItems.size());
+
+    if (leftCut)
+    {
+        message += QStringLiteral(" 请继续选择对应右切面并再次使用智能指定。");
+    }
+
+    invalidateProcessOrdersAfterEndCutChange();
+    refreshWasteProcessingExclusions();
+    ui->openGLWidget->appendCommandMessage(message);
+    ui->openGLWidget->update();
+    statusBar()->showMessage(message, 5000);
+    return true;
+}
+
+bool Gcode_postprocessing_system::assignSelectedWasteEndCut()
+{
+    QString selectionError;
+    const QVector<CadItem*> expandedItems = expandedSelectedRotaryEndCut(&selectionError);
+
+    if (expandedItems.isEmpty())
+    {
+        QMessageBox::warning(this, QStringLiteral("指定废面"), selectionError);
+        return false;
+    }
+
+    for (const CadItem* item : expandedItems)
+    {
+        if (item != nullptr && item->m_rotaryEndCutRole != RotaryEndCutRole::None)
+        {
+            QMessageBox::warning(this, QStringLiteral("指定废面"), QStringLiteral("选中的图元已属于一个切面组，请先清除原切面指定。"));
+            return false;
+        }
+    }
+
+    int highestBoundaryId = -1;
+
+    for (const std::unique_ptr<CadItem>& entity : m_document.m_entities)
+    {
+        if (entity != nullptr && entity->m_rotaryEndCutRole != RotaryEndCutRole::None)
+        {
+            highestBoundaryId = std::max(highestBoundaryId, entity->m_rotaryEndCutPairId);
+        }
+    }
+
+    const int wasteId = highestBoundaryId + 1;
+
+    for (CadItem* item : expandedItems)
+    {
+        if (item == nullptr)
+        {
+            continue;
+        }
+
+        item->m_rotaryEndCutPairId = wasteId;
+        item->m_rotaryEndCutRole = RotaryEndCutRole::Waste;
+    }
+
+    invalidateProcessOrdersAfterEndCutChange();
+    const int excludedCount = refreshWasteProcessingExclusions();
+    const QString message = QStringLiteral("已指定废面 W%1，共识别 %2 个相连图元；当前废弃区共排除 %3 个图元。")
+        .arg(wasteId + 1)
+        .arg(expandedItems.size())
+        .arg(excludedCount);
+    ui->openGLWidget->appendCommandMessage(message);
+    ui->openGLWidget->update();
+    statusBar()->showMessage(message, 6000);
+    return true;
+}
+
+bool Gcode_postprocessing_system::smartAssignSelectedRotaryEndCut()
+{
+    int pendingLeftPairId = -1;
+
+    for (const std::unique_ptr<CadItem>& entity : m_document.m_entities)
+    {
+        if (entity == nullptr || entity->m_rotaryEndCutRole != RotaryEndCutRole::Left)
+        {
+            continue;
+        }
+
+        const bool hasRight = std::any_of
+        (
+            m_document.m_entities.begin(),
+            m_document.m_entities.end(),
+            [&entity](const std::unique_ptr<CadItem>& candidate)
+            {
+                return candidate != nullptr
+                    && candidate->m_rotaryEndCutPairId == entity->m_rotaryEndCutPairId
+                    && candidate->m_rotaryEndCutRole == RotaryEndCutRole::Right;
+            }
+        );
+
+        if (!hasRight)
+        {
+            pendingLeftPairId = std::max(pendingLeftPairId, entity->m_rotaryEndCutPairId);
+        }
+    }
+
+    return assignSelectedRotaryEndCut(pendingLeftPairId < 0);
+}
+
+bool Gcode_postprocessing_system::clearSelectedRotaryEndCutAssignments()
+{
+    const QVector<CadItem*> selectedItems = ui->openGLWidget->selectedEntities();
+    QSet<int> pairIds;
+
+    for (const CadItem* item : selectedItems)
+    {
+        if (item != nullptr
+            && item->m_rotaryEndCutRole != RotaryEndCutRole::None
+            && item->m_rotaryEndCutPairId >= 0)
+        {
+            pairIds.insert(item->m_rotaryEndCutPairId);
+        }
+    }
+
+    if (pairIds.isEmpty())
+    {
+        QMessageBox::information(this, QStringLiteral("清除切面组"), QStringLiteral("请先选中一个已指定的切面。"));
+        return false;
+    }
+
+    int clearedCount = 0;
+
+    for (const std::unique_ptr<CadItem>& entity : m_document.m_entities)
+    {
+        if (entity == nullptr || !pairIds.contains(entity->m_rotaryEndCutPairId))
+        {
+            continue;
+        }
+
+        entity->m_rotaryEndCutPairId = -1;
+        entity->m_rotaryEndCutRole = RotaryEndCutRole::None;
+        ++clearedCount;
+    }
+
+    const QString message = QStringLiteral("已清除 %1 组切面指定，共 %2 个图元。")
+        .arg(pairIds.size())
+        .arg(clearedCount);
+    invalidateProcessOrdersAfterEndCutChange();
+    refreshWasteProcessingExclusions();
+    ui->openGLWidget->appendCommandMessage(message);
+    ui->openGLWidget->update();
+    statusBar()->showMessage(message, 5000);
+    return true;
+}
+
+bool Gcode_postprocessing_system::clearRotaryEndCutAssignments()
+{
+    int clearedCount = 0;
+
+    for (const std::unique_ptr<CadItem>& entity : m_document.m_entities)
+    {
+        if (entity == nullptr || entity->m_rotaryEndCutRole == RotaryEndCutRole::None)
+        {
+            continue;
+        }
+
+        entity->m_rotaryEndCutPairId = -1;
+        entity->m_rotaryEndCutRole = RotaryEndCutRole::None;
+        ++clearedCount;
+    }
+
+    if (clearedCount == 0)
+    {
+        statusBar()->showMessage(QStringLiteral("当前没有已指定的切面。"), 3000);
+        return false;
+    }
+
+    const QString message = QStringLiteral("已清除 %1 个图元的切面指定。").arg(clearedCount);
+    invalidateProcessOrdersAfterEndCutChange();
+    refreshWasteProcessingExclusions();
+    ui->openGLWidget->appendCommandMessage(message);
+    ui->openGLWidget->update();
+    statusBar()->showMessage(message, 5000);
+    return true;
+}
+
+void Gcode_postprocessing_system::invalidateProcessOrdersAfterEndCutChange()
+{
+    for (const std::unique_ptr<CadItem>& entity : m_document.m_entities)
+    {
+        if (entity != nullptr)
+        {
+            entity->m_processOrder = -1;
+        }
+    }
+}
+
+int Gcode_postprocessing_system::refreshWasteProcessingExclusions()
+{
+    struct BoundaryGroup
+    {
+        RotaryEndCutRole role = RotaryEndCutRole::None;
+        double sumX = 0.0;
+        size_t pointCount = 0;
+    };
+
+    std::map<int, BoundaryGroup> boundaryGroups;
+
+    for (const std::unique_ptr<CadItem>& entity : m_document.m_entities)
+    {
+        if (entity == nullptr)
+        {
+            continue;
+        }
+
+        entity->m_excludedFromProcessing = false;
+
+        if (entity->m_rotaryEndCutRole == RotaryEndCutRole::None || entity->m_rotaryEndCutPairId < 0)
+        {
+            continue;
+        }
+
+        const int roleIndex = static_cast<int>(entity->m_rotaryEndCutRole);
+        const int key = entity->m_rotaryEndCutPairId * 4 + roleIndex;
+        BoundaryGroup& group = boundaryGroups[key];
+        group.role = entity->m_rotaryEndCutRole;
+
+        for (const QVector3D& point : entity->m_geometry.vertices)
+        {
+            group.sumX += point.x();
+            ++group.pointCount;
+        }
+
+        if (entity->m_rotaryEndCutRole == RotaryEndCutRole::Waste)
+        {
+            entity->m_excludedFromProcessing = true;
+            entity->m_processOrder = -1;
+        }
+    }
+
+    struct BoundaryPosition
+    {
+        RotaryEndCutRole role = RotaryEndCutRole::None;
+        double centerX = 0.0;
+    };
+
+    std::vector<BoundaryPosition> boundaries;
+    boundaries.reserve(boundaryGroups.size());
+
+    for (const auto& [key, group] : boundaryGroups)
+    {
+        Q_UNUSED(key);
+
+        if (group.pointCount > 0)
+        {
+            boundaries.push_back({ group.role, group.sumX / static_cast<double>(group.pointCount) });
+        }
+    }
+
+    std::sort
+    (
+        boundaries.begin(),
+        boundaries.end(),
+        [](const BoundaryPosition& left, const BoundaryPosition& right)
+        {
+            return left.centerX < right.centerX;
+        }
+    );
+
+    std::vector<std::pair<double, double>> wasteIntervals;
+
+    for (size_t index = 0; index + 1 < boundaries.size(); ++index)
+    {
+        if (boundaries[index].role != RotaryEndCutRole::Waste
+            && boundaries[index + 1].role != RotaryEndCutRole::Waste)
+        {
+            continue;
+        }
+
+        wasteIntervals.push_back
+        ({
+            std::min(boundaries[index].centerX, boundaries[index + 1].centerX),
+            std::max(boundaries[index].centerX, boundaries[index + 1].centerX)
+        });
+    }
+
+    int excludedCount = 0;
+
+    for (const std::unique_ptr<CadItem>& entity : m_document.m_entities)
+    {
+        if (entity == nullptr)
+        {
+            continue;
+        }
+
+        if (entity->m_rotaryEndCutRole == RotaryEndCutRole::Waste)
+        {
+            ++excludedCount;
+            continue;
+        }
+
+        if (entity->m_rotaryEndCutRole != RotaryEndCutRole::None || entity->m_geometry.vertices.isEmpty())
+        {
+            continue;
+        }
+
+        double centerX = 0.0;
+
+        for (const QVector3D& point : entity->m_geometry.vertices)
+        {
+            centerX += point.x();
+        }
+
+        centerX /= static_cast<double>(entity->m_geometry.vertices.size());
+
+        for (const std::pair<double, double>& interval : wasteIntervals)
+        {
+            if (centerX >= interval.first - kEndCutConnectionTolerance
+                && centerX <= interval.second + kEndCutConnectionTolerance)
+            {
+                entity->m_excludedFromProcessing = true;
+                entity->m_processOrder = -1;
+                ++excludedCount;
+                break;
+            }
+        }
+    }
+
+    return excludedCount;
 }
 
 bool Gcode_postprocessing_system::sortEntitiesByCurrentDirection()
@@ -3872,6 +4830,17 @@ bool Gcode_postprocessing_system::sortEntitiesByCurrentDirection3D()
         return true;
     }
 
+    if (hasManualRotaryEndCutAssignments(sortableItems))
+    {
+        QMessageBox::warning
+        (
+            this,
+            QStringLiteral("4轴(绕A)排序"),
+            QStringLiteral("已指定切面组，但无法形成有效加工段。请确认每组均包含左、右切面，且切面之间存在可加工图元。")
+        );
+        return false;
+    }
+
     const QVector3D sweepDirection = computeRotarySweepDirection(sortableItems, rotaryAxisConfig);
     const GapStartSelectionContext gapStartContext = buildGapStartSelectionContext(sortableItems, kPreferredStartGapDistance3D);
     std::vector<CadEditer::ProcessStateUpdate> processUpdates;
@@ -4042,6 +5011,17 @@ bool Gcode_postprocessing_system::smartSortEntities3D()
         ui->openGLWidget->refreshCommandPrompt();
         statusBar()->showMessage(QStringLiteral("4轴(绕A)懒旋转智能排序完成，共更新 %1 个图元").arg(lazyRotaryUpdates.size()), 5000);
         return true;
+    }
+
+    if (hasManualRotaryEndCutAssignments(sortableItems))
+    {
+        QMessageBox::warning
+        (
+            this,
+            QStringLiteral("4轴(绕A)智能排序"),
+            QStringLiteral("已指定切面组，但无法形成有效加工段。请确认每组均包含左、右切面，且切面之间存在可加工图元。")
+        );
+        return false;
     }
 
     const QVector3D sweepDirection = computeRotarySweepDirection(sortableItems, rotaryAxisConfig);

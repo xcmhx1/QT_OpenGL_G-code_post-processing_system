@@ -103,9 +103,14 @@ public:
     // 设置 Viewer 主题。
     void setTheme(const AppThemeColors& theme);
 
-    // 设置是否显示加工方向箭头与加工顺序标签。
+    // 设置画布显示选项；这些选项不参与排序和 G 代码生成。
     void setProcessVisualsVisible(bool visible);
     bool processVisualsVisible() const { return m_processVisualsVisible; }
+    void setProcessDirectionVisible(bool visible);
+    void setProcessOrderVisible(bool visible);
+    void setRotaryEndCutsVisible(bool visible);
+    void setExcludedEntitiesDimmed(bool dimmed);
+    void setBackgroundGridVisible(bool visible);
 
     // 开始绘制指定类型图元。
     void startDrawing(DrawType drawType);
@@ -377,6 +382,9 @@ private:
     // 绘制加工顺序编号
     void renderProcessOrderLabels();
 
+    // 绘制人工指定切面的左右角色与组号。
+    void renderRotaryEndCutLabels();
+
     struct ProcessOrderLabelOverlay
     {
         CadItem* item = nullptr;
@@ -456,6 +464,9 @@ private:
     // 构建加工方向箭头图元
     // @return 加工方向 overlay 图元列表
     std::vector<TransientPrimitive> buildProcessDirectionPrimitives() const;
+
+    // 构建用户指定的方管左右切面网格提示。
+    std::vector<TransientPrimitive> buildRotaryEndCutPrimitives() const;
 
     // 构建选中图元的基点/控制点图元
     // @return 选中态手柄 overlay 图元列表
@@ -559,8 +570,13 @@ private:
     // 顺序标签交换的首个候选实体 ID。
     EntityId m_pendingProcessOrderSwapEntityId = 0;
 
-    // 是否显示加工方向箭头与加工顺序标签。
+    // 画布显示选项。
     bool m_processVisualsVisible = true;
+    bool m_processDirectionVisible = true;
+    bool m_processOrderVisible = true;
+    bool m_rotaryEndCutsVisible = true;
+    bool m_excludedEntitiesDimmed = true;
+    bool m_backgroundGridVisible = true;
 
     // 基点吸附开关
     bool m_basePointSnapEnabled = false;
