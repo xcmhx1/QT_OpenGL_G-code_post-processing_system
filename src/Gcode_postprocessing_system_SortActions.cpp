@@ -19,6 +19,7 @@ namespace
     constexpr double kSortEpsilon = 1.0e-9;
     constexpr double kPi = 3.14159265358979323846;
     constexpr double kTwoPi = 6.28318530717958647692;
+    constexpr int kClosedCircleSampleCount = 16;
     constexpr int kClosedEllipseSampleCount = 16;
     constexpr double kNextDistanceWeight = 0.15;
     constexpr double kDirectionPenaltyWeight = 0.35;
@@ -32,6 +33,7 @@ namespace
     constexpr double kNearGapPriorityDistance3D = 1.0;
     constexpr double kPreferredStartGapDistance2D = 1.0;
     constexpr double kPreferredStartGapDistance3D = 1.0;
+    constexpr double kRotaryPlaneMatchToleranceDegrees = 3.0;
     constexpr double kSquareTubeSectionToleranceRatio = 0.015;
     constexpr double kSquareTubeEndCutCoverageThreshold = 0.72;
     constexpr double kSortDedupCoordinateTolerance = 1.0e-4;
@@ -54,6 +56,7 @@ namespace
         double priorityDistance = std::numeric_limits<double>::max();
         double gapDistance = std::numeric_limits<double>::max();
         double score = std::numeric_limits<double>::max();
+        bool matchesCurrentRotaryPlane = false;
         QVector3D startPoint;
         QVector3D endPoint;
     };
@@ -1270,21 +1273,46 @@ namespace
             const std::initializer_list<bool> reverseOptions = strategy == SortStrategy::Smart
                 ? std::initializer_list<bool>{ false, true }
                 : std::initializer_list<bool>{ item->m_isReverse };
-            const double startParameter = strategy == SortStrategy::Smart
-                ? kPi * 0.5
-                : (item->m_hasCustomProcessStart ? item->m_processStartParameter : kPi * 0.5);
 
-            for (const bool reverse : reverseOptions)
+            if (strategy == SortStrategy::Smart)
             {
-                ProcessPathOption option;
-                option.reverse = reverse;
-                option.hasCustomStart = false;
-                option.processStartParameter = startParameter;
-                option.startPoint = circlePointAt(circle, startParameter);
-                option.endPoint = option.startPoint;
-                option.startTangent = circleTangentAt(circle, startParameter, reverse);
-                option.endTangent = option.startTangent;
-                options.push_back(option);
+                for (int sampleIndex = 0; sampleIndex < kClosedCircleSampleCount; ++sampleIndex)
+                {
+                    const double startParameter = kTwoPi * static_cast<double>(sampleIndex)
+                        / static_cast<double>(kClosedCircleSampleCount);
+
+                    for (const bool reverse : reverseOptions)
+                    {
+                        ProcessPathOption option;
+                        option.reverse = reverse;
+                        option.hasCustomStart = true;
+                        option.processStartParameter = startParameter;
+                        option.startPoint = circlePointAt(circle, startParameter);
+                        option.endPoint = option.startPoint;
+                        option.startTangent = circleTangentAt(circle, startParameter, reverse);
+                        option.endTangent = option.startTangent;
+                        options.push_back(option);
+                    }
+                }
+            }
+            else
+            {
+                const double startParameter = item->m_hasCustomProcessStart
+                    ? item->m_processStartParameter
+                    : kPi * 0.5;
+
+                for (const bool reverse : reverseOptions)
+                {
+                    ProcessPathOption option;
+                    option.reverse = reverse;
+                    option.hasCustomStart = item->m_hasCustomProcessStart;
+                    option.processStartParameter = startParameter;
+                    option.startPoint = circlePointAt(circle, startParameter);
+                    option.endPoint = option.startPoint;
+                    option.startTangent = circleTangentAt(circle, startParameter, reverse);
+                    option.endTangent = option.startTangent;
+                    options.push_back(option);
+                }
             }
 
             break;
@@ -2245,6 +2273,10 @@ namespace
         const QVector3D referencePoint = hasCurrentEndPoint ? currentEndPoint : kRotaryInitialSortOrigin;
         RotarySortPoint referenceRotaryPoint;
         const bool hasReferenceRotaryPoint = tryBuildRotarySortPoint(referencePoint, config, referenceRotaryPoint);
+        const bool preferMatchingRotaryPlane = strategy == SortStrategy::Smart
+            && hasCurrentEndPoint
+            && !mustStayInCurrentComponent
+            && hasReferenceRotaryPoint;
         const QVector3D normalizedSweepDirection = normalizeOrZero(sweepDirection);
         const double referenceProgress = hasReferenceRotaryPoint
             ? static_cast<double>(referencePoint.x()) * static_cast<double>(normalizedSweepDirection.x())
@@ -2284,6 +2316,14 @@ namespace
                 const double connectionDistance = computeClosestConnectionDistance3D(processedSegments, option.startPoint, option.endPoint);
                 const bool directlyConnected = connectionDistance <= kSortConnectionEpsilon;
                 const bool bestDirectlyConnected = bestCandidate.connectionDistance <= kSortConnectionEpsilon;
+                RotarySortPoint candidateRotaryPoint;
+                const bool matchesCurrentRotaryPlane = preferMatchingRotaryPlane
+                    && tryBuildRotarySortPoint(option.startPoint, config, candidateRotaryPoint)
+                    && std::abs
+                    (
+                        unwrapAngleDegrees(referenceRotaryPoint.angleDegrees, candidateRotaryPoint.angleDegrees)
+                            - referenceRotaryPoint.angleDegrees
+                    ) <= kRotaryPlaneMatchToleranceDegrees;
                 double resolvedCandidateAngle = 0.0;
                 const double entryDistance = rotarySortTravelDistance(referencePoint, option.startPoint, config, &resolvedCandidateAngle);
                 const double currentGapDistance = hasCurrentEndPoint
@@ -2335,27 +2375,31 @@ namespace
                     + backtrackDistance * kRotaryBacktrackPenaltyWeight
                     + continuityScale * kRotaryDirectionPenaltyWeight * continuityPenalty;
 
+                const bool rotaryPlanePreferenceDecides = preferMatchingRotaryPlane
+                    && matchesCurrentRotaryPlane != bestCandidate.matchesCurrentRotaryPlane;
                 const bool shouldReplace = bestCandidate.index < 0
-                    || (preferPreferredGapStart && preferredGapStart && !bestPreferredGapStart)
-                    || (preferPreferredGapStart
-                        && preferredGapStart == bestPreferredGapStart
-                        && (entryDistance < bestCandidate.priorityDistance - kSortEpsilon
-                            || (std::abs(entryDistance - bestCandidate.priorityDistance) <= kSortEpsilon
-                                && (optionScore < bestCandidate.score - kSortEpsilon
-                                    || (std::abs(optionScore - bestCandidate.score) <= kSortEpsilon
-                                        && isPointLexicographicallyLess(option.startPoint, bestCandidate.startPoint))))))
-                    || (nearCurrentGap && !bestNearCurrentGap)
-                    || (directlyConnected && !bestDirectlyConnected)
-                    || (nearCurrentGap == bestNearCurrentGap
-                        && directlyConnected == bestDirectlyConnected
-                        && (!preferPreferredGapStart || preferredGapStart == bestPreferredGapStart)
-                        && (connectionDistance < bestCandidate.connectionDistance - kSortEpsilon
-                            || (std::abs(connectionDistance - bestCandidate.connectionDistance) <= kSortEpsilon
-                                && (optionScore < bestCandidate.score - kSortEpsilon
-                                    || (std::abs(optionScore - bestCandidate.score) <= kSortEpsilon
-                                        && (entryDistance < bestCandidate.priorityDistance - kSortEpsilon
-                                            || (std::abs(entryDistance - bestCandidate.priorityDistance) <= kSortEpsilon
-                                                && isPointLexicographicallyLess(option.startPoint, bestCandidate.startPoint))))))));
+                    || (rotaryPlanePreferenceDecides && matchesCurrentRotaryPlane)
+                    || (!rotaryPlanePreferenceDecides
+                        && ((preferPreferredGapStart && preferredGapStart && !bestPreferredGapStart)
+                            || (preferPreferredGapStart
+                                && preferredGapStart == bestPreferredGapStart
+                                && (entryDistance < bestCandidate.priorityDistance - kSortEpsilon
+                                    || (std::abs(entryDistance - bestCandidate.priorityDistance) <= kSortEpsilon
+                                        && (optionScore < bestCandidate.score - kSortEpsilon
+                                            || (std::abs(optionScore - bestCandidate.score) <= kSortEpsilon
+                                                && isPointLexicographicallyLess(option.startPoint, bestCandidate.startPoint))))))
+                            || (nearCurrentGap && !bestNearCurrentGap)
+                            || (directlyConnected && !bestDirectlyConnected)
+                            || (nearCurrentGap == bestNearCurrentGap
+                                && directlyConnected == bestDirectlyConnected
+                                && (!preferPreferredGapStart || preferredGapStart == bestPreferredGapStart)
+                                && (connectionDistance < bestCandidate.connectionDistance - kSortEpsilon
+                                    || (std::abs(connectionDistance - bestCandidate.connectionDistance) <= kSortEpsilon
+                                        && (optionScore < bestCandidate.score - kSortEpsilon
+                                            || (std::abs(optionScore - bestCandidate.score) <= kSortEpsilon
+                                                && (entryDistance < bestCandidate.priorityDistance - kSortEpsilon
+                                                    || (std::abs(entryDistance - bestCandidate.priorityDistance) <= kSortEpsilon
+                                                        && isPointLexicographicallyLess(option.startPoint, bestCandidate.startPoint))))))))));
 
                 if (!shouldReplace)
                 {
@@ -2370,6 +2414,7 @@ namespace
                 bestCandidate.priorityDistance = entryDistance;
                 bestCandidate.gapDistance = currentGapDistance;
                 bestCandidate.score = optionScore;
+                bestCandidate.matchesCurrentRotaryPlane = matchesCurrentRotaryPlane;
                 bestCandidate.startPoint = option.startPoint;
                 bestCandidate.endPoint = option.endPoint;
             }
