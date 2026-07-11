@@ -10,9 +10,9 @@
 namespace
 {
     constexpr double kMinimumTolerance = 1.0e-6;
-    constexpr int kMaximumSubdivisionDepth = 16;
+    constexpr int kMaximumSubdivisionDepth = 12;
     constexpr size_t kMaximumPolylinePoints = 65536;
-    constexpr int kFitFallbackSamplesPerSpan = 32;
+    constexpr int kFitFallbackSamplesPerSpan = 16;
 
     struct Point3D
     {
@@ -363,8 +363,10 @@ namespace
             return points;
         }
 
-        const double tolerance = std::max(kMinimumTolerance, diagonal * 1.0e-5);
-        const double maximumSegmentLength = std::max(tolerance * 32.0, diagonal / 256.0);
+        // Match the practical density used by arc machining: preserve curve shape
+        // without creating excessive polyline vertices that destabilize sorting.
+        const double tolerance = std::max(kMinimumTolerance, diagonal * 5.0e-4);
+        const double maximumSegmentLength = std::max(tolerance * 32.0, diagonal / 64.0);
         const double knotTolerance = std::max(1.0e-14, std::abs(spline->tolknot));
         const size_t controlCount = spline->controllist.size();
         const int degree = spline->degree;
