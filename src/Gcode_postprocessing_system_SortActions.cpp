@@ -32,6 +32,9 @@ namespace
     constexpr double kNearGapPriorityDistance3D = 1.0;
     constexpr double kPreferredStartGapDistance2D = 1.0;
     constexpr double kPreferredStartGapDistance3D = 1.0;
+    constexpr double kSquareTubeSectionToleranceRatio = 0.015;
+    constexpr double kSquareTubeEndCutCoverageThreshold = 0.72;
+    constexpr double kSortDedupCoordinateTolerance = 1.0e-4;
     const QVector3D kSortOrigin(0.0f, 0.0f, 0.0f);
     const QVector3D kRotaryInitialSortOrigin(0.0f, 0.0f, 50.0f);
 
@@ -88,6 +91,68 @@ namespace
     {
         std::vector<int> componentIds;
         std::vector<std::vector<QVector3D>> preferredStartPointsByComponent;
+    };
+
+    enum class RotarySurfaceGroup
+    {
+        Top,
+        Right,
+        Bottom,
+        Left,
+        Unknown
+    };
+
+    struct RotaryPathBounds
+    {
+        bool valid = false;
+        double minX = 0.0;
+        double maxX = 0.0;
+        double minY = 0.0;
+        double maxY = 0.0;
+        double minZ = 0.0;
+        double maxZ = 0.0;
+        double sumX = 0.0;
+        double sumY = 0.0;
+        double sumZ = 0.0;
+        size_t pointCount = 0;
+    };
+
+    struct RotaryItemAnalysis
+    {
+        size_t itemIndex = 0;
+        RotaryPathBounds bounds;
+        RotarySurfaceGroup surface = RotarySurfaceGroup::Unknown;
+    };
+
+    struct RotaryFeatureComponent
+    {
+        std::vector<size_t> itemIndices;
+        RotaryPathBounds bounds;
+        bool isEndCut = false;
+    };
+
+    struct RotaryCutCluster
+    {
+        std::vector<size_t> itemIndices;
+        double centerX = 0.0;
+    };
+
+    struct RotaryLazySegment
+    {
+        int leftClusterIndex = -1;
+        int rightClusterIndex = -1;
+        double centerX = 0.0;
+        std::vector<size_t> topItems;
+        std::vector<size_t> rightItems;
+        std::vector<size_t> bottomItems;
+        std::vector<size_t> leftItems;
+        std::vector<size_t> unknownItems;
+    };
+
+    struct SortableDedupResult
+    {
+        size_t removedCount = 0;
+        QVector<CadItem*> duplicateItems;
     };
 
     std::vector<ProcessPathOption> buildPathOptionsForItem(const CadItem* item, SortStrategy strategy);
@@ -1766,6 +1831,146 @@ namespace
         return context;
     }
 
+    QString sortDedupPointToken(const RawPathPoint3D& point)
+    {
+        const qint64 x = static_cast<qint64>(std::llround(point.x / kSortDedupCoordinateTolerance));
+        const qint64 y = static_cast<qint64>(std::llround(point.y / kSortDedupCoordinateTolerance));
+        const qint64 z = static_cast<qint64>(std::llround(point.z / kSortDedupCoordinateTolerance));
+        return QStringLiteral("%1,%2,%3").arg(x).arg(y).arg(z);
+    }
+
+    QString sortDedupJoinTokens(const std::vector<QString>& tokens, size_t startIndex, bool reverse)
+    {
+        QString key;
+        key.reserve(static_cast<int>(tokens.size() * 24));
+
+        for (size_t offset = 0; offset < tokens.size(); ++offset)
+        {
+            const size_t index = reverse
+                ? (startIndex + tokens.size() - offset) % tokens.size()
+                : (startIndex + offset) % tokens.size();
+
+            if (!key.isEmpty())
+            {
+                key.append(QLatin1Char(';'));
+            }
+
+            key.append(tokens[index]);
+        }
+
+        return key;
+    }
+
+    QString sortDedupCanonicalPathKey(CadItem* item)
+    {
+        if (item == nullptr)
+        {
+            return QString();
+        }
+
+        item->rebuildRawPathPoints3D();
+
+        std::vector<QString> tokens;
+        tokens.reserve(item->rawPathPoints3D().size());
+
+        for (const RawPathPoint3D& point : item->rawPathPoints3D())
+        {
+            const QString token = sortDedupPointToken(point);
+
+            if (!tokens.empty() && tokens.back() == token)
+            {
+                continue;
+            }
+
+            tokens.push_back(token);
+        }
+
+        if (tokens.empty())
+        {
+            return QString();
+        }
+
+        bool closed = false;
+
+        if (tokens.size() > 1 && tokens.front() == tokens.back())
+        {
+            tokens.pop_back();
+            closed = true;
+        }
+
+        if (tokens.empty())
+        {
+            return QString();
+        }
+
+        QString bestKey;
+
+        if (closed)
+        {
+            for (size_t index = 0; index < tokens.size(); ++index)
+            {
+                const QString forwardKey = sortDedupJoinTokens(tokens, index, false);
+                const QString reverseKey = sortDedupJoinTokens(tokens, index, true);
+
+                if (bestKey.isEmpty() || forwardKey < bestKey)
+                {
+                    bestKey = forwardKey;
+                }
+
+                if (reverseKey < bestKey)
+                {
+                    bestKey = reverseKey;
+                }
+            }
+        }
+        else
+        {
+            const QString forwardKey = sortDedupJoinTokens(tokens, 0, false);
+            const QString reverseKey = sortDedupJoinTokens(tokens, tokens.size() - 1, true);
+            bestKey = forwardKey < reverseKey ? forwardKey : reverseKey;
+        }
+
+        return QStringLiteral("%1|%2|%3")
+            .arg(static_cast<int>(item->m_type))
+            .arg(static_cast<qulonglong>(item->buildColor().rgba()))
+            .arg(bestKey);
+    }
+
+    SortableDedupResult deduplicateSortableItems(std::vector<CadItem*>& sortableItems)
+    {
+        SortableDedupResult result;
+        std::vector<CadItem*> uniqueItems;
+        std::vector<QString> uniqueKeys;
+        uniqueItems.reserve(sortableItems.size());
+        uniqueKeys.reserve(sortableItems.size());
+
+        for (CadItem* item : sortableItems)
+        {
+            const QString key = sortDedupCanonicalPathKey(item);
+
+            if (key.isEmpty())
+            {
+                uniqueItems.push_back(item);
+                continue;
+            }
+
+            const bool duplicate = std::find(uniqueKeys.begin(), uniqueKeys.end(), key) != uniqueKeys.end();
+
+            if (duplicate)
+            {
+                result.duplicateItems.append(item);
+                ++result.removedCount;
+                continue;
+            }
+
+            uniqueKeys.push_back(key);
+            uniqueItems.push_back(item);
+        }
+
+        sortableItems = std::move(uniqueItems);
+        return result;
+    }
+
     bool tryFindNearestNextStartPoint
     (
         const std::vector<CadItem*>& sortableItems,
@@ -2172,6 +2377,774 @@ namespace
         return bestCandidate;
     }
 
+    void expandRotaryBounds(RotaryPathBounds& bounds, const RawPathPoint3D& point)
+    {
+        if (!bounds.valid)
+        {
+            bounds.valid = true;
+            bounds.minX = bounds.maxX = point.x;
+            bounds.minY = bounds.maxY = point.y;
+            bounds.minZ = bounds.maxZ = point.z;
+        }
+        else
+        {
+            bounds.minX = std::min(bounds.minX, point.x);
+            bounds.maxX = std::max(bounds.maxX, point.x);
+            bounds.minY = std::min(bounds.minY, point.y);
+            bounds.maxY = std::max(bounds.maxY, point.y);
+            bounds.minZ = std::min(bounds.minZ, point.z);
+            bounds.maxZ = std::max(bounds.maxZ, point.z);
+        }
+
+        bounds.sumX += point.x;
+        bounds.sumY += point.y;
+        bounds.sumZ += point.z;
+        ++bounds.pointCount;
+    }
+
+    void mergeRotaryBounds(RotaryPathBounds& target, const RotaryPathBounds& source)
+    {
+        if (!source.valid)
+        {
+            return;
+        }
+
+        if (!target.valid)
+        {
+            target = source;
+            return;
+        }
+
+        target.minX = std::min(target.minX, source.minX);
+        target.maxX = std::max(target.maxX, source.maxX);
+        target.minY = std::min(target.minY, source.minY);
+        target.maxY = std::max(target.maxY, source.maxY);
+        target.minZ = std::min(target.minZ, source.minZ);
+        target.maxZ = std::max(target.maxZ, source.maxZ);
+        target.sumX += source.sumX;
+        target.sumY += source.sumY;
+        target.sumZ += source.sumZ;
+        target.pointCount += source.pointCount;
+    }
+
+    double rotaryBoundsCenterX(const RotaryPathBounds& bounds)
+    {
+        return bounds.pointCount > 0
+            ? bounds.sumX / static_cast<double>(bounds.pointCount)
+            : (bounds.minX + bounds.maxX) * 0.5;
+    }
+
+    double rotaryBoundsCenterY(const RotaryPathBounds& bounds)
+    {
+        return bounds.pointCount > 0
+            ? bounds.sumY / static_cast<double>(bounds.pointCount)
+            : (bounds.minY + bounds.maxY) * 0.5;
+    }
+
+    double rotaryBoundsCenterZ(const RotaryPathBounds& bounds)
+    {
+        return bounds.pointCount > 0
+            ? bounds.sumZ / static_cast<double>(bounds.pointCount)
+            : (bounds.minZ + bounds.maxZ) * 0.5;
+    }
+
+    RotarySurfaceGroup nearestSquareTubeSurface(double y, double z, const RotaryPathBounds& sectionBounds)
+    {
+        const double topDistance = std::abs(sectionBounds.maxZ - z);
+        const double rightDistance = std::abs(sectionBounds.maxY - y);
+        const double bottomDistance = std::abs(z - sectionBounds.minZ);
+        const double leftDistance = std::abs(y - sectionBounds.minY);
+
+        double bestDistance = topDistance;
+        RotarySurfaceGroup bestSurface = RotarySurfaceGroup::Top;
+
+        if (rightDistance < bestDistance)
+        {
+            bestDistance = rightDistance;
+            bestSurface = RotarySurfaceGroup::Right;
+        }
+
+        if (bottomDistance < bestDistance)
+        {
+            bestDistance = bottomDistance;
+            bestSurface = RotarySurfaceGroup::Bottom;
+        }
+
+        if (leftDistance < bestDistance)
+        {
+            bestSurface = RotarySurfaceGroup::Left;
+        }
+
+        return bestSurface;
+    }
+
+    RotarySurfaceGroup classifySquareTubeSurface(const CadItem* item, const RotaryPathBounds& itemBounds, const RotaryPathBounds& sectionBounds)
+    {
+        if (item == nullptr || !itemBounds.valid || !sectionBounds.valid)
+        {
+            return RotarySurfaceGroup::Unknown;
+        }
+
+        int topCount = 0;
+        int rightCount = 0;
+        int bottomCount = 0;
+        int leftCount = 0;
+        int totalCount = 0;
+
+        for (const RawPathPoint3D& point : item->rawPathPoints3D())
+        {
+            switch (nearestSquareTubeSurface(point.y, point.z, sectionBounds))
+            {
+            case RotarySurfaceGroup::Top:
+                ++topCount;
+                break;
+            case RotarySurfaceGroup::Right:
+                ++rightCount;
+                break;
+            case RotarySurfaceGroup::Bottom:
+                ++bottomCount;
+                break;
+            case RotarySurfaceGroup::Left:
+                ++leftCount;
+                break;
+            case RotarySurfaceGroup::Unknown:
+                break;
+            }
+
+            ++totalCount;
+        }
+
+        if (totalCount <= 0)
+        {
+            return RotarySurfaceGroup::Unknown;
+        }
+
+        int bestCount = topCount;
+        RotarySurfaceGroup bestSurface = RotarySurfaceGroup::Top;
+
+        if (rightCount > bestCount)
+        {
+            bestCount = rightCount;
+            bestSurface = RotarySurfaceGroup::Right;
+        }
+
+        if (bottomCount > bestCount)
+        {
+            bestCount = bottomCount;
+            bestSurface = RotarySurfaceGroup::Bottom;
+        }
+
+        if (leftCount > bestCount)
+        {
+            bestCount = leftCount;
+            bestSurface = RotarySurfaceGroup::Left;
+        }
+
+        if (static_cast<double>(bestCount) >= static_cast<double>(totalCount) * 0.40)
+        {
+            return bestSurface;
+        }
+
+        return nearestSquareTubeSurface(rotaryBoundsCenterY(itemBounds), rotaryBoundsCenterZ(itemBounds), sectionBounds);
+    }
+
+    bool componentMatchesSquareTubeEndCut
+    (
+        const RotaryFeatureComponent& component,
+        const std::vector<CadItem*>& sortableItems,
+        const RotaryPathBounds& sectionBounds,
+        double sectionTolerance
+    )
+    {
+        if (!component.bounds.valid || !sectionBounds.valid)
+        {
+            return false;
+        }
+
+        const double spanY = sectionBounds.maxY - sectionBounds.minY;
+        const double spanZ = sectionBounds.maxZ - sectionBounds.minZ;
+
+        if (spanY <= kSortEpsilon || spanZ <= kSortEpsilon)
+        {
+            return false;
+        }
+
+        const double coverageY = (component.bounds.maxY - component.bounds.minY) / spanY;
+        const double coverageZ = (component.bounds.maxZ - component.bounds.minZ) / spanZ;
+
+        if (coverageY < kSquareTubeEndCutCoverageThreshold || coverageZ < kSquareTubeEndCutCoverageThreshold)
+        {
+            return false;
+        }
+
+        bool touchesTop = false;
+        bool touchesRight = false;
+        bool touchesBottom = false;
+        bool touchesLeft = false;
+
+        for (const size_t itemIndex : component.itemIndices)
+        {
+            if (itemIndex >= sortableItems.size() || sortableItems[itemIndex] == nullptr)
+            {
+                continue;
+            }
+
+            for (const RawPathPoint3D& point : sortableItems[itemIndex]->rawPathPoints3D())
+            {
+                touchesTop = touchesTop || std::abs(point.z - sectionBounds.maxZ) <= sectionTolerance;
+                touchesRight = touchesRight || std::abs(point.y - sectionBounds.maxY) <= sectionTolerance;
+                touchesBottom = touchesBottom || std::abs(point.z - sectionBounds.minZ) <= sectionTolerance;
+                touchesLeft = touchesLeft || std::abs(point.y - sectionBounds.minY) <= sectionTolerance;
+            }
+        }
+
+        return touchesTop && touchesRight && touchesBottom && touchesLeft;
+    }
+
+    std::vector<size_t>& segmentItemsForSurface(RotaryLazySegment& segment, RotarySurfaceGroup surface)
+    {
+        switch (surface)
+        {
+        case RotarySurfaceGroup::Top:
+            return segment.topItems;
+        case RotarySurfaceGroup::Right:
+            return segment.rightItems;
+        case RotarySurfaceGroup::Bottom:
+            return segment.bottomItems;
+        case RotarySurfaceGroup::Left:
+            return segment.leftItems;
+        case RotarySurfaceGroup::Unknown:
+        default:
+            return segment.unknownItems;
+        }
+    }
+
+    bool appendSorted3DGroup
+    (
+        const std::vector<CadItem*>& sortableItems,
+        const std::vector<size_t>& groupIndices,
+        const GProfileRotaryAxisConfig& rotaryAxisConfig,
+        std::vector<CadEditer::ProcessStateUpdate>& processUpdates,
+        std::vector<ProcessConnectionSegment>& processedSegments,
+        bool& hasCurrentEndPoint,
+        QVector3D& currentEndPoint
+    )
+    {
+        if (groupIndices.empty())
+        {
+            return true;
+        }
+
+        std::vector<CadItem*> localItems;
+        std::vector<size_t> localToGlobal;
+        localItems.reserve(groupIndices.size());
+        localToGlobal.reserve(groupIndices.size());
+
+        for (const size_t index : groupIndices)
+        {
+            if (index >= sortableItems.size() || sortableItems[index] == nullptr)
+            {
+                continue;
+            }
+
+            localItems.push_back(sortableItems[index]);
+            localToGlobal.push_back(index);
+        }
+
+        if (localItems.empty())
+        {
+            return true;
+        }
+
+        const QVector3D sweepDirection = computeRotarySweepDirection(localItems, rotaryAxisConfig);
+        const GapStartSelectionContext gapStartContext = buildGapStartSelectionContext(localItems, kPreferredStartGapDistance3D);
+        std::vector<bool> visited(localItems.size(), false);
+        int currentComponentId = -1;
+
+        for (size_t order = 0; order < localItems.size(); ++order)
+        {
+            SortCandidate bestCandidate = chooseNext3DSortCandidate
+            (
+                localItems,
+                visited,
+                processedSegments,
+                gapStartContext,
+                SortStrategy::Smart,
+                currentComponentId,
+                -1,
+                false,
+                hasCurrentEndPoint,
+                currentEndPoint,
+                sweepDirection,
+                rotaryAxisConfig
+            );
+
+            const std::vector<bool> visitedComponents = buildVisitedComponentMask(visited, gapStartContext.componentIds);
+            const int selectedComponentId =
+                bestCandidate.index >= 0 && static_cast<size_t>(bestCandidate.index) < gapStartContext.componentIds.size()
+                ? gapStartContext.componentIds[static_cast<size_t>(bestCandidate.index)]
+                : -1;
+            const bool enteringFreshPreferredComponent =
+                selectedComponentId >= 0
+                && static_cast<size_t>(selectedComponentId) < visitedComponents.size()
+                && !visitedComponents[static_cast<size_t>(selectedComponentId)]
+                && static_cast<size_t>(selectedComponentId) < gapStartContext.preferredStartPointsByComponent.size()
+                && !gapStartContext.preferredStartPointsByComponent[static_cast<size_t>(selectedComponentId)].empty();
+
+            if (enteringFreshPreferredComponent)
+            {
+                bestCandidate = chooseNext3DSortCandidate
+                (
+                    localItems,
+                    visited,
+                    processedSegments,
+                    gapStartContext,
+                    SortStrategy::Smart,
+                    currentComponentId,
+                    selectedComponentId,
+                    true,
+                    hasCurrentEndPoint,
+                    currentEndPoint,
+                    sweepDirection,
+                    rotaryAxisConfig
+                );
+            }
+
+            if (bestCandidate.index < 0 || static_cast<size_t>(bestCandidate.index) >= localToGlobal.size())
+            {
+                return false;
+            }
+
+            const size_t localIndex = static_cast<size_t>(bestCandidate.index);
+            const size_t globalIndex = localToGlobal[localIndex];
+            visited[localIndex] = true;
+            processUpdates.push_back
+            ({
+                sortableItems[globalIndex],
+                static_cast<int>(processUpdates.size()),
+                bestCandidate.reverse,
+                bestCandidate.hasCustomStart,
+                bestCandidate.processStartParameter
+            });
+            hasCurrentEndPoint = true;
+            currentComponentId =
+                localIndex < gapStartContext.componentIds.size()
+                ? gapStartContext.componentIds[localIndex]
+                : -1;
+            currentEndPoint = bestCandidate.endPoint;
+            processedSegments.push_back({ bestCandidate.startPoint, bestCandidate.endPoint });
+        }
+
+        return true;
+    }
+
+    bool tryBuildSquareTubeLazyRotaryProcessUpdates
+    (
+        const std::vector<CadItem*>& sortableItems,
+        const GProfileRotaryAxisConfig& rotaryAxisConfig,
+        std::vector<CadEditer::ProcessStateUpdate>& processUpdates
+    )
+    {
+        if (sortableItems.size() < 3)
+        {
+            return false;
+        }
+
+        std::vector<RotaryItemAnalysis> itemAnalyses(sortableItems.size());
+        RotaryPathBounds sectionBounds;
+
+        for (size_t index = 0; index < sortableItems.size(); ++index)
+        {
+            CadItem* item = sortableItems[index];
+
+            if (item == nullptr)
+            {
+                return false;
+            }
+
+            item->rebuildRawPathPoints3D();
+
+            RotaryItemAnalysis& analysis = itemAnalyses[index];
+            analysis.itemIndex = index;
+
+            for (const RawPathPoint3D& point : item->rawPathPoints3D())
+            {
+                expandRotaryBounds(analysis.bounds, point);
+                expandRotaryBounds(sectionBounds, point);
+            }
+
+            if (!analysis.bounds.valid)
+            {
+                return false;
+            }
+        }
+
+        const double spanX = sectionBounds.maxX - sectionBounds.minX;
+        const double spanY = sectionBounds.maxY - sectionBounds.minY;
+        const double spanZ = sectionBounds.maxZ - sectionBounds.minZ;
+        const double sectionSize = std::max(spanY, spanZ);
+
+        if (spanX <= kSortEpsilon || sectionSize <= kSortEpsilon)
+        {
+            return false;
+        }
+
+        const double sectionTolerance = std::max(0.25, sectionSize * kSquareTubeSectionToleranceRatio);
+        const std::vector<int> componentIds = buildItemConnectivityComponents(sortableItems);
+
+        if (componentIds.size() != sortableItems.size())
+        {
+            return false;
+        }
+
+        const int componentCount = componentIds.empty()
+            ? 0
+            : (*std::max_element(componentIds.begin(), componentIds.end()) + 1);
+
+        if (componentCount <= 0)
+        {
+            return false;
+        }
+
+        std::vector<RotaryFeatureComponent> components(static_cast<size_t>(componentCount));
+
+        for (size_t itemIndex = 0; itemIndex < sortableItems.size(); ++itemIndex)
+        {
+            const int componentId = componentIds[itemIndex];
+
+            if (componentId < 0 || componentId >= componentCount)
+            {
+                return false;
+            }
+
+            RotaryFeatureComponent& component = components[static_cast<size_t>(componentId)];
+            component.itemIndices.push_back(itemIndex);
+            mergeRotaryBounds(component.bounds, itemAnalyses[itemIndex].bounds);
+        }
+
+        std::vector<bool> componentIsEndCut(components.size(), false);
+
+        for (size_t componentIndex = 0; componentIndex < components.size(); ++componentIndex)
+        {
+            RotaryFeatureComponent& component = components[componentIndex];
+            component.isEndCut = componentMatchesSquareTubeEndCut(component, sortableItems, sectionBounds, sectionTolerance);
+            componentIsEndCut[componentIndex] = component.isEndCut;
+        }
+
+        std::vector<size_t> componentOrder(components.size());
+
+        for (size_t componentIndex = 0; componentIndex < components.size(); ++componentIndex)
+        {
+            componentOrder[componentIndex] = componentIndex;
+        }
+
+        std::sort
+        (
+            componentOrder.begin(),
+            componentOrder.end(),
+            [&components](size_t left, size_t right)
+            {
+                return rotaryBoundsCenterX(components[left].bounds) < rotaryBoundsCenterX(components[right].bounds);
+            }
+        );
+
+        const double disconnectedCutClusterTolerance = std::max(1.0, std::min(std::max(2.0, spanX * 0.01), sectionSize * 0.35));
+        const double disconnectedCutMaxSpanX = std::max(sectionSize * 1.5, spanX * 0.08);
+        std::vector<size_t> pendingComponentCluster;
+        double pendingClusterCenterX = 0.0;
+
+        auto flushPendingComponentCluster = [&]()
+        {
+            if (pendingComponentCluster.empty())
+            {
+                return;
+            }
+
+            RotaryFeatureComponent aggregateComponent;
+
+            for (const size_t componentIndex : pendingComponentCluster)
+            {
+                if (componentIndex >= components.size())
+                {
+                    continue;
+                }
+
+                aggregateComponent.itemIndices.insert
+                (
+                    aggregateComponent.itemIndices.end(),
+                    components[componentIndex].itemIndices.begin(),
+                    components[componentIndex].itemIndices.end()
+                );
+                mergeRotaryBounds(aggregateComponent.bounds, components[componentIndex].bounds);
+            }
+
+            const double aggregateSpanX = aggregateComponent.bounds.valid
+                ? aggregateComponent.bounds.maxX - aggregateComponent.bounds.minX
+                : 0.0;
+
+            if (aggregateSpanX <= disconnectedCutMaxSpanX
+                && componentMatchesSquareTubeEndCut(aggregateComponent, sortableItems, sectionBounds, sectionTolerance))
+            {
+                for (const size_t componentIndex : pendingComponentCluster)
+                {
+                    if (componentIndex < componentIsEndCut.size())
+                    {
+                        componentIsEndCut[componentIndex] = true;
+                        components[componentIndex].isEndCut = true;
+                    }
+                }
+            }
+        };
+
+        for (const size_t componentIndex : componentOrder)
+        {
+            if (!components[componentIndex].bounds.valid)
+            {
+                continue;
+            }
+
+            const double componentCenterX = rotaryBoundsCenterX(components[componentIndex].bounds);
+
+            if (pendingComponentCluster.empty())
+            {
+                pendingComponentCluster.push_back(componentIndex);
+                pendingClusterCenterX = componentCenterX;
+                continue;
+            }
+
+            if (std::abs(componentCenterX - pendingClusterCenterX) > disconnectedCutClusterTolerance)
+            {
+                flushPendingComponentCluster();
+                pendingComponentCluster.clear();
+                pendingComponentCluster.push_back(componentIndex);
+                pendingClusterCenterX = componentCenterX;
+                continue;
+            }
+
+            const size_t oldCount = pendingComponentCluster.size();
+            pendingComponentCluster.push_back(componentIndex);
+            pendingClusterCenterX =
+                (pendingClusterCenterX * static_cast<double>(oldCount) + componentCenterX)
+                / static_cast<double>(pendingComponentCluster.size());
+        }
+
+        flushPendingComponentCluster();
+
+        std::vector<bool> itemIsEndCut(sortableItems.size(), false);
+        std::vector<size_t> endCutComponentIndices;
+        double maxEndCutSpanX = 0.0;
+
+        for (size_t componentIndex = 0; componentIndex < components.size(); ++componentIndex)
+        {
+            if (!componentIsEndCut[componentIndex])
+            {
+                continue;
+            }
+
+            endCutComponentIndices.push_back(componentIndex);
+            maxEndCutSpanX = std::max(maxEndCutSpanX, components[componentIndex].bounds.maxX - components[componentIndex].bounds.minX);
+
+            for (const size_t itemIndex : components[componentIndex].itemIndices)
+            {
+                itemIsEndCut[itemIndex] = true;
+            }
+        }
+
+        if (endCutComponentIndices.size() < 2)
+        {
+            return false;
+        }
+
+        for (RotaryItemAnalysis& analysis : itemAnalyses)
+        {
+            analysis.surface = classifySquareTubeSurface(sortableItems[analysis.itemIndex], analysis.bounds, sectionBounds);
+        }
+
+        std::sort
+        (
+            endCutComponentIndices.begin(),
+            endCutComponentIndices.end(),
+            [&components](size_t left, size_t right)
+            {
+                return rotaryBoundsCenterX(components[left].bounds) < rotaryBoundsCenterX(components[right].bounds);
+            }
+        );
+
+        const double clusterTolerance = std::max(1.0, std::min(std::max(2.0, spanX * 0.01), std::max(2.0, maxEndCutSpanX * 0.75 + 1.0)));
+        std::vector<RotaryCutCluster> cutClusters;
+
+        for (const size_t componentIndex : endCutComponentIndices)
+        {
+            const RotaryFeatureComponent& component = components[componentIndex];
+            const double centerX = rotaryBoundsCenterX(component.bounds);
+
+            if (cutClusters.empty() || std::abs(centerX - cutClusters.back().centerX) > clusterTolerance)
+            {
+                RotaryCutCluster cluster;
+                cluster.centerX = centerX;
+                cluster.itemIndices = component.itemIndices;
+                cutClusters.push_back(cluster);
+                continue;
+            }
+
+            RotaryCutCluster& cluster = cutClusters.back();
+            const size_t oldCount = cluster.itemIndices.size();
+            cluster.itemIndices.insert(cluster.itemIndices.end(), component.itemIndices.begin(), component.itemIndices.end());
+            cluster.centerX =
+                (cluster.centerX * static_cast<double>(oldCount) + centerX * static_cast<double>(component.itemIndices.size()))
+                / static_cast<double>(cluster.itemIndices.size());
+        }
+
+        if (cutClusters.size() < 2)
+        {
+            return false;
+        }
+
+        std::vector<RotaryLazySegment> segments;
+        const double boundaryTolerance = std::max(1.0, spanX * 0.001);
+
+        for (const RotaryItemAnalysis& analysis : itemAnalyses)
+        {
+            if (itemIsEndCut[analysis.itemIndex])
+            {
+                continue;
+            }
+
+            const double itemCenterX = rotaryBoundsCenterX(analysis.bounds);
+            int leftClusterIndex = -1;
+            int rightClusterIndex = -1;
+
+            for (size_t clusterIndex = 0; clusterIndex < cutClusters.size(); ++clusterIndex)
+            {
+                const double clusterCenterX = cutClusters[clusterIndex].centerX;
+
+                if (clusterCenterX < itemCenterX - boundaryTolerance)
+                {
+                    leftClusterIndex = static_cast<int>(clusterIndex);
+                    continue;
+                }
+
+                if (clusterCenterX > itemCenterX + boundaryTolerance)
+                {
+                    rightClusterIndex = static_cast<int>(clusterIndex);
+                    break;
+                }
+            }
+
+            if (leftClusterIndex < 0 || rightClusterIndex < 0 || leftClusterIndex == rightClusterIndex)
+            {
+                return false;
+            }
+
+            auto existingSegment = std::find_if
+            (
+                segments.begin(),
+                segments.end(),
+                [leftClusterIndex, rightClusterIndex](const RotaryLazySegment& segment)
+                {
+                    return segment.leftClusterIndex == leftClusterIndex && segment.rightClusterIndex == rightClusterIndex;
+                }
+            );
+
+            if (existingSegment == segments.end())
+            {
+                RotaryLazySegment segment;
+                segment.leftClusterIndex = leftClusterIndex;
+                segment.rightClusterIndex = rightClusterIndex;
+                segment.centerX = (cutClusters[static_cast<size_t>(leftClusterIndex)].centerX + cutClusters[static_cast<size_t>(rightClusterIndex)].centerX) * 0.5;
+                segments.push_back(segment);
+                existingSegment = std::prev(segments.end());
+            }
+
+            segmentItemsForSurface(*existingSegment, analysis.surface).push_back(analysis.itemIndex);
+        }
+
+        if (segments.empty())
+        {
+            return false;
+        }
+
+        std::sort
+        (
+            segments.begin(),
+            segments.end(),
+            [](const RotaryLazySegment& left, const RotaryLazySegment& right)
+            {
+                return left.centerX < right.centerX;
+            }
+        );
+
+        processUpdates.clear();
+        processUpdates.reserve(sortableItems.size());
+        std::vector<ProcessConnectionSegment> processedSegments;
+        processedSegments.reserve(sortableItems.size());
+        std::vector<bool> scheduled(sortableItems.size(), false);
+        bool hasCurrentEndPoint = false;
+        QVector3D currentEndPoint;
+
+        auto appendGroup = [&](const std::vector<size_t>& rawIndices) -> bool
+        {
+            std::vector<size_t> filteredIndices;
+            filteredIndices.reserve(rawIndices.size());
+
+            for (const size_t index : rawIndices)
+            {
+                if (index < sortableItems.size() && !scheduled[index])
+                {
+                    filteredIndices.push_back(index);
+                }
+            }
+
+            if (filteredIndices.empty())
+            {
+                return true;
+            }
+
+            if (!appendSorted3DGroup(sortableItems, filteredIndices, rotaryAxisConfig, processUpdates, processedSegments, hasCurrentEndPoint, currentEndPoint))
+            {
+                return false;
+            }
+
+            for (const size_t index : filteredIndices)
+            {
+                scheduled[index] = true;
+            }
+
+            return true;
+        };
+
+        for (const RotaryLazySegment& segment : segments)
+        {
+            if (segment.leftClusterIndex < 0
+                || segment.rightClusterIndex < 0
+                || static_cast<size_t>(segment.leftClusterIndex) >= cutClusters.size()
+                || static_cast<size_t>(segment.rightClusterIndex) >= cutClusters.size())
+            {
+                return false;
+            }
+
+            if (!appendGroup(cutClusters[static_cast<size_t>(segment.leftClusterIndex)].itemIndices)
+                || !appendGroup(segment.topItems)
+                || !appendGroup(segment.rightItems)
+                || !appendGroup(segment.bottomItems)
+                || !appendGroup(segment.leftItems)
+                || !appendGroup(segment.unknownItems)
+                || !appendGroup(cutClusters[static_cast<size_t>(segment.rightClusterIndex)].itemIndices))
+            {
+                processUpdates.clear();
+                return false;
+            }
+        }
+
+        if (processUpdates.size() != sortableItems.size())
+        {
+            processUpdates.clear();
+            return false;
+        }
+
+        return true;
+    }
+
     int nextProcessOrder(const CadDocument& document)
     {
         int maxOrder = -1;
@@ -2225,6 +3198,14 @@ bool Gcode_postprocessing_system::sortEntitiesByCurrentDirection()
         }
 
         sortableItems.push_back(entity.get());
+    }
+
+    const SortableDedupResult dedupResult = deduplicateSortableItems(sortableItems);
+
+    if (!dedupResult.duplicateItems.isEmpty() && !m_editer.deleteEntities(dedupResult.duplicateItems))
+    {
+        QMessageBox::warning(this, QStringLiteral("3轴排序"), QStringLiteral("重复图元自动去重失败，排序已中止。"));
+        return false;
     }
 
     if (sortableItems.empty())
@@ -2325,7 +3306,9 @@ bool Gcode_postprocessing_system::sortEntitiesByCurrentDirection()
 
     ui->openGLWidget->appendCommandMessage
     (
-        QStringLiteral("3轴排序完成，共更新 %1 个图元的加工顺序，首件已按最接近原点的当前起点选取，并保留当前加工方向设置。").arg(processUpdates.size())
+        QStringLiteral("3轴排序完成，共更新 %1 个图元的加工顺序，首件已按最接近原点的当前起点选取，并保留当前加工方向设置。%2")
+            .arg(processUpdates.size())
+            .arg(dedupResult.removedCount > 0 ? QStringLiteral("已自动删除 %1 个重复图元。").arg(dedupResult.removedCount) : QString())
     );
     ui->openGLWidget->refreshCommandPrompt();
     statusBar()->showMessage(QStringLiteral("3轴排序完成，共更新 %1 个图元").arg(processUpdates.size()), 5000);
@@ -2387,6 +3370,14 @@ bool Gcode_postprocessing_system::smartSortEntities()
         }
 
         sortableItems.push_back(entity.get());
+    }
+
+    const SortableDedupResult dedupResult = deduplicateSortableItems(sortableItems);
+
+    if (!dedupResult.duplicateItems.isEmpty() && !m_editer.deleteEntities(dedupResult.duplicateItems))
+    {
+        QMessageBox::warning(this, QStringLiteral("3轴智能排序"), QStringLiteral("重复图元自动去重失败，排序已中止。"));
+        return false;
     }
 
     if (sortableItems.empty())
@@ -2487,7 +3478,9 @@ bool Gcode_postprocessing_system::smartSortEntities()
 
     ui->openGLWidget->appendCommandMessage
     (
-        QStringLiteral("3轴智能排序完成，共更新 %1 个图元的加工顺序，并已对闭合图元的方向/起刀缝点做连续性优化。").arg(processUpdates.size())
+        QStringLiteral("3轴智能排序完成，共更新 %1 个图元的加工顺序，并已对闭合图元的方向/起刀缝点做连续性优化。%2")
+            .arg(processUpdates.size())
+            .arg(dedupResult.removedCount > 0 ? QStringLiteral("已自动删除 %1 个重复图元。").arg(dedupResult.removedCount) : QString())
     );
     ui->openGLWidget->refreshCommandPrompt();
     statusBar()->showMessage(QStringLiteral("3轴智能排序完成，共更新 %1 个图元").arg(processUpdates.size()), 5000);
@@ -2527,6 +3520,14 @@ bool Gcode_postprocessing_system::sortEntitiesByCurrentDirection3D()
         sortableItems.push_back(entity.get());
     }
 
+    const SortableDedupResult dedupResult = deduplicateSortableItems(sortableItems);
+
+    if (!dedupResult.duplicateItems.isEmpty() && !m_editer.deleteEntities(dedupResult.duplicateItems))
+    {
+        QMessageBox::warning(this, QStringLiteral("4轴(绕A)排序"), QStringLiteral("重复图元自动去重失败，排序已中止。"));
+        return false;
+    }
+
     if (sortableItems.empty())
     {
         QMessageBox::warning(this, QStringLiteral("4轴(绕A)排序"), QStringLiteral("当前文档中没有可参与 4 轴 G 代码排序的图元。"));
@@ -2534,6 +3535,27 @@ bool Gcode_postprocessing_system::sortEntitiesByCurrentDirection3D()
     }
 
     const GProfileRotaryAxisConfig& rotaryAxisConfig = m_activeProfile.rotaryAxisConfig();
+    std::vector<CadEditer::ProcessStateUpdate> lazyRotaryUpdates;
+
+    if (tryBuildSquareTubeLazyRotaryProcessUpdates(sortableItems, rotaryAxisConfig, lazyRotaryUpdates))
+    {
+        if (!m_editer.applyEntityProcessStates(lazyRotaryUpdates))
+        {
+            QMessageBox::warning(this, QStringLiteral("4轴(绕A)排序"), QStringLiteral("4轴排序结果写入失败。"));
+            return false;
+        }
+
+        ui->openGLWidget->appendCommandMessage
+        (
+            QStringLiteral("4轴(绕A)排序完成，共更新 %1 个图元；已按方管段执行左切面、顶面、侧面、底面、侧面、右切面的懒旋转顺序。%2")
+                .arg(lazyRotaryUpdates.size())
+                .arg(dedupResult.removedCount > 0 ? QStringLiteral("已自动删除 %1 个重复图元。").arg(dedupResult.removedCount) : QString())
+        );
+        ui->openGLWidget->refreshCommandPrompt();
+        statusBar()->showMessage(QStringLiteral("4轴(绕A)懒旋转排序完成，共更新 %1 个图元").arg(lazyRotaryUpdates.size()), 5000);
+        return true;
+    }
+
     const QVector3D sweepDirection = computeRotarySweepDirection(sortableItems, rotaryAxisConfig);
     const GapStartSelectionContext gapStartContext = buildGapStartSelectionContext(sortableItems, kPreferredStartGapDistance3D);
     std::vector<CadEditer::ProcessStateUpdate> processUpdates;
@@ -2628,7 +3650,9 @@ bool Gcode_postprocessing_system::sortEntitiesByCurrentDirection3D()
 
     ui->openGLWidget->appendCommandMessage
     (
-        QStringLiteral("4轴(绕A)排序完成，共更新 %1 个图元的加工顺序，排序已按 X 与 A 轴联动连续性重新整理。").arg(processUpdates.size())
+        QStringLiteral("4轴(绕A)排序完成，共更新 %1 个图元的加工顺序，排序已按 X 与 A 轴联动连续性重新整理。%2")
+            .arg(processUpdates.size())
+            .arg(dedupResult.removedCount > 0 ? QStringLiteral("已自动删除 %1 个重复图元。").arg(dedupResult.removedCount) : QString())
     );
     ui->openGLWidget->refreshCommandPrompt();
     statusBar()->showMessage(QStringLiteral("4轴(绕A)排序完成，共更新 %1 个图元").arg(processUpdates.size()), 5000);
@@ -2668,6 +3692,14 @@ bool Gcode_postprocessing_system::smartSortEntities3D()
         sortableItems.push_back(entity.get());
     }
 
+    const SortableDedupResult dedupResult = deduplicateSortableItems(sortableItems);
+
+    if (!dedupResult.duplicateItems.isEmpty() && !m_editer.deleteEntities(dedupResult.duplicateItems))
+    {
+        QMessageBox::warning(this, QStringLiteral("4轴(绕A)智能排序"), QStringLiteral("重复图元自动去重失败，排序已中止。"));
+        return false;
+    }
+
     if (sortableItems.empty())
     {
         QMessageBox::warning(this, QStringLiteral("4轴(绕A)智能排序"), QStringLiteral("当前文档中没有可参与 4 轴 G 代码排序的图元。"));
@@ -2675,6 +3707,27 @@ bool Gcode_postprocessing_system::smartSortEntities3D()
     }
 
     const GProfileRotaryAxisConfig& rotaryAxisConfig = m_activeProfile.rotaryAxisConfig();
+    std::vector<CadEditer::ProcessStateUpdate> lazyRotaryUpdates;
+
+    if (tryBuildSquareTubeLazyRotaryProcessUpdates(sortableItems, rotaryAxisConfig, lazyRotaryUpdates))
+    {
+        if (!m_editer.applyEntityProcessStates(lazyRotaryUpdates))
+        {
+            QMessageBox::warning(this, QStringLiteral("4轴(绕A)智能排序"), QStringLiteral("4轴智能排序结果写入失败。"));
+            return false;
+        }
+
+        ui->openGLWidget->appendCommandMessage
+        (
+            QStringLiteral("4轴(绕A)智能排序完成，共更新 %1 个图元；已按方管段执行左切面、顶面、侧面、底面、侧面、右切面的懒旋转顺序。%2")
+                .arg(lazyRotaryUpdates.size())
+                .arg(dedupResult.removedCount > 0 ? QStringLiteral("已自动删除 %1 个重复图元。").arg(dedupResult.removedCount) : QString())
+        );
+        ui->openGLWidget->refreshCommandPrompt();
+        statusBar()->showMessage(QStringLiteral("4轴(绕A)懒旋转智能排序完成，共更新 %1 个图元").arg(lazyRotaryUpdates.size()), 5000);
+        return true;
+    }
+
     const QVector3D sweepDirection = computeRotarySweepDirection(sortableItems, rotaryAxisConfig);
     const GapStartSelectionContext gapStartContext = buildGapStartSelectionContext(sortableItems, kPreferredStartGapDistance3D);
     std::vector<CadEditer::ProcessStateUpdate> processUpdates;

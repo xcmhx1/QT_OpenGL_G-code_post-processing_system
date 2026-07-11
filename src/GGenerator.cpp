@@ -34,16 +34,9 @@ namespace
 {
     constexpr double kPi = 3.14159265358979323846;
     constexpr double kTwoPi = 6.28318530717958647692;
-    constexpr double kRadToDeg = 57.2957795130823208768;
     constexpr double kCircleTolerance = 1.0e-8;
     constexpr int kFullEllipseSegments = 128;
     constexpr double kControlPointTolerance = 1.0e-5;
-    constexpr double kRotarySurfaceJoinTolerance = 0.25;
-    constexpr double kRotaryDuplicatePointTolerance = 1.0e-5;
-    constexpr double kRotaryToolDirectionJumpThresholdDegrees = 3.0;
-    constexpr double kRotaryToolDirectionBlendRatio = 0.08;
-    constexpr double kRotaryToolDirectionMinBlendLength = 1.0;
-    constexpr double kRotaryToolDirectionMaxBlendLength = 20.0;
     QString formatCoord(double value)
     {
         return QString::number(value, 'f', 5);
@@ -965,50 +958,6 @@ namespace
         return dx * dx + dy * dy + dz * dz + da * da <= tolerance * tolerance;
     }
 
-    double unwrapAngleNear(double previousDeg, double currentDeg);
-
-    bool areRawPathPointsNear
-    (
-        const RawPathPoint3D& left,
-        const RawPathPoint3D& right,
-        double tolerance = kRotarySurfaceJoinTolerance
-    )
-    {
-        const double dx = left.x - right.x;
-        const double dy = left.y - right.y;
-        const double dz = left.z - right.z;
-        return dx * dx + dy * dy + dz * dz <= tolerance * tolerance;
-    }
-
-    double rawPathDistance(const RawPathPoint3D& left, const RawPathPoint3D& right)
-    {
-        const double dx = left.x - right.x;
-        const double dy = left.y - right.y;
-        const double dz = left.z - right.z;
-        return std::sqrt(dx * dx + dy * dy + dz * dz);
-    }
-
-    void setControlPointFromRawPathAndA
-    (
-        ControlPoint4Axis& controlPoint,
-        const RawPathPoint3D& rawPoint,
-        double axisY,
-        double axisZ,
-        double aDeg
-    )
-    {
-        const double angleRad = aDeg / kRadToDeg;
-        const double c = std::cos(angleRad);
-        const double s = std::sin(angleRad);
-        const double dy = rawPoint.y - axisY;
-        const double dz = rawPoint.z - axisZ;
-
-        controlPoint.x = rawPoint.x;
-        controlPoint.y = axisY + dy * c - dz * s;
-        controlPoint.z = axisZ + dy * s + dz * c;
-        controlPoint.aDeg = aDeg;
-    }
-
     struct RotaryCornerCenter
     {
         bool valid = false;
@@ -1028,32 +977,6 @@ namespace
         RotaryCornerCenter bottomRightCorner;
         RotaryCornerCenter bottomLeftCorner;
     };
-
-    double rotarySectionSideTolerance(const RotarySectionBounds& bounds)
-    {
-        if (!bounds.valid)
-        {
-            return kRotarySurfaceJoinTolerance;
-        }
-
-        const double spanY = bounds.maxY - bounds.minY;
-        const double spanZ = bounds.maxZ - bounds.minZ;
-        return std::max(kRotarySurfaceJoinTolerance, std::max(spanY, spanZ) * 0.01);
-    }
-
-    double rotaryToolDirectionBlendLength(const RotarySectionBounds& bounds)
-    {
-        if (!bounds.valid)
-        {
-            return kRotaryToolDirectionMinBlendLength;
-        }
-
-        const double spanY = bounds.maxY - bounds.minY;
-        const double spanZ = bounds.maxZ - bounds.minZ;
-        const double sectionSpan = std::max(spanY, spanZ);
-        const double length = sectionSpan * kRotaryToolDirectionBlendRatio;
-        return std::min(kRotaryToolDirectionMaxBlendLength, std::max(kRotaryToolDirectionMinBlendLength, length));
-    }
 
     double rotarySectionExactSideTolerance(const RotarySectionBounds& bounds)
     {
@@ -1202,270 +1125,6 @@ namespace
         return bounds.valid;
     }
 
-    double rawAForPointFromCenter
-    (
-        const RawPathPoint3D& point,
-        double centerY,
-        double centerZ,
-        double fallbackA
-    )
-    {
-        const double dy = point.y - centerY;
-        const double dz = point.z - centerZ;
-
-        if (dy * dy + dz * dz <= 1.0e-12)
-        {
-            return fallbackA;
-        }
-
-        return std::atan2(dy, dz) * kRadToDeg;
-    }
-
-    bool tryRoundedCornerRawA
-    (
-        const RawPathPoint3D& point,
-        const RotarySectionBounds& bounds,
-        double fallbackA,
-        double& outRawA
-    )
-    {
-        const double tolerance = rotarySectionExactSideTolerance(bounds);
-
-        const auto tryCorner =
-            [&point, fallbackA, &outRawA, tolerance]
-            (
-                const RotaryCornerCenter& center,
-                bool inCornerRegion
-            )
-            {
-                if (!center.valid || !inCornerRegion)
-                {
-                    return false;
-                }
-
-                outRawA = rawAForPointFromCenter(point, center.y, center.z, fallbackA);
-                return true;
-            };
-
-        if (tryCorner
-        (
-            bounds.topRightCorner,
-            point.y >= bounds.topRightCorner.y - tolerance
-                && point.z >= bounds.topRightCorner.z - tolerance
-        ))
-        {
-            return true;
-        }
-
-        if (tryCorner
-        (
-            bounds.topLeftCorner,
-            point.y <= bounds.topLeftCorner.y + tolerance
-                && point.z >= bounds.topLeftCorner.z - tolerance
-        ))
-        {
-            return true;
-        }
-
-        if (tryCorner
-        (
-            bounds.bottomRightCorner,
-            point.y >= bounds.bottomRightCorner.y - tolerance
-                && point.z <= bounds.bottomRightCorner.z + tolerance
-        ))
-        {
-            return true;
-        }
-
-        if (tryCorner
-        (
-            bounds.bottomLeftCorner,
-            point.y <= bounds.bottomLeftCorner.y + tolerance
-                && point.z <= bounds.bottomLeftCorner.z + tolerance
-        ))
-        {
-            return true;
-        }
-
-        return false;
-    }
-
-    double squareTubeRawAForPathPoint
-    (
-        const RawPathPoint3D& point,
-        const RotarySectionBounds& bounds,
-        double axisY,
-        double axisZ
-    )
-    {
-        const double tolerance = rotarySectionSideTolerance(bounds);
-        const bool nearMaxY = std::abs(point.y - bounds.maxY) <= tolerance;
-        const bool nearMinY = std::abs(point.y - bounds.minY) <= tolerance;
-        const bool nearMaxZ = std::abs(point.z - bounds.maxZ) <= tolerance;
-        const bool nearMinZ = std::abs(point.z - bounds.minZ) <= tolerance;
-        const bool onYSide = nearMaxY || nearMinY;
-        const bool onZSide = nearMaxZ || nearMinZ;
-
-        double fallbackA = 0.0;
-        const double dy = point.y - axisY;
-        const double dz = point.z - axisZ;
-
-        if (dy * dy + dz * dz > 1.0e-12)
-        {
-            fallbackA = std::atan2(dy, dz) * kRadToDeg;
-        }
-
-        double roundedCornerA = fallbackA;
-
-        if (tryRoundedCornerRawA(point, bounds, fallbackA, roundedCornerA))
-        {
-            return roundedCornerA;
-        }
-
-        if (onZSide && !onYSide)
-        {
-            return nearMaxZ ? 0.0 : 180.0;
-        }
-
-        if (onYSide && !onZSide)
-        {
-            return nearMaxY ? 90.0 : -90.0;
-        }
-
-        return fallbackA;
-    }
-
-    void smoothRotaryToolAngles
-    (
-        std::vector<double>& angles,
-        const std::vector<RawPathPoint3D>& rawPoints,
-        const RotarySectionBounds& bounds,
-        const ControlPoint4Axis* previousEndPoint,
-        const RawPathPoint3D* previousRawEndPoint
-    )
-    {
-        const size_t count = std::min(angles.size(), rawPoints.size());
-
-        if (count == 0)
-        {
-            return;
-        }
-
-        const double blendLength = rotaryToolDirectionBlendLength(bounds);
-        double activeRemainingLength = 0.0;
-        double activeOffset = 0.0;
-
-        if (previousEndPoint != nullptr
-            && previousRawEndPoint != nullptr
-            && areRawPathPointsNear(*previousRawEndPoint, rawPoints.front()))
-        {
-            const double previousA = previousEndPoint->aDeg;
-            angles.front() = unwrapAngleNear(previousA, angles.front());
-            const double startDelta = angles.front() - previousA;
-
-            if (std::abs(startDelta) > kRotaryToolDirectionJumpThresholdDegrees)
-            {
-                angles.front() = previousA;
-                activeOffset = -startDelta;
-                activeRemainingLength = blendLength;
-            }
-        }
-
-        for (size_t index = 1; index < count; ++index)
-        {
-            angles[index] = unwrapAngleNear(angles[index - 1], angles[index]);
-            const double segmentLength = rawPathDistance(rawPoints[index - 1], rawPoints[index]);
-
-            if (activeRemainingLength > kControlPointTolerance)
-            {
-                const double nextRemainingLength = std::max(0.0, activeRemainingLength - segmentLength);
-                const double scale = activeRemainingLength > kControlPointTolerance
-                    ? nextRemainingLength / activeRemainingLength
-                    : 0.0;
-
-                activeOffset *= scale;
-                angles[index] += activeOffset;
-                activeRemainingLength = nextRemainingLength;
-
-                if (activeRemainingLength <= kControlPointTolerance)
-                {
-                    activeOffset = 0.0;
-                }
-
-                continue;
-            }
-
-            const double jump = angles[index] - angles[index - 1];
-
-            if (std::abs(jump) <= kRotaryToolDirectionJumpThresholdDegrees)
-            {
-                continue;
-            }
-
-            const double progress = blendLength > kControlPointTolerance
-                ? std::min(1.0, segmentLength / blendLength)
-                : 1.0;
-            const double targetA = angles[index];
-            angles[index] = angles[index - 1] + jump * progress;
-            activeOffset = angles[index] - targetA;
-            activeRemainingLength = blendLength * (1.0 - progress);
-        }
-    }
-
-    void applySquareTubeToolOrientation
-    (
-        std::vector<ControlPoint4Axis>& controlPoints,
-        const std::vector<RawPathPoint3D>& rawPoints,
-        const RotarySectionBounds& bounds,
-        double axisY,
-        double axisZ,
-        bool invertAAxisDirection,
-        double aAxisOffsetDegrees,
-        bool keepContinuousAngle,
-        const ControlPoint4Axis* previousEndPoint,
-        const RawPathPoint3D* previousRawEndPoint
-    )
-    {
-        if (!bounds.valid || controlPoints.empty() || rawPoints.empty())
-        {
-            return;
-        }
-
-        double previousA = previousEndPoint != nullptr ? previousEndPoint->aDeg : 0.0;
-        bool hasPreviousA = previousEndPoint != nullptr;
-        const size_t count = std::min(controlPoints.size(), rawPoints.size());
-        std::vector<double> angles;
-        angles.reserve(count);
-
-        for (size_t index = 0; index < count; ++index)
-        {
-            double rawA = squareTubeRawAForPathPoint(rawPoints[index], bounds, axisY, axisZ);
-
-            if (invertAAxisDirection)
-            {
-                rawA = -rawA;
-            }
-
-            rawA += aAxisOffsetDegrees;
-
-            if (hasPreviousA && keepContinuousAngle)
-            {
-                rawA = unwrapAngleNear(previousA, rawA);
-            }
-
-            angles.push_back(rawA);
-            previousA = rawA;
-            hasPreviousA = true;
-        }
-
-        smoothRotaryToolAngles(angles, rawPoints, bounds, previousEndPoint, previousRawEndPoint);
-
-        for (size_t index = 0; index < count; ++index)
-        {
-            setControlPointFromRawPathAndA(controlPoints[index], rawPoints[index], axisY, axisZ, angles[index]);
-        }
-    }
-
     bool hasInitialMachinePoint(const GProfileRotaryAxisConfig& config)
     {
         return config.useInitialMachinePoint;
@@ -1505,17 +1164,6 @@ namespace
         {
             point.aDeg += shift;
         }
-    }
-
-    bool isRotarySurfaceContinuousJoin
-    (
-        const std::vector<RawPathPoint3D>& rawPoints,
-        const RawPathPoint3D* previousRawEndPoint
-    )
-    {
-        return !rawPoints.empty()
-            && previousRawEndPoint != nullptr
-            && areRawPathPointsNear(*previousRawEndPoint, rawPoints.front());
     }
 
     void applyMachiningPlaneZOffset(std::vector<ControlPoint4Axis>& controlPoints, double zOffset)
@@ -1736,9 +1384,6 @@ namespace
         const GProfileRotaryAxisConfig& config,
         double safeMachineZ,
         const ControlPoint4Axis* previousEndPoint,
-        const std::vector<RawPathPoint3D>& rawPoints,
-        const RawPathPoint3D* previousRawEndPoint,
-        bool surfaceContinuousJoin,
         ControlPoint4Axis* writtenEndPoint
     )
     {
@@ -1751,34 +1396,6 @@ namespace
         const bool hasPreviousEndPoint = previousEndPoint != nullptr;
         const bool directlyContinuous = hasPreviousEndPoint
             && areControlPointsCoincident(*previousEndPoint, firstPoint);
-        bool hasLastOutputPoint = false;
-        ControlPoint4Axis lastOutputPoint;
-        bool hasLastOutputRawPoint = false;
-        RawPathPoint3D lastOutputRawPoint;
-
-        const auto rememberOutputPoint =
-            [&lastOutputPoint, &hasLastOutputPoint](const ControlPoint4Axis& point)
-            {
-                lastOutputPoint = point;
-                hasLastOutputPoint = true;
-            };
-
-        const auto rememberOutputRawPoint =
-            [&lastOutputRawPoint, &hasLastOutputRawPoint](const RawPathPoint3D& point)
-            {
-                lastOutputRawPoint = point;
-                hasLastOutputRawPoint = true;
-            };
-
-        if (hasPreviousEndPoint)
-        {
-            rememberOutputPoint(*previousEndPoint);
-
-            if (previousRawEndPoint != nullptr)
-            {
-                rememberOutputRawPoint(*previousRawEndPoint);
-            }
-        }
 
         if (!hasPreviousEndPoint)
         {
@@ -1793,7 +1410,6 @@ namespace
                 if (!areControlPointsCoincident(initialPoint, firstPoint))
                 {
                     writeRapidMove4Axis(stream, initialPoint.x, initialPoint.y, initialPoint.z, initialPoint.aDeg);
-                    rememberOutputPoint(initialPoint);
                 }
             }
 
@@ -1801,32 +1417,20 @@ namespace
             {
                 const ControlPoint4Axis approachPoint = machineSafeApproachPoint(firstPoint, safeMachineZ);
                 writeRapidMove4Axis(stream, approachPoint.x, approachPoint.y, approachPoint.z, approachPoint.aDeg);
-                rememberOutputPoint(approachPoint);
 
                 if (!areControlPointsCoincident(approachPoint, firstPoint))
                 {
                     writeRapidMove4Axis(stream, firstPoint.x, firstPoint.y, firstPoint.z, firstPoint.aDeg);
-                    rememberOutputPoint(firstPoint);
                 }
             }
             else
             {
                 writeRapidMove4Axis(stream, firstPoint.x, firstPoint.y, firstPoint.z, firstPoint.aDeg);
-                rememberOutputPoint(firstPoint);
-            }
-
-            if (!rawPoints.empty())
-            {
-                rememberOutputRawPoint(rawPoints.front());
             }
         }
         else if (!directlyContinuous)
         {
-            if (surfaceContinuousJoin)
-            {
-                // The raw endpoint is already continuous. Do not emit a pose-only move at the seam.
-            }
-            else if (safeMachineZ > std::min(previousEndPoint->z, firstPoint.z) + kControlPointTolerance)
+            if (safeMachineZ > std::min(previousEndPoint->z, firstPoint.z) + kControlPointTolerance)
             {
                 const ControlPoint4Axis departureSafePoint = machineSafeApproachPoint(*previousEndPoint, safeMachineZ);
                 const ControlPoint4Axis approachPoint = machineSafeApproachPoint(firstPoint, safeMachineZ);
@@ -1841,66 +1445,33 @@ namespace
                         departureSafePoint.z,
                         departureSafePoint.aDeg
                     );
-                    rememberOutputPoint(departureSafePoint);
                 }
 
                 if (!areControlPointsCoincident(departureSafePoint, approachPoint))
                 {
                     writeRapidMove4Axis(stream, approachPoint.x, approachPoint.y, approachPoint.z, approachPoint.aDeg);
-                    rememberOutputPoint(approachPoint);
                 }
 
                 if (!areControlPointsCoincident(approachPoint, firstPoint))
                 {
                     writeRapidMove4Axis(stream, firstPoint.x, firstPoint.y, firstPoint.z, firstPoint.aDeg);
-                    rememberOutputPoint(firstPoint);
-                }
-
-                if (!rawPoints.empty())
-                {
-                    rememberOutputRawPoint(rawPoints.front());
                 }
             }
             else
             {
                 writeRapidMove4Axis(stream, firstPoint.x, firstPoint.y, firstPoint.z, firstPoint.aDeg);
-                rememberOutputPoint(firstPoint);
-
-                if (!rawPoints.empty())
-                {
-                    rememberOutputRawPoint(rawPoints.front());
-                }
             }
-        }
-        else if (!rawPoints.empty())
-        {
-            rememberOutputRawPoint(rawPoints.front());
         }
 
         for (size_t index = 1; index < controlPoints.size(); ++index)
         {
             const ControlPoint4Axis& point = controlPoints[index];
-            const bool hasRawPoint = index < rawPoints.size();
-
-            if (hasRawPoint
-                && hasLastOutputRawPoint
-                && areRawPathPointsNear(lastOutputRawPoint, rawPoints[index], kRotaryDuplicatePointTolerance))
-            {
-                continue;
-            }
-
             writeLinearMove4Axis(stream, point.x, point.y, point.z, point.aDeg);
-            rememberOutputPoint(point);
-
-            if (hasRawPoint)
-            {
-                rememberOutputRawPoint(rawPoints[index]);
-            }
         }
 
-        if (writtenEndPoint != nullptr && hasLastOutputPoint)
+        if (writtenEndPoint != nullptr)
         {
-            *writtenEndPoint = lastOutputPoint;
+            *writtenEndPoint = controlPoints.back();
         }
 
         return true;
@@ -1913,7 +1484,6 @@ namespace
         const GProfileRotaryAxisConfig& config,
         const RotaryExportContext& exportContext,
         const ControlPoint4Axis* previousEndPoint,
-        const RawPathPoint3D* previousRawEndPoint,
         ControlPoint4Axis* writtenEndPoint,
         QString* errorMessage
     )
@@ -1957,35 +1527,13 @@ namespace
         }
 
         std::vector<ControlPoint4Axis>& controlPoints = writableItem->controlPoints4AxisMutable();
-        const std::vector<RawPathPoint3D>& rawPoints = writableItem->rawPathPoints3D();
-        const bool squareTubeOrientationApplied = exportContext.sectionBounds.valid && !rawPoints.empty();
 
-        applySquareTubeToolOrientation
-        (
-            controlPoints,
-            rawPoints,
-            exportContext.sectionBounds,
-            exportContext.axisY,
-            exportContext.axisZ,
-            config.invertAAxisDirection,
-            config.aAxisOffsetDegrees,
-            config.keepContinuousAngle,
-            previousEndPoint,
-            previousRawEndPoint
-        );
+        applyMachiningPlaneZOffset(controlPoints, config.machiningPlaneZOffset);
 
-        const bool surfaceContinuousJoin = isRotarySurfaceContinuousJoin
-        (
-            rawPoints,
-            previousRawEndPoint
-        );
-
-        if (!squareTubeOrientationApplied && previousEndPoint != nullptr)
+        if (previousEndPoint != nullptr)
         {
             alignControlPointsToPreviousA(controlPoints, previousEndPoint->aDeg);
         }
-
-        applyMachiningPlaneZOffset(controlPoints, config.machiningPlaneZOffset);
 
         return writeControlPointPath4Axis
         (
@@ -1994,9 +1542,6 @@ namespace
             config,
             exportContext.safeMachineZ,
             previousEndPoint,
-            rawPoints,
-            previousRawEndPoint,
-            surfaceContinuousJoin,
             writtenEndPoint
         );
     }
@@ -2257,8 +1802,6 @@ bool GGenerator::generateToFile(const QString& filePath, QString* errorMessage) 
 
     bool hasPrevious4AxisEndPoint = false;
     ControlPoint4Axis previous4AxisEndPoint;
-    bool hasPrevious4AxisRawEndPoint = false;
-    RawPathPoint3D previous4AxisRawEndPoint;
 
     for (CadItem* item : orderedItems)
     {
@@ -2288,7 +1831,6 @@ bool GGenerator::generateToFile(const QString& filePath, QString* errorMessage) 
                 rotaryAxisConfig,
                 rotaryExportContext,
                 hasPrevious4AxisEndPoint ? &previous4AxisEndPoint : nullptr,
-                hasPrevious4AxisRawEndPoint ? &previous4AxisRawEndPoint : nullptr,
                 &currentItemEndPoint,
                 &geometryError
             )
@@ -2338,17 +1880,6 @@ bool GGenerator::generateToFile(const QString& filePath, QString* errorMessage) 
         {
             previous4AxisEndPoint = currentItemEndPoint;
             hasPrevious4AxisEndPoint = true;
-
-            const std::vector<RawPathPoint3D>& rawPoints = item->rawPathPoints3D();
-            if (!rawPoints.empty())
-            {
-                previous4AxisRawEndPoint = rawPoints.back();
-                hasPrevious4AxisRawEndPoint = true;
-            }
-            else
-            {
-                hasPrevious4AxisRawEndPoint = false;
-            }
         }
     }
 
