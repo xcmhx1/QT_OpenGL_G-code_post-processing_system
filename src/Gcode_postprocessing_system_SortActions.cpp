@@ -38,7 +38,9 @@ namespace
     constexpr double kSquareTubeEndCutCoverageThreshold = 0.72;
     constexpr double kSortDedupCoordinateTolerance = 1.0e-4;
     const QVector3D kSortOrigin(0.0f, 0.0f, 0.0f);
-    const QVector3D kRotaryInitialSortOrigin(0.0f, 0.0f, 50.0f);
+    // The machine starts above the workpiece at this pose; use it to select the
+    // left end-cut seam that requires the least initial A-axis rotation.
+    const QVector3D kRotaryInitialSortOrigin(0.0f, 0.0f, 100.0f);
 
     enum class SortStrategy
     {
