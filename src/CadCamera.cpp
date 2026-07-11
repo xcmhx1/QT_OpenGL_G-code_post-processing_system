@@ -214,6 +214,18 @@ void OrbitalCamera::enter3DFrom2D()
     updateAxesSwappedState();
 }
 
+void OrbitalCamera::setViewDirection(const QVector3D& forward, const QVector3D& preferredUp)
+{
+    orientation = CadCameraMath::buildOrientationFromForward
+    (
+        forward,
+        preferredUp,
+        CadCameraMath::fallbackRight()
+    );
+    orientation.normalize();
+    updateAxesSwappedState();
+}
+
 // 根据当前前向方向更新坐标轴交换状态
 void OrbitalCamera::updateAxesSwappedState()
 {

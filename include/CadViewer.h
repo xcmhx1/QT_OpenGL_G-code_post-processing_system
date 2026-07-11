@@ -18,6 +18,7 @@
 #include <QOpenGLFunctions_4_5_Core>
 #include <QOpenGLWidget>
 #include <QPoint>
+#include <QPolygonF>
 #include <QSet>
 #include <QTimer>
 #include <QVector>
@@ -499,6 +500,31 @@ private:
     // 绘制动态命令浮框。
     void renderDynamicCommandOverlay();
 
+    enum class ViewCubeFace
+    {
+        None,
+        Top,
+        Bottom,
+        Front,
+        Back,
+        Left,
+        Right
+    };
+
+    struct ViewCubeFaceOverlay
+    {
+        ViewCubeFace face = ViewCubeFace::None;
+        QPolygonF polygon;
+        float depth = 0.0f;
+        QString label;
+    };
+
+    QVector<ViewCubeFaceOverlay> buildViewCubeFaces() const;
+    void renderViewCube();
+    bool handleViewCubeClick(const QPoint& screenPos);
+    void updateViewCubeHover(const QPoint& screenPos);
+    void applyViewCubeFace(ViewCubeFace face);
+
     // 获取当前视口宽高比
     // @return 宽高比（宽度/高度）
     float aspectRatio() const;
@@ -577,6 +603,9 @@ private:
     bool m_rotaryEndCutsVisible = true;
     bool m_excludedEntitiesDimmed = true;
     bool m_backgroundGridVisible = true;
+
+    // 三维视图方块当前悬停面。
+    ViewCubeFace m_hoveredViewCubeFace = ViewCubeFace::None;
 
     // 基点吸附开关
     bool m_basePointSnapEnabled = false;

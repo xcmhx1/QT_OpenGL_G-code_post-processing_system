@@ -102,6 +102,20 @@ void CadViewInteractionController::resetToTopView(OrbitalCamera& camera)
     resetForFitScene();         // 重置控制器状态
 }
 
+void CadViewInteractionController::setStandardView
+(
+    OrbitalCamera& camera,
+    const QVector3D& forward,
+    const QVector3D& preferredUp,
+    bool planarTopView
+)
+{
+    camera.setViewDirection(forward, preferredUp);
+    m_viewMode = planarTopView ? CameraViewMode::Planar2D : CameraViewMode::Orbit3D;
+    m_interactionMode = ViewInteractionMode::Idle;
+    m_ignoreNextOrbitDelta = false;
+}
+
 // 获取当前视图模式
 // @return 相机视图模式
 CameraViewMode CadViewInteractionController::viewMode() const

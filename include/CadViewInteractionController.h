@@ -75,6 +75,15 @@ public:
     // @param camera 轨道相机引用
     void resetToTopView(OrbitalCamera& camera);
 
+    // 切换到视图方块指定的标准正交视角。
+    void setStandardView
+    (
+        OrbitalCamera& camera,
+        const QVector3D& forward,
+        const QVector3D& preferredUp,
+        bool planarTopView
+    );
+
     // 获取当前视图模式
     // @return 相机视图模式
     CameraViewMode viewMode() const;

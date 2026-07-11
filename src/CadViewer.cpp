@@ -586,6 +586,7 @@ void CadViewer::paintGL()
     renderOverlappedHandlePopup();
     renderDynamicInputOverlay();
     renderDynamicCommandOverlay();
+    renderViewCube();
 
     // 性能日志记录
     if constexpr (kEnableViewerPerfLogging)

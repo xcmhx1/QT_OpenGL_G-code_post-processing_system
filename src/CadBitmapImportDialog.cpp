@@ -186,17 +186,17 @@ void CadBitmapImportDialog::buildUi()
     m_sourcePreviewLabel = new QLabel(previewPanel);
     m_sourcePreviewLabel->setMinimumSize(240, 260);
     m_sourcePreviewLabel->setAlignment(Qt::AlignCenter);
-    m_sourcePreviewLabel->setStyleSheet("background-color: rgb(24, 27, 31); border: 1px solid rgb(70, 75, 82);");
+    m_sourcePreviewLabel->setProperty("imagePreview", true);
 
     m_processedPreviewLabel = new QLabel(previewPanel);
     m_processedPreviewLabel->setMinimumSize(240, 260);
     m_processedPreviewLabel->setAlignment(Qt::AlignCenter);
-    m_processedPreviewLabel->setStyleSheet("background-color: rgb(24, 27, 31); border: 1px solid rgb(70, 75, 82);");
+    m_processedPreviewLabel->setProperty("imagePreview", true);
 
     m_vectorPreviewLabel = new QLabel(previewPanel);
     m_vectorPreviewLabel->setMinimumSize(240, 260);
     m_vectorPreviewLabel->setAlignment(Qt::AlignCenter);
-    m_vectorPreviewLabel->setStyleSheet("background-color: rgb(24, 27, 31); border: 1px solid rgb(70, 75, 82);");
+    m_vectorPreviewLabel->setProperty("imagePreview", true);
 
     auto createPreviewColumn =
         [previewPanel](const QString& title, QLabel* imageLabel)

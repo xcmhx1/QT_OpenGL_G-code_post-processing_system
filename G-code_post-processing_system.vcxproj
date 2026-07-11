@@ -64,6 +64,7 @@
     <OpenCVIncludeDir>$(OpenCVRoot)\build\include</OpenCVIncludeDir>
     <OpenCVLibDir>$(OpenCVRoot)\build\x64\vc16\lib</OpenCVLibDir>
     <OpenCVBinDir>$(OpenCVRoot)\build\x64\vc16\bin</OpenCVBinDir>
+    <VCRuntimeRedistDir>$(VCInstallDir)Redist\MSVC\$(VCToolsVersion)\x64\Microsoft.VC145.CRT</VCRuntimeRedistDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'Debug|x64'">
   </PropertyGroup>
@@ -80,7 +81,8 @@
       <AdditionalDependencies>opencv_world4110d.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
-      <Command>if exist "$(OpenCVBinDir)\opencv_world4110d.dll" copy /Y "$(OpenCVBinDir)\opencv_world4110d.dll" "$(OutDir)"</Command>
+      <Command>if exist "$(OpenCVBinDir)\opencv_world4110d.dll" copy /Y "$(OpenCVBinDir)\opencv_world4110d.dll" "$(OutDir)"
+if exist "$(QtInstallDir)\bin\windeployqt.exe" "$(QtInstallDir)\bin\windeployqt.exe" --debug --no-compiler-runtime --no-translations "$(TargetPath)"</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)' == 'Debug|x64'" Label="Configuration">
@@ -113,7 +115,9 @@
       <AdditionalDependencies>opencv_world4110.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
-      <Command>if exist "$(OpenCVBinDir)\opencv_world4110.dll" copy /Y "$(OpenCVBinDir)\opencv_world4110.dll" "$(OutDir)"</Command>
+      <Command>if exist "$(OpenCVBinDir)\opencv_world4110.dll" copy /Y "$(OpenCVBinDir)\opencv_world4110.dll" "$(OutDir)"
+if exist "$(QtInstallDir)\bin\windeployqt.exe" "$(QtInstallDir)\bin\windeployqt.exe" --release --no-compiler-runtime --no-translations "$(TargetPath)"
+if exist "$(VCRuntimeRedistDir)\*.dll" copy /Y "$(VCRuntimeRedistDir)\*.dll" "$(OutDir)"</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -300,6 +304,10 @@
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
     </ClCompile>
     <ClCompile Include="src\CadViewer_ViewNavigation.cpp">
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+    </ClCompile>
+    <ClCompile Include="src\CadViewer_ViewCube.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
     </ClCompile>

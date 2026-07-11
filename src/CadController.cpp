@@ -709,7 +709,8 @@ bool CadController::handleWheel(QWheelEvent* event)
     m_drawState.keyboardModifiers = event->modifiers();
 
     // 计算缩放因子
-    const float factor = event->angleDelta().y() > 0 ? 1.1f : (1.0f / 1.1f);
+    constexpr float kWheelZoomFactor = 1.6f;
+    const float factor = event->angleDelta().y() > 0 ? kWheelZoomFactor : (1.0f / kWheelZoomFactor);
 
     // 在鼠标位置缩放
     m_viewer->zoomAtScreenPosition(event->position().toPoint(), factor);

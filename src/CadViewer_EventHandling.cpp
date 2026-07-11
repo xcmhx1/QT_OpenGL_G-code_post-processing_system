@@ -31,6 +31,14 @@ void CadViewer::mousePressEvent(QMouseEvent* event)
     m_cursorScreenPos = event->pos();
     m_showCrosshairOverlay = rect().contains(event->pos());
 
+    if (event->button() == Qt::LeftButton && handleViewCubeClick(event->pos()))
+    {
+        setCursor(Qt::ArrowCursor);
+        m_showCrosshairOverlay = false;
+        event->accept();
+        return;
+    }
+
     if (event->button() == Qt::LeftButton && handleOverlappedHandlePopupPress(event->pos()))
     {
         event->accept();
@@ -63,6 +71,15 @@ void CadViewer::mouseDoubleClickEvent(QMouseEvent* event)
     ensureBlankCursor();
     m_cursorScreenPos = event->pos();
     m_showCrosshairOverlay = rect().contains(event->pos());
+    updateViewCubeHover(event->pos());
+
+    if (event->button() == Qt::LeftButton && m_hoveredViewCubeFace != ViewCubeFace::None)
+    {
+        setCursor(Qt::ArrowCursor);
+        m_showCrosshairOverlay = false;
+        event->accept();
+        return;
+    }
 
     if (event->button() == Qt::LeftButton && handleProcessOrderLabelDoubleClick(event->pos()))
     {
@@ -81,6 +98,17 @@ void CadViewer::mouseMoveEvent(QMouseEvent* event)
     ensureBlankCursor();
     m_cursorScreenPos = event->pos();
     m_showCrosshairOverlay = rect().contains(event->pos());
+    updateViewCubeHover(event->pos());
+
+    if (m_hoveredViewCubeFace != ViewCubeFace::None)
+    {
+        setCursor(Qt::ArrowCursor);
+        m_showCrosshairOverlay = false;
+        resetOverlappedHandleHoverState();
+        event->accept();
+        update();
+        return;
+    }
 
     if (!m_controller.handleMouseMove(event))
     {
@@ -103,6 +131,7 @@ void CadViewer::mouseMoveEvent(QMouseEvent* event)
 void CadViewer::leaveEvent(QEvent* event)
 {
     m_showCrosshairOverlay = false;
+    m_hoveredViewCubeFace = ViewCubeFace::None;
     resetOverlappedHandleHoverState();
     update();
     QOpenGLWidget::leaveEvent(event);

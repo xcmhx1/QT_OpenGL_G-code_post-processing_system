@@ -102,6 +102,9 @@ struct OrbitalCamera
     // 从二维顶视图进入三维视图模式
     void enter3DFrom2D();
 
+    // 切换到指定正交观察方向，同时保留观察中心和缩放。
+    void setViewDirection(const QVector3D& forward, const QVector3D& preferredUp);
+
     // 查询当前是否处于坐标轴交换显示状态
     // @return 如果处于交换显示状态返回 true，否则返回 false
     bool axesSwapped() const { return m_axesSwapped; }

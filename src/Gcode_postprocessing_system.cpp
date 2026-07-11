@@ -279,6 +279,8 @@ Gcode_postprocessing_system::Gcode_postprocessing_system(QWidget* parent)
 
     if (QVBoxLayout* centralLayout = qobject_cast<QVBoxLayout*>(ui->centralWidget->layout()))
     {
+        centralLayout->setContentsMargins(0, 0, 0, 0);
+        centralLayout->setSpacing(0);
         centralLayout->addWidget(m_commandLineWidget);
         centralLayout->addWidget(m_statusPaneWidget);
     }
@@ -984,18 +986,53 @@ void Gcode_postprocessing_system::applyThemeColors(const AppThemeColors& theme, 
 
     qApp->setStyle(QStyleFactory::create(QStringLiteral("Fusion")));
     qApp->setPalette(theme.palette);
+    QFont appFont(QStringLiteral("Microsoft YaHei UI"));
+    appFont.setPointSize(9);
+    qApp->setFont(appFont);
 
     setStyleSheet
     (
         QStringLiteral
         (
-            "QMainWindow { background-color: %1; color: %2; }"
+            "QMainWindow, QDialog, QMessageBox { background-color: %1; color: %2; }"
             "QWidget#centralWidget { background-color: %1; }"
-            "QMenuBar { background-color: %3; color: %2; border-bottom: 1px solid %4; }"
-            "QMenuBar::item { background: transparent; padding: 4px 10px; }"
+            "QMenuBar { background-color: %3; color: %2; border: none; border-bottom: 1px solid %4; padding: 2px 6px; }"
+            "QMenuBar::item { background: transparent; border-radius: 4px; padding: 5px 11px; margin: 1px; }"
             "QMenuBar::item:selected { background: %5; }"
-            "QToolBar { background-color: %3; border: none; border-bottom: 1px solid %4; spacing: 0px; }"
-            "QStatusBar { background-color: %3; color: %2; border-top: 1px solid %4; }"
+            "QMenuBar::item:pressed { background: %7; }"
+            "QMenu { background-color: %6; color: %2; border: 1px solid %4; padding: 5px; }"
+            "QMenu::item { border-radius: 3px; padding: 6px 30px 6px 24px; }"
+            "QMenu::item:selected { background-color: %5; }"
+            "QMenu::item:disabled { color: palette(mid); }"
+            "QMenu::separator { height: 1px; background: %4; margin: 5px 8px; }"
+            "QMenu::icon { left: 7px; }"
+            "QToolBar { background-color: %3; border: none; border-bottom: 1px solid %4; spacing: 0px; padding: 0px; }"
+            "QToolTip { background-color: %6; color: %2; border: 1px solid %4; padding: 5px 7px; }"
+            "QDialog QLabel { color: %2; }"
+            "QDialog QGroupBox { border: 1px solid %4; border-radius: 5px; margin-top: 12px; padding: 12px 8px 8px 8px; font-weight: 600; }"
+            "QDialog QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0px 5px; color: %2; }"
+            "QDialog QPushButton { min-height: 27px; min-width: 72px; background-color: %6; color: %2; border: 1px solid %4; border-radius: 4px; padding: 2px 12px; }"
+            "QDialog QPushButton:hover { background-color: %5; border-color: %8; }"
+            "QDialog QPushButton:pressed { background-color: %7; }"
+            "QDialog QPushButton:default { background-color: %8; color: %9; border-color: %8; font-weight: 600; }"
+            "QDialog QPushButton:disabled { color: palette(mid); background-color: %7; }"
+            "QDialog QLineEdit, QDialog QTextEdit, QDialog QPlainTextEdit, QDialog QSpinBox, QDialog QDoubleSpinBox, QDialog QComboBox { min-height: 25px; background-color: %6; color: %2; border: 1px solid %4; border-radius: 4px; padding: 2px 6px; selection-background-color: %8; selection-color: %9; }"
+            "QDialog QLineEdit:focus, QDialog QTextEdit:focus, QDialog QPlainTextEdit:focus, QDialog QSpinBox:focus, QDialog QDoubleSpinBox:focus, QDialog QComboBox:focus { border-color: %8; }"
+            "QDialog QLabel[imagePreview=\"true\"] { background-color: %7; color: %2; border: 1px solid %4; border-radius: 5px; }"
+            "QDialog QTabWidget::pane { border: 1px solid %4; border-radius: 4px; background: %6; top: -1px; }"
+            "QDialog QTabBar::tab { background: %7; color: %2; border: 1px solid %4; padding: 7px 14px; margin-right: 2px; }"
+            "QDialog QTabBar::tab:selected { background: %6; border-bottom-color: %6; color: %8; }"
+            "QAbstractItemView { background-color: %6; alternate-background-color: %7; color: %2; border: 1px solid %4; outline: none; selection-background-color: %8; selection-color: %9; }"
+            "QAbstractItemView::item { min-height: 24px; padding: 2px 5px; }"
+            "QHeaderView::section { background-color: %7; color: %2; border: none; border-right: 1px solid %4; border-bottom: 1px solid %4; padding: 6px 8px; font-weight: 600; }"
+            "QScrollBar:vertical { background: %7; width: 10px; margin: 0px; }"
+            "QScrollBar::handle:vertical { background: %4; min-height: 26px; border-radius: 4px; margin: 2px; }"
+            "QScrollBar::handle:vertical:hover { background: %8; }"
+            "QScrollBar:horizontal { background: %7; height: 10px; margin: 0px; }"
+            "QScrollBar::handle:horizontal { background: %4; min-width: 26px; border-radius: 4px; margin: 2px; }"
+            "QScrollBar::handle:horizontal:hover { background: %8; }"
+            "QScrollBar::add-line, QScrollBar::sub-line { width: 0px; height: 0px; }"
+            "QStatusBar { background-color: %3; color: %2; border-top: 1px solid %4; padding: 1px 6px; }"
             "QStatusBar::item { border: none; }"
         )
         .arg(theme.windowBackground.name())
@@ -1003,6 +1040,10 @@ void Gcode_postprocessing_system::applyThemeColors(const AppThemeColors& theme, 
         .arg(theme.panelBackground.name())
         .arg(theme.borderColor.name())
         .arg(theme.hoverBackgroundColor.name())
+        .arg(theme.surfaceBackground.name())
+        .arg(theme.surfaceAltBackground.name())
+        .arg(theme.accentColor.name())
+        .arg(theme.accentTextColor.name())
     );
 
     if (m_commandLineWidget != nullptr)

@@ -11,22 +11,12 @@
 
 namespace
 {
-    // 期望网格在屏幕上的视觉间距（像素）
-    constexpr float kTargetGridSpacingPixels = 40.0f;
+    constexpr float kMinimumGridStep = 10.0f;
+    constexpr float kTargetHorizontalMajorGridGroups = 5.0f;
+    constexpr float kMinorGridCellsPerMajorGroup = 5.0f;
     // 单个方向上允许绘制的最大网格线数量
     constexpr float kMaxGridLineCountPerAxis = 240.0f;
     constexpr float kXlineHandleDistancePixels = 72.0f;
-
-    // 采用二分层级网格步长，保证细分后不会丢失上一级网格点。
-    // 示例：100 -> 50 -> 25 -> 12.5 -> 6.25
-    float chooseHierarchicalGridStep(float desiredStep)
-    {
-        constexpr float kGridStepAnchor = 100.0f;
-        const float safeStep = std::max(desiredStep, 1.0e-6f);
-        const float level = std::round(std::log2(safeStep / kGridStepAnchor));
-        const float step = kGridStepAnchor * std::pow(2.0f, level);
-        return std::max(step, 1.0e-6f);
-    }
 }
 
 void CadViewer::fitScene()
@@ -213,14 +203,15 @@ float CadViewer::currentGridStep() const
     float maxY = 0.0f;
     computeVisibleGroundBounds(minX, maxX, minY, maxY);
 
-    float gridStep = chooseHierarchicalGridStep(pixelToWorldScale() * kTargetGridSpacingPixels);
     const float width = std::max(maxX - minX, 0.0f);
     const float height = std::max(maxY - minY, 0.0f);
+    const float targetHorizontalCellCount = kTargetHorizontalMajorGridGroups * kMinorGridCellsPerMajorGroup;
+    float gridStep = std::max(width / targetHorizontalCellCount, kMinimumGridStep);
 
     while ((width / gridStep) > kMaxGridLineCountPerAxis
         || (height / gridStep) > kMaxGridLineCountPerAxis)
     {
-        gridStep *= 2.0f;
+        gridStep *= 5.0f;
     }
 
     return gridStep;

@@ -19,17 +19,18 @@ CadCommandLineWidget::CadCommandLineWidget(QWidget* parent)
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
 
     QVBoxLayout* layout = new QVBoxLayout(this);
-    layout->setContentsMargins(10, 6, 10, 6);
-    layout->setSpacing(4);
+    layout->setContentsMargins(9, 4, 9, 4);
+    layout->setSpacing(3);
 
     m_summaryLabel = new QLabel(this);
+    m_summaryLabel->setObjectName(QStringLiteral("CommandSummary"));
     m_summaryLabel->setWordWrap(false);
     m_summaryLabel->setAlignment(Qt::AlignVCenter | Qt::AlignLeft);
     m_summaryLabel->setText(QStringLiteral("命令栏就绪"));
     m_summaryLabel->setAttribute(Qt::WA_TransparentForMouseEvents, true);
 
     QFont summaryFont = m_summaryLabel->font();
-    summaryFont.setPointSize(12);
+    summaryFont.setPointSize(9);
     m_summaryLabel->setFont(summaryFont);
 
     m_promptLabel = new QLabel(this);
@@ -38,7 +39,7 @@ CadCommandLineWidget::CadCommandLineWidget(QWidget* parent)
     m_promptLabel->setText(QStringLiteral(" "));
 
     QFont promptFont = m_promptLabel->font();
-    promptFont.setPointSize(12);
+    promptFont.setPointSize(9);
     promptFont.setBold(true);
     m_promptLabel->setFont(promptFont);
 
@@ -49,7 +50,7 @@ CadCommandLineWidget::CadCommandLineWidget(QWidget* parent)
     m_historyEdit->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
 
     QFont historyFont = m_historyEdit->font();
-    historyFont.setPointSize(12);
+    historyFont.setPointSize(9);
     m_historyEdit->setFont(historyFont);
 
     layout->addWidget(m_summaryLabel);
@@ -173,13 +174,13 @@ void CadCommandLineWidget::refreshHistory()
 
 int CadCommandLineWidget::collapsedHeight() const
 {
-    return fontMetrics().height() + 18;
+    return fontMetrics().height() + 12;
 }
 
 int CadCommandLineWidget::expandedHeight() const
 {
     const int lineHeight = m_historyEdit->fontMetrics().lineSpacing();
-    return lineHeight * 4 + 42;
+    return lineHeight * 4 + 34;
 }
 
 void CadCommandLineWidget::setTheme(const AppThemeColors& theme)
@@ -196,6 +197,7 @@ void CadCommandLineWidget::setTheme(const AppThemeColors& theme)
             "#CadCommandLineWidget QLabel {"
             "color: %3;"
             "}"
+            "#CadCommandLineWidget QLabel#CommandSummary { color: %8; }"
             "#CadCommandLineWidget QPlainTextEdit {"
             "background-color: %4;"
             "color: %3;"
@@ -203,6 +205,7 @@ void CadCommandLineWidget::setTheme(const AppThemeColors& theme)
             "padding: 4px;"
             "selection-background-color: %6;"
             "selection-color: %7;"
+            "border-radius: 4px;"
             "}"
         )
         .arg(theme.panelBackground.name())
@@ -212,5 +215,6 @@ void CadCommandLineWidget::setTheme(const AppThemeColors& theme)
         .arg(theme.borderStrongColor.name())
         .arg(theme.accentColor.name())
         .arg(theme.accentTextColor.name())
+        .arg(theme.textSecondaryColor.name())
     );
 }

@@ -208,6 +208,9 @@
     <ClCompile Include="src\CadViewer_ViewNavigation.cpp">
       <Filter>Source Files\View</Filter>
     </ClCompile>
+    <ClCompile Include="src\CadViewer_ViewCube.cpp">
+      <Filter>Source Files\View</Filter>
+    </ClCompile>
     <ClCompile Include="src\CadViewer_TransientPrimitives.cpp">
       <Filter>Source Files\View</Filter>
     </ClCompile>

@@ -981,14 +981,15 @@ void CadToolPanelWidget::applyTheme()
         QStringLiteral
         (
             "#cadToolPanelRoot { background: transparent; }"
-            "QTabWidget::pane { border: none; background: transparent; margin-top: 2px; }"
-            "QTabBar::tab { background: %7; color: %2; border: 1px solid %4; border-bottom: none; padding: 4px 8px; min-width: 46px; font-size: 10px; }"
-            "QTabBar::tab:selected { background: %5; color: %9; }"
-            "QTabBar::tab:!selected { margin-top: 2px; }"
+            "QTabWidget::pane { border: none; border-top: 1px solid %4; background: transparent; margin-top: 0px; }"
+            "QTabBar::tab { background: transparent; color: %2; border: none; border-bottom: 2px solid transparent; padding: 6px 14px 5px 14px; min-width: 50px; font-size: 11px; }"
+            "QTabBar::tab:hover { background: %5; color: %1; }"
+            "QTabBar::tab:selected { background: %7; color: %1; border-bottom-color: %8; font-weight: 600; }"
+            "QWidget[ribbonPanel=\"true\"] { background: %7; border: 1px solid %4; border-radius: 4px; }"
             "QLabel { color: %1; font-size: 10px; }"
             "QLabel[panelTitle=\"true\"] {"
             " color: %2;"
-            " font-size: 12px;"
+            " font-size: 10px;"
             " padding-bottom: 1px;"
             "}"
             "QLabel[machiningFieldLabel=\"true\"] {"
@@ -1019,7 +1020,7 @@ void CadToolPanelWidget::applyTheme()
             "}"
             "QToolButton[ribbonButton=\"true\"] {"
             " border: 1px solid transparent;"
-            " border-radius: 2px;"
+            " border-radius: 4px;"
             " padding: 2px 3px 2px 3px;"
             " background: transparent;"
             " color: %1;"
@@ -1035,7 +1036,7 @@ void CadToolPanelWidget::applyTheme()
             "}"
             "QToolButton[machiningButton=\"true\"] {"
             " border: 1px solid %4;"
-            " border-radius: 2px;"
+            " border-radius: 4px;"
             " padding: 3px 10px;"
             " background: %7;"
             " color: %1;"
@@ -1054,7 +1055,7 @@ void CadToolPanelWidget::applyTheme()
             " background-color: %7;"
             " color: %1;"
             " border: 1px solid %4;"
-            " border-radius: 2px;"
+            " border-radius: 4px;"
             " padding: 1px 22px 1px 6px;"
             " font-size: 11px;"
             "}"
@@ -1254,6 +1255,7 @@ void CadToolPanelWidget::applyTheme()
 QWidget* CadToolPanelWidget::buildPanelFrame(const QString& title, QWidget* contentWidget, int preferredWidth, QMenu* launcherMenu, bool flexibleWidth)
 {
     QWidget* panel = new QWidget(this);
+    panel->setProperty("ribbonPanel", true);
     panel->setSizePolicy(flexibleWidth ? QSizePolicy::Preferred : QSizePolicy::Fixed, QSizePolicy::Fixed);
     panel->setMinimumHeight(kPanelHeight);
     panel->setMaximumHeight(kPanelHeight);

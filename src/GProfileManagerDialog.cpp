@@ -149,13 +149,14 @@ void GProfileManagerDialog::applyTheme()
         QStringLiteral
         (
             "QDialog { background: %1; color: %2; }"
-            "QWidget[managerPanel=\"true\"] { background: %3; border: 1px solid %4; border-radius: 5px; }"
+            "QWidget[managerPanel=\"true\"] { background: %3; border: 1px solid %4; border-radius: 6px; }"
             "QLabel[panelTitle=\"true\"] { color: %2; font-size: 13px; font-weight: 600; border: none; }"
             "QLabel[secondaryText=\"true\"] { color: %5; }"
-            "QTreeWidget, QListWidget { background: %6; color: %2; border: 1px solid %4; border-radius: 3px; }"
+            "QTreeWidget, QListWidget { background: %6; color: %2; border: 1px solid %4; border-radius: 4px; outline: none; }"
             "QTreeWidget::item, QListWidget::item { min-height: 25px; }"
-            "QPushButton, QToolButton { background: %3; color: %2; border: 1px solid %4; border-radius: 3px; padding: 5px 12px; }"
-            "QPushButton:hover, QToolButton:hover { background: %7; }"
+            "QTreeWidget:focus, QListWidget:focus { border-color: %9; }"
+            "QPushButton, QToolButton { background: %3; color: %2; border: 1px solid %4; border-radius: 4px; padding: 5px 12px; min-height: 26px; }"
+            "QPushButton:hover, QToolButton:hover { background: %7; border-color: %9; }"
             "QPushButton:pressed, QToolButton:pressed { background: %8; }"
         )
         .arg(m_theme.windowBackground.name())
@@ -166,6 +167,7 @@ void GProfileManagerDialog::applyTheme()
         .arg(m_theme.surfaceBackground.name())
         .arg(m_theme.hoverBackgroundColor.name())
         .arg(m_theme.pressedBackgroundColor.name())
+        .arg(m_theme.accentColor.name())
     );
 }
 

@@ -15,29 +15,31 @@ CadStatusPaneWidget::CadStatusPaneWidget(QWidget* parent)
 {
     setObjectName("CadStatusPaneWidget");
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-    setFixedHeight(44);
+    setFixedHeight(40);
 
     QHBoxLayout* layout = new QHBoxLayout(this);
-    layout->setContentsMargins(10, 4, 10, 4);
-    layout->setSpacing(12);
+    layout->setContentsMargins(8, 4, 8, 4);
+    layout->setSpacing(8);
 
     QFrame* coordinateFrame = new QFrame(this);
     coordinateFrame->setObjectName("CoordinateBlock");
     QHBoxLayout* coordinateLayout = new QHBoxLayout(coordinateFrame);
-    coordinateLayout->setContentsMargins(10, 4, 10, 4);
-    coordinateLayout->setSpacing(8);
+    coordinateLayout->setContentsMargins(8, 3, 8, 3);
+    coordinateLayout->setSpacing(6);
 
     QLabel* coordinateTitleLabel = new QLabel(QStringLiteral("坐标"), coordinateFrame);
     QFont titleFont = coordinateTitleLabel->font();
-    titleFont.setPointSize(12);
+    titleFont.setPointSize(9);
     titleFont.setBold(true);
     coordinateTitleLabel->setFont(titleFont);
+    coordinateTitleLabel->setProperty("statusTitle", true);
 
     m_coordinateValueLabel = new QLabel(coordinateFrame);
     QFont valueFont = m_coordinateValueLabel->font();
-    valueFont.setPointSize(12);
+    valueFont.setPointSize(9);
     m_coordinateValueLabel->setFont(valueFont);
-    m_coordinateValueLabel->setMinimumWidth(280);
+    m_coordinateValueLabel->setMinimumWidth(238);
+    m_coordinateValueLabel->setProperty("statusValue", true);
 
     coordinateLayout->addWidget(coordinateTitleLabel);
     coordinateLayout->addWidget(m_coordinateValueLabel);
@@ -45,16 +47,18 @@ CadStatusPaneWidget::CadStatusPaneWidget(QWidget* parent)
     QFrame* entityTypeFrame = new QFrame(this);
     entityTypeFrame->setObjectName("EntityTypeBlock");
     QHBoxLayout* entityTypeLayout = new QHBoxLayout(entityTypeFrame);
-    entityTypeLayout->setContentsMargins(10, 4, 10, 4);
-    entityTypeLayout->setSpacing(8);
+    entityTypeLayout->setContentsMargins(8, 3, 8, 3);
+    entityTypeLayout->setSpacing(6);
 
     QLabel* entityTypeTitleLabel = new QLabel(QStringLiteral("图元"), entityTypeFrame);
     entityTypeTitleLabel->setFont(titleFont);
+    entityTypeTitleLabel->setProperty("statusTitle", true);
 
     m_entityTypeValueLabel = new QLabel(entityTypeFrame);
     m_entityTypeValueLabel->setFont(valueFont);
-    m_entityTypeValueLabel->setMinimumWidth(180);
-    m_entityTypeValueLabel->setMaximumWidth(360);
+    m_entityTypeValueLabel->setMinimumWidth(145);
+    m_entityTypeValueLabel->setMaximumWidth(300);
+    m_entityTypeValueLabel->setProperty("statusValue", true);
     m_entityTypeValueLabel->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
     m_entityTypeValueLabel->setText(QStringLiteral("无"));
 
@@ -239,12 +243,14 @@ void CadStatusPaneWidget::setTheme(const AppThemeColors& theme)
             "#CadStatusPaneWidget QLabel {"
             "color: %5;"
             "}"
+            "#CadStatusPaneWidget QLabel[statusTitle=\"true\"] { color: %10; }"
+            "#CadStatusPaneWidget QLabel[statusValue=\"true\"] { font-weight: 500; }"
             "QPushButton[snapToggle=\"true\"] {"
             "background-color: %6;"
             "color: %5;"
             "border: 1px solid %2;"
             "border-radius: 4px;"
-            "padding: 3px 10px;"
+            "padding: 3px 9px;"
             "}"
             "QPushButton[snapToggle=\"true\"]:hover {"
             "background-color: %7;"
@@ -254,8 +260,8 @@ void CadStatusPaneWidget::setTheme(const AppThemeColors& theme)
             "color: %5;"
             "border: 1px solid %2;"
             "border-radius: 4px;"
-            "padding: 3px 12px;"
-            "font-weight: 600;"
+            "padding: 3px 10px;"
+            "font-weight: 500;"
             "}"
             "QToolButton[snapToggle=\"true\"]:hover {"
             "background-color: %7;"
@@ -293,6 +299,7 @@ void CadStatusPaneWidget::setTheme(const AppThemeColors& theme)
         .arg(theme.hoverBackgroundColor.name())
         .arg(theme.accentColor.name())
         .arg(theme.accentTextColor.name())
+        .arg(theme.textSecondaryColor.name())
     );
 }
 
