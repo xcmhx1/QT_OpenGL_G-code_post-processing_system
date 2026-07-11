@@ -34,13 +34,14 @@ namespace
     constexpr double kPreferredStartGapDistance2D = 1.0;
     constexpr double kPreferredStartGapDistance3D = 1.0;
     constexpr double kRotaryPlaneMatchToleranceDegrees = 3.0;
+    constexpr double kSurfaceSweepBoundaryTolerance = 1.0e-4;
     constexpr double kSquareTubeSectionToleranceRatio = 0.015;
     constexpr double kSquareTubeEndCutCoverageThreshold = 0.72;
     constexpr double kSortDedupCoordinateTolerance = 1.0e-4;
     const QVector3D kSortOrigin(0.0f, 0.0f, 0.0f);
     // The machine starts above the workpiece at this pose; use it to select the
     // left end-cut seam that requires the least initial A-axis rotation.
-    const QVector3D kRotaryInitialSortOrigin(0.0f, 0.0f, 100.0f);
+    const QVector3D kRotaryInitialSortOrigin(0.0f, 0.0f, 500.0f);
 
     enum class SortStrategy
     {
@@ -58,6 +59,8 @@ namespace
         double priorityDistance = std::numeric_limits<double>::max();
         double gapDistance = std::numeric_limits<double>::max();
         double score = std::numeric_limits<double>::max();
+        bool startsOnInitialTopPlane = false;
+        bool startsOnSweepBoundary = false;
         bool matchesCurrentRotaryPlane = false;
         QVector3D startPoint;
         QVector3D endPoint;
@@ -2265,7 +2268,9 @@ namespace
         bool hasCurrentEndPoint,
         const QVector3D& currentEndPoint,
         const QVector3D& sweepDirection,
-        const GProfileRotaryAxisConfig& config
+        const GProfileRotaryAxisConfig& config,
+        bool preferSweepBoundary = false,
+        double sweepBoundaryX = 0.0
     )
     {
         SortCandidate bestCandidate;
@@ -2279,6 +2284,41 @@ namespace
             && hasCurrentEndPoint
             && !mustStayInCurrentComponent
             && hasReferenceRotaryPoint;
+        bool hasInitialTopPlane = false;
+        double initialTopZ = 0.0;
+        double initialTopTolerance = 0.0;
+
+        if (!hasCurrentEndPoint)
+        {
+            double minimumZ = 0.0;
+
+            for (const CadItem* item : sortableItems)
+            {
+                if (item == nullptr)
+                {
+                    continue;
+                }
+
+                for (const QVector3D& point : item->m_geometry.vertices)
+                {
+                    if (!hasInitialTopPlane)
+                    {
+                        minimumZ = point.z();
+                        initialTopZ = point.z();
+                        hasInitialTopPlane = true;
+                        continue;
+                    }
+
+                    minimumZ = std::min(minimumZ, static_cast<double>(point.z()));
+                    initialTopZ = std::max(initialTopZ, static_cast<double>(point.z()));
+                }
+            }
+
+            if (hasInitialTopPlane)
+            {
+                initialTopTolerance = std::max(0.25, (initialTopZ - minimumZ) * kSquareTubeSectionToleranceRatio);
+            }
+        }
         const QVector3D normalizedSweepDirection = normalizeOrZero(sweepDirection);
         const double referenceProgress = hasReferenceRotaryPoint
             ? static_cast<double>(referencePoint.x()) * static_cast<double>(normalizedSweepDirection.x())
@@ -2318,6 +2358,10 @@ namespace
                 const double connectionDistance = computeClosestConnectionDistance3D(processedSegments, option.startPoint, option.endPoint);
                 const bool directlyConnected = connectionDistance <= kSortConnectionEpsilon;
                 const bool bestDirectlyConnected = bestCandidate.connectionDistance <= kSortConnectionEpsilon;
+                const bool startsOnInitialTopPlane = hasInitialTopPlane
+                    && std::abs(static_cast<double>(option.startPoint.z()) - initialTopZ) <= initialTopTolerance;
+                const bool startsOnSweepBoundary = preferSweepBoundary
+                    && std::abs(static_cast<double>(option.startPoint.x()) - sweepBoundaryX) <= kSurfaceSweepBoundaryTolerance;
                 RotarySortPoint candidateRotaryPoint;
                 const bool matchesCurrentRotaryPlane = preferMatchingRotaryPlane
                     && tryBuildRotarySortPoint(option.startPoint, config, candidateRotaryPoint)
@@ -2379,9 +2423,22 @@ namespace
 
                 const bool rotaryPlanePreferenceDecides = preferMatchingRotaryPlane
                     && matchesCurrentRotaryPlane != bestCandidate.matchesCurrentRotaryPlane;
+                const bool initialTopPlanePreferenceDecides = hasInitialTopPlane
+                    && startsOnInitialTopPlane != bestCandidate.startsOnInitialTopPlane;
+                const bool sweepBoundaryPreferenceDecides = preferSweepBoundary
+                    && startsOnSweepBoundary != bestCandidate.startsOnSweepBoundary;
                 const bool shouldReplace = bestCandidate.index < 0
-                    || (rotaryPlanePreferenceDecides && matchesCurrentRotaryPlane)
-                    || (!rotaryPlanePreferenceDecides
+                    || (initialTopPlanePreferenceDecides && startsOnInitialTopPlane)
+                    || (!initialTopPlanePreferenceDecides
+                        && sweepBoundaryPreferenceDecides
+                        && startsOnSweepBoundary)
+                    || (!initialTopPlanePreferenceDecides
+                        && !sweepBoundaryPreferenceDecides
+                        && rotaryPlanePreferenceDecides
+                        && matchesCurrentRotaryPlane)
+                    || (!initialTopPlanePreferenceDecides
+                        && !sweepBoundaryPreferenceDecides
+                        && !rotaryPlanePreferenceDecides
                         && ((preferPreferredGapStart && preferredGapStart && !bestPreferredGapStart)
                             || (preferPreferredGapStart
                                 && preferredGapStart == bestPreferredGapStart
@@ -2416,6 +2473,8 @@ namespace
                 bestCandidate.priorityDistance = entryDistance;
                 bestCandidate.gapDistance = currentGapDistance;
                 bestCandidate.score = optionScore;
+                bestCandidate.startsOnInitialTopPlane = startsOnInitialTopPlane;
+                bestCandidate.startsOnSweepBoundary = startsOnSweepBoundary;
                 bestCandidate.matchesCurrentRotaryPlane = matchesCurrentRotaryPlane;
                 bestCandidate.startPoint = option.startPoint;
                 bestCandidate.endPoint = option.endPoint;
@@ -2630,7 +2689,9 @@ namespace
         std::vector<CadEditer::ProcessStateUpdate>& processUpdates,
         std::vector<ProcessConnectionSegment>& processedSegments,
         bool& hasCurrentEndPoint,
-        QVector3D& currentEndPoint
+        QVector3D& currentEndPoint,
+        bool preferSweepBoundary = false,
+        double sweepBoundaryX = 0.0
     )
     {
         if (groupIndices.empty())
@@ -2679,7 +2740,9 @@ namespace
                 hasCurrentEndPoint,
                 currentEndPoint,
                 sweepDirection,
-                rotaryAxisConfig
+                rotaryAxisConfig,
+                preferSweepBoundary && order == 0,
+                sweepBoundaryX
             );
 
             const std::vector<bool> visitedComponents = buildVisitedComponentMask(visited, gapStartContext.componentIds);
@@ -2709,7 +2772,9 @@ namespace
                     hasCurrentEndPoint,
                     currentEndPoint,
                     sweepDirection,
-                    rotaryAxisConfig
+                    rotaryAxisConfig,
+                    preferSweepBoundary && order == 0,
+                    sweepBoundaryX
                 );
             }
 
@@ -3167,6 +3232,201 @@ namespace
             return true;
         };
 
+        auto appendSurfaceSweepGroup =
+            [&](const std::vector<size_t>& rawIndices, bool leftToRight) -> bool
+            {
+                std::vector<CadItem*> localItems;
+                std::vector<size_t> localToGlobal;
+                localItems.reserve(rawIndices.size());
+                localToGlobal.reserve(rawIndices.size());
+
+                for (const size_t index : rawIndices)
+                {
+                    if (index < sortableItems.size()
+                        && !scheduled[index]
+                        && sortableItems[index] != nullptr)
+                    {
+                        localItems.push_back(sortableItems[index]);
+                        localToGlobal.push_back(index);
+                    }
+                }
+
+                if (localItems.empty())
+                {
+                    return true;
+                }
+
+                const std::vector<int> componentIds = buildItemConnectivityComponents(localItems);
+                if (componentIds.size() != localItems.size())
+                {
+                    return false;
+                }
+
+                const int componentCount = componentIds.empty()
+                    ? 0
+                    : *std::max_element(componentIds.begin(), componentIds.end()) + 1;
+                if (componentCount <= 0)
+                {
+                    return false;
+                }
+
+                std::vector<std::vector<size_t>> componentIndices(static_cast<size_t>(componentCount));
+
+                for (size_t localIndex = 0; localIndex < localToGlobal.size(); ++localIndex)
+                {
+                    const int componentId = componentIds[localIndex];
+                    if (componentId < 0 || componentId >= componentCount)
+                    {
+                        return false;
+                    }
+
+                    componentIndices[static_cast<size_t>(componentId)].push_back(localToGlobal[localIndex]);
+                }
+
+                const auto componentSweepBoundaryX = [&sortableItems, leftToRight](const std::vector<size_t>& indices)
+                    {
+                        bool hasPoint = false;
+                        double boundaryX = 0.0;
+
+                        for (const size_t index : indices)
+                        {
+                            if (index >= sortableItems.size() || sortableItems[index] == nullptr)
+                            {
+                                continue;
+                            }
+
+                            for (const QVector3D& point : sortableItems[index]->m_geometry.vertices)
+                            {
+                                if (!hasPoint)
+                                {
+                                    boundaryX = point.x();
+                                    hasPoint = true;
+                                    continue;
+                                }
+
+                                boundaryX = leftToRight
+                                    ? std::min(boundaryX, static_cast<double>(point.x()))
+                                    : std::max(boundaryX, static_cast<double>(point.x()));
+                            }
+                        }
+
+                        return boundaryX;
+                    };
+
+                std::sort
+                (
+                    componentIndices.begin(),
+                    componentIndices.end(),
+                    [&componentSweepBoundaryX, leftToRight](const std::vector<size_t>& left, const std::vector<size_t>& right)
+                    {
+                        const double leftBoundaryX = componentSweepBoundaryX(left);
+                        const double rightBoundaryX = componentSweepBoundaryX(right);
+
+                        if (std::abs(leftBoundaryX - rightBoundaryX) <= kSortEpsilon)
+                        {
+                            return left < right;
+                        }
+
+                        return leftToRight ? leftBoundaryX < rightBoundaryX : leftBoundaryX > rightBoundaryX;
+                    }
+                );
+
+                for (const std::vector<size_t>& component : componentIndices)
+                {
+                    const double sweepBoundaryX = componentSweepBoundaryX(component);
+
+                    if (component.size() == 1)
+                    {
+                        const size_t itemIndex = component.front();
+                        const std::vector<ProcessPathOption> options = buildPathOptionsForItem
+                        (
+                            sortableItems[itemIndex],
+                            SortStrategy::Smart
+                        );
+
+                        if (options.empty())
+                        {
+                            return false;
+                        }
+
+                        const QVector3D referencePoint = hasCurrentEndPoint
+                            ? currentEndPoint
+                            : kRotaryInitialSortOrigin;
+                        const ProcessPathOption* selectedOption = nullptr;
+                        double bestBoundaryDistance = std::numeric_limits<double>::max();
+                        double bestTravelDistance = std::numeric_limits<double>::max();
+
+                        for (const ProcessPathOption& option : options)
+                        {
+                            const double boundaryDistance = std::abs
+                            (
+                                static_cast<double>(option.startPoint.x()) - sweepBoundaryX
+                            );
+                            const double travelDistance = rotarySortTravelDistance
+                            (
+                                referencePoint,
+                                option.startPoint,
+                                rotaryAxisConfig
+                            );
+
+                            if (selectedOption == nullptr
+                                || boundaryDistance < bestBoundaryDistance - kSurfaceSweepBoundaryTolerance
+                                || (std::abs(boundaryDistance - bestBoundaryDistance) <= kSurfaceSweepBoundaryTolerance
+                                    && (travelDistance < bestTravelDistance - kSortEpsilon
+                                        || (std::abs(travelDistance - bestTravelDistance) <= kSortEpsilon
+                                            && isPointLexicographicallyLess(option.startPoint, selectedOption->startPoint)))))
+                            {
+                                selectedOption = &option;
+                                bestBoundaryDistance = boundaryDistance;
+                                bestTravelDistance = travelDistance;
+                            }
+                        }
+
+                        if (selectedOption == nullptr)
+                        {
+                            return false;
+                        }
+
+                        processUpdates.push_back
+                        ({
+                            sortableItems[itemIndex],
+                            static_cast<int>(processUpdates.size()),
+                            selectedOption->reverse,
+                            selectedOption->hasCustomStart,
+                            selectedOption->processStartParameter
+                        });
+                        hasCurrentEndPoint = true;
+                        currentEndPoint = selectedOption->endPoint;
+                        processedSegments.push_back({ selectedOption->startPoint, selectedOption->endPoint });
+                        scheduled[itemIndex] = true;
+                        continue;
+                    }
+
+                    if (!appendSorted3DGroup
+                    (
+                        sortableItems,
+                        component,
+                        rotaryAxisConfig,
+                        processUpdates,
+                        processedSegments,
+                        hasCurrentEndPoint,
+                        currentEndPoint,
+                        true,
+                        sweepBoundaryX
+                    ))
+                    {
+                        return false;
+                    }
+
+                    for (const size_t index : component)
+                    {
+                        scheduled[index] = true;
+                    }
+                }
+
+                return true;
+            };
+
         for (const RotaryLazySegment& segment : segments)
         {
             if (segment.leftClusterIndex < 0
@@ -3179,10 +3439,11 @@ namespace
 
             if (!appendGroup(cutClusters[static_cast<size_t>(segment.leftClusterIndex)].itemIndices)
                 || !appendGroup(segment.continuousItems)
-                || !appendGroup(segment.topItems)
-                || !appendGroup(segment.rightItems)
-                || !appendGroup(segment.bottomItems)
-                || !appendGroup(segment.leftItems)
+                // S-shaped machining sweep: top L->R, right R->L, bottom L->R, left R->L.
+                || !appendSurfaceSweepGroup(segment.topItems, true)
+                || !appendSurfaceSweepGroup(segment.rightItems, false)
+                || !appendSurfaceSweepGroup(segment.bottomItems, true)
+                || !appendSurfaceSweepGroup(segment.leftItems, false)
                 || !appendGroup(segment.unknownItems)
                 || !appendGroup(cutClusters[static_cast<size_t>(segment.rightClusterIndex)].itemIndices))
             {
