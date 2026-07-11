@@ -4,15 +4,9 @@
 
 #pragma once
 
-// 标准库
-#include <vector>
-
-// Qt 核心模块
+#include <QColor>
+#include <QPainter>
 #include <QPoint>
-
-// CAD 模块内部依赖
-#include "CadCamera.h"
-#include "CadRenderTypes.h"
 
 // 十字光标构建器类：
 // 静态工具类，用于构建CAD视图中的十字准线、拾取框等临时渲染图元。
@@ -20,32 +14,15 @@
 class CadCrosshairBuilder
 {
 public:
-    // 构建十字准线图元
-    // 根据当前视图状态、相机参数和光标位置，生成十字准线和拾取框的渲染图元
-    // @param camera 当前轨道相机对象
-    // @param viewportWidth 视口宽度（像素）
-    // @param viewportHeight 视口高度（像素）
-    // @param widgetWidth 部件宽度（逻辑像素）
-    // @param widgetHeight 部件高度（逻辑像素）
-    // @param cursorScreenPos 当前光标屏幕坐标
-    // @param visible 十字准线是否可见
-    // @param orbiting 是否正在轨道旋转交互中
-    // @param planeZ 十字准线平面Z坐标（世界坐标）
-    // @param boxHalfSizeWorld 拾取框半边长（世界单位）
-    // @param crosshairHalfLengthWorld 十字准线半长（世界单位）
-    // @return 临时图元向量，包含十字准线和拾取框的渲染数据
-    static std::vector<TransientPrimitive> buildCrosshairPrimitives
+    // 在屏幕空间绘制十字线，使其不受视角、缩放和吸附位置影响。
+    static void renderCrosshair
     (
-        const OrbitalCamera& camera,
-        int viewportWidth,
-        int viewportHeight,
+        QPainter& painter,
         int widgetWidth,
         int widgetHeight,
         const QPoint& cursorScreenPos,
         bool visible,
         bool orbiting,
-        float planeZ,
-        float boxHalfSizeWorld,
-        float crosshairHalfLengthWorld
+        const QColor& color
     );
 };

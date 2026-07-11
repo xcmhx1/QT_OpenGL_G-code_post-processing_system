@@ -12,7 +12,6 @@
 #include <QPen>
 #include <QPolygonF>
 
-#include <algorithm>
 #include <memory>
 #include <vector>
 
@@ -87,11 +86,6 @@ void CadViewer::renderEntitySelectionOverlays()
     }
 
     const QMatrix4x4 viewProjection = m_camera.viewProjectionMatrix(aspectRatio());
-    const QColor committedColor(0, 188, 255, 228);
-    const QColor previewColor = m_selectionWindowPreview.crossingSelection
-        ? QColor(66, 205, 104, 220)
-        : QColor(74, 152, 250, 220);
-
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing, true);
 
@@ -146,60 +140,43 @@ void CadViewer::renderEntitySelectionOverlays()
             continue;
         }
 
-        const QColor mainColor = committedSelected ? committedColor : previewColor;
+        const QColor haloColor = committedSelected
+            ? QColor(60, 174, 255, 48)
+            : (m_theme.dark ? QColor(255, 255, 255, 52) : QColor(42, 78, 104, 48));
         const QColor glowColor = committedSelected
-            ? QColor(255, 255, 255, 235)
-            : QColor(232, 246, 255, 220);
+            ? QColor(76, 184, 255, 105)
+            : QColor(255, 255, 255, 125);
+        const QColor coreColor = committedSelected
+            ? QColor(105, 202, 255, 195)
+            : QColor(255, 255, 255, 235);
 
-        QPen glowPen(glowColor, committedSelected ? 2.4 : 2.0, Qt::SolidLine);
-        QPen mainPen(mainColor, committedSelected ? 1.5 : 1.2, Qt::DashLine);
-        mainPen.setDashPattern(committedSelected ? QList<qreal>{ 7.0, 3.0 } : QList<qreal>{ 5.0, 4.0 });
+        QPen haloPen(haloColor, 7.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
+        QPen glowPen(glowColor, 3.4, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
+        QPen corePen(coreColor, 1.25, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
 
         painter.setBrush(Qt::NoBrush);
 
         if (projectedPolyline.size() == 1)
         {
             const QPointF center = projectedPolyline.front();
+            painter.setPen(haloPen);
+            painter.drawEllipse(center, 8.0, 8.0);
             painter.setPen(glowPen);
-            painter.drawEllipse(center, 5.8, 5.8);
-            painter.setPen(mainPen);
+            painter.drawEllipse(center, 6.0, 6.0);
+            painter.setPen(corePen);
             painter.drawEllipse(center, 4.0, 4.0);
         }
         else
         {
+            painter.setPen(haloPen);
+            painter.drawPolyline(projectedPolyline);
+
             painter.setPen(glowPen);
             painter.drawPolyline(projectedPolyline);
 
-            painter.setPen(mainPen);
+            painter.setPen(corePen);
             painter.drawPolyline(projectedPolyline);
         }
-
-        const QRectF bounds = projectedPolyline.boundingRect().adjusted(-4.0, -4.0, 4.0, 4.0);
-        const qreal maxCornerLength = 10.0;
-        const qreal minCornerLength = 4.0;
-        const qreal cornerLength = std::clamp
-        (
-            std::min(bounds.width(), bounds.height()) * 0.28,
-            minCornerLength,
-            maxCornerLength
-        );
-
-        QPen cornerPen(mainColor, committedSelected ? 1.4 : 1.2, Qt::SolidLine);
-        painter.setPen(cornerPen);
-
-        const qreal left = bounds.left();
-        const qreal right = bounds.right();
-        const qreal top = bounds.top();
-        const qreal bottom = bounds.bottom();
-
-        painter.drawLine(QPointF(left, top), QPointF(left + cornerLength, top));
-        painter.drawLine(QPointF(left, top), QPointF(left, top + cornerLength));
-        painter.drawLine(QPointF(right, top), QPointF(right - cornerLength, top));
-        painter.drawLine(QPointF(right, top), QPointF(right, top + cornerLength));
-        painter.drawLine(QPointF(left, bottom), QPointF(left + cornerLength, bottom));
-        painter.drawLine(QPointF(left, bottom), QPointF(left, bottom - cornerLength));
-        painter.drawLine(QPointF(right, bottom), QPointF(right - cornerLength, bottom));
-        painter.drawLine(QPointF(right, bottom), QPointF(right, bottom - cornerLength));
     }
 }
 

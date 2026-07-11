@@ -579,6 +579,7 @@ void CadViewer::paintGL()
     renderTransientPrimitives(viewProjection);
     renderAxis(viewProjection);
     renderOrbitMarker(viewProjection);
+    renderScreenCrosshair();
     renderEntitySelectionOverlays();
     renderProcessOrderLabels();
     renderRotaryEndCutLabels();
@@ -715,30 +716,12 @@ void CadViewer::renderTransientPrimitives(const QMatrix4x4& viewProjection)
     const std::vector<TransientPrimitive> snapHighlightPrimitives = buildSnapHighlightPrimitives();
     // 构建命令预览图元
     const std::vector<TransientPrimitive> commandPrimitives = buildTransientPrimitives();
-    const QPoint crosshairScreenPos = worldToScreen(resolveInteractiveWorldPosition(m_cursorScreenPos));
-    // 构建十字准线图元
-    const std::vector<TransientPrimitive> crosshairPrimitives = CadCrosshairBuilder::buildCrosshairPrimitives
-    (
-        m_camera,
-        m_viewportWidth,
-        m_viewportHeight,
-        width(),
-        height(),
-        crosshairScreenPos,
-        m_showCrosshairOverlay,
-        m_viewInteractionController.crosshairSuppressed(),
-        m_crosshairPlaneZ,
-        CadInteractionConstants::kPickBoxHalfSizePixels * pixelToWorldScale(),
-        CadInteractionConstants::kCrosshairHalfLengthWorld
-    );
-
-    // 如果没有临时图元，则返回
     processPrimitives.insert(processPrimitives.end(), processDirectionPrimitives.begin(), processDirectionPrimitives.end());
     processPrimitives.insert(processPrimitives.end(), selectedHandlePrimitives.begin(), selectedHandlePrimitives.end());
     processPrimitives.insert(processPrimitives.end(), snapHighlightPrimitives.begin(), snapHighlightPrimitives.end());
     processPrimitives.insert(processPrimitives.end(), commandPrimitives.begin(), commandPrimitives.end());
 
-    if (processPrimitives.empty() && crosshairPrimitives.empty())
+    if (processPrimitives.empty())
     {
         return;
     }
@@ -748,7 +731,24 @@ void CadViewer::renderTransientPrimitives(const QMatrix4x4& viewProjection)
     (
         viewProjection,
         processPrimitives,
-        crosshairPrimitives
+        {}
+    );
+}
+
+void CadViewer::renderScreenCrosshair()
+{
+    QPainter painter(this);
+    painter.setRenderHint(QPainter::Antialiasing, false);
+    const QColor crosshairColor = m_theme.dark ? QColor(92, 214, 244) : QColor(30, 142, 184);
+    CadCrosshairBuilder::renderCrosshair
+    (
+        painter,
+        width(),
+        height(),
+        m_cursorScreenPos,
+        m_showCrosshairOverlay,
+        m_viewInteractionController.crosshairSuppressed(),
+        crosshairColor
     );
 }
 

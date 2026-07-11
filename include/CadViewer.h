@@ -500,6 +500,9 @@ private:
     // 绘制动态命令浮框。
     void renderDynamicCommandOverlay();
 
+    // 按原始鼠标屏幕坐标绘制十字线。
+    void renderScreenCrosshair();
+
     enum class ViewCubeFace
     {
         None,
@@ -580,9 +583,6 @@ private:
 
     // 是否显示十字准线覆盖
     bool m_showCrosshairOverlay = false;
-
-    // 十字准线平面 Z 坐标
-    float m_crosshairPlaneZ = 0.0f;
 
     // 控制器，负责接收 Viewer 输入并维护绘图状态
     CadController m_controller;

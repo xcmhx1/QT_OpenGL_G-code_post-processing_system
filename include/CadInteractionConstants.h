@@ -13,8 +13,4 @@ namespace CadInteractionConstants
     // 拾取框的实际尺寸为 2 * kPickBoxHalfSizePixels
     constexpr float kPickBoxHalfSizePixels = 10.0f;
 
-    // 十字准线半长（世界单位）
-    // 注意：十字线当前按世界坐标长度绘制，过大会让 overlay 在拖动时显得发涩
-    // 这个值定义了十字准线在水平和垂直方向上的长度的一半
-    constexpr float kCrosshairHalfLengthWorld = 500.0f;
 }
