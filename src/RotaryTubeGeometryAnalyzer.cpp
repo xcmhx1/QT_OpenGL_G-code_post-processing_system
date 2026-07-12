@@ -1128,6 +1128,96 @@ namespace
         std::sort(candidates.begin(), candidates.end());
         return candidates[candidates.size() / 2];
     }
+
+    RotaryTubeSectionModel parseSectionCandidate
+    (
+        const QVector<int>& candidateIndices,
+        const QVector<CadItem*>& sceneItems,
+        const QVector<QVector<QVector3D>>& paths,
+        const GeometryTolerance& tolerance
+    )
+    {
+        RotaryTubeSectionModel model;
+        const QVector<int> core = peelDanglingItems(candidateIndices, paths, tolerance.nodeSnap);
+
+        if (core.isEmpty())
+        {
+            model.errorMessage = QStringLiteral("候选图元未能形成闭合或近似闭合的方管垂直截面。");
+            return model;
+        }
+
+        const TopologyOuterBoundary outerBoundary = buildLargestOuterBoundary(core, paths, 2, tolerance.nodeSnap);
+        QSet<int> outerBoundaryItems;
+
+        for (int itemIndex : outerBoundary.itemIndices)
+        {
+            if (itemFollowsOuterBoundary
+            (
+                paths[itemIndex],
+                2,
+                outerBoundary.polygon,
+                tolerance.boundaryDistance
+            ))
+            {
+                outerBoundaryItems.insert(itemIndex);
+            }
+        }
+
+        if (outerBoundaryItems.isEmpty())
+        {
+            model.errorMessage = QStringLiteral("未能从候选图元中提取唯一的最大闭合外轮廓。");
+            return model;
+        }
+
+        QVector<QVector2D> sectionPoints;
+        model.sectionBoundary = outerBoundary.polygon;
+
+        for (int itemIndex : outerBoundaryItems)
+        {
+            model.outerBoundaryItems.push_back(sceneItems[itemIndex]);
+
+            for (const QVector3D& point : paths[itemIndex])
+            {
+                sectionPoints.push_back(QVector2D(point.y(), point.z()));
+            }
+        }
+
+        model.sectionHull = convexHull(std::move(sectionPoints));
+
+        if (model.sectionHull.size() < 3 || polygonArea(model.sectionHull) <= kEpsilon)
+        {
+            model.sectionHull.clear();
+            model.errorMessage = QStringLiteral("最大外轮廓在 YZ 平面上的投影无效，无法识别方管垂直截面。");
+            return model;
+        }
+
+        double minY = model.sectionHull.front().x();
+        double maxY = minY;
+        double minZ = model.sectionHull.front().y();
+        double maxZ = minZ;
+
+        for (const QVector2D& point : model.sectionHull)
+        {
+            minY = std::min(minY, static_cast<double>(point.x()));
+            maxY = std::max(maxY, static_cast<double>(point.x()));
+            minZ = std::min(minZ, static_cast<double>(point.y()));
+            maxZ = std::max(maxZ, static_cast<double>(point.y()));
+        }
+
+        model.yLength = maxY - minY;
+        model.zWidth = maxZ - minZ;
+        const double fallbackRadius = estimateRoundedCornerRadius(model.sectionHull, tolerance.boundaryDistance);
+        model.cornerRadius = estimateCornerRadiusFromEntities
+        (
+            model.outerBoundaryItems,
+            paths,
+            sceneItems,
+            std::min(model.yLength, model.zWidth) * 0.5,
+            fallbackRadius
+        );
+        model.valid = true;
+        return model;
+    }
 }
 
 RotaryTubeSectionModel RotaryTubeGeometryAnalyzer::buildSectionModel
@@ -1154,97 +1244,41 @@ RotaryTubeSectionModel RotaryTubeGeometryAnalyzer::buildSectionModel
         paths.push_back(itemPath(item));
     }
 
-    const QVector<int> component = selectedConnectedItems(selectedItems, sceneItems, paths, tolerance.nodeSnap);
+    QVector<int> directCandidate;
+    directCandidate.reserve(selectedItems.size());
 
     for (CadItem* selectedItem : selectedItems)
     {
         const int selectedIndex = sceneItems.indexOf(selectedItem);
 
-        if (selectedIndex < 0 || !component.contains(selectedIndex))
+        if (selectedIndex < 0)
+        {
+            model.errorMessage = QStringLiteral("选择集中存在不属于当前文档的图元。");
+            return model;
+        }
+
+        if (!directCandidate.contains(selectedIndex)) directCandidate.push_back(selectedIndex);
+    }
+
+    model = parseSectionCandidate(directCandidate, sceneItems, paths, tolerance);
+
+    if (model.valid)
+    {
+        return model;
+    }
+
+    const QVector<int> component = selectedConnectedItems(selectedItems, sceneItems, paths, tolerance.nodeSnap);
+
+    for (int selectedIndex : directCandidate)
+    {
+        if (!component.contains(selectedIndex))
         {
             model.errorMessage = QStringLiteral("请选择同一个连续方管截面中的图元，不要同时选择多个独立轮廓。");
             return model;
         }
     }
 
-    const QVector<int> core = peelDanglingItems(component, paths, tolerance.nodeSnap);
-
-    if (core.isEmpty())
-    {
-        model.errorMessage = QStringLiteral("选中图元未能形成闭合或近似闭合的方管垂直截面；无用支线已自动忽略。");
-        return model;
-    }
-
-    const TopologyOuterBoundary outerBoundary = buildLargestOuterBoundary(core, paths, 2, tolerance.nodeSnap);
-    QSet<int> outerBoundaryItems;
-
-    for (int itemIndex : outerBoundary.itemIndices)
-    {
-        if (itemFollowsOuterBoundary
-        (
-            paths[itemIndex],
-            2,
-            outerBoundary.polygon,
-            tolerance.boundaryDistance
-        ))
-        {
-            outerBoundaryItems.insert(itemIndex);
-        }
-    }
-
-    if (outerBoundaryItems.isEmpty())
-    {
-        model.errorMessage = QStringLiteral("未能从选中图元组中提取唯一的最大闭合外轮廓。");
-        return model;
-    }
-
-    QVector<QVector2D> sectionPoints;
-    model.sectionBoundary = outerBoundary.polygon;
-
-    for (int itemIndex : outerBoundaryItems)
-    {
-        model.outerBoundaryItems.push_back(sceneItems[itemIndex]);
-
-        for (const QVector3D& point : paths[itemIndex])
-        {
-            sectionPoints.push_back(QVector2D(point.y(), point.z()));
-        }
-    }
-
-    model.sectionHull = convexHull(std::move(sectionPoints));
-
-    if (model.sectionHull.size() < 3 || polygonArea(model.sectionHull) <= kEpsilon)
-    {
-        model.sectionHull.clear();
-        model.errorMessage = QStringLiteral("最大外轮廓在 YZ 平面上的投影无效，无法识别方管垂直截面。");
-        return model;
-    }
-
-    double minY = model.sectionHull.front().x();
-    double maxY = minY;
-    double minZ = model.sectionHull.front().y();
-    double maxZ = minZ;
-
-    for (const QVector2D& point : model.sectionHull)
-    {
-        minY = std::min(minY, static_cast<double>(point.x()));
-        maxY = std::max(maxY, static_cast<double>(point.x()));
-        minZ = std::min(minZ, static_cast<double>(point.y()));
-        maxZ = std::max(maxZ, static_cast<double>(point.y()));
-    }
-
-    model.yLength = maxY - minY;
-    model.zWidth = maxZ - minZ;
-    const double fallbackRadius = estimateRoundedCornerRadius(model.sectionHull, tolerance.boundaryDistance);
-    model.cornerRadius = estimateCornerRadiusFromEntities
-    (
-        model.outerBoundaryItems,
-        paths,
-        sceneItems,
-        std::min(model.yLength, model.zWidth) * 0.5,
-        fallbackRadius
-    );
-    model.valid = true;
+    model = parseSectionCandidate(component, sceneItems, paths, tolerance);
     return model;
 }
 

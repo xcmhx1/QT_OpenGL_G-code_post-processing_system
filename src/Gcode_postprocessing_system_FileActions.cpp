@@ -72,6 +72,8 @@ bool Gcode_postprocessing_system::importDxfFile(const QString& filePath)
     m_rotaryTubeSectionModel = RotaryTubeSectionModel();
     m_currentDocumentPath = ensureDxfSuffix(filePath);
     ui->openGLWidget->setDocument(&m_document);
+    ui->openGLWidget->clearSelection();
+    runDxfImportPostProcessing();
     ui->openGLWidget->appendCommandMessage(QStringLiteral("已导入文件: %1").arg(QFileInfo(filePath).fileName()));
     ui->openGLWidget->refreshCommandPrompt();
     statusBar()->showMessage(QStringLiteral("已导入: %1").arg(QFileInfo(filePath).fileName()), 5000);
@@ -83,6 +85,37 @@ bool Gcode_postprocessing_system::importDxfFile(const QString& filePath)
 
     syncToolPanelState();
     return true;
+}
+
+void Gcode_postprocessing_system::runDxfImportPostProcessing()
+{
+    auto reportFailure = [this](const QString& message)
+    {
+        ui->openGLWidget->appendCommandMessage(message);
+        statusBar()->showMessage(message, 5000);
+    };
+
+    if (loadAutoDeduplicateOnImport() && !removeDuplicateEntities(false))
+    {
+        reportFailure(QStringLiteral("导入后自动去重未完成，文件仍已正常导入。"));
+    }
+
+    if (loadAutoRecognizeRotaryTubeSectionOnImport() && !recognizeRotaryTubeSection(false))
+    {
+        reportFailure(QStringLiteral("导入后未能自动识别方管垂直截面，文件仍已正常导入。"));
+    }
+
+    if (loadAutoRemoveInternalPathsOnImport())
+    {
+        if (!m_rotaryTubeSectionModel.valid)
+        {
+            reportFailure(QStringLiteral("方管垂直截面未识别，已跳过导入后内部线条清理。"));
+        }
+        else if (!removeInternalMachiningPaths(false))
+        {
+            reportFailure(QStringLiteral("导入后内部线条清理未完成，文件仍已正常导入。"));
+        }
+    }
 }
 
 bool Gcode_postprocessing_system::importBitmapFile(const QString& filePath)

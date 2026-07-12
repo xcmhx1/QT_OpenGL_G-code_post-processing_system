@@ -450,13 +450,13 @@ Gcode_postprocessing_system::Gcode_postprocessing_system(QWidget* parent)
     QAction* joinAction = new QAction(QStringLiteral("合并..."), this);
     QAction* filletAction = new QAction(QStringLiteral("圆角..."), this);
     QAction* chamferAction = new QAction(QStringLiteral("直角（倒角）..."), this);
-    QAction* assignRotaryEndCutAction = new QAction(QStringLiteral("指定为中断切面"), this);
+    QAction* assignRotaryEndCutAction = new QAction(QStringLiteral("指定为加工断面"), this);
     QAction* assignWasteRotaryEndCutAction = new QAction(QStringLiteral("指定为废面"), this);
     QAction* recognizeRotaryTubeSectionAction = new QAction(QStringLiteral("识别方管垂直截面（外轮廓）"), this);
     QAction* removeInternalPathsAction = new QAction(QStringLiteral("去除内部线条"), this);
     QAction* restoreInternalPathsAction = new QAction(QStringLiteral("恢复内部线条"), this);
-    QAction* clearSelectedRotaryEndCutAssignmentsAction = new QAction(QStringLiteral("清除选中切面指定"), this);
-    QAction* clearRotaryEndCutAssignmentsAction = new QAction(QStringLiteral("清除全部切面指定"), this);
+    QAction* clearSelectedRotaryEndCutAssignmentsAction = new QAction(QStringLiteral("清除选中加工断面指定"), this);
+    QAction* clearRotaryEndCutAssignmentsAction = new QAction(QStringLiteral("清除全部加工断面指定"), this);
 
     ui->menuFile->insertAction(ui->action_File_Export_G, exportDxfAction);
     ui->menuFile->insertAction(ui->action_File_Export_G, exportSafeDxfAction);
@@ -530,6 +530,41 @@ Gcode_postprocessing_system::~Gcode_postprocessing_system()
     delete ui;
 }
 
+void Gcode_postprocessing_system::showMachiningContextMenu(const QPoint& globalPos)
+{
+    QMenu menu(this);
+    QAction* recognizeSectionAction = menu.addAction(QStringLiteral("截面识别"));
+    QMenu* processSectionMenu = menu.addMenu(QStringLiteral("加工断面"));
+    QAction* toggleProcessSectionAction = processSectionMenu->addAction(QStringLiteral("加工断面指定/恢复"));
+    QAction* recognizeAllProcessSectionsAction = processSectionMenu->addAction(QStringLiteral("所有断面识别"));
+    QAction* restoreAllProcessSectionsAction = processSectionMenu->addAction(QStringLiteral("所有断面恢复"));
+    QMenu* internalLineMenu = menu.addMenu(QStringLiteral("内部线条"));
+    QAction* toggleInternalLineAction = internalLineMenu->addAction(QStringLiteral("内部线条指定/恢复"));
+    QAction* recognizeAllInternalLinesAction = internalLineMenu->addAction(QStringLiteral("所有线条识别"));
+    QAction* restoreAllInternalLinesAction = internalLineMenu->addAction(QStringLiteral("所有线条恢复"));
+    menu.addSeparator();
+    QAction* clearAllAction = menu.addAction(QStringLiteral("清空所有面线"));
+
+    const bool documentEmpty = m_document.m_entities.empty();
+    const bool hasSelection = !ui->openGLWidget->selectedEntities().isEmpty();
+    recognizeSectionAction->setEnabled(!documentEmpty && hasSelection);
+    toggleProcessSectionAction->setEnabled(!documentEmpty && hasSelection);
+    toggleInternalLineAction->setEnabled(!documentEmpty && hasSelection);
+    processSectionMenu->setEnabled(!documentEmpty);
+    internalLineMenu->setEnabled(!documentEmpty);
+    clearAllAction->setEnabled(!documentEmpty);
+
+    connect(recognizeSectionAction, &QAction::triggered, this, [this]() { recognizeRotaryTubeSection(); });
+    connect(toggleProcessSectionAction, &QAction::triggered, this, [this]() { toggleSelectedRotaryEndCutAssignment(); });
+    connect(recognizeAllProcessSectionsAction, &QAction::triggered, this, [this]() { recognizeAllRotaryEndCuts(); });
+    connect(restoreAllProcessSectionsAction, &QAction::triggered, this, [this]() { clearRotaryEndCutAssignments(); });
+    connect(toggleInternalLineAction, &QAction::triggered, this, [this]() { toggleSelectedInternalPathAssignment(); });
+    connect(recognizeAllInternalLinesAction, &QAction::triggered, this, [this]() { removeInternalMachiningPaths(); });
+    connect(restoreAllInternalLinesAction, &QAction::triggered, this, [this]() { restoreInternalMachiningPaths(); });
+    connect(clearAllAction, &QAction::triggered, this, [this]() { clearAllMachiningFaceAndLineAssignments(); });
+    menu.exec(globalPos);
+}
+
 void Gcode_postprocessing_system::initializeThemeMenu()
 {
     ui->menuSet->setTitle(QStringLiteral("用户设置"));
@@ -566,6 +601,13 @@ void Gcode_postprocessing_system::initializeThemeMenu()
         {
             applyGenerationPreference(GCodeGenerationPreference::Auto);
         }
+    );
+    connect
+    (
+        ui->openGLWidget,
+        &CadViewer::machiningContextMenuRequested,
+        this,
+        &Gcode_postprocessing_system::showMachiningContextMenu
     );
     connect
     (
@@ -1229,16 +1271,49 @@ Gcode_postprocessing_system::GCodeGenerationPreference Gcode_postprocessing_syst
     return GCodeGenerationPreference::Auto;
 }
 
-bool Gcode_postprocessing_system::loadAutoDeduplicateOnExport() const
+bool Gcode_postprocessing_system::loadAutoDeduplicateOnImport() const
 {
     QSettings settings(QStringLiteral("GCodePostProcessingSystem"), QStringLiteral("GCodePostProcessingSystem"));
-    return settings.value(QStringLiteral("gcode/autoDeduplicateOnExport"), false).toBool();
+    const QString newKey = QStringLiteral("dxf/autoDeduplicateOnImport");
+
+    if (settings.contains(newKey))
+    {
+        return settings.value(newKey, false).toBool();
+    }
+
+    const bool migratedValue = settings.value(QStringLiteral("gcode/autoDeduplicateOnExport"), false).toBool();
+    settings.setValue(newKey, migratedValue);
+    return migratedValue;
 }
 
-void Gcode_postprocessing_system::saveAutoDeduplicateOnExport(bool enabled) const
+void Gcode_postprocessing_system::saveAutoDeduplicateOnImport(bool enabled) const
 {
     QSettings settings(QStringLiteral("GCodePostProcessingSystem"), QStringLiteral("GCodePostProcessingSystem"));
-    settings.setValue(QStringLiteral("gcode/autoDeduplicateOnExport"), enabled);
+    settings.setValue(QStringLiteral("dxf/autoDeduplicateOnImport"), enabled);
+}
+
+bool Gcode_postprocessing_system::loadAutoRecognizeRotaryTubeSectionOnImport() const
+{
+    QSettings settings(QStringLiteral("GCodePostProcessingSystem"), QStringLiteral("GCodePostProcessingSystem"));
+    return settings.value(QStringLiteral("dxf/autoRecognizeRotaryTubeSectionOnImport"), false).toBool();
+}
+
+void Gcode_postprocessing_system::saveAutoRecognizeRotaryTubeSectionOnImport(bool enabled) const
+{
+    QSettings settings(QStringLiteral("GCodePostProcessingSystem"), QStringLiteral("GCodePostProcessingSystem"));
+    settings.setValue(QStringLiteral("dxf/autoRecognizeRotaryTubeSectionOnImport"), enabled);
+}
+
+bool Gcode_postprocessing_system::loadAutoRemoveInternalPathsOnImport() const
+{
+    QSettings settings(QStringLiteral("GCodePostProcessingSystem"), QStringLiteral("GCodePostProcessingSystem"));
+    return settings.value(QStringLiteral("dxf/autoRemoveInternalPathsOnImport"), false).toBool();
+}
+
+void Gcode_postprocessing_system::saveAutoRemoveInternalPathsOnImport(bool enabled) const
+{
+    QSettings settings(QStringLiteral("GCodePostProcessingSystem"), QStringLiteral("GCodePostProcessingSystem"));
+    settings.setValue(QStringLiteral("dxf/autoRemoveInternalPathsOnImport"), enabled);
 }
 
 bool Gcode_postprocessing_system::loadUseDxfFileNameOnExport() const
@@ -1351,7 +1426,9 @@ void Gcode_postprocessing_system::applyGenerationPreference(GCodeGenerationPrefe
 void Gcode_postprocessing_system::initializeToolPanel()
 {
     m_toolPanelWidget = new CadToolPanelWidget(this);
-    m_toolPanelWidget->setAutoDeduplicateEnabled(loadAutoDeduplicateOnExport());
+    m_toolPanelWidget->setAutoDeduplicateOnImportEnabled(loadAutoDeduplicateOnImport());
+    m_toolPanelWidget->setAutoRecognizeRotaryTubeSectionOnImportEnabled(loadAutoRecognizeRotaryTubeSectionOnImport());
+    m_toolPanelWidget->setAutoRemoveInternalPathsOnImportEnabled(loadAutoRemoveInternalPathsOnImport());
     m_toolPanelWidget->setUseDxfFileNameEnabled(loadUseDxfFileNameOnExport());
     m_toolPanelWidget->setUseDefaultImportPathEnabled(loadUseDefaultImportPath());
     m_toolPanelWidget->setUseDefaultExportPathEnabled(loadUseDefaultExportPath());
@@ -1422,7 +1499,15 @@ void Gcode_postprocessing_system::initializeToolPanel()
     connect(m_toolPanelWidget, &CadToolPanelWidget::importFileRequested, this, [this]() { ui->action_File_Import_Dxf->trigger(); });
     connect(m_toolPanelWidget, &CadToolPanelWidget::exportGCodeRequested, this, [this]() { ui->action_File_Export_G->trigger(); });
     connect(m_toolPanelWidget, &CadToolPanelWidget::deduplicateRequested, this, [this]() { removeDuplicateEntities(); });
-    connect(m_toolPanelWidget, &CadToolPanelWidget::autoDeduplicateOptionChanged, this, [this](bool enabled) { saveAutoDeduplicateOnExport(enabled); });
+    connect(m_toolPanelWidget, &CadToolPanelWidget::autoDeduplicateOnImportOptionChanged, this, [this](bool enabled) { saveAutoDeduplicateOnImport(enabled); });
+    connect(m_toolPanelWidget, &CadToolPanelWidget::autoRecognizeRotaryTubeSectionOnImportOptionChanged, this, [this](bool enabled)
+    {
+        saveAutoRecognizeRotaryTubeSectionOnImport(enabled);
+    });
+    connect(m_toolPanelWidget, &CadToolPanelWidget::autoRemoveInternalPathsOnImportOptionChanged, this, [this](bool enabled)
+    {
+        saveAutoRemoveInternalPathsOnImport(enabled);
+    });
     connect(m_toolPanelWidget, &CadToolPanelWidget::useDxfFileNameOptionChanged, this, [this](bool enabled) { saveUseDxfFileNameOnExport(enabled); });
     connect(m_toolPanelWidget, &CadToolPanelWidget::useDefaultImportPathOptionChanged, this, [this](bool enabled) { saveUseDefaultImportPath(enabled); });
     connect(m_toolPanelWidget, &CadToolPanelWidget::useDefaultExportPathOptionChanged, this, [this](bool enabled) { saveUseDefaultExportPath(enabled); });

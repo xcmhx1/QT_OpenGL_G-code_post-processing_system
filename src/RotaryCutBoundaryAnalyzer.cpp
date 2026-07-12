@@ -83,7 +83,7 @@ namespace
 
             if (segment.points.size() < 2)
             {
-                errorMessage = QStringLiteral("切面中存在无法构成连续刀路的图元。");
+                errorMessage = QStringLiteral("加工断面中存在无法构成连续刀路的图元。");
                 return false;
             }
 
@@ -92,14 +92,14 @@ namespace
 
         if (segments.empty())
         {
-            errorMessage = QStringLiteral("切面候选图元为空。");
+            errorMessage = QStringLiteral("加工断面候选图元为空。");
             return false;
         }
 
         if (segments.size() > 1
             && distance3D(segments.front().points.front(), segments.front().points.back()) <= connectionTolerance)
         {
-            errorMessage = QStringLiteral("候选组中同时存在独立闭环和其它图元，无法形成单一切面。");
+            errorMessage = QStringLiteral("候选组中同时存在独立闭环和其它图元，无法形成单一加工断面。");
             return false;
         }
 
@@ -149,7 +149,7 @@ namespace
 
             if (matchCount > 1)
             {
-                errorMessage = QStringLiteral("候选切面存在分叉或多义连接，无法确定唯一闭环。");
+                errorMessage = QStringLiteral("候选加工断面存在分叉或多义连接，无法确定唯一闭环。");
                 return false;
             }
 
@@ -456,7 +456,7 @@ RotaryCutBoundaryAnalysis RotaryCutBoundaryAnalyzer::analyze
 
     if (densePath.size() < 4)
     {
-        analysis.errorMessage = QStringLiteral("切面路径采样点不足，无法进行拓扑验证。");
+        analysis.errorMessage = QStringLiteral("加工断面路径采样点不足，无法进行拓扑验证。");
         return analysis;
     }
 
@@ -488,7 +488,7 @@ RotaryCutBoundaryAnalysis RotaryCutBoundaryAnalyzer::analyze
             deviation
         ))
         {
-            analysis.errorMessage = QStringLiteral("切面路径无法映射到方管截面周长。");
+            analysis.errorMessage = QStringLiteral("加工断面路径无法映射到方管截面周长。");
             return analysis;
         }
 

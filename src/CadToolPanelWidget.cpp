@@ -20,6 +20,7 @@
 #include <QTabBar>
 #include <QTabWidget>
 #include <QToolButton>
+#include <QTimer>
 #include <QVBoxLayout>
 #include <QWidgetAction>
 
@@ -776,21 +777,53 @@ void CadToolPanelWidget::setCurrentProfileSelection(const QString& profileId)
     m_updatingUi = false;
 }
 
-void CadToolPanelWidget::setAutoDeduplicateEnabled(bool enabled)
+void CadToolPanelWidget::setAutoDeduplicateOnImportEnabled(bool enabled)
 {
-    if (m_autoDeduplicateCheckBox == nullptr)
+    if (m_autoDeduplicateOnImportCheckBox == nullptr)
     {
         return;
     }
 
     m_updatingUi = true;
-    m_autoDeduplicateCheckBox->setChecked(enabled);
+    m_autoDeduplicateOnImportCheckBox->setChecked(enabled);
     m_updatingUi = false;
 }
 
-bool CadToolPanelWidget::autoDeduplicateEnabled() const
+bool CadToolPanelWidget::autoDeduplicateOnImportEnabled() const
 {
-    return m_autoDeduplicateCheckBox != nullptr && m_autoDeduplicateCheckBox->isChecked();
+    return m_autoDeduplicateOnImportCheckBox != nullptr && m_autoDeduplicateOnImportCheckBox->isChecked();
+}
+
+void CadToolPanelWidget::setAutoRecognizeRotaryTubeSectionOnImportEnabled(bool enabled)
+{
+    if (m_autoRecognizeRotaryTubeSectionOnImportCheckBox != nullptr)
+    {
+        m_updatingUi = true;
+        m_autoRecognizeRotaryTubeSectionOnImportCheckBox->setChecked(enabled);
+        m_updatingUi = false;
+    }
+}
+
+bool CadToolPanelWidget::autoRecognizeRotaryTubeSectionOnImportEnabled() const
+{
+    return m_autoRecognizeRotaryTubeSectionOnImportCheckBox != nullptr
+        && m_autoRecognizeRotaryTubeSectionOnImportCheckBox->isChecked();
+}
+
+void CadToolPanelWidget::setAutoRemoveInternalPathsOnImportEnabled(bool enabled)
+{
+    if (m_autoRemoveInternalPathsOnImportCheckBox != nullptr)
+    {
+        m_updatingUi = true;
+        m_autoRemoveInternalPathsOnImportCheckBox->setChecked(enabled);
+        m_updatingUi = false;
+    }
+}
+
+bool CadToolPanelWidget::autoRemoveInternalPathsOnImportEnabled() const
+{
+    return m_autoRemoveInternalPathsOnImportCheckBox != nullptr
+        && m_autoRemoveInternalPathsOnImportCheckBox->isChecked();
 }
 
 void CadToolPanelWidget::setUseDxfFileNameEnabled(bool enabled)
@@ -903,8 +936,22 @@ void CadToolPanelWidget::setRotaryTubeSectionProperties
 
     m_rotaryTubeSectionStatusLabel->setText(recognized ? QStringLiteral("已识别") : QStringLiteral("未识别"));
     m_rotaryTubeSectionStatusLabel->setProperty("sectionRecognized", recognized);
+    m_rotaryTubeSectionBlinkOn = !recognized;
+    m_rotaryTubeSectionStatusLabel->setProperty("sectionBlinkOn", m_rotaryTubeSectionBlinkOn);
     m_rotaryTubeSectionStatusLabel->style()->unpolish(m_rotaryTubeSectionStatusLabel);
     m_rotaryTubeSectionStatusLabel->style()->polish(m_rotaryTubeSectionStatusLabel);
+
+    if (m_rotaryTubeSectionBlinkTimer != nullptr)
+    {
+        if (recognized)
+        {
+            m_rotaryTubeSectionBlinkTimer->stop();
+        }
+        else if (!m_rotaryTubeSectionBlinkTimer->isActive())
+        {
+            m_rotaryTubeSectionBlinkTimer->start();
+        }
+    }
 
     if (!recognized)
     {
@@ -1035,7 +1082,8 @@ void CadToolPanelWidget::applyTheme()
             " font-weight: 500;"
             "}"
             "QLabel[sectionStatus=\"true\"] { font-size: 11px; font-weight: 600; }"
-            "QLabel[sectionStatus=\"true\"][sectionRecognized=\"false\"] { color: %2; }"
+            "QLabel[sectionStatus=\"true\"][sectionRecognized=\"false\"][sectionBlinkOn=\"true\"] { color: rgb(220, 48, 48); }"
+            "QLabel[sectionStatus=\"true\"][sectionRecognized=\"false\"][sectionBlinkOn=\"false\"] { color: rgba(220, 48, 48, 45); }"
             "QLabel[sectionStatus=\"true\"][sectionRecognized=\"true\"] { color: %8; }"
             "QLabel[sectionValue=\"true\"] { color: %1; font-size: 10px; }"
             "QCheckBox[machiningOption=\"true\"] {"
@@ -1609,7 +1657,7 @@ QWidget* CadToolPanelWidget::buildDisplayPanel()
     m_backgroundGridCheckBox = new QCheckBox(QStringLiteral("背景网格"), panel);
     m_processDirectionCheckBox = new QCheckBox(QStringLiteral("加工方向箭头"), panel);
     m_processOrderCheckBox = new QCheckBox(QStringLiteral("加工顺序编号"), panel);
-    m_rotaryEndCutsCheckBox = new QCheckBox(QStringLiteral("切面标记"), panel);
+    m_rotaryEndCutsCheckBox = new QCheckBox(QStringLiteral("加工断面标记"), panel);
     m_excludedEntitiesDimmedCheckBox = new QCheckBox(QStringLiteral("废弃区域弱化"), panel);
 
     const QList<QCheckBox*> defaultChecked
@@ -1696,9 +1744,9 @@ QWidget* CadToolPanelWidget::buildMachiningPanel()
     m_importFileButton = buildMachiningButton(QStringLiteral("文件导入"));
     m_exportGCodeButton = buildMachiningButton(QStringLiteral("G代码导出"));
     m_deduplicateButton = buildMachiningButton(QStringLiteral("去重"));
-    m_autoDeduplicateCheckBox = new QCheckBox(QStringLiteral("自动"), panel);
-    m_autoDeduplicateCheckBox->setProperty("machiningOption", true);
-    m_autoDeduplicateCheckBox->setToolTip(QStringLiteral("勾选后，导出G代码前会先自动执行一次去重"));
+    m_autoDeduplicateOnImportCheckBox = new QCheckBox(QStringLiteral("导入后自动去重"), panel);
+    m_autoDeduplicateOnImportCheckBox->setProperty("machiningOption", true);
+    m_autoDeduplicateOnImportCheckBox->setToolTip(QStringLiteral("导入 DXF/DWG 后自动删除完全重叠的同类型图元"));
     m_useDxfFileNameCheckBox = new QCheckBox(QStringLiteral("使用dxf文件名"), panel);
     m_useDxfFileNameCheckBox->setProperty("machiningOption", true);
     m_useDxfFileNameCheckBox->setToolTip(QStringLiteral("勾选后，导出G代码时会优先使用当前DXF文件名作为输出文件名"));
@@ -1735,24 +1783,21 @@ QWidget* CadToolPanelWidget::buildMachiningPanel()
     featureLayout->setContentsMargins(1, 6, 1, 2);
     featureLayout->setHorizontalSpacing(6);
     featureLayout->setVerticalSpacing(6);
-    featureLayout->addWidget(m_autoDeduplicateCheckBox, 0, 0, Qt::AlignLeft | Qt::AlignVCenter);
-    featureLayout->addWidget(m_deduplicateButton, 0, 1);
-    featureLayout->addWidget(m_useDefaultExportPathCheckBox, 1, 0, 1, 2, Qt::AlignLeft | Qt::AlignVCenter);
+    featureLayout->addWidget(m_autoDeduplicateOnImportCheckBox, 0, 0, 1, 2, Qt::AlignLeft | Qt::AlignVCenter);
+    featureLayout->addWidget(m_deduplicateButton, 1, 1);
+    featureLayout->addWidget(m_useDefaultExportPathCheckBox, 1, 0, Qt::AlignLeft | Qt::AlignVCenter);
     featureLayout->addWidget(m_useDxfFileNameCheckBox, 2, 0, 1, 2, Qt::AlignLeft | Qt::AlignVCenter);
     featureLayout->setColumnStretch(1, 1);
     featureLayout->setAlignment(Qt::AlignLeft | Qt::AlignTop);
 
     QWidget* configPanel = new QWidget(panel);
-    QVBoxLayout* configLayout = new QVBoxLayout(configPanel);
+    QGridLayout* configLayout = new QGridLayout(configPanel);
     configLayout->setContentsMargins(2, 6, 2, 2);
-    configLayout->setSpacing(6);
+    configLayout->setHorizontalSpacing(6);
+    configLayout->setVerticalSpacing(4);
+    configPanel->setMaximumWidth(310);
 
-    QWidget* profileRow = new QWidget(configPanel);
-    QHBoxLayout* profileLayout = new QHBoxLayout(profileRow);
-    profileLayout->setContentsMargins(0, 0, 0, 0);
-    profileLayout->setSpacing(6);
-
-    m_profileManagerButton = new QToolButton(profileRow);
+    m_profileManagerButton = new QToolButton(configPanel);
     m_profileManagerButton->setText(QStringLiteral("当前配置"));
     m_profileManagerButton->setToolButtonStyle(Qt::ToolButtonTextOnly);
     m_profileManagerButton->setProperty("machiningButton", true);
@@ -1760,56 +1805,68 @@ QWidget* CadToolPanelWidget::buildMachiningPanel()
     m_profileManagerButton->setFixedHeight(kComboHeight);
     m_profileManagerButton->setMinimumWidth(76);
     m_profileManagerButton->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
-    m_profileComboBox = new QComboBox(profileRow);
+    m_profileComboBox = new QComboBox(configPanel);
     m_profileComboBox->setEditable(false);
     m_profileComboBox->setFixedHeight(kComboHeight);
     m_profileComboBox->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-    profileLayout->addWidget(m_profileManagerButton, 0);
-    profileLayout->addWidget(m_profileComboBox, 1);
-    configLayout->addWidget(profileRow);
+    configLayout->addWidget(m_profileManagerButton, 0, 0);
+    configLayout->addWidget(m_profileComboBox, 0, 1, 1, 2);
 
-    QWidget* modeRow = new QWidget(configPanel);
-    QHBoxLayout* modeLayout = new QHBoxLayout(modeRow);
-    modeLayout->setContentsMargins(0, 0, 0, 0);
-    modeLayout->setSpacing(6);
-
-    QLabel* modeLabel = new QLabel(QStringLiteral("G代码模式"), modeRow);
+    QLabel* modeLabel = new QLabel(QStringLiteral("G代码模式"), configPanel);
     modeLabel->setProperty("machiningFieldLabel", true);
     modeLabel->setMinimumWidth(54);
-    m_gcodeModeComboBox = new QComboBox(modeRow);
+    m_gcodeModeComboBox = new QComboBox(configPanel);
     m_gcodeModeComboBox->setEditable(false);
     m_gcodeModeComboBox->setFixedHeight(kComboHeight);
     m_gcodeModeComboBox->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     m_gcodeModeComboBox->addItem(QStringLiteral("自动"), static_cast<int>(GCodeModeSelection::Auto));
     m_gcodeModeComboBox->addItem(QStringLiteral("3轴"), static_cast<int>(GCodeModeSelection::ThreeAxis));
     m_gcodeModeComboBox->addItem(QStringLiteral("4轴(绕A)"), static_cast<int>(GCodeModeSelection::FourAxisAroundA));
-    modeLayout->addWidget(modeLabel, 0);
-    modeLayout->addWidget(m_gcodeModeComboBox, 1);
-    configLayout->addWidget(modeRow);
-    configLayout->addStretch(1);
-
-    QWidget* profileSettingsPanel = new QWidget(panel);
-    QVBoxLayout* profileSettingsLayout = new QVBoxLayout(profileSettingsPanel);
-    profileSettingsLayout->setContentsMargins(2, 6, 2, 2);
-    profileSettingsLayout->setSpacing(6);
-    profileSettingsLayout->addWidget(m_profileSettingsButton);
-    profileSettingsLayout->addStretch(1);
+    configLayout->addWidget(modeLabel, 1, 0);
+    configLayout->addWidget(m_gcodeModeComboBox, 1, 1, 1, 2);
+    configLayout->addWidget(m_profileSettingsButton, 2, 0, 1, 3);
+    configLayout->setColumnStretch(1, 1);
 
     QWidget* sectionPanel = new QWidget(panel);
-    QVBoxLayout* sectionLayout = new QVBoxLayout(sectionPanel);
+    QGridLayout* sectionLayout = new QGridLayout(sectionPanel);
     sectionLayout->setContentsMargins(4, 5, 4, 2);
-    sectionLayout->setSpacing(4);
+    sectionLayout->setHorizontalSpacing(6);
+    sectionLayout->setVerticalSpacing(2);
     m_rotaryTubeSectionStatusLabel = new QLabel(QStringLiteral("未识别"), sectionPanel);
     m_rotaryTubeSectionStatusLabel->setProperty("sectionStatus", true);
     m_rotaryTubeSectionStatusLabel->setProperty("sectionRecognized", false);
+    m_rotaryTubeSectionStatusLabel->setProperty("sectionBlinkOn", true);
     m_rotaryTubeSectionSizeLabel = new QLabel(QStringLiteral("Y长 --   Z宽 --"), sectionPanel);
     m_rotaryTubeSectionSizeLabel->setProperty("sectionValue", true);
     m_rotaryTubeSectionRadiusLabel = new QLabel(QStringLiteral("圆角半径 R --"), sectionPanel);
     m_rotaryTubeSectionRadiusLabel->setProperty("sectionValue", true);
-    sectionLayout->addWidget(m_rotaryTubeSectionStatusLabel);
-    sectionLayout->addWidget(m_rotaryTubeSectionSizeLabel);
-    sectionLayout->addWidget(m_rotaryTubeSectionRadiusLabel);
-    sectionLayout->addStretch(1);
+    m_autoRecognizeRotaryTubeSectionOnImportCheckBox = new QCheckBox(QStringLiteral("导入后自动识别截面"), sectionPanel);
+    m_autoRecognizeRotaryTubeSectionOnImportCheckBox->setProperty("machiningOption", true);
+    m_autoRemoveInternalPathsOnImportCheckBox = new QCheckBox(QStringLiteral("识别后自动清理内部线条"), sectionPanel);
+    m_autoRemoveInternalPathsOnImportCheckBox->setProperty("machiningOption", true);
+    sectionLayout->addWidget(m_rotaryTubeSectionStatusLabel, 0, 0);
+    sectionLayout->addWidget(m_rotaryTubeSectionSizeLabel, 0, 1);
+    sectionLayout->addWidget(m_rotaryTubeSectionRadiusLabel, 1, 0, 1, 2);
+    sectionLayout->addWidget(m_autoRecognizeRotaryTubeSectionOnImportCheckBox, 2, 0, 1, 2);
+    sectionLayout->addWidget(m_autoRemoveInternalPathsOnImportCheckBox, 3, 0, 1, 2);
+
+    m_rotaryTubeSectionBlinkTimer = new QTimer(this);
+    m_rotaryTubeSectionBlinkTimer->setInterval(650);
+    connect(m_rotaryTubeSectionBlinkTimer, &QTimer::timeout, this, [this]()
+    {
+        if (m_rotaryTubeSectionStatusLabel == nullptr
+            || m_rotaryTubeSectionStatusLabel->property("sectionRecognized").toBool())
+        {
+            m_rotaryTubeSectionBlinkTimer->stop();
+            return;
+        }
+
+        m_rotaryTubeSectionBlinkOn = !m_rotaryTubeSectionBlinkOn;
+        m_rotaryTubeSectionStatusLabel->setProperty("sectionBlinkOn", m_rotaryTubeSectionBlinkOn);
+        m_rotaryTubeSectionStatusLabel->style()->unpolish(m_rotaryTubeSectionStatusLabel);
+        m_rotaryTubeSectionStatusLabel->style()->polish(m_rotaryTubeSectionStatusLabel);
+    });
+    m_rotaryTubeSectionBlinkTimer->start();
 
     rootLayout->addWidget(buildPanelFrame(QStringLiteral("导入导出"), importPanel, 182, nullptr, false), 0);
     rootLayout->addWidget(buildDivider(), 0, Qt::AlignLeft | Qt::AlignVCenter);
@@ -1817,9 +1874,9 @@ QWidget* CadToolPanelWidget::buildMachiningPanel()
     rootLayout->addWidget(buildDivider(), 0, Qt::AlignLeft | Qt::AlignVCenter);
     rootLayout->addWidget(buildPanelFrame(QStringLiteral("功能"), featurePanel, 148, nullptr, false), 0);
     rootLayout->addWidget(buildDivider(), 0, Qt::AlignLeft | Qt::AlignVCenter);
-    rootLayout->addWidget(buildPanelFrame(QStringLiteral("配置"), configPanel, 220, nullptr, true), 1);
-    rootLayout->addWidget(buildDivider(), 0, Qt::AlignLeft | Qt::AlignVCenter);
-    rootLayout->addWidget(buildPanelFrame(QStringLiteral("G代码配置"), profileSettingsPanel, 128, nullptr, false), 0);
+    QWidget* configFrame = buildPanelFrame(QStringLiteral("配置"), configPanel, 250, nullptr, true);
+    configFrame->setMaximumWidth(320);
+    rootLayout->addWidget(configFrame, 0);
     rootLayout->addWidget(buildDivider(), 0, Qt::AlignLeft | Qt::AlignVCenter);
     rootLayout->addWidget(buildPanelFrame(QStringLiteral("方管垂直截面"), sectionPanel, 238, nullptr, false), 0);
     rootLayout->addStretch(1);
@@ -1827,12 +1884,20 @@ QWidget* CadToolPanelWidget::buildMachiningPanel()
     connect(m_importFileButton, &QToolButton::clicked, this, [this]() { emit importFileRequested(); });
     connect(m_exportGCodeButton, &QToolButton::clicked, this, [this]() { emit exportGCodeRequested(); });
     connect(m_deduplicateButton, &QToolButton::clicked, this, [this]() { emit deduplicateRequested(); });
-    connect(m_autoDeduplicateCheckBox, &QCheckBox::toggled, this, [this](bool checked)
+    connect(m_autoDeduplicateOnImportCheckBox, &QCheckBox::toggled, this, [this](bool checked)
     {
         if (!m_updatingUi)
         {
-            emit autoDeduplicateOptionChanged(checked);
+            emit autoDeduplicateOnImportOptionChanged(checked);
         }
+    });
+    connect(m_autoRecognizeRotaryTubeSectionOnImportCheckBox, &QCheckBox::toggled, this, [this](bool checked)
+    {
+        if (!m_updatingUi) emit autoRecognizeRotaryTubeSectionOnImportOptionChanged(checked);
+    });
+    connect(m_autoRemoveInternalPathsOnImportCheckBox, &QCheckBox::toggled, this, [this](bool checked)
+    {
+        if (!m_updatingUi) emit autoRemoveInternalPathsOnImportOptionChanged(checked);
     });
     connect(m_useDxfFileNameCheckBox, &QCheckBox::toggled, this, [this](bool checked)
     {

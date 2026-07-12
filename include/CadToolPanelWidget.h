@@ -18,6 +18,7 @@ class QMenu;
 class QTabBar;
 class QTabWidget;
 class QToolButton;
+class QTimer;
 
 class CadToolPanelWidget : public QWidget
 {
@@ -44,8 +45,12 @@ public:
     void setGCodeModeSelection(GCodeModeSelection selection);
     void setAvailableProfiles(const QList<QPair<QString, QString>>& profiles);
     void setCurrentProfileSelection(const QString& profileId);
-    void setAutoDeduplicateEnabled(bool enabled);
-    bool autoDeduplicateEnabled() const;
+    void setAutoDeduplicateOnImportEnabled(bool enabled);
+    bool autoDeduplicateOnImportEnabled() const;
+    void setAutoRecognizeRotaryTubeSectionOnImportEnabled(bool enabled);
+    bool autoRecognizeRotaryTubeSectionOnImportEnabled() const;
+    void setAutoRemoveInternalPathsOnImportEnabled(bool enabled);
+    bool autoRemoveInternalPathsOnImportEnabled() const;
     void setUseDxfFileNameEnabled(bool enabled);
     bool useDxfFileNameEnabled() const;
     void setUseDefaultImportPathEnabled(bool enabled);
@@ -94,7 +99,9 @@ signals:
     void profileSelectionChanged(const QString& profileId);
     void profileManagerRequested();
     void profileSettingsRequested();
-    void autoDeduplicateOptionChanged(bool enabled);
+    void autoDeduplicateOnImportOptionChanged(bool enabled);
+    void autoRecognizeRotaryTubeSectionOnImportOptionChanged(bool enabled);
+    void autoRemoveInternalPathsOnImportOptionChanged(bool enabled);
     void useDxfFileNameOptionChanged(bool enabled);
     void useDefaultImportPathOptionChanged(bool enabled);
     void useDefaultExportPathOptionChanged(bool enabled);
@@ -134,12 +141,16 @@ private:
     QLabel* m_rotaryTubeSectionStatusLabel = nullptr;
     QLabel* m_rotaryTubeSectionSizeLabel = nullptr;
     QLabel* m_rotaryTubeSectionRadiusLabel = nullptr;
+    QTimer* m_rotaryTubeSectionBlinkTimer = nullptr;
+    bool m_rotaryTubeSectionBlinkOn = false;
     QComboBox* m_layerComboBox = nullptr;
     QComboBox* m_propertyLayerComboBox = nullptr;
     QComboBox* m_colorComboBox = nullptr;
     QComboBox* m_gcodeModeComboBox = nullptr;
     QComboBox* m_profileComboBox = nullptr;
-    QCheckBox* m_autoDeduplicateCheckBox = nullptr;
+    QCheckBox* m_autoDeduplicateOnImportCheckBox = nullptr;
+    QCheckBox* m_autoRecognizeRotaryTubeSectionOnImportCheckBox = nullptr;
+    QCheckBox* m_autoRemoveInternalPathsOnImportCheckBox = nullptr;
     QCheckBox* m_useDxfFileNameCheckBox = nullptr;
     QCheckBox* m_useDefaultImportPathCheckBox = nullptr;
     QCheckBox* m_useDefaultExportPathCheckBox = nullptr;

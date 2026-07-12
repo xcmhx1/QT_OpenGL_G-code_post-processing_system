@@ -286,6 +286,9 @@ signals:
     // @param filePath 文件路径
     void fileDropRequested(const QString& filePath);
 
+    // 右键未被活动命令处理时，由主窗口创建机加工上下文菜单。
+    void machiningContextMenuRequested(const QPoint& globalPos);
+
     // 绘图约束模式变化。
     void orthoEnabledChanged(bool enabled);
     void polarTrackingEnabledChanged(bool enabled);

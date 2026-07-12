@@ -3978,7 +3978,7 @@ QVector<CadItem*> Gcode_postprocessing_system::expandedSelectedRotaryEndCut(QStr
     {
         if (errorMessage != nullptr)
         {
-            *errorMessage = QStringLiteral("请先选中切面中的一个或部分图元。系统会自动扩展相连图元。");
+            *errorMessage = QStringLiteral("请先选中加工断面中的一个或部分图元。系统会自动扩展相连图元。");
         }
 
         return {};
@@ -4049,7 +4049,7 @@ bool Gcode_postprocessing_system::assignSelectedRotaryEndCut()
 
     if (expandedItems.isEmpty())
     {
-        QMessageBox::warning(this, QStringLiteral("指定切面"), selectionError);
+        QMessageBox::warning(this, QStringLiteral("指定加工断面"), selectionError);
         return false;
     }
 
@@ -4060,8 +4060,8 @@ bool Gcode_postprocessing_system::assignSelectedRotaryEndCut()
             QMessageBox::warning
             (
                 this,
-                QStringLiteral("指定切面"),
-                QStringLiteral("选中的图元已属于一个切面边界。如需重新指定，请先清除切面指定。")
+                QStringLiteral("指定加工断面"),
+                QStringLiteral("选中的图元已属于一个加工断面边界。如需重新指定，请先清除加工断面指定。")
             );
             return false;
         }
@@ -4092,7 +4092,7 @@ bool Gcode_postprocessing_system::assignSelectedRotaryEndCut()
         item->m_rotaryEndCutRole = RotaryEndCutRole::Break;
     }
 
-    const QString message = QStringLiteral("已指定中断切面 断%1，共识别 %2 个相连图元，已通过方管周向分离验证。")
+    const QString message = QStringLiteral("已指定加工断面 断%1，共识别 %2 个相连图元，已通过方管周向分离验证。")
         .arg(boundaryId + 1)
         .arg(expandedItems.size());
 
@@ -4119,7 +4119,7 @@ bool Gcode_postprocessing_system::assignSelectedWasteEndCut()
     {
         if (item != nullptr && item->m_rotaryEndCutRole != RotaryEndCutRole::None)
         {
-            QMessageBox::warning(this, QStringLiteral("指定废面"), QStringLiteral("选中的图元已属于一个切面边界，请先清除原切面指定。"));
+            QMessageBox::warning(this, QStringLiteral("指定废面"), QStringLiteral("选中的图元已属于一个加工断面边界，请先清除原加工断面指定。"));
             return false;
         }
     }
@@ -4164,7 +4164,7 @@ bool Gcode_postprocessing_system::smartAssignSelectedRotaryEndCut()
     return assignSelectedRotaryEndCut();
 }
 
-bool Gcode_postprocessing_system::recognizeRotaryTubeSection()
+bool Gcode_postprocessing_system::recognizeRotaryTubeSection(bool interactive)
 {
     QVector<CadItem*> sceneItems;
     sceneItems.reserve(static_cast<qsizetype>(m_document.m_entities.size()));
@@ -4177,16 +4177,80 @@ bool Gcode_postprocessing_system::recognizeRotaryTubeSection()
         }
     }
 
-    const RotaryTubeSectionModel recognized = RotaryTubeGeometryAnalyzer::buildSectionModel
-    (
-        ui->openGLWidget->selectedEntities(),
-        sceneItems,
-        kEndCutConnectionTolerance
-    );
+    RotaryTubeSectionModel recognized;
+    const QVector<CadItem*> selectedItems = ui->openGLWidget->selectedEntities();
+
+    if (!selectedItems.isEmpty())
+    {
+        recognized = RotaryTubeGeometryAnalyzer::buildSectionModel
+        (
+            selectedItems,
+            sceneItems,
+            kEndCutConnectionTolerance
+        );
+    }
+    else if (!interactive)
+    {
+        double bestSectionArea = 0.0;
+        std::vector<CadItem*> documentItems;
+        documentItems.reserve(static_cast<size_t>(sceneItems.size()));
+
+        for (CadItem* item : sceneItems) documentItems.push_back(item);
+
+        const std::vector<int> componentIds = buildItemConnectivityComponents
+        (
+            documentItems,
+            kEndCutConnectionTolerance
+        );
+        const int componentCount = componentIds.empty()
+            ? 0
+            : (*std::max_element(componentIds.begin(), componentIds.end()) + 1);
+
+        for (int componentId = 0; componentId < componentCount; ++componentId)
+        {
+            QVector<CadItem*> componentItems;
+
+            for (size_t itemIndex = 0; itemIndex < documentItems.size(); ++itemIndex)
+            {
+                if (componentIds[itemIndex] == componentId)
+                {
+                    componentItems.push_back(documentItems[itemIndex]);
+                }
+            }
+
+            const RotaryTubeSectionModel candidate = RotaryTubeGeometryAnalyzer::buildSectionModel
+            (
+                componentItems,
+                sceneItems,
+                kEndCutConnectionTolerance
+            );
+            const double candidateArea = candidate.yLength * candidate.zWidth;
+
+            if (candidate.valid && candidateArea > bestSectionArea)
+            {
+                bestSectionArea = candidateArea;
+                recognized = candidate;
+            }
+        }
+    }
+    else
+    {
+        recognized.errorMessage = QStringLiteral("请先选择方管垂直截面中的一个或部分图元。");
+    }
 
     if (!recognized.valid)
     {
-        QMessageBox::warning(this, QStringLiteral("识别方管垂直截面"), recognized.errorMessage);
+        const QString errorMessage = recognized.errorMessage.isEmpty()
+            ? QStringLiteral("未找到有效的方管垂直截面。")
+            : recognized.errorMessage;
+
+        if (interactive)
+        {
+            QMessageBox::warning(this, QStringLiteral("识别方管垂直截面"), errorMessage);
+        }
+
+        ui->openGLWidget->appendCommandMessage(QStringLiteral("方管垂直截面识别失败：%1").arg(errorMessage));
+        statusBar()->showMessage(QStringLiteral("方管垂直截面识别失败"), 5000);
         return false;
     }
 
@@ -4199,8 +4263,9 @@ bool Gcode_postprocessing_system::recognizeRotaryTubeSection()
     return true;
 }
 
-bool Gcode_postprocessing_system::removeInternalMachiningPaths()
+bool Gcode_postprocessing_system::removeInternalMachiningPaths(bool interactive)
 {
+    Q_UNUSED(interactive);
     QVector<CadItem*> sceneItems;
     sceneItems.reserve(static_cast<qsizetype>(m_document.m_entities.size()));
 
@@ -4254,8 +4319,9 @@ bool Gcode_postprocessing_system::removeInternalMachiningPaths()
     return true;
 }
 
-bool Gcode_postprocessing_system::restoreInternalMachiningPaths()
+bool Gcode_postprocessing_system::restoreInternalMachiningPaths(bool interactive)
 {
+    Q_UNUSED(interactive);
     int restoredCount = 0;
 
     for (const std::unique_ptr<CadItem>& entity : m_document.m_entities)
@@ -4278,6 +4344,213 @@ bool Gcode_postprocessing_system::restoreInternalMachiningPaths()
     return restoredCount > 0;
 }
 
+bool Gcode_postprocessing_system::toggleSelectedRotaryEndCutAssignment()
+{
+    const QVector<CadItem*> selectedItems = ui->openGLWidget->selectedEntities();
+
+    if (selectedItems.isEmpty())
+    {
+        return false;
+    }
+
+    const bool hasUnassignedItem = std::any_of(selectedItems.begin(), selectedItems.end(), [](const CadItem* item)
+    {
+        return item != nullptr && item->m_rotaryEndCutRole == RotaryEndCutRole::None;
+    });
+
+    if (!hasUnassignedItem)
+    {
+        return clearSelectedRotaryEndCutAssignments();
+    }
+
+    QString errorMessage;
+    const QVector<CadItem*> boundaryItems = expandedSelectedRotaryEndCut(&errorMessage);
+
+    if (boundaryItems.isEmpty())
+    {
+        QMessageBox::warning(this, QStringLiteral("加工断面指定"), errorMessage);
+        return false;
+    }
+
+    int nextBoundaryId = 0;
+
+    for (const std::unique_ptr<CadItem>& entity : m_document.m_entities)
+    {
+        if (entity != nullptr && entity->m_rotaryEndCutPairId >= nextBoundaryId)
+        {
+            nextBoundaryId = entity->m_rotaryEndCutPairId + 1;
+        }
+    }
+
+    for (CadItem* item : boundaryItems)
+    {
+        item->m_rotaryEndCutPairId = nextBoundaryId;
+        item->m_rotaryEndCutRole = RotaryEndCutRole::Break;
+    }
+
+    invalidateProcessOrdersAfterEndCutChange();
+    refreshWasteProcessingExclusions();
+    const QString message = QStringLiteral("已指定加工断面 %1，共 %2 个图元。")
+        .arg(nextBoundaryId + 1)
+        .arg(boundaryItems.size());
+    ui->openGLWidget->appendCommandMessage(message);
+    ui->openGLWidget->update();
+    statusBar()->showMessage(message, 5000);
+    return true;
+}
+
+bool Gcode_postprocessing_system::recognizeAllRotaryEndCuts()
+{
+    std::vector<CadItem*> documentItems;
+    QVector<CadItem*> sceneItems;
+
+    for (const std::unique_ptr<CadItem>& entity : m_document.m_entities)
+    {
+        if (entity != nullptr)
+        {
+            documentItems.push_back(entity.get());
+            sceneItems.push_back(entity.get());
+        }
+    }
+
+    if (documentItems.empty())
+    {
+        return false;
+    }
+
+    const std::vector<int> componentIds = buildItemConnectivityComponents
+    (
+        documentItems,
+        kEndCutConnectionTolerance
+    );
+    const int componentCount = componentIds.empty()
+        ? 0
+        : (*std::max_element(componentIds.begin(), componentIds.end()) + 1);
+    int nextBoundaryId = 0;
+
+    for (CadItem* item : documentItems)
+    {
+        if (item->m_rotaryEndCutPairId >= nextBoundaryId)
+        {
+            nextBoundaryId = item->m_rotaryEndCutPairId + 1;
+        }
+    }
+
+    int recognizedCount = 0;
+
+    for (int componentId = 0; componentId < componentCount; ++componentId)
+    {
+        QVector<CadItem*> candidateItems;
+
+        for (size_t itemIndex = 0; itemIndex < documentItems.size(); ++itemIndex)
+        {
+            if (componentIds[itemIndex] == componentId)
+            {
+                candidateItems.push_back(documentItems[itemIndex]);
+            }
+        }
+
+        if (candidateItems.isEmpty()
+            || std::any_of(candidateItems.begin(), candidateItems.end(), [](const CadItem* item)
+            {
+                return item != nullptr && item->m_rotaryEndCutRole != RotaryEndCutRole::None;
+            }))
+        {
+            continue;
+        }
+
+        const RotaryTubeSectionModel candidateSection = RotaryTubeGeometryAnalyzer::buildSectionModel
+        (
+            candidateItems,
+            sceneItems,
+            kEndCutConnectionTolerance
+        );
+
+        if (!candidateSection.valid || candidateSection.outerBoundaryItems.isEmpty())
+        {
+            continue;
+        }
+
+        const QVector<QVector2D>& validationHull = m_rotaryTubeSectionModel.valid
+            ? m_rotaryTubeSectionModel.sectionHull
+            : candidateSection.sectionHull;
+        const RotaryCutBoundaryAnalysis analysis = RotaryCutBoundaryAnalyzer::analyze
+        (
+            candidateSection.outerBoundaryItems,
+            sceneItems,
+            kEndCutConnectionTolerance,
+            validationHull
+        );
+
+        if (!analysis.valid)
+        {
+            continue;
+        }
+
+        for (CadItem* item : candidateSection.outerBoundaryItems)
+        {
+            item->m_rotaryEndCutPairId = nextBoundaryId;
+            item->m_rotaryEndCutRole = RotaryEndCutRole::Break;
+        }
+
+        ++nextBoundaryId;
+        ++recognizedCount;
+    }
+
+    invalidateProcessOrdersAfterEndCutChange();
+    refreshWasteProcessingExclusions();
+    const QString message = QStringLiteral("所有加工断面识别完成，共识别 %1 个有效加工断面。")
+        .arg(recognizedCount);
+    ui->openGLWidget->appendCommandMessage(message);
+    ui->openGLWidget->update();
+    statusBar()->showMessage(message, 5000);
+    return true;
+}
+
+bool Gcode_postprocessing_system::toggleSelectedInternalPathAssignment()
+{
+    const QVector<CadItem*> selectedItems = ui->openGLWidget->selectedEntities();
+
+    if (selectedItems.isEmpty())
+    {
+        return false;
+    }
+
+    const bool hasOrdinaryItem = std::any_of(selectedItems.begin(), selectedItems.end(), [](const CadItem* item)
+    {
+        return item != nullptr && !item->m_excludedAsInternalGeometry;
+    });
+
+    for (CadItem* item : selectedItems)
+    {
+        if (item != nullptr)
+        {
+            item->m_excludedAsInternalGeometry = hasOrdinaryItem;
+            item->m_processOrder = -1;
+        }
+    }
+
+    invalidateProcessOrdersAfterEndCutChange();
+    refreshWasteProcessingExclusions();
+    const QString message = hasOrdinaryItem
+        ? QStringLiteral("已将选中图元指定为内部线条。")
+        : QStringLiteral("已恢复选中的内部线条。");
+    ui->openGLWidget->appendCommandMessage(message);
+    ui->openGLWidget->update();
+    statusBar()->showMessage(message, 4000);
+    return true;
+}
+
+bool Gcode_postprocessing_system::clearAllMachiningFaceAndLineAssignments()
+{
+    const bool clearedSections = clearRotaryEndCutAssignments();
+    const bool restoredLines = restoreInternalMachiningPaths();
+    const QString message = QStringLiteral("已清空所有加工断面和内部线条状态，未删除 CAD 图元。");
+    ui->openGLWidget->appendCommandMessage(message);
+    statusBar()->showMessage(message, 5000);
+    return clearedSections || restoredLines;
+}
+
 bool Gcode_postprocessing_system::clearSelectedRotaryEndCutAssignments()
 {
     const QVector<CadItem*> selectedItems = ui->openGLWidget->selectedEntities();
@@ -4295,7 +4568,7 @@ bool Gcode_postprocessing_system::clearSelectedRotaryEndCutAssignments()
 
     if (pairIds.isEmpty())
     {
-        QMessageBox::information(this, QStringLiteral("清除切面指定"), QStringLiteral("请先选中一个已指定的切面。"));
+        QMessageBox::information(this, QStringLiteral("清除加工断面指定"), QStringLiteral("请先选中一个已指定的加工断面。"));
         return false;
     }
 
@@ -4313,7 +4586,7 @@ bool Gcode_postprocessing_system::clearSelectedRotaryEndCutAssignments()
         ++clearedCount;
     }
 
-    const QString message = QStringLiteral("已清除 %1 个切面边界，共 %2 个图元。")
+    const QString message = QStringLiteral("已清除 %1 个加工断面边界，共 %2 个图元。")
         .arg(pairIds.size())
         .arg(clearedCount);
     invalidateProcessOrdersAfterEndCutChange();
@@ -4342,11 +4615,11 @@ bool Gcode_postprocessing_system::clearRotaryEndCutAssignments()
 
     if (clearedCount == 0)
     {
-        statusBar()->showMessage(QStringLiteral("当前没有已指定的切面。"), 3000);
+        statusBar()->showMessage(QStringLiteral("当前没有已指定的加工断面。"), 3000);
         return false;
     }
 
-    const QString message = QStringLiteral("已清除 %1 个图元的切面指定。").arg(clearedCount);
+    const QString message = QStringLiteral("已清除 %1 个图元的加工断面指定。").arg(clearedCount);
     invalidateProcessOrdersAfterEndCutChange();
     refreshWasteProcessingExclusions();
     ui->openGLWidget->appendCommandMessage(message);
@@ -4947,7 +5220,7 @@ bool Gcode_postprocessing_system::sortEntitiesByCurrentDirection3D()
 
         ui->openGLWidget->appendCommandMessage
         (
-            QStringLiteral("4轴(绕A)排序完成，共更新 %1 个图元；已按中断切面分段，并在每个切面前完成其左侧图元的懒旋转加工。%2")
+            QStringLiteral("4轴(绕A)排序完成，共更新 %1 个图元；已按加工断面分段，并在每个加工断面前完成其左侧图元的懒旋转加工。%2")
                 .arg(lazyRotaryUpdates.size())
                 .arg(dedupResult.removedCount > 0 ? QStringLiteral("已自动删除 %1 个重复图元。").arg(dedupResult.removedCount) : QString())
         );
@@ -4962,7 +5235,7 @@ bool Gcode_postprocessing_system::sortEntitiesByCurrentDirection3D()
         (
             this,
             QStringLiteral("4轴(绕A)排序"),
-            QStringLiteral("已指定中断切面，但无法形成稳定加工分段。请检查是否有图元横跨切面，或多个三维切面在方管展开面上交叉。")
+            QStringLiteral("已指定加工断面，但无法形成稳定加工分段。请检查是否有图元横跨加工断面，或多个三维加工断面在方管展开面上交叉。")
         );
         return false;
     }
@@ -5136,7 +5409,7 @@ bool Gcode_postprocessing_system::smartSortEntities3D()
 
         ui->openGLWidget->appendCommandMessage
         (
-            QStringLiteral("4轴(绕A)智能排序完成，共更新 %1 个图元；已按中断切面分段，并在每个切面前完成其左侧图元的懒旋转加工。%2")
+            QStringLiteral("4轴(绕A)智能排序完成，共更新 %1 个图元；已按加工断面分段，并在每个加工断面前完成其左侧图元的懒旋转加工。%2")
                 .arg(lazyRotaryUpdates.size())
                 .arg(dedupResult.removedCount > 0 ? QStringLiteral("已自动删除 %1 个重复图元。").arg(dedupResult.removedCount) : QString())
         );
@@ -5151,7 +5424,7 @@ bool Gcode_postprocessing_system::smartSortEntities3D()
         (
             this,
             QStringLiteral("4轴(绕A)智能排序"),
-            QStringLiteral("已指定中断切面，但无法形成稳定加工分段。请检查是否有图元横跨切面，或多个三维切面在方管展开面上交叉。")
+            QStringLiteral("已指定加工断面，但无法形成稳定加工分段。请检查是否有图元横跨加工断面，或多个三维加工断面在方管展开面上交叉。")
         );
         return false;
     }

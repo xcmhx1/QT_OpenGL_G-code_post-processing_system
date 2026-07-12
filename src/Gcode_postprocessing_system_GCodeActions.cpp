@@ -290,36 +290,6 @@ namespace
         }
     }
 
-    bool documentHasRemovableDuplicates(const CadDocument& document)
-    {
-        QSet<QString> seenKeys;
-
-        for (auto it = document.m_entities.rbegin(); it != document.m_entities.rend(); ++it)
-        {
-            const CadItem* item = it->get();
-
-            if (item == nullptr || item->m_excludedFromProcessing || item->m_nativeEntity == nullptr)
-            {
-                continue;
-            }
-
-            const QString geometryKey = duplicateGeometryKey(item);
-
-            if (geometryKey.isEmpty())
-            {
-                continue;
-            }
-
-            if (seenKeys.contains(geometryKey))
-            {
-                return true;
-            }
-
-            seenKeys.insert(geometryKey);
-        }
-
-        return false;
-    }
 }
 
 bool Gcode_postprocessing_system::exportGCode()
@@ -404,17 +374,6 @@ bool Gcode_postprocessing_system::prepareDocumentForGCodeExport(GGenerator::Gene
     {
         QMessageBox::warning(this, QStringLiteral("导出G代码失败"), QStringLiteral("废面区间过滤后没有可加工图元。"));
         return false;
-    }
-
-    if (m_toolPanelWidget != nullptr && m_toolPanelWidget->autoDeduplicateEnabled() && documentHasRemovableDuplicates(m_document))
-    {
-        ui->openGLWidget->appendCommandMessage(QStringLiteral("检测到已勾选自动去重，导出前先执行一次去重。"));
-
-        if (!removeDuplicateEntities())
-        {
-            QMessageBox::warning(this, QStringLiteral("导出G代码失败"), QStringLiteral("自动去重失败，G代码导出已取消。"));
-            return false;
-        }
     }
 
     if (!hasCompleteProcessOrderForExport(generationMode))
@@ -571,11 +530,13 @@ bool Gcode_postprocessing_system::exportGCode
     return true;
 }
 
-bool Gcode_postprocessing_system::removeDuplicateEntities()
+bool Gcode_postprocessing_system::removeDuplicateEntities(bool interactive)
 {
     if (m_document.m_entities.empty())
     {
-        statusBar()->showMessage(QStringLiteral("当前文档没有可去重的图元"), 3000);
+        const QString message = QStringLiteral("当前文档没有可去重的图元");
+        ui->openGLWidget->appendCommandMessage(message);
+        statusBar()->showMessage(message, 3000);
         return false;
     }
 
@@ -609,15 +570,25 @@ bool Gcode_postprocessing_system::removeDuplicateEntities()
 
     if (duplicates.isEmpty())
     {
-        statusBar()->showMessage(QStringLiteral("未发现完全重叠的同类型图元"), 3000);
-        return false;
+        const QString message = QStringLiteral("未发现完全重叠的同类型图元");
+        ui->openGLWidget->appendCommandMessage(message);
+        statusBar()->showMessage(message, 3000);
+        return true;
     }
 
     std::reverse(duplicates.begin(), duplicates.end());
 
     if (!m_editer.deleteEntities(duplicates))
     {
-        QMessageBox::warning(this, QStringLiteral("去重失败"), QStringLiteral("删除重复图元时发生错误。"));
+        const QString message = QStringLiteral("删除重复图元时发生错误。");
+
+        if (interactive)
+        {
+            QMessageBox::warning(this, QStringLiteral("去重失败"), message);
+        }
+
+        ui->openGLWidget->appendCommandMessage(QStringLiteral("去重失败：%1").arg(message));
+        statusBar()->showMessage(QStringLiteral("去重失败"), 4000);
         return false;
     }
 

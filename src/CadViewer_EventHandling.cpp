@@ -55,7 +55,14 @@ void CadViewer::mousePressEvent(QMouseEvent* event)
         return;
     }
 
-    if (!m_controller.handleMousePress(event))
+    const bool controllerHandled = m_controller.handleMousePress(event);
+
+    if (!controllerHandled && event->button() == Qt::RightButton)
+    {
+        emit machiningContextMenuRequested(event->globalPosition().toPoint());
+        event->accept();
+    }
+    else if (!controllerHandled)
     {
         QOpenGLWidget::mousePressEvent(event);
     }
