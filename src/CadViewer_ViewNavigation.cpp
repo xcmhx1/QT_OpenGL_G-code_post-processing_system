@@ -14,8 +14,6 @@ namespace
     constexpr float kMinimumGridStep = 10.0f;
     constexpr float kTargetHorizontalMajorGridGroups = 5.0f;
     constexpr float kMinorGridCellsPerMajorGroup = 5.0f;
-    // 单个方向上允许绘制的最大网格线数量
-    constexpr float kMaxGridLineCountPerAxis = 240.0f;
     constexpr float kXlineHandleDistancePixels = 72.0f;
 }
 
@@ -197,24 +195,11 @@ void CadViewer::computeVisibleGroundBounds(float& minX, float& maxX, float& minY
 
 float CadViewer::currentGridStep() const
 {
-    float minX = 0.0f;
-    float maxX = 0.0f;
-    float minY = 0.0f;
-    float maxY = 0.0f;
-    computeVisibleGroundBounds(minX, maxX, minY, maxY);
-
-    const float width = std::max(maxX - minX, 0.0f);
-    const float height = std::max(maxY - minY, 0.0f);
+    // 网格密度只跟正交相机的缩放范围相关。若使用地平面反投影宽度，
+    // 相机倾斜时交点范围会被放大，导致网格在旋转过程中产生呼吸感。
+    const float stableViewWidth = std::max(m_camera.viewHeight * aspectRatio(), 0.0f);
     const float targetHorizontalCellCount = kTargetHorizontalMajorGridGroups * kMinorGridCellsPerMajorGroup;
-    float gridStep = std::max(width / targetHorizontalCellCount, kMinimumGridStep);
-
-    while ((width / gridStep) > kMaxGridLineCountPerAxis
-        || (height / gridStep) > kMaxGridLineCountPerAxis)
-    {
-        gridStep *= 5.0f;
-    }
-
-    return gridStep;
+    return std::max(stableViewWidth / targetHorizontalCellCount, kMinimumGridStep);
 }
 
 float CadViewer::aspectRatio() const

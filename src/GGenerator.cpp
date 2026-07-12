@@ -37,6 +37,7 @@ namespace
     constexpr double kCircleTolerance = 1.0e-8;
     constexpr int kFullEllipseSegments = 128;
     constexpr double kControlPointTolerance = 1.0e-5;
+    constexpr double kNoLiftPathConnectionTolerance = 1.0;
     QString formatCoord(double value)
     {
         return QString::number(value, 'f', 5);
@@ -958,6 +959,14 @@ namespace
         return dx * dx + dy * dy + dz * dz + da * da <= tolerance * tolerance;
     }
 
+    double rawPathPointDistance(const RawPathPoint3D& left, const RawPathPoint3D& right)
+    {
+        const double dx = left.x - right.x;
+        const double dy = left.y - right.y;
+        const double dz = left.z - right.z;
+        return std::sqrt(dx * dx + dy * dy + dz * dz);
+    }
+
     struct RotaryCornerCenter
     {
         bool valid = false;
@@ -1461,6 +1470,8 @@ namespace
         const GProfileRotaryAxisConfig& config,
         double safeMachineZ,
         const ControlPoint4Axis* previousEndPoint,
+        bool pathDirectlyContinuous,
+        bool needsCuttingConnectionMove,
         ControlPoint4Axis* writtenEndPoint
     )
     {
@@ -1471,8 +1482,6 @@ namespace
 
         const ControlPoint4Axis& firstPoint = controlPoints.front();
         const bool hasPreviousEndPoint = previousEndPoint != nullptr;
-        const bool directlyContinuous = hasPreviousEndPoint
-            && areControlPointsCoincident(*previousEndPoint, firstPoint);
 
         if (!hasPreviousEndPoint)
         {
@@ -1505,7 +1514,7 @@ namespace
                 writeRapidMove4Axis(stream, firstPoint.x, firstPoint.y, firstPoint.z, firstPoint.aDeg);
             }
         }
-        else if (!directlyContinuous)
+        else if (!pathDirectlyContinuous)
         {
             if (safeMachineZ > std::min(previousEndPoint->z, firstPoint.z) + kControlPointTolerance)
             {
@@ -1539,6 +1548,11 @@ namespace
                 writeRapidMove4Axis(stream, firstPoint.x, firstPoint.y, firstPoint.z, firstPoint.aDeg);
             }
         }
+        else if (needsCuttingConnectionMove
+            && !areControlPointsCoincident(*previousEndPoint, firstPoint))
+        {
+            writeLinearMove4Axis(stream, firstPoint.x, firstPoint.y, firstPoint.z, firstPoint.aDeg);
+        }
 
         for (size_t index = 1; index < controlPoints.size(); ++index)
         {
@@ -1561,7 +1575,9 @@ namespace
         const GProfileRotaryAxisConfig& config,
         const RotaryExportContext& exportContext,
         const ControlPoint4Axis* previousEndPoint,
+        const RawPathPoint3D* previousRawEndPoint,
         ControlPoint4Axis* writtenEndPoint,
+        RawPathPoint3D* writtenRawEndPoint,
         QString* errorMessage
     )
     {
@@ -1604,6 +1620,12 @@ namespace
         }
 
         std::vector<ControlPoint4Axis>& controlPoints = writableItem->controlPoints4AxisMutable();
+        const std::vector<RawPathPoint3D>& rawPathPoints = writableItem->rawPathPoints3D();
+
+        if (rawPathPoints.empty())
+        {
+            return false;
+        }
 
         writableItem->applyRoundedCornerToolOrientation
         (
@@ -1622,15 +1644,32 @@ namespace
             alignControlPointsToPreviousA(controlPoints, previousEndPoint->aDeg);
         }
 
-        return writeControlPointPath4Axis
+        const double rawConnectionDistance = previousRawEndPoint != nullptr
+            ? rawPathPointDistance(*previousRawEndPoint, rawPathPoints.front())
+            : std::numeric_limits<double>::max();
+        const bool pathDirectlyContinuous = previousRawEndPoint != nullptr
+            && rawConnectionDistance <= kNoLiftPathConnectionTolerance;
+        const bool needsCuttingConnectionMove = pathDirectlyContinuous
+            && rawConnectionDistance > kControlPointTolerance;
+
+        const bool written = writeControlPointPath4Axis
         (
             stream,
             controlPoints,
             config,
             exportContext.safeMachineZ,
             previousEndPoint,
+            pathDirectlyContinuous,
+            needsCuttingConnectionMove,
             writtenEndPoint
         );
+
+        if (written && writtenRawEndPoint != nullptr)
+        {
+            *writtenRawEndPoint = rawPathPoints.back();
+        }
+
+        return written;
     }
 
 }
@@ -1891,6 +1930,7 @@ bool GGenerator::generateToFile(const QString& filePath, QString* errorMessage) 
 
     bool hasPrevious4AxisEndPoint = false;
     ControlPoint4Axis previous4AxisEndPoint;
+    RawPathPoint3D previous4AxisRawEndPoint;
 
     for (CadItem* item : orderedItems)
     {
@@ -1912,6 +1952,7 @@ bool GGenerator::generateToFile(const QString& filePath, QString* errorMessage) 
 
         QString geometryError;
         ControlPoint4Axis currentItemEndPoint;
+        RawPathPoint3D currentItemRawEndPoint;
         const bool geometryWritten = m_generationMode == GenerationMode::Mode3D
             ? writeItemGeometry4Axis
             (
@@ -1920,7 +1961,9 @@ bool GGenerator::generateToFile(const QString& filePath, QString* errorMessage) 
                 rotaryAxisConfig,
                 rotaryExportContext,
                 hasPrevious4AxisEndPoint ? &previous4AxisEndPoint : nullptr,
+                hasPrevious4AxisEndPoint ? &previous4AxisRawEndPoint : nullptr,
                 &currentItemEndPoint,
+                &currentItemRawEndPoint,
                 &geometryError
             )
             : writeItemGeometry(geometryStream, item);
@@ -1968,6 +2011,7 @@ bool GGenerator::generateToFile(const QString& filePath, QString* errorMessage) 
         if (m_generationMode == GenerationMode::Mode3D)
         {
             previous4AxisEndPoint = currentItemEndPoint;
+            previous4AxisRawEndPoint = currentItemRawEndPoint;
             hasPrevious4AxisEndPoint = true;
         }
     }

@@ -17,8 +17,9 @@ namespace
 {
     // 每 5 条次网格线形成一组，组边界绘制为主网格线。
     constexpr int kMajorGridLineInterval = 5;
-    constexpr float kMajorGridOpacity = 0.34f;
-    constexpr float kMinorGridOpacity = 0.19f;
+    constexpr int kMaxGridLineCountPerAxis = 240;
+    constexpr float kMajorGridOpacity = 0.04f;
+    constexpr float kMinorGridOpacity = 0.0175f;
 
     // 获取当前 OpenGL 上下文导出的函数表
     // @return 可用的 OpenGL 函数表指针，无上下文时返回 nullptr
@@ -62,8 +63,8 @@ namespace
 void CadReferenceRenderer::setTheme(const AppThemeColors& theme)
 {
     const QVector3D backgroundColor = toVector3D(theme.viewerBackgroundColor);
-    m_majorGridColor = blendColor(toVector3D(theme.viewerGridColor), backgroundColor, 0.35f);
-    m_minorGridColor = blendColor(m_majorGridColor, backgroundColor, 0.70f);
+    m_majorGridColor = blendColor(toVector3D(theme.viewerGridColor), backgroundColor, 0.875f);
+    m_minorGridColor = blendColor(m_majorGridColor, backgroundColor, 0.90f);
 }
 
 // 初始化网格顶点缓冲
@@ -173,10 +174,28 @@ void CadReferenceRenderer::renderGrid
     }
 
     const float margin = gridStep * 2.0f;
-    const int startX = static_cast<int>(std::floor((minX - margin) / gridStep));
-    const int endX = static_cast<int>(std::ceil((maxX + margin) / gridStep));
-    const int startY = static_cast<int>(std::floor((minY - margin) / gridStep));
-    const int endY = static_cast<int>(std::ceil((maxY + margin) / gridStep));
+    int startX = static_cast<int>(std::floor((minX - margin) / gridStep));
+    int endX = static_cast<int>(std::ceil((maxX + margin) / gridStep));
+    int startY = static_cast<int>(std::floor((minY - margin) / gridStep));
+    int endY = static_cast<int>(std::ceil((maxY + margin) / gridStep));
+
+    const auto clampIndexRange = [](int& start, int& end)
+        {
+            const qint64 count = static_cast<qint64>(end) - static_cast<qint64>(start) + 1;
+
+            if (count <= kMaxGridLineCountPerAxis)
+            {
+                return;
+            }
+
+            const qint64 center = static_cast<qint64>(start) + (static_cast<qint64>(end) - start) / 2;
+            start = static_cast<int>(center - kMaxGridLineCountPerAxis / 2);
+            end = start + kMaxGridLineCountPerAxis - 1;
+        };
+
+    // 侧视附近的地平面反投影范围很大，限制线数而不改变网格步长。
+    clampIndexRange(startX, endX);
+    clampIndexRange(startY, endY);
 
     std::vector<QVector3D> majorVertices;
     std::vector<QVector3D> minorVertices;
