@@ -498,18 +498,16 @@ std::vector<TransientPrimitive> CadViewer::buildRotaryEndCutPrimitives() const
             continue;
         }
 
-        const QVector3D color = overlay.role == RotaryEndCutRole::Left
-            ? QVector3D(0.12f, 0.92f, 0.42f)
-            : (overlay.role == RotaryEndCutRole::Right
-                ? QVector3D(0.96f, 0.24f, 0.20f)
-                : QVector3D(1.0f, 0.60f, 0.12f));
+        const QVector3D color = overlay.role == RotaryEndCutRole::Waste
+            ? QVector3D(1.0f, 0.60f, 0.12f)
+            : QVector3D(0.18f, 0.68f, 1.0f);
 
         TransientPrimitive lines;
         lines.primitiveType = GL_LINES;
         lines.color = color;
         lines.opacity = overlay.role == RotaryEndCutRole::Waste
             ? 0.82f
-            : (overlay.role == RotaryEndCutRole::Left ? 0.58f : 0.70f);
+            : 0.68f;
         const QPoint extentStart = worldToScreen(planePoint(origin, axisU, axisV, minU, minV, viewOffset));
         const QPoint extentEnd = worldToScreen(planePoint(origin, axisU, axisV, maxU, maxV, viewOffset));
         const double projectedExtent = std::hypot

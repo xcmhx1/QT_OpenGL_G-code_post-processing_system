@@ -124,7 +124,7 @@ private:
     bool sortEntitiesByCurrentDirection3D();
     bool smartSortEntities3D();
     bool smartAssignSelectedRotaryEndCut();
-    bool assignSelectedRotaryEndCut(bool leftCut);
+    bool assignSelectedRotaryEndCut();
     bool assignSelectedWasteEndCut();
     bool clearSelectedRotaryEndCutAssignments();
     bool clearRotaryEndCutAssignments();

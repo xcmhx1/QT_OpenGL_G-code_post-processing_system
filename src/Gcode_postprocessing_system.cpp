@@ -450,11 +450,9 @@ Gcode_postprocessing_system::Gcode_postprocessing_system(QWidget* parent)
     QAction* joinAction = new QAction(QStringLiteral("合并..."), this);
     QAction* filletAction = new QAction(QStringLiteral("圆角..."), this);
     QAction* chamferAction = new QAction(QStringLiteral("直角（倒角）..."), this);
-    QAction* smartAssignRotaryEndCutAction = new QAction(QStringLiteral("智能指定切面"), this);
-    QAction* assignLeftRotaryEndCutAction = new QAction(QStringLiteral("手动指定为左切面"), this);
-    QAction* assignRightRotaryEndCutAction = new QAction(QStringLiteral("手动指定为右切面"), this);
+    QAction* assignRotaryEndCutAction = new QAction(QStringLiteral("指定为中断切面"), this);
     QAction* assignWasteRotaryEndCutAction = new QAction(QStringLiteral("指定为废面"), this);
-    QAction* clearSelectedRotaryEndCutAssignmentsAction = new QAction(QStringLiteral("清除选中切面组"), this);
+    QAction* clearSelectedRotaryEndCutAssignmentsAction = new QAction(QStringLiteral("清除选中切面指定"), this);
     QAction* clearRotaryEndCutAssignmentsAction = new QAction(QStringLiteral("清除全部切面指定"), this);
 
     ui->menuFile->insertAction(ui->action_File_Export_G, exportDxfAction);
@@ -471,9 +469,7 @@ Gcode_postprocessing_system::Gcode_postprocessing_system(QWidget* parent)
     ui->menuEdit->addAction(filletAction);
     ui->menuEdit->addAction(chamferAction);
     ui->menuSort->addSeparator();
-    ui->menuSort->addAction(smartAssignRotaryEndCutAction);
-    ui->menuSort->addAction(assignLeftRotaryEndCutAction);
-    ui->menuSort->addAction(assignRightRotaryEndCutAction);
+    ui->menuSort->addAction(assignRotaryEndCutAction);
     ui->menuSort->addAction(assignWasteRotaryEndCutAction);
     ui->menuSort->addAction(clearSelectedRotaryEndCutAssignmentsAction);
     ui->menuSort->addAction(clearRotaryEndCutAssignmentsAction);
@@ -494,9 +490,7 @@ Gcode_postprocessing_system::Gcode_postprocessing_system(QWidget* parent)
     connect(joinAction, &QAction::triggered, this, [this]() { joinSelectedEntities(); });
     connect(filletAction, &QAction::triggered, this, [this]() { filletSelectedEntities(); });
     connect(chamferAction, &QAction::triggered, this, [this]() { chamferSelectedEntities(); });
-    connect(smartAssignRotaryEndCutAction, &QAction::triggered, this, [this]() { smartAssignSelectedRotaryEndCut(); });
-    connect(assignLeftRotaryEndCutAction, &QAction::triggered, this, [this]() { assignSelectedRotaryEndCut(true); });
-    connect(assignRightRotaryEndCutAction, &QAction::triggered, this, [this]() { assignSelectedRotaryEndCut(false); });
+    connect(assignRotaryEndCutAction, &QAction::triggered, this, [this]() { smartAssignSelectedRotaryEndCut(); });
     connect(assignWasteRotaryEndCutAction, &QAction::triggered, this, [this]() { assignSelectedWasteEndCut(); });
     connect(clearSelectedRotaryEndCutAssignmentsAction, &QAction::triggered, this, [this]() { clearSelectedRotaryEndCutAssignments(); });
     connect(clearRotaryEndCutAssignmentsAction, &QAction::triggered, this, [this]() { clearRotaryEndCutAssignments(); });

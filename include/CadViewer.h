@@ -466,7 +466,7 @@ private:
     // @return 加工方向 overlay 图元列表
     std::vector<TransientPrimitive> buildProcessDirectionPrimitives() const;
 
-    // 构建用户指定的方管左右切面网格提示。
+    // 构建用户指定的方管中断切面和废面网格提示。
     std::vector<TransientPrimitive> buildRotaryEndCutPrimitives() const;
 
     // 构建选中图元的基点/控制点图元

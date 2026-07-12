@@ -136,9 +136,9 @@ void CadViewer::renderRotaryEndCutLabels()
             continue;
         }
 
-        const QString roleText = label.role == RotaryEndCutRole::Left
-            ? QStringLiteral("L")
-            : (label.role == RotaryEndCutRole::Right ? QStringLiteral("R") : QStringLiteral("W"));
+        const QString roleText = label.role == RotaryEndCutRole::Waste
+            ? QStringLiteral("W")
+            : QStringLiteral("断");
         const QString text = QStringLiteral("%1%2")
             .arg(roleText)
             .arg(label.pairId + 1);
@@ -150,9 +150,9 @@ void CadViewer::renderRotaryEndCutLabels()
             textRect.width() + 16,
             textRect.height() + 10
         );
-        const QColor accent = label.role == RotaryEndCutRole::Left
-            ? QColor(36, 205, 106)
-            : (label.role == RotaryEndCutRole::Right ? QColor(236, 67, 61) : QColor(242, 151, 36));
+        const QColor accent = label.role == RotaryEndCutRole::Waste
+            ? QColor(242, 151, 36)
+            : QColor(46, 166, 242);
         QColor fill = m_theme.viewerBackgroundColor;
         fill.setAlpha(218);
         painter.setPen(QPen(accent, 1.6));

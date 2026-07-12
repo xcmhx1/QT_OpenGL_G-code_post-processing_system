@@ -46,12 +46,11 @@ struct RotaryCornerToolCenter
     int zDirection = 0;
 };
 
-// 用户为四轴方管排序显式指定的端部切面角色。
+// 用户为四轴方管排序显式指定的加工边界角色。
 enum class RotaryEndCutRole
 {
     None,
-    Left,
-    Right,
+    Break,
     Waste
 };
 
@@ -130,7 +129,7 @@ public:
     double m_processStartParameter = 0.0;
     // 记录当前图元是否处于选中状态。
     bool m_isSelected = false;
-    // 用户指定的方管端部切面组；仅作为当前文档的加工排序参考，不写入 DXF。
+    // 用户指定的方管加工边界；仅作为当前文档的加工排序参考，不写入 DXF。
     int m_rotaryEndCutPairId = -1;
     RotaryEndCutRole m_rotaryEndCutRole = RotaryEndCutRole::None;
     // 由废面边界区间推导，不参与排序、加工可视化和 G 代码输出。
