@@ -452,6 +452,9 @@ Gcode_postprocessing_system::Gcode_postprocessing_system(QWidget* parent)
     QAction* chamferAction = new QAction(QStringLiteral("直角（倒角）..."), this);
     QAction* assignRotaryEndCutAction = new QAction(QStringLiteral("指定为中断切面"), this);
     QAction* assignWasteRotaryEndCutAction = new QAction(QStringLiteral("指定为废面"), this);
+    QAction* recognizeRotaryTubeSectionAction = new QAction(QStringLiteral("识别方管垂直截面（外轮廓）"), this);
+    QAction* removeInternalPathsAction = new QAction(QStringLiteral("去除内部线条"), this);
+    QAction* restoreInternalPathsAction = new QAction(QStringLiteral("恢复内部线条"), this);
     QAction* clearSelectedRotaryEndCutAssignmentsAction = new QAction(QStringLiteral("清除选中切面指定"), this);
     QAction* clearRotaryEndCutAssignmentsAction = new QAction(QStringLiteral("清除全部切面指定"), this);
 
@@ -471,6 +474,10 @@ Gcode_postprocessing_system::Gcode_postprocessing_system(QWidget* parent)
     ui->menuSort->addSeparator();
     ui->menuSort->addAction(assignRotaryEndCutAction);
     ui->menuSort->addAction(assignWasteRotaryEndCutAction);
+    ui->menuSort->addSeparator();
+    ui->menuSort->addAction(recognizeRotaryTubeSectionAction);
+    ui->menuSort->addAction(removeInternalPathsAction);
+    ui->menuSort->addAction(restoreInternalPathsAction);
     ui->menuSort->addAction(clearSelectedRotaryEndCutAssignmentsAction);
     ui->menuSort->addAction(clearRotaryEndCutAssignmentsAction);
 
@@ -492,6 +499,9 @@ Gcode_postprocessing_system::Gcode_postprocessing_system(QWidget* parent)
     connect(chamferAction, &QAction::triggered, this, [this]() { chamferSelectedEntities(); });
     connect(assignRotaryEndCutAction, &QAction::triggered, this, [this]() { smartAssignSelectedRotaryEndCut(); });
     connect(assignWasteRotaryEndCutAction, &QAction::triggered, this, [this]() { assignSelectedWasteEndCut(); });
+    connect(recognizeRotaryTubeSectionAction, &QAction::triggered, this, [this]() { recognizeRotaryTubeSection(); });
+    connect(removeInternalPathsAction, &QAction::triggered, this, [this]() { removeInternalMachiningPaths(); });
+    connect(restoreInternalPathsAction, &QAction::triggered, this, [this]() { restoreInternalMachiningPaths(); });
     connect(clearSelectedRotaryEndCutAssignmentsAction, &QAction::triggered, this, [this]() { clearSelectedRotaryEndCutAssignments(); });
     connect(clearRotaryEndCutAssignmentsAction, &QAction::triggered, this, [this]() { clearRotaryEndCutAssignments(); });
     connect(ui->action_Sort_2D_Assign, &QAction::triggered, this, [this]() { sortEntitiesByCurrentMode(false); });
@@ -1614,6 +1624,14 @@ void Gcode_postprocessing_system::syncToolPanelState()
     {
         return;
     }
+
+    m_toolPanelWidget->setRotaryTubeSectionProperties
+    (
+        m_rotaryTubeSectionModel.valid,
+        m_rotaryTubeSectionModel.yLength,
+        m_rotaryTubeSectionModel.zWidth,
+        m_rotaryTubeSectionModel.cornerRadius
+    );
 
     const QStringList layerNames = m_document.layerNames();
     QMap<QString, QColor> layerColors;

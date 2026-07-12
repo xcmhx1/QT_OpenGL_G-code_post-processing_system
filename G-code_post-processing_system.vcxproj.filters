@@ -352,6 +352,12 @@
     <ClCompile Include="src\CadSplineConverter.cpp">
       <Filter>Source Files\Model</Filter>
     </ClCompile>
+    <ClCompile Include="src\RotaryCutBoundaryAnalyzer.cpp">
+      <Filter>Source Files\Model</Filter>
+    </ClCompile>
+    <ClCompile Include="src\RotaryTubeGeometryAnalyzer.cpp">
+      <Filter>Source Files\Model</Filter>
+    </ClCompile>
     <ClCompile Include="src\CadCircleItem.cpp">
       <Filter>Source Files\Item</Filter>
     </ClCompile>
@@ -568,6 +574,12 @@
       <Filter>Header Files\Item</Filter>
     </ClInclude>
     <ClInclude Include="include\CadSplineConverter.h">
+      <Filter>Header Files\Model</Filter>
+    </ClInclude>
+    <ClInclude Include="include\RotaryCutBoundaryAnalyzer.h">
+      <Filter>Header Files\Model</Filter>
+    </ClInclude>
+    <ClInclude Include="include\RotaryTubeGeometryAnalyzer.h">
       <Filter>Header Files\Model</Filter>
     </ClInclude>
     <ClInclude Include="include\CadCircleItem.h">

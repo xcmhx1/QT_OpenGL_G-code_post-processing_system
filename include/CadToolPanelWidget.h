@@ -59,6 +59,13 @@ public:
     void setRotaryEndCutsVisible(bool enabled);
     void setExcludedEntitiesDimmed(bool enabled);
     void setBackgroundGridVisible(bool enabled);
+    void setRotaryTubeSectionProperties
+    (
+        bool recognized,
+        double yLength = 0.0,
+        double zWidth = 0.0,
+        double cornerRadius = 0.0
+    );
 
 signals:
     void drawRequested(DrawType drawType);
@@ -124,6 +131,9 @@ private:
     QToolButton* m_arrayButton = nullptr;
     QLabel* m_layerStatusLabel = nullptr;
     QLabel* m_propertyStatusLabel = nullptr;
+    QLabel* m_rotaryTubeSectionStatusLabel = nullptr;
+    QLabel* m_rotaryTubeSectionSizeLabel = nullptr;
+    QLabel* m_rotaryTubeSectionRadiusLabel = nullptr;
     QComboBox* m_layerComboBox = nullptr;
     QComboBox* m_propertyLayerComboBox = nullptr;
     QComboBox* m_colorComboBox = nullptr;

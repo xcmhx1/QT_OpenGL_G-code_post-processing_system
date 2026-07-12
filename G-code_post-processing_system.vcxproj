@@ -166,6 +166,14 @@ if exist "$(VCRuntimeRedistDir)\*.dll" copy /Y "$(VCRuntimeRedistDir)\*.dll" "$(
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
     </ClCompile>
+    <ClCompile Include="src\RotaryCutBoundaryAnalyzer.cpp">
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+    </ClCompile>
+    <ClCompile Include="src\RotaryTubeGeometryAnalyzer.cpp">
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+    </ClCompile>
     <ClCompile Include="src\CadCircleItem.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
@@ -408,6 +416,8 @@ if exist "$(VCRuntimeRedistDir)\*.dll" copy /Y "$(VCRuntimeRedistDir)\*.dll" "$(
     <ClInclude Include="include\CadArcItem.h" />
     <ClInclude Include="include\CadOcsGeometry.h" />
     <ClInclude Include="include\CadSplineConverter.h" />
+    <ClInclude Include="include\RotaryCutBoundaryAnalyzer.h" />
+    <ClInclude Include="include\RotaryTubeGeometryAnalyzer.h" />
     <ClInclude Include="include\AppBranding.h" />
     <ClInclude Include="include\AppLicense.h" />
     <ClInclude Include="include\AppTheme.h" />

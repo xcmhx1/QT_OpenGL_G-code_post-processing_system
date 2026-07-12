@@ -132,8 +132,10 @@ public:
     // 用户指定的方管加工边界；仅作为当前文档的加工排序参考，不写入 DXF。
     int m_rotaryEndCutPairId = -1;
     RotaryEndCutRole m_rotaryEndCutRole = RotaryEndCutRole::None;
-    // 由废面边界区间推导，不参与排序、加工可视化和 G 代码输出。
+    // 由废面边界区间或内部线识别推导，不参与排序、加工可视化和 G 代码输出。
     bool m_excludedFromProcessing = false;
+    // 用户执行内部线识别后保留的独立排除来源，刷新废面规则时不会丢失。
+    bool m_excludedAsInternalGeometry = false;
     // 渲染层直接消费的离散几何缓存。
     GeometryData m_geometry;
     // 图元按当前加工顺序离散后的原始三维点集缓存。

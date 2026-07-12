@@ -9,6 +9,7 @@
 #include "CadStatusPaneWidget.h"
 #include "CadToolPanelWidget.h"
 #include "GGenerator.h"
+#include "RotaryTubeGeometryAnalyzer.h"
 #include "GProfile.h"
 
 #include <QtWidgets/QMainWindow>
@@ -129,6 +130,9 @@ private:
     bool clearSelectedRotaryEndCutAssignments();
     bool clearRotaryEndCutAssignments();
     QVector<CadItem*> expandedSelectedRotaryEndCut(QString* errorMessage = nullptr) const;
+    bool recognizeRotaryTubeSection();
+    bool removeInternalMachiningPaths();
+    bool restoreInternalMachiningPaths();
     int refreshWasteProcessingExclusions();
     void invalidateProcessOrdersAfterEndCutChange();
     bool hasCompleteProcessOrderForExport(GGenerator::GenerationMode generationMode) const;
@@ -149,6 +153,7 @@ private:
     CadDocument m_document;
     AppBranding m_branding;
     AppLicense m_license;
+    RotaryTubeSectionModel m_rotaryTubeSectionModel;
     GProfile m_activeProfile = GProfile::createDefaultLaserProfile();
     QString m_currentLayerName = QStringLiteral("0");
     QColor m_currentColor = QColor(Qt::white);

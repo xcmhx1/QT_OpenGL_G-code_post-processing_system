@@ -16,6 +16,7 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QSizePolicy>
+#include <QStyle>
 #include <QTabBar>
 #include <QTabWidget>
 #include <QToolButton>
@@ -885,6 +886,42 @@ void CadToolPanelWidget::setBackgroundGridVisible(bool enabled)
     if (m_backgroundGridCheckBox != nullptr) m_backgroundGridCheckBox->setChecked(enabled);
 }
 
+void CadToolPanelWidget::setRotaryTubeSectionProperties
+(
+    bool recognized,
+    double yLength,
+    double zWidth,
+    double cornerRadius
+)
+{
+    if (m_rotaryTubeSectionStatusLabel == nullptr
+        || m_rotaryTubeSectionSizeLabel == nullptr
+        || m_rotaryTubeSectionRadiusLabel == nullptr)
+    {
+        return;
+    }
+
+    m_rotaryTubeSectionStatusLabel->setText(recognized ? QStringLiteral("已识别") : QStringLiteral("未识别"));
+    m_rotaryTubeSectionStatusLabel->setProperty("sectionRecognized", recognized);
+    m_rotaryTubeSectionStatusLabel->style()->unpolish(m_rotaryTubeSectionStatusLabel);
+    m_rotaryTubeSectionStatusLabel->style()->polish(m_rotaryTubeSectionStatusLabel);
+
+    if (!recognized)
+    {
+        m_rotaryTubeSectionSizeLabel->setText(QStringLiteral("Y长 --   Z宽 --"));
+        m_rotaryTubeSectionRadiusLabel->setText(QStringLiteral("圆角半径 R --"));
+        return;
+    }
+
+    m_rotaryTubeSectionSizeLabel->setText
+    (
+        QStringLiteral("Y长 %1   Z宽 %2 mm")
+            .arg(yLength, 0, 'f', 2)
+            .arg(zWidth, 0, 'f', 2)
+    );
+    m_rotaryTubeSectionRadiusLabel->setText(QStringLiteral("圆角半径 R %1 mm").arg(cornerRadius, 0, 'f', 2));
+}
+
 void CadToolPanelWidget::buildUi()
 {
     m_drawPointAction = new QAction(QStringLiteral("点"), this);
@@ -997,6 +1034,10 @@ void CadToolPanelWidget::applyTheme()
             " font-size: 11px;"
             " font-weight: 500;"
             "}"
+            "QLabel[sectionStatus=\"true\"] { font-size: 11px; font-weight: 600; }"
+            "QLabel[sectionStatus=\"true\"][sectionRecognized=\"false\"] { color: %2; }"
+            "QLabel[sectionStatus=\"true\"][sectionRecognized=\"true\"] { color: %8; }"
+            "QLabel[sectionValue=\"true\"] { color: %1; font-size: 10px; }"
             "QCheckBox[machiningOption=\"true\"] {"
             " color: %2;"
             " font-size: 10px;"
@@ -1754,6 +1795,22 @@ QWidget* CadToolPanelWidget::buildMachiningPanel()
     profileSettingsLayout->addWidget(m_profileSettingsButton);
     profileSettingsLayout->addStretch(1);
 
+    QWidget* sectionPanel = new QWidget(panel);
+    QVBoxLayout* sectionLayout = new QVBoxLayout(sectionPanel);
+    sectionLayout->setContentsMargins(4, 5, 4, 2);
+    sectionLayout->setSpacing(4);
+    m_rotaryTubeSectionStatusLabel = new QLabel(QStringLiteral("未识别"), sectionPanel);
+    m_rotaryTubeSectionStatusLabel->setProperty("sectionStatus", true);
+    m_rotaryTubeSectionStatusLabel->setProperty("sectionRecognized", false);
+    m_rotaryTubeSectionSizeLabel = new QLabel(QStringLiteral("Y长 --   Z宽 --"), sectionPanel);
+    m_rotaryTubeSectionSizeLabel->setProperty("sectionValue", true);
+    m_rotaryTubeSectionRadiusLabel = new QLabel(QStringLiteral("圆角半径 R --"), sectionPanel);
+    m_rotaryTubeSectionRadiusLabel->setProperty("sectionValue", true);
+    sectionLayout->addWidget(m_rotaryTubeSectionStatusLabel);
+    sectionLayout->addWidget(m_rotaryTubeSectionSizeLabel);
+    sectionLayout->addWidget(m_rotaryTubeSectionRadiusLabel);
+    sectionLayout->addStretch(1);
+
     rootLayout->addWidget(buildPanelFrame(QStringLiteral("导入导出"), importPanel, 182, nullptr, false), 0);
     rootLayout->addWidget(buildDivider(), 0, Qt::AlignLeft | Qt::AlignVCenter);
     rootLayout->addWidget(buildPanelFrame(QStringLiteral("排序"), sortPanel, 132, nullptr, false), 0);
@@ -1763,6 +1820,8 @@ QWidget* CadToolPanelWidget::buildMachiningPanel()
     rootLayout->addWidget(buildPanelFrame(QStringLiteral("配置"), configPanel, 220, nullptr, true), 1);
     rootLayout->addWidget(buildDivider(), 0, Qt::AlignLeft | Qt::AlignVCenter);
     rootLayout->addWidget(buildPanelFrame(QStringLiteral("G代码配置"), profileSettingsPanel, 128, nullptr, false), 0);
+    rootLayout->addWidget(buildDivider(), 0, Qt::AlignLeft | Qt::AlignVCenter);
+    rootLayout->addWidget(buildPanelFrame(QStringLiteral("方管垂直截面"), sectionPanel, 238, nullptr, false), 0);
     rootLayout->addStretch(1);
 
     connect(m_importFileButton, &QToolButton::clicked, this, [this]() { emit importFileRequested(); });

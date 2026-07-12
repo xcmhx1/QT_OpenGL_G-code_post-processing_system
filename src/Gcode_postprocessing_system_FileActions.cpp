@@ -69,6 +69,7 @@ bool Gcode_postprocessing_system::importDxfFile(const QString& filePath)
 {
     m_editer.clearHistory();
     m_document.readDxfDocument(filePath);
+    m_rotaryTubeSectionModel = RotaryTubeSectionModel();
     m_currentDocumentPath = ensureDxfSuffix(filePath);
     ui->openGLWidget->setDocument(&m_document);
     ui->openGLWidget->appendCommandMessage(QStringLiteral("已导入文件: %1").arg(QFileInfo(filePath).fileName()));
@@ -151,6 +152,7 @@ bool Gcode_postprocessing_system::importBitmapFile(const QString& filePath)
 
     if (replaceExisting)
     {
+        m_rotaryTubeSectionModel = RotaryTubeSectionModel();
         m_currentDocumentPath.clear();
         ui->openGLWidget->clearSelection();
     }

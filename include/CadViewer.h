@@ -383,7 +383,7 @@ private:
     // 绘制加工顺序编号
     void renderProcessOrderLabels();
 
-    // 绘制人工指定切面的左右角色与组号。
+    // 绘制人工指定的中断切面或废弃面标签。
     void renderRotaryEndCutLabels();
 
     struct ProcessOrderLabelOverlay
