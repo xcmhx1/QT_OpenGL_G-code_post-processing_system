@@ -4180,7 +4180,40 @@ bool Gcode_postprocessing_system::recognizeRotaryTubeSection(bool interactive)
     RotaryTubeSectionModel recognized;
     const QVector<CadItem*> selectedItems = ui->openGLWidget->selectedEntities();
 
-    if (!selectedItems.isEmpty())
+    if (!interactive)
+    {
+        recognized = RotaryTubeGeometryAnalyzer::findBestSectionModel
+        (
+            sceneItems,
+            kEndCutConnectionTolerance
+        );
+
+        QString diagnostic = QStringLiteral("自动截面识别：检查候选 %1 个，有效 %2 个，圆角候选 %3 个")
+            .arg(recognized.inspectedCandidateCount)
+            .arg(recognized.validCandidateCount)
+            .arg(recognized.roundedCandidateCount);
+
+        if (recognized.valid)
+        {
+            diagnostic += QStringLiteral("；选中 X=%1，Y长=%2，Z宽=%3，圆角数=%4，R=%5")
+                .arg(recognized.centerX, 0, 'f', 3)
+                .arg(recognized.yLength, 0, 'f', 3)
+                .arg(recognized.zWidth, 0, 'f', 3)
+                .arg(recognized.roundedCornerCount)
+                .arg(recognized.cornerRadius, 0, 'f', 3);
+        }
+
+        ui->openGLWidget->appendCommandMessage(diagnostic);
+
+        if (recognized.valid && recognized.roundedCornerCount == 0)
+        {
+            ui->openGLWidget->appendCommandMessage
+            (
+                QStringLiteral("未找到可靠圆角截面，已回退使用直角截面。")
+            );
+        }
+    }
+    else if (!selectedItems.isEmpty())
     {
         recognized = RotaryTubeGeometryAnalyzer::buildSectionModel
         (
@@ -4188,50 +4221,6 @@ bool Gcode_postprocessing_system::recognizeRotaryTubeSection(bool interactive)
             sceneItems,
             kEndCutConnectionTolerance
         );
-    }
-    else if (!interactive)
-    {
-        double bestSectionArea = 0.0;
-        std::vector<CadItem*> documentItems;
-        documentItems.reserve(static_cast<size_t>(sceneItems.size()));
-
-        for (CadItem* item : sceneItems) documentItems.push_back(item);
-
-        const std::vector<int> componentIds = buildItemConnectivityComponents
-        (
-            documentItems,
-            kEndCutConnectionTolerance
-        );
-        const int componentCount = componentIds.empty()
-            ? 0
-            : (*std::max_element(componentIds.begin(), componentIds.end()) + 1);
-
-        for (int componentId = 0; componentId < componentCount; ++componentId)
-        {
-            QVector<CadItem*> componentItems;
-
-            for (size_t itemIndex = 0; itemIndex < documentItems.size(); ++itemIndex)
-            {
-                if (componentIds[itemIndex] == componentId)
-                {
-                    componentItems.push_back(documentItems[itemIndex]);
-                }
-            }
-
-            const RotaryTubeSectionModel candidate = RotaryTubeGeometryAnalyzer::buildSectionModel
-            (
-                componentItems,
-                sceneItems,
-                kEndCutConnectionTolerance
-            );
-            const double candidateArea = candidate.yLength * candidate.zWidth;
-
-            if (candidate.valid && candidateArea > bestSectionArea)
-            {
-                bestSectionArea = candidateArea;
-                recognized = candidate;
-            }
-        }
     }
     else
     {

@@ -15,6 +15,13 @@ struct RotaryTubeSectionModel
     double yLength = 0.0;
     double zWidth = 0.0;
     double cornerRadius = 0.0;
+    int roundedCornerCount = 0;
+    QVector<double> cornerRadii;
+    double cornerConfidence = 0.0;
+    double centerX = 0.0;
+    int inspectedCandidateCount = 0;
+    int validCandidateCount = 0;
+    int roundedCandidateCount = 0;
     QString errorMessage;
 };
 
@@ -30,6 +37,12 @@ public:
     static RotaryTubeSectionModel buildSectionModel
     (
         const QVector<CadItem*>& selectedItems,
+        const QVector<CadItem*>& sceneItems,
+        double connectionTolerance = 1.0
+    );
+
+    static RotaryTubeSectionModel findBestSectionModel
+    (
         const QVector<CadItem*>& sceneItems,
         double connectionTolerance = 1.0
     );

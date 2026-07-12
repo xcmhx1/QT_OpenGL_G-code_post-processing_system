@@ -22,6 +22,19 @@ namespace
         double intersection = 0.01;
     };
 
+    struct CornerAnalysis
+    {
+        int roundedCornerCount = 0;
+        QVector<double> cornerRadii;
+        double confidence = 0.0;
+        bool reliableRoundedSection = false;
+    };
+
+    struct SectionCandidate
+    {
+        RotaryTubeSectionModel model;
+    };
+
     GeometryTolerance buildTolerance(double connectionTolerance)
     {
         const double nodeSnap = std::max(0.001, connectionTolerance);
@@ -988,6 +1001,178 @@ namespace
             : cornerRadii[cornerRadii.size() / 2];
     }
 
+    double medianValue(QVector<double> values)
+    {
+        if (values.isEmpty())
+        {
+            return 0.0;
+        }
+
+        std::sort(values.begin(), values.end());
+        const int middle = values.size() / 2;
+        return values.size() % 2 == 0
+            ? (values[middle - 1] + values[middle]) * 0.5
+            : values[middle];
+    }
+
+    CornerAnalysis analyzeRoundedCorners
+    (
+        const QVector<QVector2D>& boundary,
+        double connectionTolerance
+    )
+    {
+        CornerAnalysis result;
+
+        if (boundary.size() < 4)
+        {
+            return result;
+        }
+
+        double minY = boundary.front().x();
+        double maxY = minY;
+        double minZ = boundary.front().y();
+        double maxZ = minZ;
+
+        for (const QVector2D& point : boundary)
+        {
+            minY = std::min(minY, static_cast<double>(point.x()));
+            maxY = std::max(maxY, static_cast<double>(point.x()));
+            minZ = std::min(minZ, static_cast<double>(point.y()));
+            maxZ = std::max(maxZ, static_cast<double>(point.y()));
+        }
+
+        const double maximumRadius = std::min(maxY - minY, maxZ - minZ) * 0.5;
+        const double supportTolerance = std::max(1.0e-5, connectionTolerance * 0.1);
+
+        for (int ySide : { -1, 1 })
+        {
+            for (int zSide : { -1, 1 })
+            {
+                const double cornerY = ySide < 0 ? minY : maxY;
+                const double cornerZ = zSide < 0 ? minZ : maxZ;
+                bool sharpCorner = false;
+                bool ySideSupport = false;
+                bool zSideSupport = false;
+                QVector<double> radiusSamples;
+
+                for (const QVector2D& point : boundary)
+                {
+                    const double yOffset = std::abs(static_cast<double>(point.x()) - cornerY);
+                    const double zOffset = std::abs(static_cast<double>(point.y()) - cornerZ);
+
+                    if (yOffset > maximumRadius + supportTolerance
+                        || zOffset > maximumRadius + supportTolerance)
+                    {
+                        continue;
+                    }
+
+                    if (std::hypot(yOffset, zOffset) <= supportTolerance)
+                    {
+                        sharpCorner = true;
+                        break;
+                    }
+
+                    if (zOffset <= supportTolerance && yOffset > supportTolerance)
+                    {
+                        ySideSupport = true;
+                    }
+
+                    if (yOffset <= supportTolerance && zOffset > supportTolerance)
+                    {
+                        zSideSupport = true;
+                    }
+
+                    if (yOffset > supportTolerance && zOffset > supportTolerance)
+                    {
+                        const double radius = yOffset + zOffset
+                            + std::sqrt(2.0 * yOffset * zOffset);
+
+                        if (radius > supportTolerance && radius <= maximumRadius + supportTolerance)
+                        {
+                            radiusSamples.push_back(radius);
+                        }
+                    }
+                }
+
+                if (sharpCorner || !ySideSupport || !zSideSupport || radiusSamples.size() < 2)
+                {
+                    result.cornerRadii.push_back(0.0);
+                    continue;
+                }
+
+                const double radius = medianValue(radiusSamples);
+                const auto [minimum, maximum] = std::minmax_element(radiusSamples.begin(), radiusSamples.end());
+                const double allowedSpread = std::max(connectionTolerance, radius * 0.12);
+
+                if (radius <= supportTolerance || *maximum - *minimum > allowedSpread)
+                {
+                    result.cornerRadii.push_back(0.0);
+                    continue;
+                }
+
+                result.cornerRadii.push_back(radius);
+                ++result.roundedCornerCount;
+            }
+        }
+
+        QVector<double> reliableRadii;
+
+        for (double radius : result.cornerRadii)
+        {
+            if (radius > supportTolerance)
+            {
+                reliableRadii.push_back(radius);
+            }
+        }
+
+        if (result.roundedCornerCount >= 3)
+        {
+            const double medianRadius = medianValue(reliableRadii);
+            const auto [minimum, maximum] = std::minmax_element(reliableRadii.begin(), reliableRadii.end());
+            const double allowedSpread = std::max(connectionTolerance, medianRadius * 0.12);
+            const bool radiiConsistent = *maximum - *minimum <= allowedSpread;
+            result.reliableRoundedSection = radiiConsistent;
+            result.confidence = radiiConsistent
+                ? static_cast<double>(result.roundedCornerCount) / 4.0
+                    * std::max(0.0, 1.0 - (*maximum - *minimum) / std::max(allowedSpread, kEpsilon))
+                : 0.0;
+        }
+
+        return result;
+    }
+
+    bool dimensionsMatch
+    (
+        const RotaryTubeSectionModel& left,
+        const RotaryTubeSectionModel& right,
+        double connectionTolerance
+    )
+    {
+        const auto closeDimension = [connectionTolerance](double first, double second)
+        {
+            return std::abs(first - second)
+                <= std::max(connectionTolerance, std::max(first, second) * 0.02);
+        };
+
+        return closeDimension(left.yLength, right.yLength)
+            && closeDimension(left.zWidth, right.zWidth)
+            && closeDimension(left.cornerRadius, right.cornerRadius);
+    }
+
+    QString candidateKey(QVector<int> indices)
+    {
+        std::sort(indices.begin(), indices.end());
+        QStringList parts;
+        parts.reserve(indices.size());
+
+        for (int index : indices)
+        {
+            parts.push_back(QString::number(index));
+        }
+
+        return parts.join(QLatin1Char(','));
+    }
+
     double verticalSectionProjectionFactor(const DRW_Coord& extrusion)
     {
         QVector3D normal(extrusion.x, extrusion.y, extrusion.z);
@@ -1280,6 +1465,333 @@ RotaryTubeSectionModel RotaryTubeGeometryAnalyzer::buildSectionModel
 
     model = parseSectionCandidate(component, sceneItems, paths, tolerance);
     return model;
+}
+
+RotaryTubeSectionModel RotaryTubeGeometryAnalyzer::findBestSectionModel
+(
+    const QVector<CadItem*>& sceneItems,
+    double connectionTolerance
+)
+{
+    RotaryTubeSectionModel result;
+    const GeometryTolerance tolerance = buildTolerance(connectionTolerance);
+    QVector<QVector<QVector3D>> paths;
+    QVector<double> itemCenterX(sceneItems.size(), 0.0);
+    QVector<int> verticalItems;
+    paths.reserve(sceneItems.size());
+
+    for (int itemIndex = 0; itemIndex < sceneItems.size(); ++itemIndex)
+    {
+        paths.push_back(itemPath(sceneItems[itemIndex]));
+        const QVector<QVector3D>& path = paths.back();
+
+        if (path.size() < 2)
+        {
+            continue;
+        }
+
+        double minX = path.front().x();
+        double maxX = minX;
+
+        for (const QVector3D& point : path)
+        {
+            minX = std::min(minX, static_cast<double>(point.x()));
+            maxX = std::max(maxX, static_cast<double>(point.x()));
+        }
+
+        if (maxX - minX <= tolerance.nodeSnap)
+        {
+            itemCenterX[itemIndex] = (minX + maxX) * 0.5;
+            verticalItems.push_back(itemIndex);
+        }
+    }
+
+    std::sort(verticalItems.begin(), verticalItems.end(), [&itemCenterX](int left, int right)
+    {
+        return itemCenterX[left] < itemCenterX[right];
+    });
+
+    QVector<QVector<int>> xClusters;
+
+    for (int itemIndex : verticalItems)
+    {
+        if (xClusters.isEmpty()
+            || itemCenterX[itemIndex] - itemCenterX[xClusters.back().back()] > tolerance.nodeSnap)
+        {
+            xClusters.push_back({ itemIndex });
+        }
+        else
+        {
+            xClusters.back().push_back(itemIndex);
+        }
+    }
+
+    QVector<SectionCandidate> candidates;
+    QSet<QString> candidateKeys;
+
+    for (const QVector<int>& xCluster : xClusters)
+    {
+        QVector<bool> visited(xCluster.size(), false);
+
+        for (int start = 0; start < xCluster.size(); ++start)
+        {
+            if (visited[start])
+            {
+                continue;
+            }
+
+            QVector<int> pending{ start };
+            QVector<int> component;
+            visited[start] = true;
+
+            for (int cursor = 0; cursor < pending.size(); ++cursor)
+            {
+                const int localIndex = pending[cursor];
+                const int itemIndex = xCluster[localIndex];
+                component.push_back(itemIndex);
+
+                for (int candidate = 0; candidate < xCluster.size(); ++candidate)
+                {
+                    if (!visited[candidate]
+                        && pathsTouch(paths[itemIndex], paths[xCluster[candidate]], tolerance.nodeSnap))
+                    {
+                        visited[candidate] = true;
+                        pending.push_back(candidate);
+                    }
+                }
+            }
+
+            ++result.inspectedCandidateCount;
+            RotaryTubeSectionModel model = parseSectionCandidate(component, sceneItems, paths, tolerance);
+
+            if (!model.valid
+                || model.yLength <= tolerance.nodeSnap
+                || model.zWidth <= tolerance.nodeSnap)
+            {
+                continue;
+            }
+
+            QVector<int> outerIndices;
+            double centerXSum = 0.0;
+            int centerXCount = 0;
+
+            for (CadItem* item : model.outerBoundaryItems)
+            {
+                const int itemIndex = sceneItems.indexOf(item);
+
+                if (itemIndex >= 0)
+                {
+                    outerIndices.push_back(itemIndex);
+
+                    for (const QVector3D& point : paths[itemIndex])
+                    {
+                        centerXSum += point.x();
+                        ++centerXCount;
+                    }
+                }
+            }
+
+            const QString key = candidateKey(outerIndices);
+
+            if (outerIndices.isEmpty() || candidateKeys.contains(key))
+            {
+                continue;
+            }
+
+            candidateKeys.insert(key);
+            const CornerAnalysis corners = analyzeRoundedCorners
+            (
+                model.sectionBoundary,
+                tolerance.nodeSnap
+            );
+            model.roundedCornerCount = corners.roundedCornerCount;
+            model.cornerRadii = corners.cornerRadii;
+            model.cornerConfidence = corners.confidence;
+            model.centerX = centerXCount > 0 ? centerXSum / centerXCount : 0.0;
+
+            if (corners.reliableRoundedSection)
+            {
+                QVector<double> reliableRadii;
+
+                for (double radius : corners.cornerRadii)
+                {
+                    if (radius > tolerance.boundaryDistance)
+                    {
+                        reliableRadii.push_back(radius);
+                    }
+                }
+
+                model.cornerRadius = medianValue(reliableRadii);
+                ++result.roundedCandidateCount;
+            }
+            else if (corners.roundedCornerCount == 0)
+            {
+                model.cornerRadius = 0.0;
+            }
+
+            ++result.validCandidateCount;
+            candidates.push_back({ std::move(model) });
+        }
+    }
+
+    QVector<int> eligibleCandidates;
+    int preferredCornerCount = 0;
+
+    for (const SectionCandidate& candidate : candidates)
+    {
+        if (candidate.model.cornerConfidence > 0.0)
+        {
+            preferredCornerCount = std::max(preferredCornerCount, candidate.model.roundedCornerCount);
+        }
+    }
+
+    for (int index = 0; index < candidates.size(); ++index)
+    {
+        const RotaryTubeSectionModel& model = candidates[index].model;
+
+        if ((preferredCornerCount > 0
+                && model.cornerConfidence > 0.0
+                && model.roundedCornerCount == preferredCornerCount)
+            || (preferredCornerCount == 0 && model.roundedCornerCount == 0))
+        {
+            eligibleCandidates.push_back(index);
+        }
+    }
+
+    if (eligibleCandidates.isEmpty())
+    {
+        result.errorMessage = QStringLiteral("未找到满足闭合、垂直投影和圆角可靠性要求的方管截面。");
+        return result;
+    }
+
+    QVector<QVector<int>> groups;
+    QVector<bool> grouped(eligibleCandidates.size(), false);
+
+    for (int start = 0; start < eligibleCandidates.size(); ++start)
+    {
+        if (grouped[start])
+        {
+            continue;
+        }
+
+        QVector<int> pending{ start };
+        QVector<int> group;
+        grouped[start] = true;
+
+        for (int cursor = 0; cursor < pending.size(); ++cursor)
+        {
+            const int localIndex = pending[cursor];
+            const int candidateIndex = eligibleCandidates[localIndex];
+            group.push_back(candidateIndex);
+
+            for (int other = 0; other < eligibleCandidates.size(); ++other)
+            {
+                if (!grouped[other] && dimensionsMatch
+                (
+                    candidates[candidateIndex].model,
+                    candidates[eligibleCandidates[other]].model,
+                    tolerance.nodeSnap
+                ))
+                {
+                    grouped[other] = true;
+                    pending.push_back(other);
+                }
+            }
+        }
+
+        groups.push_back(std::move(group));
+    }
+
+    int bestGroupIndex = -1;
+    double bestGroupDispersion = std::numeric_limits<double>::max();
+
+    for (int groupIndex = 0; groupIndex < groups.size(); ++groupIndex)
+    {
+        QVector<double> yLengths;
+        QVector<double> zWidths;
+        QVector<double> radii;
+
+        for (int candidateIndex : groups[groupIndex])
+        {
+            yLengths.push_back(candidates[candidateIndex].model.yLength);
+            zWidths.push_back(candidates[candidateIndex].model.zWidth);
+            radii.push_back(candidates[candidateIndex].model.cornerRadius);
+        }
+
+        const double medianY = medianValue(yLengths);
+        const double medianZ = medianValue(zWidths);
+        const double medianRadius = medianValue(radii);
+        double dispersion = 0.0;
+
+        for (int candidateIndex : groups[groupIndex])
+        {
+            const RotaryTubeSectionModel& model = candidates[candidateIndex].model;
+            dispersion += std::abs(model.yLength - medianY) / std::max(medianY, tolerance.nodeSnap);
+            dispersion += std::abs(model.zWidth - medianZ) / std::max(medianZ, tolerance.nodeSnap);
+
+            if (preferredCornerCount > 0)
+            {
+                dispersion += std::abs(model.cornerRadius - medianRadius)
+                    / std::max(medianRadius, tolerance.nodeSnap);
+            }
+        }
+
+        dispersion /= groups[groupIndex].size();
+
+        if (bestGroupIndex < 0
+            || groups[groupIndex].size() > groups[bestGroupIndex].size()
+            || (groups[groupIndex].size() == groups[bestGroupIndex].size()
+                && dispersion < bestGroupDispersion))
+        {
+            bestGroupIndex = groupIndex;
+            bestGroupDispersion = dispersion;
+        }
+    }
+
+    QVector<double> bestYLengths;
+    QVector<double> bestZWidths;
+    QVector<double> bestRadii;
+
+    for (int candidateIndex : groups[bestGroupIndex])
+    {
+        bestYLengths.push_back(candidates[candidateIndex].model.yLength);
+        bestZWidths.push_back(candidates[candidateIndex].model.zWidth);
+        bestRadii.push_back(candidates[candidateIndex].model.cornerRadius);
+    }
+
+    const double medianY = medianValue(bestYLengths);
+    const double medianZ = medianValue(bestZWidths);
+    const double medianRadius = medianValue(bestRadii);
+    int bestCandidateIndex = groups[bestGroupIndex].front();
+    double bestDistance = std::numeric_limits<double>::max();
+
+    for (int candidateIndex : groups[bestGroupIndex])
+    {
+        const RotaryTubeSectionModel& model = candidates[candidateIndex].model;
+        double distance = std::abs(model.yLength - medianY) / std::max(medianY, tolerance.nodeSnap)
+            + std::abs(model.zWidth - medianZ) / std::max(medianZ, tolerance.nodeSnap);
+
+        if (preferredCornerCount > 0)
+        {
+            distance += std::abs(model.cornerRadius - medianRadius)
+                / std::max(medianRadius, tolerance.nodeSnap);
+        }
+
+        if (distance < bestDistance)
+        {
+            bestDistance = distance;
+            bestCandidateIndex = candidateIndex;
+        }
+    }
+
+    const int inspectedCandidateCount = result.inspectedCandidateCount;
+    const int validCandidateCount = result.validCandidateCount;
+    const int roundedCandidateCount = result.roundedCandidateCount;
+    result = candidates[bestCandidateIndex].model;
+    result.inspectedCandidateCount = inspectedCandidateCount;
+    result.validCandidateCount = validCandidateCount;
+    result.roundedCandidateCount = roundedCandidateCount;
+    return result;
 }
 
 RotaryInternalPathResult RotaryTubeGeometryAnalyzer::findInternalPaths
