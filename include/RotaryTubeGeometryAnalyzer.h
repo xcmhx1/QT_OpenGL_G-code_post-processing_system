@@ -9,6 +9,7 @@ class CadItem;
 struct RotaryTubeSectionModel
 {
     bool valid = false;
+    QVector<QVector2D> sectionBoundary;
     QVector<QVector2D> sectionHull;
     QVector<CadItem*> outerBoundaryItems;
     double yLength = 0.0;

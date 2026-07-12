@@ -15,6 +15,24 @@ namespace
 {
     constexpr double kEpsilon = 1.0e-9;
 
+    struct GeometryTolerance
+    {
+        double nodeSnap = 1.0;
+        double boundaryDistance = 0.1;
+        double intersection = 0.01;
+    };
+
+    GeometryTolerance buildTolerance(double connectionTolerance)
+    {
+        const double nodeSnap = std::max(0.001, connectionTolerance);
+        return
+        {
+            nodeSnap,
+            std::max(0.001, nodeSnap * 0.1),
+            std::max(0.0001, nodeSnap * 0.01)
+        };
+    }
+
     QVector<QVector3D> itemPath(CadItem* item)
     {
         QVector<QVector3D> path;
@@ -125,39 +143,50 @@ namespace
         return distance;
     }
 
-    bool pointInsideConvexHull(const QVector2D& point, const QVector<QVector2D>& hull)
+    bool pointInsidePolygon(const QVector2D& point, const QVector<QVector2D>& polygon)
     {
-        if (hull.size() < 3)
-        {
-            return false;
-        }
+        bool inside = false;
 
-        for (int index = 0; index < hull.size(); ++index)
+        for (int current = 0, previous = polygon.size() - 1; current < polygon.size(); previous = current++)
         {
-            if (cross2D(hull[index], hull[(index + 1) % hull.size()], point) < -kEpsilon)
+            const QVector2D& first = polygon[previous];
+            const QVector2D& second = polygon[current];
+            const bool crossesScanLine = (first.y() > point.y()) != (second.y() > point.y());
+
+            if (!crossesScanLine)
             {
-                return false;
+                continue;
+            }
+
+            const double intersectionX = static_cast<double>(second.x() - first.x())
+                * static_cast<double>(point.y() - first.y())
+                / static_cast<double>(second.y() - first.y())
+                + first.x();
+
+            if (static_cast<double>(point.x()) < intersectionX)
+            {
+                inside = !inside;
             }
         }
 
-        return true;
+        return inside;
     }
 
-    bool segmentEntersHullInterior
+    bool segmentEntersPolygonInterior
     (
         const QVector2D& start,
         const QVector2D& end,
-        const QVector<QVector2D>& hull,
+        const QVector<QVector2D>& polygon,
         double interiorTolerance
     )
     {
         QVector<double> parameters{ 0.0, 1.0 };
         const QVector2D segment = end - start;
 
-        for (int index = 0; index < hull.size(); ++index)
+        for (int index = 0; index < polygon.size(); ++index)
         {
-            const QVector2D edgeStart = hull[index];
-            const QVector2D edge = hull[(index + 1) % hull.size()] - edgeStart;
+            const QVector2D edgeStart = polygon[index];
+            const QVector2D edge = polygon[(index + 1) % polygon.size()] - edgeStart;
             const double denominator = cross2D(QVector2D(), segment, edge);
 
             if (std::abs(denominator) <= kEpsilon)
@@ -187,8 +216,8 @@ namespace
             const double parameter = (parameters[index] + parameters[index + 1]) * 0.5;
             const QVector2D sample = start + segment * static_cast<float>(parameter);
 
-            if (pointInsideConvexHull(sample, hull)
-                && distanceToHull(sample, hull) > interiorTolerance)
+            if (pointInsidePolygon(sample, polygon)
+                && distanceToHull(sample, polygon) > interiorTolerance)
             {
                 return true;
             }
@@ -294,8 +323,7 @@ namespace
                             continue;
                         }
 
-                        connected = distance3D(endpoint, paths[component[other]].front()) <= tolerance
-                            || distance3D(endpoint, paths[component[other]].back()) <= tolerance;
+                        connected = distancePointToPath(endpoint, paths[component[other]]) <= tolerance;
                     }
 
                     connectedEnds += connected ? 1 : 0;
@@ -337,18 +365,23 @@ namespace
         return QVector2D(point.y(), point.z());
     }
 
-    double hullArea(const QVector<QVector2D>& hull)
+    double signedPolygonArea(const QVector<QVector2D>& polygon)
     {
         double area = 0.0;
 
-        for (int index = 0; index < hull.size(); ++index)
+        for (int index = 0; index < polygon.size(); ++index)
         {
-            const QVector2D& start = hull[index];
-            const QVector2D& end = hull[(index + 1) % hull.size()];
+            const QVector2D& start = polygon[index];
+            const QVector2D& end = polygon[(index + 1) % polygon.size()];
             area += static_cast<double>(start.x()) * end.y() - static_cast<double>(end.x()) * start.y();
         }
 
-        return std::abs(area) * 0.5;
+        return area * 0.5;
+    }
+
+    double polygonArea(const QVector<QVector2D>& polygon)
+    {
+        return std::abs(signedPolygonArea(polygon));
     }
 
     double distancePointToPath(const QVector3D& point, const QVector<QVector3D>& path)
@@ -383,6 +416,14 @@ namespace
         int firstNode = -1;
         int secondNode = -1;
         int itemIndex = -1;
+    };
+
+    struct TopologyOuterBoundary
+    {
+        QSet<int> itemIndices;
+        QVector<QVector2D> polygon;
+        double area = 0.0;
+        double signedArea = 0.0;
     };
 
     int findOrAddNode
@@ -425,7 +466,34 @@ namespace
         return factor;
     }
 
-    QSet<int> buildLargestOuterBoundary
+    bool segmentIntersectionParameters2D
+    (
+        const QVector2D& firstStart,
+        const QVector2D& firstEnd,
+        const QVector2D& secondStart,
+        const QVector2D& secondEnd,
+        double tolerance,
+        double& firstParameter,
+        double& secondParameter
+    )
+    {
+        const QVector2D firstDirection = firstEnd - firstStart;
+        const QVector2D secondDirection = secondEnd - secondStart;
+        const double denominator = cross2D(QVector2D(), firstDirection, secondDirection);
+
+        if (std::abs(denominator) <= tolerance)
+        {
+            return false;
+        }
+
+        const QVector2D offset = secondStart - firstStart;
+        firstParameter = cross2D(QVector2D(), offset, secondDirection) / denominator;
+        secondParameter = cross2D(QVector2D(), offset, firstDirection) / denominator;
+        return firstParameter >= -tolerance && firstParameter <= 1.0 + tolerance
+            && secondParameter >= -tolerance && secondParameter <= 1.0 + tolerance;
+    }
+
+    TopologyOuterBoundary buildLargestOuterBoundary
     (
         const QVector<int>& component,
         const QVector<QVector<QVector3D>>& paths,
@@ -455,15 +523,53 @@ namespace
                         continue;
                     }
 
-                    for (const QVector3D& endpoint : { otherPath.front(), otherPath.back() })
+                    for (const QVector3D& vertex : otherPath)
                     {
-                        double endpointDistance = 0.0;
-                        const double factor = pointSegmentParameter3D(endpoint, start, end, endpointDistance);
+                        double vertexDistance = 0.0;
+                        const double factor = pointSegmentParameter3D(vertex, start, end, vertexDistance);
 
-                        if (endpointDistance <= tolerance
+                        if (vertexDistance <= tolerance
                             && factor > kEpsilon && factor < 1.0 - kEpsilon)
                         {
                             splitParameters.push_back(factor);
+                        }
+                    }
+
+                    for (int otherSegmentIndex = 0; otherSegmentIndex + 1 < otherPath.size(); ++otherSegmentIndex)
+                    {
+                        if (otherItemIndex == itemIndex && otherSegmentIndex == segmentIndex)
+                        {
+                            continue;
+                        }
+
+                        const QVector3D otherStart = otherPath[otherSegmentIndex];
+                        const QVector3D otherEnd = otherPath[otherSegmentIndex + 1];
+                        double firstParameter = 0.0;
+                        double secondParameter = 0.0;
+
+                        if (!segmentIntersectionParameters2D
+                        (
+                            projectPoint(start, projection),
+                            projectPoint(end, projection),
+                            projectPoint(otherStart, projection),
+                            projectPoint(otherEnd, projection),
+                            kEpsilon,
+                            firstParameter,
+                            secondParameter
+                        ))
+                        {
+                            continue;
+                        }
+
+                        const QVector3D firstIntersection = start
+                            + (end - start) * static_cast<float>(firstParameter);
+                        const QVector3D secondIntersection = otherStart
+                            + (otherEnd - otherStart) * static_cast<float>(secondParameter);
+
+                        if (distance3D(firstIntersection, secondIntersection) <= tolerance
+                            && firstParameter > kEpsilon && firstParameter < 1.0 - kEpsilon)
+                        {
+                            splitParameters.push_back(firstParameter);
                         }
                     }
                 }
@@ -499,7 +605,16 @@ namespace
 
                     if (firstNode != secondNode)
                     {
-                        edges.push_back({ firstNode, secondNode, itemIndex });
+                        const bool duplicateEdge = std::any_of(edges.begin(), edges.end(), [&](const TopologyEdge& edge)
+                        {
+                            return (edge.firstNode == firstNode && edge.secondNode == secondNode)
+                                || (edge.firstNode == secondNode && edge.secondNode == firstNode);
+                        });
+
+                        if (!duplicateEdge)
+                        {
+                            edges.push_back({ firstNode, secondNode, itemIndex });
+                        }
                     }
                 }
             }
@@ -539,8 +654,16 @@ namespace
         }
 
         QVector<bool> visited(edges.size() * 2, false);
-        QSet<int> largestBoundaryItems;
-        double largestArea = 0.0;
+        QVector<int> halfEdgeFace(edges.size() * 2, -1);
+
+        struct FaceRecord
+        {
+            QVector<QVector2D> polygon;
+            QVector<int> halfEdges;
+            double signedArea = 0.0;
+        };
+
+        QVector<FaceRecord> faces;
 
         for (int initialHalfEdge = 0; initialHalfEdge < visited.size(); ++initialHalfEdge)
         {
@@ -550,7 +673,7 @@ namespace
             }
 
             QVector<QVector2D> face;
-            QSet<int> faceItems;
+            QVector<int> faceHalfEdges;
             int currentHalfEdge = initialHalfEdge;
             bool closed = false;
 
@@ -564,7 +687,7 @@ namespace
 
                 visited[currentHalfEdge] = true;
                 face.push_back(nodes[halfEdgeStart(currentHalfEdge)].projectedPoint);
-                faceItems.insert(edges[currentHalfEdge / 2].itemIndex);
+                faceHalfEdges.push_back(currentHalfEdge);
                 const int endNode = halfEdgeEnd(currentHalfEdge);
                 const QVector<int>& outgoing = nodes[endNode].outgoingHalfEdges;
                 const int reverseIndex = outgoing.indexOf(currentHalfEdge ^ 1);
@@ -582,16 +705,155 @@ namespace
                 continue;
             }
 
-            const double area = hullArea(face);
+            const int faceIndex = faces.size();
+            const double faceSignedArea = signedPolygonArea(face);
 
-            if (area > largestArea)
+            for (int halfEdge : faceHalfEdges)
             {
-                largestArea = area;
-                largestBoundaryItems = std::move(faceItems);
+                halfEdgeFace[halfEdge] = faceIndex;
+            }
+
+            faces.push_back({ std::move(face), std::move(faceHalfEdges), faceSignedArea });
+        }
+
+        int outerFaceIndex = -1;
+
+        for (int faceIndex = 0; faceIndex < faces.size(); ++faceIndex)
+        {
+            const bool candidateIsUnbounded = faces[faceIndex].signedArea < 0.0;
+            const bool currentIsUnbounded = outerFaceIndex >= 0 && faces[outerFaceIndex].signedArea < 0.0;
+
+            if (outerFaceIndex < 0
+                || (candidateIsUnbounded && !currentIsUnbounded)
+                || (candidateIsUnbounded && currentIsUnbounded
+                    && faces[faceIndex].signedArea < faces[outerFaceIndex].signedArea)
+                || (!candidateIsUnbounded && !currentIsUnbounded
+                    && std::abs(faces[faceIndex].signedArea) > std::abs(faces[outerFaceIndex].signedArea)))
+            {
+                outerFaceIndex = faceIndex;
             }
         }
 
-        return largestArea > tolerance * tolerance ? largestBoundaryItems : QSet<int>();
+        if (outerFaceIndex < 0)
+        {
+            return {};
+        }
+
+        TopologyOuterBoundary result;
+        result.polygon = faces[outerFaceIndex].polygon;
+        result.signedArea = faces[outerFaceIndex].signedArea;
+        result.area = std::abs(result.signedArea);
+
+        for (int halfEdge : faces[outerFaceIndex].halfEdges)
+        {
+            const int oppositeFace = halfEdgeFace[halfEdge ^ 1];
+
+            if (oppositeFace >= 0 && oppositeFace != outerFaceIndex)
+            {
+                result.itemIndices.insert(edges[halfEdge / 2].itemIndex);
+            }
+        }
+
+        return result.area > tolerance * tolerance ? result : TopologyOuterBoundary();
+    }
+
+    bool itemFollowsOuterBoundary
+    (
+        const QVector<QVector3D>& path,
+        int projection,
+        const QVector<QVector2D>& boundary,
+        double tolerance
+    )
+    {
+        if (path.size() < 2 || boundary.size() < 3)
+        {
+            return false;
+        }
+
+        for (int index = 0; index + 1 < path.size(); ++index)
+        {
+            const QVector2D start = projectPoint(path[index], projection);
+            const QVector2D end = projectPoint(path[index + 1], projection);
+            const QVector2D midpoint = (start + end) * 0.5f;
+
+            if (distanceToHull(midpoint, boundary) > tolerance)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    enum class ItemBoundaryRelation
+    {
+        OuterBoundary,
+        Interior,
+        Exterior,
+        Mixed
+    };
+
+    ItemBoundaryRelation classifyItemAgainstBoundary
+    (
+        const QVector<QVector3D>& path,
+        int projection,
+        const QVector<QVector2D>& boundary,
+        double tolerance
+    )
+    {
+        bool hasBoundarySegment = false;
+        bool hasInteriorSegment = false;
+        bool hasExteriorSegment = false;
+        bool crossesBoundary = false;
+
+        for (int index = 0; index + 1 < path.size(); ++index)
+        {
+            const QVector2D start = projectPoint(path[index], projection);
+            const QVector2D end = projectPoint(path[index + 1], projection);
+            const QVector2D midpoint = (start + end) * 0.5f;
+            const double midpointDistance = distanceToHull(midpoint, boundary);
+
+            if (midpointDistance <= tolerance)
+            {
+                hasBoundarySegment = true;
+                continue;
+            }
+
+            const bool midpointInside = pointInsidePolygon(midpoint, boundary);
+            const bool startOutside = distanceToHull(start, boundary) > tolerance
+                && !pointInsidePolygon(start, boundary);
+            const bool endOutside = distanceToHull(end, boundary) > tolerance
+                && !pointInsidePolygon(end, boundary);
+
+            if (midpointInside)
+            {
+                hasInteriorSegment = true;
+                crossesBoundary = crossesBoundary || startOutside || endOutside;
+            }
+            else
+            {
+                hasExteriorSegment = true;
+                crossesBoundary = crossesBoundary || segmentEntersPolygonInterior
+                (
+                    start,
+                    end,
+                    boundary,
+                    tolerance
+                );
+            }
+        }
+
+        if (crossesBoundary
+            || (hasInteriorSegment && hasExteriorSegment)
+            || (hasBoundarySegment && (hasInteriorSegment || hasExteriorSegment)))
+        {
+            return ItemBoundaryRelation::Mixed;
+        }
+
+        if (hasBoundarySegment) return ItemBoundaryRelation::OuterBoundary;
+        if (hasInteriorSegment) return ItemBoundaryRelation::Interior;
+        if (hasExteriorSegment) return ItemBoundaryRelation::Exterior;
+        return ItemBoundaryRelation::Mixed;
     }
 
     double estimateRoundedCornerRadius(const QVector<QVector2D>& hull, double tolerance)
@@ -876,6 +1138,7 @@ RotaryTubeSectionModel RotaryTubeGeometryAnalyzer::buildSectionModel
 )
 {
     RotaryTubeSectionModel model;
+    const GeometryTolerance tolerance = buildTolerance(connectionTolerance);
 
     if (selectedItems.isEmpty())
     {
@@ -891,7 +1154,7 @@ RotaryTubeSectionModel RotaryTubeGeometryAnalyzer::buildSectionModel
         paths.push_back(itemPath(item));
     }
 
-    const QVector<int> component = selectedConnectedItems(selectedItems, sceneItems, paths, connectionTolerance);
+    const QVector<int> component = selectedConnectedItems(selectedItems, sceneItems, paths, tolerance.nodeSnap);
 
     for (CadItem* selectedItem : selectedItems)
     {
@@ -904,7 +1167,7 @@ RotaryTubeSectionModel RotaryTubeGeometryAnalyzer::buildSectionModel
         }
     }
 
-    const QVector<int> core = peelDanglingItems(component, paths, connectionTolerance);
+    const QVector<int> core = peelDanglingItems(component, paths, tolerance.nodeSnap);
 
     if (core.isEmpty())
     {
@@ -912,7 +1175,22 @@ RotaryTubeSectionModel RotaryTubeGeometryAnalyzer::buildSectionModel
         return model;
     }
 
-    const QSet<int> outerBoundaryItems = buildLargestOuterBoundary(core, paths, 2, connectionTolerance);
+    const TopologyOuterBoundary outerBoundary = buildLargestOuterBoundary(core, paths, 2, tolerance.nodeSnap);
+    QSet<int> outerBoundaryItems;
+
+    for (int itemIndex : outerBoundary.itemIndices)
+    {
+        if (itemFollowsOuterBoundary
+        (
+            paths[itemIndex],
+            2,
+            outerBoundary.polygon,
+            tolerance.boundaryDistance
+        ))
+        {
+            outerBoundaryItems.insert(itemIndex);
+        }
+    }
 
     if (outerBoundaryItems.isEmpty())
     {
@@ -921,6 +1199,7 @@ RotaryTubeSectionModel RotaryTubeGeometryAnalyzer::buildSectionModel
     }
 
     QVector<QVector2D> sectionPoints;
+    model.sectionBoundary = outerBoundary.polygon;
 
     for (int itemIndex : outerBoundaryItems)
     {
@@ -934,7 +1213,7 @@ RotaryTubeSectionModel RotaryTubeGeometryAnalyzer::buildSectionModel
 
     model.sectionHull = convexHull(std::move(sectionPoints));
 
-    if (model.sectionHull.size() < 3 || hullArea(model.sectionHull) <= kEpsilon)
+    if (model.sectionHull.size() < 3 || polygonArea(model.sectionHull) <= kEpsilon)
     {
         model.sectionHull.clear();
         model.errorMessage = QStringLiteral("最大外轮廓在 YZ 平面上的投影无效，无法识别方管垂直截面。");
@@ -956,7 +1235,7 @@ RotaryTubeSectionModel RotaryTubeGeometryAnalyzer::buildSectionModel
 
     model.yLength = maxY - minY;
     model.zWidth = maxZ - minZ;
-    const double fallbackRadius = estimateRoundedCornerRadius(model.sectionHull, 0.05);
+    const double fallbackRadius = estimateRoundedCornerRadius(model.sectionHull, tolerance.boundaryDistance);
     model.cornerRadius = estimateCornerRadiusFromEntities
     (
         model.outerBoundaryItems,
@@ -977,8 +1256,8 @@ RotaryInternalPathResult RotaryTubeGeometryAnalyzer::findInternalPaths
 )
 {
     RotaryInternalPathResult result;
-
-    const bool hasSectionModel = model.valid && model.sectionHull.size() >= 3;
+    const GeometryTolerance tolerance = buildTolerance(connectionTolerance);
+    const bool hasSectionModel = model.valid && model.sectionBoundary.size() >= 3;
 
     QVector<QVector<QVector3D>> paths;
     paths.reserve(sceneItems.size());
@@ -990,7 +1269,7 @@ RotaryInternalPathResult RotaryTubeGeometryAnalyzer::findInternalPaths
 
     // A shallow entry is still unsafe for the laser head. Keep only a small
     // numerical margin so boundary noise is not treated as an interior cut.
-    const double interiorTolerance = std::max(0.01, connectionTolerance * 0.02);
+    const double interiorTolerance = tolerance.intersection;
     QVector<bool> physicalInterior(sceneItems.size(), false);
 
     for (int itemIndex = 0; itemIndex < sceneItems.size(); ++itemIndex)
@@ -1012,8 +1291,8 @@ RotaryInternalPathResult RotaryTubeGeometryAnalyzer::findInternalPaths
         {
             const QVector2D sectionPoint(point.y(), point.z());
 
-            if (pointInsideConvexHull(sectionPoint, model.sectionHull)
-                && distanceToHull(sectionPoint, model.sectionHull) > interiorTolerance)
+            if (pointInsidePolygon(sectionPoint, model.sectionBoundary)
+                && distanceToHull(sectionPoint, model.sectionBoundary) > interiorTolerance)
             {
                 entersPhysicalInterior = true;
                 break;
@@ -1022,11 +1301,11 @@ RotaryInternalPathResult RotaryTubeGeometryAnalyzer::findInternalPaths
 
         for (int pointIndex = 0; !entersPhysicalInterior && pointIndex + 1 < path.size(); ++pointIndex)
         {
-            entersPhysicalInterior = segmentEntersHullInterior
+            entersPhysicalInterior = segmentEntersPolygonInterior
             (
                 QVector2D(path[pointIndex].y(), path[pointIndex].z()),
                 QVector2D(path[pointIndex + 1].y(), path[pointIndex + 1].z()),
-                model.sectionHull,
+                model.sectionBoundary,
                 interiorTolerance
             );
         }
@@ -1056,7 +1335,7 @@ RotaryInternalPathResult RotaryTubeGeometryAnalyzer::findInternalPaths
             {
                 if (!visited[candidate]
                     && !physicalInterior[candidate]
-                    && pathsTouch(paths[component[cursor]], paths[candidate], connectionTolerance))
+                    && pathsTouch(paths[component[cursor]], paths[candidate], tolerance.nodeSnap))
                 {
                     visited[candidate] = true;
                     component.push_back(candidate);
@@ -1064,7 +1343,7 @@ RotaryInternalPathResult RotaryTubeGeometryAnalyzer::findInternalPaths
             }
         }
 
-        const QVector<int> closedCore = peelDanglingItems(component, paths, connectionTolerance);
+        const QVector<int> closedCore = peelDanglingItems(component, paths, tolerance.nodeSnap);
 
         if (closedCore.isEmpty())
         {
@@ -1087,7 +1366,7 @@ RotaryInternalPathResult RotaryTubeGeometryAnalyzer::findInternalPaths
             }
 
             QVector<QVector2D> hull = convexHull(std::move(projectedPoints));
-            const double area = hullArea(hull);
+            const double area = polygonArea(hull);
 
             if (area > bestArea)
             {
@@ -1096,15 +1375,15 @@ RotaryInternalPathResult RotaryTubeGeometryAnalyzer::findInternalPaths
             }
         }
 
-        const QSet<int> outerBoundaryItems = buildLargestOuterBoundary
+        const TopologyOuterBoundary outerBoundary = buildLargestOuterBoundary
         (
             closedCore,
             paths,
             bestProjection,
-            connectionTolerance
+            tolerance.nodeSnap
         );
 
-        if (outerBoundaryItems.isEmpty())
+        if (outerBoundary.itemIndices.isEmpty())
         {
             continue;
         }
@@ -1114,13 +1393,23 @@ RotaryInternalPathResult RotaryTubeGeometryAnalyzer::findInternalPaths
             CadItem* item = sceneItems[itemIndex];
 
             if (item == nullptr
-                || item->m_rotaryEndCutRole != RotaryEndCutRole::None
-                || outerBoundaryItems.contains(itemIndex))
+                || item->m_rotaryEndCutRole != RotaryEndCutRole::None)
             {
                 continue;
             }
 
-            result.topologicalInteriorItems.push_back(item);
+            const ItemBoundaryRelation relation = classifyItemAgainstBoundary
+            (
+                paths[itemIndex],
+                bestProjection,
+                outerBoundary.polygon,
+                tolerance.boundaryDistance
+            );
+
+            if (relation == ItemBoundaryRelation::Interior)
+            {
+                result.topologicalInteriorItems.push_back(item);
+            }
         }
     }
 
