@@ -142,6 +142,7 @@ if exist "$(VCRuntimeRedistDir)\*.dll" copy /Y "$(VCRuntimeRedistDir)\*.dll" "$(
   <ItemGroup>
     <QtMoc Include="include\Gcode_postprocessing_system.h" />
     <QtMoc Include="include\CadToolPanelWidget.h" />
+    <QtMoc Include="include\MachiningSettingsWidget.h" />
     <QtMoc Include="include\CadStatusPaneWidget.h" />
   </ItemGroup>
   <ItemGroup>
@@ -312,6 +313,10 @@ if exist "$(VCRuntimeRedistDir)\*.dll" copy /Y "$(VCRuntimeRedistDir)\*.dll" "$(
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
     </ClCompile>
     <ClCompile Include="src\CadViewer_ViewNavigation.cpp">
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+    </ClCompile>
+    <ClCompile Include="src\MachiningSettingsWidget.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
     </ClCompile>

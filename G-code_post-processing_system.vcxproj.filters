@@ -149,6 +149,9 @@
     <QtMoc Include="include\CadToolPanelWidget.h">
       <Filter>Header Files\Application</Filter>
     </QtMoc>
+    <QtMoc Include="include\MachiningSettingsWidget.h">
+      <Filter>Header Files\Application</Filter>
+    </QtMoc>
     <QtMoc Include="include\CadStatusPaneWidget.h">
       <Filter>Header Files\View</Filter>
     </QtMoc>
@@ -236,6 +239,9 @@
       <Filter>Source Files\View</Filter>
     </ClCompile>
     <ClCompile Include="src\CadToolPanelWidget.cpp">
+      <Filter>Source Files\Application</Filter>
+    </ClCompile>
+    <ClCompile Include="src\MachiningSettingsWidget.cpp">
       <Filter>Source Files\Application</Filter>
     </ClCompile>
     <ClCompile Include="src\CadController.cpp">

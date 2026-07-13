@@ -7,11 +7,13 @@
 #include "GProfileDialog.h"
 #include "GProfileManagerDialog.h"
 #include "GProfilePathStore.h"
+#include "MachiningSettingsWidget.h"
 
 #include <QActionGroup>
 #include <QApplication>
 #include <QCoreApplication>
 #include <QDir>
+#include <QDockWidget>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QInputDialog>
@@ -519,7 +521,19 @@ Gcode_postprocessing_system::Gcode_postprocessing_system(QWidget* parent)
 
     initializeThemeMenu();
     initializeHelpMenu();
+    initializeMachiningSettingsDock();
     initializeToolPanel();
+
+    QSettings windowSettings(QStringLiteral("GCodePostProcessingSystem"), QStringLiteral("GCodePostProcessingSystem"));
+    restoreGeometry(windowSettings.value(QStringLiteral("ui/mainWindowGeometry")).toByteArray());
+    const QByteArray savedWindowState = windowSettings.value(QStringLiteral("ui/mainWindowState")).toByteArray();
+
+    if (savedWindowState.isEmpty() || !restoreState(savedWindowState))
+    {
+        addDockWidget(Qt::RightDockWidgetArea, m_machiningSettingsDock);
+        m_machiningSettingsDock->show();
+    }
+
     applyDefaultDrawingProperties();
     applyTheme(loadThemeMode());
     syncToolPanelState();
@@ -527,6 +541,9 @@ Gcode_postprocessing_system::Gcode_postprocessing_system(QWidget* parent)
 
 Gcode_postprocessing_system::~Gcode_postprocessing_system()
 {
+    QSettings settings(QStringLiteral("GCodePostProcessingSystem"), QStringLiteral("GCodePostProcessingSystem"));
+    settings.setValue(QStringLiteral("ui/mainWindowGeometry"), saveGeometry());
+    settings.setValue(QStringLiteral("ui/mainWindowState"), saveState());
     delete ui;
 }
 
@@ -1304,6 +1321,18 @@ void Gcode_postprocessing_system::saveAutoRecognizeRotaryTubeSectionOnImport(boo
     settings.setValue(QStringLiteral("dxf/autoRecognizeRotaryTubeSectionOnImport"), enabled);
 }
 
+bool Gcode_postprocessing_system::loadAutoRecognizeRotaryEndCutsOnImport() const
+{
+    QSettings settings(QStringLiteral("GCodePostProcessingSystem"), QStringLiteral("GCodePostProcessingSystem"));
+    return settings.value(QStringLiteral("dxf/autoRecognizeRotaryEndCutsOnImport"), false).toBool();
+}
+
+void Gcode_postprocessing_system::saveAutoRecognizeRotaryEndCutsOnImport(bool enabled) const
+{
+    QSettings settings(QStringLiteral("GCodePostProcessingSystem"), QStringLiteral("GCodePostProcessingSystem"));
+    settings.setValue(QStringLiteral("dxf/autoRecognizeRotaryEndCutsOnImport"), enabled);
+}
+
 bool Gcode_postprocessing_system::loadAutoRemoveInternalPathsOnImport() const
 {
     QSettings settings(QStringLiteral("GCodePostProcessingSystem"), QStringLiteral("GCodePostProcessingSystem"));
@@ -1423,15 +1452,66 @@ void Gcode_postprocessing_system::applyGenerationPreference(GCodeGenerationPrefe
 }
 
 
+void Gcode_postprocessing_system::initializeMachiningSettingsDock()
+{
+    m_machiningSettingsDock = new QDockWidget(QStringLiteral("加工设置"), this);
+    m_machiningSettingsDock->setObjectName(QStringLiteral("machiningSettingsDock"));
+    m_machiningSettingsDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
+    m_machiningSettingsDock->setFeatures
+    (
+        QDockWidget::DockWidgetClosable
+        | QDockWidget::DockWidgetMovable
+        | QDockWidget::DockWidgetFloatable
+    );
+    m_machiningSettingsDock->setMinimumWidth(260);
+    m_machiningSettingsDock->resize(310, height());
+
+    m_machiningSettingsWidget = new MachiningSettingsWidget(m_machiningSettingsDock);
+    m_machiningSettingsDock->setWidget(m_machiningSettingsWidget);
+    addDockWidget(Qt::RightDockWidgetArea, m_machiningSettingsDock);
+
+    QMenu* viewMenu = menuBar()->addMenu(QStringLiteral("视图"));
+    QAction* settingsAction = m_machiningSettingsDock->toggleViewAction();
+    settingsAction->setText(QStringLiteral("加工设置"));
+    viewMenu->addAction(settingsAction);
+
+    connect(m_machiningSettingsWidget, &MachiningSettingsWidget::autoDeduplicateOnImportChanged, this, [this](bool enabled)
+    {
+        saveAutoDeduplicateOnImport(enabled);
+        QMetaObject::invokeMethod(this, [this]() { syncMachiningSettingsState(); }, Qt::QueuedConnection);
+    });
+    connect(m_machiningSettingsWidget, &MachiningSettingsWidget::autoRecognizeRotaryTubeSectionOnImportChanged, this, [this](bool enabled)
+    {
+        saveAutoRecognizeRotaryTubeSectionOnImport(enabled);
+        QMetaObject::invokeMethod(this, [this]() { syncMachiningSettingsState(); }, Qt::QueuedConnection);
+    });
+    connect(m_machiningSettingsWidget, &MachiningSettingsWidget::autoRecognizeRotaryEndCutsOnImportChanged, this, [this](bool enabled)
+    {
+        saveAutoRecognizeRotaryEndCutsOnImport(enabled);
+        QMetaObject::invokeMethod(this, [this]() { syncMachiningSettingsState(); }, Qt::QueuedConnection);
+    });
+    connect(m_machiningSettingsWidget, &MachiningSettingsWidget::autoRemoveInternalPathsOnImportChanged, this, [this](bool enabled)
+    {
+        saveAutoRemoveInternalPathsOnImport(enabled);
+        QMetaObject::invokeMethod(this, [this]() { syncMachiningSettingsState(); }, Qt::QueuedConnection);
+    });
+    connect(m_machiningSettingsWidget, &MachiningSettingsWidget::useDefaultExportDirectoryChanged, this, [this](bool enabled)
+    {
+        saveUseDefaultExportPath(enabled);
+        QMetaObject::invokeMethod(this, [this]() { syncMachiningSettingsState(); }, Qt::QueuedConnection);
+    });
+    connect(m_machiningSettingsWidget, &MachiningSettingsWidget::useDxfFileNameChanged, this, [this](bool enabled)
+    {
+        saveUseDxfFileNameOnExport(enabled);
+        QMetaObject::invokeMethod(this, [this]() { syncMachiningSettingsState(); }, Qt::QueuedConnection);
+    });
+
+    syncMachiningSettingsState();
+}
+
 void Gcode_postprocessing_system::initializeToolPanel()
 {
     m_toolPanelWidget = new CadToolPanelWidget(this);
-    m_toolPanelWidget->setAutoDeduplicateOnImportEnabled(loadAutoDeduplicateOnImport());
-    m_toolPanelWidget->setAutoRecognizeRotaryTubeSectionOnImportEnabled(loadAutoRecognizeRotaryTubeSectionOnImport());
-    m_toolPanelWidget->setAutoRemoveInternalPathsOnImportEnabled(loadAutoRemoveInternalPathsOnImport());
-    m_toolPanelWidget->setUseDxfFileNameEnabled(loadUseDxfFileNameOnExport());
-    m_toolPanelWidget->setUseDefaultImportPathEnabled(loadUseDefaultImportPath());
-    m_toolPanelWidget->setUseDefaultExportPathEnabled(loadUseDefaultExportPath());
     const bool processVisualsVisible = loadProcessVisualsVisible();
     m_toolPanelWidget->setProcessVisualsVisible(processVisualsVisible);
     ui->openGLWidget->setProcessVisualsVisible(processVisualsVisible);
@@ -1499,18 +1579,17 @@ void Gcode_postprocessing_system::initializeToolPanel()
     connect(m_toolPanelWidget, &CadToolPanelWidget::importFileRequested, this, [this]() { ui->action_File_Import_Dxf->trigger(); });
     connect(m_toolPanelWidget, &CadToolPanelWidget::exportGCodeRequested, this, [this]() { ui->action_File_Export_G->trigger(); });
     connect(m_toolPanelWidget, &CadToolPanelWidget::deduplicateRequested, this, [this]() { removeDuplicateEntities(); });
-    connect(m_toolPanelWidget, &CadToolPanelWidget::autoDeduplicateOnImportOptionChanged, this, [this](bool enabled) { saveAutoDeduplicateOnImport(enabled); });
-    connect(m_toolPanelWidget, &CadToolPanelWidget::autoRecognizeRotaryTubeSectionOnImportOptionChanged, this, [this](bool enabled)
+    connect(m_toolPanelWidget, &CadToolPanelWidget::recognizeRotaryTubeSectionRequested, this, [this]() { recognizeRotaryTubeSection(true); });
+    connect(m_toolPanelWidget, &CadToolPanelWidget::recognizeRotaryEndCutsRequested, this, [this]() { recognizeAllRotaryEndCuts(true); });
+    connect(m_toolPanelWidget, &CadToolPanelWidget::removeInternalPathsRequested, this, [this]() { removeInternalMachiningPaths(true); });
+    connect(m_toolPanelWidget, &CadToolPanelWidget::machiningSettingsRequested, this, [this]()
     {
-        saveAutoRecognizeRotaryTubeSectionOnImport(enabled);
+        if (m_machiningSettingsDock != nullptr)
+        {
+            m_machiningSettingsDock->show();
+            m_machiningSettingsDock->raise();
+        }
     });
-    connect(m_toolPanelWidget, &CadToolPanelWidget::autoRemoveInternalPathsOnImportOptionChanged, this, [this](bool enabled)
-    {
-        saveAutoRemoveInternalPathsOnImport(enabled);
-    });
-    connect(m_toolPanelWidget, &CadToolPanelWidget::useDxfFileNameOptionChanged, this, [this](bool enabled) { saveUseDxfFileNameOnExport(enabled); });
-    connect(m_toolPanelWidget, &CadToolPanelWidget::useDefaultImportPathOptionChanged, this, [this](bool enabled) { saveUseDefaultImportPath(enabled); });
-    connect(m_toolPanelWidget, &CadToolPanelWidget::useDefaultExportPathOptionChanged, this, [this](bool enabled) { saveUseDefaultExportPath(enabled); });
     connect
     (
         m_toolPanelWidget,
@@ -1710,13 +1789,7 @@ void Gcode_postprocessing_system::syncToolPanelState()
         return;
     }
 
-    m_toolPanelWidget->setRotaryTubeSectionProperties
-    (
-        m_rotaryTubeSectionModel.valid,
-        m_rotaryTubeSectionModel.yLength,
-        m_rotaryTubeSectionModel.zWidth,
-        m_rotaryTubeSectionModel.cornerRadius
-    );
+    syncMachiningSettingsState();
 
     const QStringList layerNames = m_document.layerNames();
     QMap<QString, QColor> layerColors;
@@ -1769,6 +1842,70 @@ void Gcode_postprocessing_system::syncToolPanelState()
         m_currentColorIndex,
         m_document.layerColor(m_currentLayerName, QColor(Qt::white))
     );
+}
+
+void Gcode_postprocessing_system::syncMachiningSettingsState()
+{
+    if (m_machiningSettingsWidget == nullptr)
+    {
+        return;
+    }
+
+    const bool recognizeEndCuts = loadAutoRecognizeRotaryEndCutsOnImport();
+    const bool removeInternalPaths = loadAutoRemoveInternalPathsOnImport();
+    bool recognizeSection = loadAutoRecognizeRotaryTubeSectionOnImport();
+
+    if (!recognizeSection && (recognizeEndCuts || removeInternalPaths))
+    {
+        recognizeSection = true;
+        saveAutoRecognizeRotaryTubeSectionOnImport(true);
+    }
+
+    m_machiningSettingsWidget->setAutomaticOptions
+    (
+        loadAutoDeduplicateOnImport(),
+        recognizeSection,
+        recognizeEndCuts,
+        removeInternalPaths
+    );
+    m_machiningSettingsWidget->setExportOptions
+    (
+        loadUseDefaultExportPath(),
+        loadUseDxfFileNameOnExport()
+    );
+    m_machiningSettingsWidget->setRotaryTubeSectionProperties
+    (
+        m_rotaryTubeSectionModel.valid,
+        m_rotaryTubeSectionModel.yLength,
+        m_rotaryTubeSectionModel.zWidth,
+        m_rotaryTubeSectionModel.cornerRadius,
+        m_rotaryTubeSectionModel.roundedCornerCount
+    );
+
+    QSet<int> rotaryEndCutIds;
+    int internalPathCount = 0;
+
+    for (const std::unique_ptr<CadItem>& entity : m_document.m_entities)
+    {
+        if (entity == nullptr)
+        {
+            continue;
+        }
+
+        if (entity->m_rotaryEndCutRole == RotaryEndCutRole::Break
+            && entity->m_rotaryEndCutPairId >= 0)
+        {
+            rotaryEndCutIds.insert(entity->m_rotaryEndCutPairId);
+        }
+
+        if (entity->m_excludedAsInternalGeometry)
+        {
+            ++internalPathCount;
+        }
+    }
+
+    m_machiningSettingsWidget->setRotaryEndCutCount(rotaryEndCutIds.size());
+    m_machiningSettingsWidget->setInternalPathCount(internalPathCount);
 }
 
 void Gcode_postprocessing_system::applyDefaultDrawingProperties()

@@ -420,7 +420,7 @@ bool Gcode_postprocessing_system::exportGCode
     QString resolvedExportPath;
     const QString exportFilters = QStringLiteral("NC 文件 (*.nc);;GCode 文件 (*.gcode);;文本文件 (*.txt)");
 
-    if (m_toolPanelWidget != nullptr && m_toolPanelWidget->useDxfFileNameEnabled())
+    if (loadUseDxfFileNameOnExport())
     {
         if (m_currentDocumentPath.trimmed().isEmpty())
         {

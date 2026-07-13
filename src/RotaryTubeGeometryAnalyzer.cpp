@@ -1400,6 +1400,10 @@ namespace
             std::min(model.yLength, model.zWidth) * 0.5,
             fallbackRadius
         );
+        const CornerAnalysis corners = analyzeRoundedCorners(model.sectionBoundary, tolerance.nodeSnap);
+        model.roundedCornerCount = corners.roundedCornerCount;
+        model.cornerRadii = corners.cornerRadii;
+        model.cornerConfidence = corners.confidence;
         model.valid = true;
         return model;
     }

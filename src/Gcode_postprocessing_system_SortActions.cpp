@@ -4285,11 +4285,19 @@ bool Gcode_postprocessing_system::removeInternalMachiningPaths(bool interactive)
         internalItems.insert(item);
     }
 
+    int excludedInternalCount = 0;
+
     for (CadItem* item : internalItems)
     {
+        if (item == nullptr || item->m_rotaryEndCutRole != RotaryEndCutRole::None)
+        {
+            continue;
+        }
+
         item->m_excludedAsInternalGeometry = true;
         item->m_excludedFromProcessing = true;
         item->m_processOrder = -1;
+        ++excludedInternalCount;
     }
 
     invalidateProcessOrdersAfterEndCutChange();
@@ -4298,10 +4306,10 @@ bool Gcode_postprocessing_system::removeInternalMachiningPaths(bool interactive)
         ? QStringLiteral("内部线条识别完成：进入方管内部 %1 个，最大外轮廓之外 %2 个，共排除 %3 个图元。")
             .arg(result.physicalInteriorItems.size())
             .arg(result.topologicalInteriorItems.size())
-            .arg(internalItems.size())
+            .arg(excludedInternalCount)
         : QStringLiteral("方管垂直截面尚未识别，本次仅执行拓扑过滤：最大外轮廓之外 %1 个，共排除 %2 个图元。")
             .arg(result.topologicalInteriorItems.size())
-            .arg(internalItems.size());
+            .arg(excludedInternalCount);
     ui->openGLWidget->appendCommandMessage(message);
     ui->openGLWidget->update();
     statusBar()->showMessage(message, 6000);
@@ -4388,7 +4396,7 @@ bool Gcode_postprocessing_system::toggleSelectedRotaryEndCutAssignment()
     return true;
 }
 
-bool Gcode_postprocessing_system::recognizeAllRotaryEndCuts()
+bool Gcode_postprocessing_system::recognizeAllRotaryEndCuts(bool interactive)
 {
     std::vector<CadItem*> documentItems;
     QVector<CadItem*> sceneItems;
@@ -4404,6 +4412,15 @@ bool Gcode_postprocessing_system::recognizeAllRotaryEndCuts()
 
     if (documentItems.empty())
     {
+        const QString message = QStringLiteral("当前文档为空，未识别到加工断面。");
+        ui->openGLWidget->appendCommandMessage(message);
+        statusBar()->showMessage(message, 4000);
+
+        if (interactive)
+        {
+            QMessageBox::information(this, QStringLiteral("识别加工断面"), message);
+        }
+
         return false;
     }
 
@@ -4486,14 +4503,26 @@ bool Gcode_postprocessing_system::recognizeAllRotaryEndCuts()
         ++recognizedCount;
     }
 
-    invalidateProcessOrdersAfterEndCutChange();
-    refreshWasteProcessingExclusions();
     const QString message = QStringLiteral("所有加工断面识别完成，共识别 %1 个有效加工断面。")
         .arg(recognizedCount);
+
+    if (recognizedCount > 0)
+    {
+        invalidateProcessOrdersAfterEndCutChange();
+        refreshWasteProcessingExclusions();
+    }
+
     ui->openGLWidget->appendCommandMessage(message);
     ui->openGLWidget->update();
     statusBar()->showMessage(message, 5000);
-    return true;
+
+    if (interactive && recognizedCount == 0)
+    {
+        QMessageBox::information(this, QStringLiteral("识别加工断面"), QStringLiteral("未识别到有效加工断面。"));
+    }
+
+    syncMachiningSettingsState();
+    return recognizedCount > 0;
 }
 
 bool Gcode_postprocessing_system::toggleSelectedInternalPathAssignment()
@@ -4826,6 +4855,7 @@ int Gcode_postprocessing_system::refreshWasteProcessingExclusions()
         }
     }
 
+    syncMachiningSettingsState();
     return excludedCount;
 }
 

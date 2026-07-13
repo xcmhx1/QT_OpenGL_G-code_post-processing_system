@@ -18,7 +18,6 @@ class QMenu;
 class QTabBar;
 class QTabWidget;
 class QToolButton;
-class QTimer;
 
 class CadToolPanelWidget : public QWidget
 {
@@ -45,18 +44,6 @@ public:
     void setGCodeModeSelection(GCodeModeSelection selection);
     void setAvailableProfiles(const QList<QPair<QString, QString>>& profiles);
     void setCurrentProfileSelection(const QString& profileId);
-    void setAutoDeduplicateOnImportEnabled(bool enabled);
-    bool autoDeduplicateOnImportEnabled() const;
-    void setAutoRecognizeRotaryTubeSectionOnImportEnabled(bool enabled);
-    bool autoRecognizeRotaryTubeSectionOnImportEnabled() const;
-    void setAutoRemoveInternalPathsOnImportEnabled(bool enabled);
-    bool autoRemoveInternalPathsOnImportEnabled() const;
-    void setUseDxfFileNameEnabled(bool enabled);
-    bool useDxfFileNameEnabled() const;
-    void setUseDefaultImportPathEnabled(bool enabled);
-    bool useDefaultImportPathEnabled() const;
-    void setUseDefaultExportPathEnabled(bool enabled);
-    bool useDefaultExportPathEnabled() const;
     void setProcessVisualsVisible(bool enabled);
     bool processVisualsVisible() const;
     void setProcessDirectionVisible(bool enabled);
@@ -64,13 +51,6 @@ public:
     void setRotaryEndCutsVisible(bool enabled);
     void setExcludedEntitiesDimmed(bool enabled);
     void setBackgroundGridVisible(bool enabled);
-    void setRotaryTubeSectionProperties
-    (
-        bool recognized,
-        double yLength = 0.0,
-        double zWidth = 0.0,
-        double cornerRadius = 0.0
-    );
 
 signals:
     void drawRequested(DrawType drawType);
@@ -93,18 +73,16 @@ signals:
     void importFileRequested();
     void exportGCodeRequested();
     void deduplicateRequested();
+    void recognizeRotaryTubeSectionRequested();
+    void recognizeRotaryEndCutsRequested();
+    void removeInternalPathsRequested();
+    void machiningSettingsRequested();
     void sortKeepDirectionRequested();
     void smartSortRequested();
     void gcodeModeSelectionChanged(CadToolPanelWidget::GCodeModeSelection selection);
     void profileSelectionChanged(const QString& profileId);
     void profileManagerRequested();
     void profileSettingsRequested();
-    void autoDeduplicateOnImportOptionChanged(bool enabled);
-    void autoRecognizeRotaryTubeSectionOnImportOptionChanged(bool enabled);
-    void autoRemoveInternalPathsOnImportOptionChanged(bool enabled);
-    void useDxfFileNameOptionChanged(bool enabled);
-    void useDefaultImportPathOptionChanged(bool enabled);
-    void useDefaultExportPathOptionChanged(bool enabled);
     void processVisualsVisibleChanged(bool enabled);
     void processDirectionVisibleChanged(bool enabled);
     void processOrderVisibleChanged(bool enabled);
@@ -138,22 +116,11 @@ private:
     QToolButton* m_arrayButton = nullptr;
     QLabel* m_layerStatusLabel = nullptr;
     QLabel* m_propertyStatusLabel = nullptr;
-    QLabel* m_rotaryTubeSectionStatusLabel = nullptr;
-    QLabel* m_rotaryTubeSectionSizeLabel = nullptr;
-    QLabel* m_rotaryTubeSectionRadiusLabel = nullptr;
-    QTimer* m_rotaryTubeSectionBlinkTimer = nullptr;
-    bool m_rotaryTubeSectionBlinkOn = false;
     QComboBox* m_layerComboBox = nullptr;
     QComboBox* m_propertyLayerComboBox = nullptr;
     QComboBox* m_colorComboBox = nullptr;
     QComboBox* m_gcodeModeComboBox = nullptr;
     QComboBox* m_profileComboBox = nullptr;
-    QCheckBox* m_autoDeduplicateOnImportCheckBox = nullptr;
-    QCheckBox* m_autoRecognizeRotaryTubeSectionOnImportCheckBox = nullptr;
-    QCheckBox* m_autoRemoveInternalPathsOnImportCheckBox = nullptr;
-    QCheckBox* m_useDxfFileNameCheckBox = nullptr;
-    QCheckBox* m_useDefaultImportPathCheckBox = nullptr;
-    QCheckBox* m_useDefaultExportPathCheckBox = nullptr;
     QCheckBox* m_processVisualsCheckBox = nullptr;
     QCheckBox* m_processDirectionCheckBox = nullptr;
     QCheckBox* m_processOrderCheckBox = nullptr;

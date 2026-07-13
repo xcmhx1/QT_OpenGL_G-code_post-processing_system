@@ -105,6 +105,18 @@ void Gcode_postprocessing_system::runDxfImportPostProcessing()
         reportFailure(QStringLiteral("导入后未能自动识别方管垂直截面，文件仍已正常导入。"));
     }
 
+    if (loadAutoRecognizeRotaryEndCutsOnImport())
+    {
+        if (!m_rotaryTubeSectionModel.valid)
+        {
+            reportFailure(QStringLiteral("方管垂直截面未识别，已跳过自动加工断面识别。"));
+        }
+        else if (!recognizeAllRotaryEndCuts(false))
+        {
+            reportFailure(QStringLiteral("导入后未识别到有效加工断面，文件仍已正常导入。"));
+        }
+    }
+
     if (loadAutoRemoveInternalPathsOnImport())
     {
         if (!m_rotaryTubeSectionModel.valid)
@@ -116,6 +128,9 @@ void Gcode_postprocessing_system::runDxfImportPostProcessing()
             reportFailure(QStringLiteral("导入后内部线条清理未完成，文件仍已正常导入。"));
         }
     }
+
+    refreshWasteProcessingExclusions();
+    syncMachiningSettingsState();
 }
 
 bool Gcode_postprocessing_system::importBitmapFile(const QString& filePath)

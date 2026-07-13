@@ -23,6 +23,8 @@ namespace Ui { class Gcode_postprocessing_systemClass; }
 QT_END_NAMESPACE
 
 class QAction;
+class QDockWidget;
+class MachiningSettingsWidget;
 enum class CadHelpSection;
 
 class Gcode_postprocessing_system : public QMainWindow
@@ -68,6 +70,8 @@ private:
     void saveAutoDeduplicateOnImport(bool enabled) const;
     bool loadAutoRecognizeRotaryTubeSectionOnImport() const;
     void saveAutoRecognizeRotaryTubeSectionOnImport(bool enabled) const;
+    bool loadAutoRecognizeRotaryEndCutsOnImport() const;
+    void saveAutoRecognizeRotaryEndCutsOnImport(bool enabled) const;
     bool loadAutoRemoveInternalPathsOnImport() const;
     void saveAutoRemoveInternalPathsOnImport(bool enabled) const;
     bool loadUseDxfFileNameOnExport() const;
@@ -88,7 +92,9 @@ private:
     QString loadSelectedProfileId() const;
     void saveSelectedProfileId(const QString& profileId) const;
     void initializeToolPanel();
+    void initializeMachiningSettingsDock();
     void syncToolPanelState();
+    void syncMachiningSettingsState();
     void applyDefaultDrawingProperties();
     QString activeLayerName() const;
     QColor activeColor() const;
@@ -139,7 +145,7 @@ private:
     bool removeInternalMachiningPaths(bool interactive = true);
     bool restoreInternalMachiningPaths(bool interactive = true);
     bool toggleSelectedRotaryEndCutAssignment();
-    bool recognizeAllRotaryEndCuts();
+    bool recognizeAllRotaryEndCuts(bool interactive = true);
     bool toggleSelectedInternalPathAssignment();
     bool clearAllMachiningFaceAndLineAssignments();
     void showMachiningContextMenu(const QPoint& globalPos);
@@ -152,6 +158,8 @@ private:
     CadCommandLineWidget* m_commandLineWidget = nullptr;
     CadStatusPaneWidget* m_statusPaneWidget = nullptr;
     CadToolPanelWidget* m_toolPanelWidget = nullptr;
+    QDockWidget* m_machiningSettingsDock = nullptr;
+    MachiningSettingsWidget* m_machiningSettingsWidget = nullptr;
     QAction* m_lightThemeAction = nullptr;
     QAction* m_darkThemeAction = nullptr;
     QAction* m_customAppearanceAction = nullptr;
