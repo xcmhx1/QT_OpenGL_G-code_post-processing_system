@@ -6,6 +6,7 @@
 #include "CadOcsGeometry.h"
 #include "CadProcessVisualUtils.h"
 #include "RotaryCutBoundaryAnalyzer.h"
+#include "RotaryPathTopology.h"
 
 #include <QMessageBox>
 #include <QSet>
@@ -1656,82 +1657,20 @@ namespace
         double connectionDistance = kSortConnectionEpsilon
     )
     {
-        const std::vector<EndpointNode> endpoints = collectOpenEndpointNodes(sortableItems);
-        std::vector<std::vector<size_t>> itemEndpointIndices(sortableItems.size());
-        const double exactConnectionDistanceSquared = connectionDistance * connectionDistance;
+        QVector<CadItem*> items;
+        items.reserve(static_cast<qsizetype>(sortableItems.size()));
 
-        for (size_t endpointIndex = 0; endpointIndex < endpoints.size(); ++endpointIndex)
+        for (CadItem* item : sortableItems)
         {
-            itemEndpointIndices[endpoints[endpointIndex].itemIndex].push_back(endpointIndex);
+            items.push_back(item);
         }
 
-        std::vector<std::vector<size_t>> adjacency(sortableItems.size());
-
-        for (size_t leftItem = 0; leftItem < itemEndpointIndices.size(); ++leftItem)
-        {
-            for (size_t rightItem = leftItem + 1; rightItem < itemEndpointIndices.size(); ++rightItem)
-            {
-                bool connected = false;
-
-                for (size_t leftEndpointIndex : itemEndpointIndices[leftItem])
-                {
-                    for (size_t rightEndpointIndex : itemEndpointIndices[rightItem])
-                    {
-                        if (spatialDistanceSquared(endpoints[leftEndpointIndex].point, endpoints[rightEndpointIndex].point) <= exactConnectionDistanceSquared)
-                        {
-                            connected = true;
-                            break;
-                        }
-                    }
-
-                    if (connected)
-                    {
-                        break;
-                    }
-                }
-
-                if (connected)
-                {
-                    adjacency[leftItem].push_back(rightItem);
-                    adjacency[rightItem].push_back(leftItem);
-                }
-            }
-        }
-
-        std::vector<int> componentIds(sortableItems.size(), -1);
-        int nextComponentId = 0;
-
-        for (size_t itemIndex = 0; itemIndex < sortableItems.size(); ++itemIndex)
-        {
-            if (componentIds[itemIndex] >= 0)
-            {
-                continue;
-            }
-
-            std::vector<size_t> stack = { itemIndex };
-            componentIds[itemIndex] = nextComponentId;
-
-            while (!stack.empty())
-            {
-                const size_t currentItem = stack.back();
-                stack.pop_back();
-
-                for (size_t neighborItem : adjacency[currentItem])
-                {
-                    if (componentIds[neighborItem] >= 0)
-                    {
-                        continue;
-                    }
-
-                    componentIds[neighborItem] = nextComponentId;
-                    stack.push_back(neighborItem);
-                }
-            }
-
-            ++nextComponentId;
-        }
-
-        return componentIds;
+        const RotaryPathTopology topology
+        (
+            items,
+            RotaryPathTopologyTolerance::fromConnectionTolerance(connectionDistance)
+        );
+        return topology.itemComponentIds();
     }
 
     std::vector<std::vector<QVector3D>> detectPreferredGapStartPointsByComponent
@@ -3995,6 +3934,27 @@ QVector<CadItem*> Gcode_postprocessing_system::expandedSelectedRotaryEndCut(QStr
         }
     }
 
+    const QVector<QVector2D> directValidationHull = m_rotaryTubeSectionModel.valid
+        ? m_rotaryTubeSectionModel.sectionHull
+        : QVector<QVector2D>();
+    const RotaryCutBoundaryAnalysis directAnalysis = RotaryCutBoundaryAnalyzer::analyze
+    (
+        selectedItems,
+        sceneItems,
+        kEndCutConnectionTolerance,
+        directValidationHull
+    );
+
+    if (directAnalysis.valid && !directAnalysis.boundaryItems.isEmpty())
+    {
+        if (errorMessage != nullptr)
+        {
+            errorMessage->clear();
+        }
+
+        return directAnalysis.boundaryItems;
+    }
+
     const RotaryTubeSectionModel candidateSection = RotaryTubeGeometryAnalyzer::buildSectionModel
     (
         selectedItems,
@@ -4039,7 +3999,7 @@ QVector<CadItem*> Gcode_postprocessing_system::expandedSelectedRotaryEndCut(QStr
         errorMessage->clear();
     }
 
-    return candidateSection.outerBoundaryItems;
+    return analysis.boundaryItems.isEmpty() ? candidateSection.outerBoundaryItems : analysis.boundaryItems;
 }
 
 bool Gcode_postprocessing_system::assignSelectedRotaryEndCut()
@@ -4493,7 +4453,11 @@ bool Gcode_postprocessing_system::recognizeAllRotaryEndCuts(bool interactive)
             continue;
         }
 
-        for (CadItem* item : candidateSection.outerBoundaryItems)
+        const QVector<CadItem*>& recognizedItems = analysis.boundaryItems.isEmpty()
+            ? candidateSection.outerBoundaryItems
+            : analysis.boundaryItems;
+
+        for (CadItem* item : recognizedItems)
         {
             item->m_rotaryEndCutPairId = nextBoundaryId;
             item->m_rotaryEndCutRole = RotaryEndCutRole::Break;

@@ -3,6 +3,7 @@
 #include "RotaryCutBoundaryAnalyzer.h"
 
 #include "CadItem.h"
+#include "RotaryPathTopology.h"
 
 #include <algorithm>
 #include <cmath>
@@ -17,11 +18,6 @@ namespace
     {
         double y = 0.0;
         double z = 0.0;
-    };
-
-    struct CandidateSegment
-    {
-        QVector<QVector3D> points;
     };
 
     double distance3D(const QVector3D& left, const QVector3D& right)
@@ -40,156 +36,13 @@ namespace
             - (left.z - origin.z) * (right.y - origin.y);
     }
 
-    QVector<QVector3D> itemPath(CadItem* item)
-    {
-        QVector<QVector3D> points;
-
-        if (item == nullptr)
-        {
-            return points;
-        }
-
-        item->rebuildRawPathPoints3D();
-
-        for (const RawPathPoint3D& point : item->rawPathPoints3D())
-        {
-            points.push_back(QVector3D
-            (
-                static_cast<float>(point.x),
-                static_cast<float>(point.y),
-                static_cast<float>(point.z)
-            ));
-        }
-
-        return points;
-    }
-
-    bool appendOrderedCandidatePath
-    (
-        const QVector<CadItem*>& candidateItems,
-        double connectionTolerance,
-        QVector<QVector3D>& orderedPath,
-        double& closureGap,
-        QString& errorMessage
-    )
-    {
-        std::vector<CandidateSegment> segments;
-        segments.reserve(static_cast<size_t>(candidateItems.size()));
-
-        for (CadItem* item : candidateItems)
-        {
-            CandidateSegment segment;
-            segment.points = itemPath(item);
-
-            if (segment.points.size() < 2)
-            {
-                errorMessage = QStringLiteral("加工断面中存在无法构成连续刀路的图元。");
-                return false;
-            }
-
-            segments.push_back(std::move(segment));
-        }
-
-        if (segments.empty())
-        {
-            errorMessage = QStringLiteral("加工断面候选图元为空。");
-            return false;
-        }
-
-        if (segments.size() > 1
-            && distance3D(segments.front().points.front(), segments.front().points.back()) <= connectionTolerance)
-        {
-            errorMessage = QStringLiteral("候选组中同时存在独立闭环和其它图元，无法形成单一加工断面。");
-            return false;
-        }
-
-        std::vector<bool> used(segments.size(), false);
-        orderedPath = segments.front().points;
-        used.front() = true;
-
-        for (size_t usedCount = 1; usedCount < segments.size(); ++usedCount)
-        {
-            const QVector3D currentEnd = orderedPath.back();
-            int matchedIndex = -1;
-            bool reverseMatched = false;
-            double bestDistance = std::numeric_limits<double>::max();
-            int matchCount = 0;
-
-            for (size_t segmentIndex = 0; segmentIndex < segments.size(); ++segmentIndex)
-            {
-                if (used[segmentIndex])
-                {
-                    continue;
-                }
-
-                const double forwardDistance = distance3D(currentEnd, segments[segmentIndex].points.front());
-                const double reverseDistance = distance3D(currentEnd, segments[segmentIndex].points.back());
-                const double candidateDistance = std::min(forwardDistance, reverseDistance);
-
-                if (candidateDistance > connectionTolerance)
-                {
-                    continue;
-                }
-
-                ++matchCount;
-
-                if (candidateDistance < bestDistance)
-                {
-                    matchedIndex = static_cast<int>(segmentIndex);
-                    reverseMatched = reverseDistance < forwardDistance;
-                    bestDistance = candidateDistance;
-                }
-            }
-
-            if (matchedIndex < 0)
-            {
-                errorMessage = QStringLiteral("候选图元组不是一条连续路径。");
-                return false;
-            }
-
-            if (matchCount > 1)
-            {
-                errorMessage = QStringLiteral("候选加工断面存在分叉或多义连接，无法确定唯一闭环。");
-                return false;
-            }
-
-            CandidateSegment& matched = segments[static_cast<size_t>(matchedIndex)];
-
-            if (reverseMatched)
-            {
-                std::reverse(matched.points.begin(), matched.points.end());
-            }
-
-            for (int pointIndex = 1; pointIndex < matched.points.size(); ++pointIndex)
-            {
-                orderedPath.push_back(matched.points[pointIndex]);
-            }
-
-            used[static_cast<size_t>(matchedIndex)] = true;
-        }
-
-        closureGap = distance3D(orderedPath.front(), orderedPath.back());
-
-        if (closureGap > connectionTolerance)
-        {
-            errorMessage = QStringLiteral("候选路径未闭合，首尾间距为 %1 mm，超过 %2 mm 容差。")
-                .arg(closureGap, 0, 'f', 3)
-                .arg(connectionTolerance, 0, 'f', 3);
-            return false;
-        }
-
-        return true;
-    }
-
-    std::vector<SectionPoint> buildSectionHull(const QVector<CadItem*>& sceneItems)
+    std::vector<SectionPoint> buildSectionHull(const QVector<RotaryPathTopologyRecord>& records)
     {
         std::vector<SectionPoint> points;
 
-        for (CadItem* item : sceneItems)
+        for (const RotaryPathTopologyRecord& record : records)
         {
-            const QVector<QVector3D> path = itemPath(item);
-
-            for (const QVector3D& point : path)
+            for (const QVector3D& point : record.points)
             {
                 points.push_back({ point.y(), point.z() });
             }
@@ -384,19 +237,37 @@ RotaryCutBoundaryAnalysis RotaryCutBoundaryAnalyzer::analyze
 )
 {
     RotaryCutBoundaryAnalysis analysis;
+    QVector<CadItem*> topologyItems = sceneItems;
 
-    if (!appendOrderedCandidatePath
-    (
-        candidateItems,
-        connectionTolerance,
-        analysis.orderedPath,
-        analysis.closureGap,
-        analysis.errorMessage
-    ))
+    for (CadItem* item : candidateItems)
     {
+        if (item != nullptr && !topologyItems.contains(item))
+        {
+            topologyItems.push_back(item);
+        }
+    }
+
+    const RotaryPathTopology topology
+    (
+        topologyItems,
+        RotaryPathTopologyTolerance::fromConnectionTolerance(connectionTolerance)
+    );
+    const RotaryPathLoopResult loop = topology.extractBestLoop(candidateItems, candidateItems);
+    analysis.connectedComponentCount = loop.connectedComponentCount;
+    analysis.openNodeCount = loop.openNodeCount;
+    analysis.branchNodeCount = loop.branchNodeCount;
+    analysis.ignoredBranchItemCount = loop.ignoredBranchItemCount;
+    analysis.approximatelyClosed = loop.approximatelyClosed;
+    analysis.closureGap = loop.closureGap;
+    analysis.boundaryItems = loop.usedItems;
+
+    if (!loop.valid)
+    {
+        analysis.errorMessage = loop.errorMessage;
         return analysis;
     }
 
+    analysis.orderedPath = loop.orderedPath;
     analysis.connectedLoop = true;
     std::vector<SectionPoint> hull;
 
@@ -411,7 +282,7 @@ RotaryCutBoundaryAnalysis RotaryCutBoundaryAnalyzer::analyze
     }
     else
     {
-        hull = buildSectionHull(sceneItems);
+        hull = buildSectionHull(topology.records());
     }
 
     if (hull.size() < 3)

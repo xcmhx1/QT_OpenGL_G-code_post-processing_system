@@ -361,6 +361,9 @@
     <ClCompile Include="src\RotaryCutBoundaryAnalyzer.cpp">
       <Filter>Source Files\Model</Filter>
     </ClCompile>
+    <ClCompile Include="src\RotaryPathTopology.cpp">
+      <Filter>Source Files\Model</Filter>
+    </ClCompile>
     <ClCompile Include="src\RotaryTubeGeometryAnalyzer.cpp">
       <Filter>Source Files\Model</Filter>
     </ClCompile>
@@ -583,6 +586,9 @@
       <Filter>Header Files\Model</Filter>
     </ClInclude>
     <ClInclude Include="include\RotaryCutBoundaryAnalyzer.h">
+      <Filter>Header Files\Model</Filter>
+    </ClInclude>
+    <ClInclude Include="include\RotaryPathTopology.h">
       <Filter>Header Files\Model</Filter>
     </ClInclude>
     <ClInclude Include="include\RotaryTubeGeometryAnalyzer.h">

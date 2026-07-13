@@ -3,6 +3,7 @@
 #include "RotaryTubeGeometryAnalyzer.h"
 
 #include "CadItem.h"
+#include "RotaryPathTopology.h"
 
 #include <QSet>
 
@@ -44,26 +45,6 @@ namespace
             std::max(0.001, nodeSnap * 0.1),
             std::max(0.0001, nodeSnap * 0.01)
         };
-    }
-
-    QVector<QVector3D> itemPath(CadItem* item)
-    {
-        QVector<QVector3D> path;
-
-        if (item == nullptr)
-        {
-            return path;
-        }
-
-        item->rebuildRawPathPoints3D();
-        path.reserve(static_cast<qsizetype>(item->rawPathPoints3D().size()));
-
-        for (const RawPathPoint3D& point : item->rawPathPoints3D())
-        {
-            path.push_back(QVector3D(point.x, point.y, point.z));
-        }
-
-        return path;
     }
 
     double distance3D(const QVector3D& left, const QVector3D& right)
@@ -241,25 +222,11 @@ namespace
 
     double distancePointToPath(const QVector3D& point, const QVector<QVector3D>& path);
 
-    bool pathsTouch(const QVector<QVector3D>& left, const QVector<QVector3D>& right, double tolerance)
-    {
-        if (left.isEmpty() || right.isEmpty())
-        {
-            return false;
-        }
-
-        return distancePointToPath(left.front(), right) <= tolerance
-            || distancePointToPath(left.back(), right) <= tolerance
-            || distancePointToPath(right.front(), left) <= tolerance
-            || distancePointToPath(right.back(), left) <= tolerance;
-    }
-
     QVector<int> selectedConnectedItems
     (
         const QVector<CadItem*>& selectedItems,
         const QVector<CadItem*>& sceneItems,
-        const QVector<QVector<QVector3D>>& paths,
-        double tolerance
+        const RotaryPathTopology& topology
     )
     {
         QVector<int> pending;
@@ -283,7 +250,8 @@ namespace
 
             for (int candidate = 0; candidate < sceneItems.size(); ++candidate)
             {
-                if (!included[candidate] && pathsTouch(paths[current], paths[candidate], tolerance))
+                if (!included[candidate]
+                    && topology.itemsDirectlyConnected(sceneItems[current], sceneItems[candidate]))
                 {
                     included[candidate] = true;
                     pending.push_back(candidate);
@@ -298,7 +266,8 @@ namespace
     (
         const QVector<int>& component,
         const QVector<QVector<QVector3D>>& paths,
-        double tolerance
+        double tolerance,
+        const RotaryPathTopology& topology
     )
     {
         QVector<bool> active(component.size(), true);
@@ -318,7 +287,22 @@ namespace
 
                 const QVector<QVector3D>& path = paths[component[localIndex]];
 
-                if (path.size() < 2 || distance3D(path.front(), path.back()) <= tolerance)
+                const RotaryPathTopologyRecord& topologyRecord = topology.records()[component[localIndex]];
+                const double closureGap = path.size() < 2
+                    ? std::numeric_limits<double>::max()
+                    : distance3D(path.front(), path.back());
+                double length = 0.0;
+
+                for (int pointIndex = 1; pointIndex < path.size(); ++pointIndex)
+                {
+                    length += distance3D(path[pointIndex - 1], path[pointIndex]);
+                }
+
+                const bool approximatelyClosed = path.size() >= 3
+                    && closureGap <= tolerance
+                    && length > 4.0 * std::max(tolerance, closureGap);
+
+                if (path.size() < 2 || topologyRecord.semanticallyClosed || approximatelyClosed)
                 {
                     continue;
                 }
@@ -1319,11 +1303,18 @@ namespace
         const QVector<int>& candidateIndices,
         const QVector<CadItem*>& sceneItems,
         const QVector<QVector<QVector3D>>& paths,
-        const GeometryTolerance& tolerance
+        const GeometryTolerance& tolerance,
+        const RotaryPathTopology& topology
     )
     {
         RotaryTubeSectionModel model;
-        const QVector<int> core = peelDanglingItems(candidateIndices, paths, tolerance.nodeSnap);
+        const QVector<int> core = peelDanglingItems
+        (
+            candidateIndices,
+            paths,
+            tolerance.nodeSnap,
+            topology
+        );
 
         if (core.isEmpty())
         {
@@ -1418,6 +1409,11 @@ RotaryTubeSectionModel RotaryTubeGeometryAnalyzer::buildSectionModel
 {
     RotaryTubeSectionModel model;
     const GeometryTolerance tolerance = buildTolerance(connectionTolerance);
+    const RotaryPathTopology topology
+    (
+        sceneItems,
+        RotaryPathTopologyTolerance::fromConnectionTolerance(connectionTolerance)
+    );
 
     if (selectedItems.isEmpty())
     {
@@ -1428,9 +1424,9 @@ RotaryTubeSectionModel RotaryTubeGeometryAnalyzer::buildSectionModel
     QVector<QVector<QVector3D>> paths;
     paths.reserve(sceneItems.size());
 
-    for (CadItem* item : sceneItems)
+    for (const RotaryPathTopologyRecord& record : topology.records())
     {
-        paths.push_back(itemPath(item));
+        paths.push_back(record.points);
     }
 
     QVector<int> directCandidate;
@@ -1449,14 +1445,14 @@ RotaryTubeSectionModel RotaryTubeGeometryAnalyzer::buildSectionModel
         if (!directCandidate.contains(selectedIndex)) directCandidate.push_back(selectedIndex);
     }
 
-    model = parseSectionCandidate(directCandidate, sceneItems, paths, tolerance);
+    model = parseSectionCandidate(directCandidate, sceneItems, paths, tolerance, topology);
 
     if (model.valid)
     {
         return model;
     }
 
-    const QVector<int> component = selectedConnectedItems(selectedItems, sceneItems, paths, tolerance.nodeSnap);
+    const QVector<int> component = selectedConnectedItems(selectedItems, sceneItems, topology);
 
     for (int selectedIndex : directCandidate)
     {
@@ -1467,7 +1463,7 @@ RotaryTubeSectionModel RotaryTubeGeometryAnalyzer::buildSectionModel
         }
     }
 
-    model = parseSectionCandidate(component, sceneItems, paths, tolerance);
+    model = parseSectionCandidate(component, sceneItems, paths, tolerance, topology);
     return model;
 }
 
@@ -1479,6 +1475,11 @@ RotaryTubeSectionModel RotaryTubeGeometryAnalyzer::findBestSectionModel
 {
     RotaryTubeSectionModel result;
     const GeometryTolerance tolerance = buildTolerance(connectionTolerance);
+    const RotaryPathTopology topology
+    (
+        sceneItems,
+        RotaryPathTopologyTolerance::fromConnectionTolerance(connectionTolerance)
+    );
     QVector<QVector<QVector3D>> paths;
     QVector<double> itemCenterX(sceneItems.size(), 0.0);
     QVector<int> verticalItems;
@@ -1486,7 +1487,7 @@ RotaryTubeSectionModel RotaryTubeGeometryAnalyzer::findBestSectionModel
 
     for (int itemIndex = 0; itemIndex < sceneItems.size(); ++itemIndex)
     {
-        paths.push_back(itemPath(sceneItems[itemIndex]));
+        paths.push_back(topology.records()[itemIndex].points);
         const QVector<QVector3D>& path = paths.back();
 
         if (path.size() < 2)
@@ -1557,7 +1558,11 @@ RotaryTubeSectionModel RotaryTubeGeometryAnalyzer::findBestSectionModel
                 for (int candidate = 0; candidate < xCluster.size(); ++candidate)
                 {
                     if (!visited[candidate]
-                        && pathsTouch(paths[itemIndex], paths[xCluster[candidate]], tolerance.nodeSnap))
+                        && topology.itemsDirectlyConnected
+                        (
+                            sceneItems[itemIndex],
+                            sceneItems[xCluster[candidate]]
+                        ))
                     {
                         visited[candidate] = true;
                         pending.push_back(candidate);
@@ -1566,7 +1571,7 @@ RotaryTubeSectionModel RotaryTubeGeometryAnalyzer::findBestSectionModel
             }
 
             ++result.inspectedCandidateCount;
-            RotaryTubeSectionModel model = parseSectionCandidate(component, sceneItems, paths, tolerance);
+            RotaryTubeSectionModel model = parseSectionCandidate(component, sceneItems, paths, tolerance, topology);
 
             if (!model.valid
                 || model.yLength <= tolerance.nodeSnap
@@ -1808,13 +1813,18 @@ RotaryInternalPathResult RotaryTubeGeometryAnalyzer::findInternalPaths
     RotaryInternalPathResult result;
     const GeometryTolerance tolerance = buildTolerance(connectionTolerance);
     const bool hasSectionModel = model.valid && model.sectionBoundary.size() >= 3;
+    const RotaryPathTopology topology
+    (
+        sceneItems,
+        RotaryPathTopologyTolerance::fromConnectionTolerance(connectionTolerance)
+    );
 
     QVector<QVector<QVector3D>> paths;
     paths.reserve(sceneItems.size());
 
-    for (CadItem* item : sceneItems)
+    for (const RotaryPathTopologyRecord& record : topology.records())
     {
-        paths.push_back(itemPath(item));
+        paths.push_back(record.points);
     }
 
     // A shallow entry is still unsafe for the laser head. Keep only a small
@@ -1885,7 +1895,11 @@ RotaryInternalPathResult RotaryTubeGeometryAnalyzer::findInternalPaths
             {
                 if (!visited[candidate]
                     && !physicalInterior[candidate]
-                    && pathsTouch(paths[component[cursor]], paths[candidate], tolerance.nodeSnap))
+                    && topology.itemsDirectlyConnected
+                    (
+                        sceneItems[component[cursor]],
+                        sceneItems[candidate]
+                    ))
                 {
                     visited[candidate] = true;
                     component.push_back(candidate);
@@ -1893,7 +1907,13 @@ RotaryInternalPathResult RotaryTubeGeometryAnalyzer::findInternalPaths
             }
         }
 
-        const QVector<int> closedCore = peelDanglingItems(component, paths, tolerance.nodeSnap);
+        const QVector<int> closedCore = peelDanglingItems
+        (
+            component,
+            paths,
+            tolerance.nodeSnap,
+            topology
+        );
 
         if (closedCore.isEmpty())
         {
