@@ -3,6 +3,7 @@
 #include "pch.h"
 
 #include "CadEllipseItem.h"
+#include "CadEllipseGeometry.h"
 
 #include <cmath>
 
@@ -26,54 +27,13 @@ double normalizeAnglePositive(double angle)
     return normalized;
 }
 
-QVector3D resolveNormal(const DRW_Coord& extPoint)
-{
-    // 椭圆所在平面同样由 extrusion direction 给出。
-    QVector3D normal(extPoint.x, extPoint.y, extPoint.z);
-
-    if (normal.lengthSquared() <= 1.0e-12f)
-    {
-        return QVector3D(0.0f, 0.0f, 1.0f);
-    }
-
-    normal.normalize();
-    return normal;
-}
-
-QVector3D buildMinorAxis(const QVector3D& normal, const QVector3D& majorAxis, double ratio)
-{
-    // 短轴方向由法向与长轴叉乘得到，长度再乘以 ratio。
-    QVector3D minorDirection = QVector3D::crossProduct(normal, majorAxis);
-
-    if (minorDirection.lengthSquared() <= 1.0e-12f)
-    {
-        // 如果长轴与法向导致叉乘退化，换辅助轴再尝试一次。
-        const QVector3D helper = std::abs(majorAxis.z()) < 0.999f
-            ? QVector3D(0.0f, 0.0f, 1.0f)
-            : QVector3D(0.0f, 1.0f, 0.0f);
-
-        minorDirection = QVector3D::crossProduct(helper, majorAxis);
-    }
-
-    if (minorDirection.lengthSquared() <= 1.0e-12f)
-    {
-        return QVector3D();
-    }
-
-    minorDirection.normalize();
-    return minorDirection * static_cast<float>(majorAxis.length() * ratio);
-}
-
 bool isFullEllipsePath(const DRW_Ellipse* ellipse)
 {
-    if (ellipse == nullptr)
-    {
-        return false;
-    }
-
-    const double span = ellipse->endparam - ellipse->staparam;
-    return std::abs(span) < 1.0e-10
-        || std::abs(std::abs(span) - kTwoPi) < 1.0e-10;
+    return ellipse != nullptr && CadEllipseGeometryUtils::isFullEllipseParameterRange
+    (
+        ellipse->staparam,
+        ellipse->endparam
+    );
 }
 
 double effectiveClosedEllipseStartParameter(const CadEllipseItem* item)
@@ -109,20 +69,9 @@ void CadEllipseItem::buildGeometryDatay()
     }
 
     // DXF 椭圆以中心点和“从中心指向长轴端点”的向量表示长轴。
-    const QVector3D center(m_data->basePoint.x, m_data->basePoint.y, m_data->basePoint.z);
-    const QVector3D majorAxis(m_data->secPoint.x, m_data->secPoint.y, m_data->secPoint.z);
+    CadEllipseGeometry geometry;
 
-    // 没有有效长轴或 ratio 非法时无法构建椭圆。
-    if (majorAxis.lengthSquared() <= 1.0e-12f || m_data->ratio <= 0.0)
-    {
-        return;
-    }
-
-    const QVector3D normal = resolveNormal(m_data->extPoint);
-    const QVector3D minorAxis = buildMinorAxis(normal, majorAxis, m_data->ratio);
-
-    // 短轴构建失败通常意味着几何定义退化，不再继续采样。
-    if (minorAxis.lengthSquared() <= 1.0e-12f)
+    if (!CadEllipseGeometryUtils::buildEllipseGeometry(m_data, geometry))
     {
         return;
     }
@@ -131,7 +80,7 @@ void CadEllipseItem::buildGeometryDatay()
     double endParam = m_data->endparam;
 
     // 完整椭圆在 DXF 中可能以相同起止参数或完整 2π 参数区间表示。
-    if (std::abs(endParam - startParam) < 1.0e-10 || std::abs(std::abs(endParam - startParam) - kTwoPi) < 1.0e-10)
+    if (geometry.full)
     {
         endParam = startParam + kTwoPi;
     }
@@ -152,12 +101,7 @@ void CadEllipseItem::buildGeometryDatay()
     {
         // 椭圆参数方程：center + major*cos(t) + minor*sin(t)。
         const double t = startParam + span * static_cast<double>(i) / static_cast<double>(segments);
-        const QVector3D point =
-            center +
-            majorAxis * static_cast<float>(std::cos(t)) +
-            minorAxis * static_cast<float>(std::sin(t));
-
-        m_geometry.vertices.append(point);
+        m_geometry.vertices.append(CadEllipseGeometryUtils::ellipsePointAt(geometry, t));
     }
 }
 
@@ -170,18 +114,9 @@ void CadEllipseItem::rebuildRawPathPoints3D()
         return;
     }
 
-    const QVector3D center(m_data->basePoint.x, m_data->basePoint.y, m_data->basePoint.z);
-    const QVector3D majorAxis(m_data->secPoint.x, m_data->secPoint.y, m_data->secPoint.z);
+    CadEllipseGeometry geometry;
 
-    if (majorAxis.lengthSquared() <= 1.0e-12f || m_data->ratio <= 0.0)
-    {
-        return;
-    }
-
-    const QVector3D normal = resolveNormal(m_data->extPoint);
-    const QVector3D minorAxis = buildMinorAxis(normal, majorAxis, m_data->ratio);
-
-    if (minorAxis.lengthSquared() <= 1.0e-12f)
+    if (!CadEllipseGeometryUtils::buildEllipseGeometry(m_data, geometry))
     {
         return;
     }
@@ -221,10 +156,7 @@ void CadEllipseItem::rebuildRawPathPoints3D()
     for (int index = 0; index <= segments; ++index)
     {
         const double parameter = startParam + span * static_cast<double>(index) / static_cast<double>(segments);
-        const QVector3D point =
-            center +
-            majorAxis * static_cast<float>(std::cos(parameter)) +
-            minorAxis * static_cast<float>(std::sin(parameter));
+        const QVector3D point = CadEllipseGeometryUtils::ellipsePointAt(geometry, parameter);
         m_rawPathPoints3D.push_back({ point.x(), point.y(), point.z() });
     }
 }
@@ -267,10 +199,22 @@ bool CadEllipseItem::rebuildControlPoints4Axis
     m_controlPoints4Axis.clear();
     m_controlPoints4Axis.reserve(m_rawPathPoints3D.size());
 
-    const QVector3D normal = resolveNormal(m_data->extPoint);
+    CadEllipseGeometry geometry;
 
-    const double centerY = m_data->basePoint.y;
-    const double centerZ = m_data->basePoint.z;
+    if (!CadEllipseGeometryUtils::buildEllipseGeometry(m_data, geometry))
+    {
+        if (errorMessage != nullptr)
+        {
+            *errorMessage = QStringLiteral("椭圆几何参数无效。");
+        }
+
+        return false;
+    }
+
+    const QVector3D normal = geometry.normal;
+
+    const double centerY = geometry.center.y();
+    const double centerZ = geometry.center.z();
 
     bool hasPrevious = false;
     double previousA = 0.0;

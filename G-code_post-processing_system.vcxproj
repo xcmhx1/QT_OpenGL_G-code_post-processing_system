@@ -450,6 +450,7 @@ if exist "$(VCRuntimeRedistDir)\*.dll" copy /Y "$(VCRuntimeRedistDir)\*.dll" "$(
     <ClInclude Include="include\CadGraphicsCoordinator.h" />
     <ClInclude Include="include\CadInteractionConstants.h" />
     <ClInclude Include="include\CadEllipseItem.h" />
+    <ClInclude Include="include\CadEllipseGeometry.h" />
     <QtMoc Include="include\CadItem.h" />
     <ClInclude Include="include\CadLineItem.h" />
     <ClInclude Include="include\CadXlineItem.h" />

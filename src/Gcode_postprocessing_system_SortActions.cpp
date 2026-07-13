@@ -3,11 +3,13 @@
 #include "Gcode_postprocessing_system.h"
 
 #include "CadItem.h"
+#include "CadEllipseGeometry.h"
 #include "CadOcsGeometry.h"
 #include "CadProcessVisualUtils.h"
 #include "RotaryCutBoundaryAnalyzer.h"
 #include "RotaryPathTopology.h"
 
+#include <QDebug>
 #include <QMessageBox>
 #include <QSet>
 #include <QStatusBar>
@@ -560,14 +562,11 @@ namespace
 
     bool isFullEllipsePath(const DRW_Ellipse* ellipse)
     {
-        if (ellipse == nullptr)
-        {
-            return false;
-        }
-
-        const double span = ellipse->endparam - ellipse->staparam;
-        return std::abs(span) < 1.0e-10
-            || std::abs(std::abs(span) - kTwoPi) < 1.0e-10;
+        return ellipse != nullptr && CadEllipseGeometryUtils::isFullEllipseParameterRange
+        (
+            ellipse->staparam,
+            ellipse->endparam
+        );
     }
 
     QVector3D bulgeArcCenter(const QVector3D& startPoint, const QVector3D& endPoint, double bulge, bool* valid = nullptr)
@@ -650,38 +649,15 @@ namespace
 
     bool tryBuildEllipseAxes(const DRW_Ellipse* ellipse, QVector3D& majorAxis, QVector3D& minorAxis)
     {
-        if (ellipse == nullptr)
+        CadEllipseGeometry geometry;
+
+        if (!CadEllipseGeometryUtils::buildEllipseGeometry(ellipse, geometry))
         {
             return false;
         }
 
-        majorAxis = QVector3D(ellipse->secPoint.x, ellipse->secPoint.y, ellipse->secPoint.z);
-
-        if (majorAxis.lengthSquared() <= kSortEpsilon || ellipse->ratio <= 0.0)
-        {
-            return false;
-        }
-
-        QVector3D normal(ellipse->extPoint.x, ellipse->extPoint.y, ellipse->extPoint.z);
-
-        if (normal.lengthSquared() <= kSortEpsilon)
-        {
-            normal = QVector3D(0.0f, 0.0f, 1.0f);
-        }
-        else
-        {
-            normal.normalize();
-        }
-
-        minorAxis = QVector3D::crossProduct(normal, majorAxis);
-
-        if (minorAxis.lengthSquared() <= kSortEpsilon)
-        {
-            return false;
-        }
-
-        minorAxis.normalize();
-        minorAxis *= static_cast<float>(majorAxis.length() * ellipse->ratio);
+        majorAxis = geometry.majorAxis;
+        minorAxis = geometry.minorAxis;
         return true;
     }
 
@@ -810,47 +786,25 @@ namespace
 
     QVector3D ellipsePointAt(const DRW_Ellipse* ellipse, double parameter)
     {
-        if (ellipse == nullptr)
+        CadEllipseGeometry geometry;
+
+        if (!CadEllipseGeometryUtils::buildEllipseGeometry(ellipse, geometry))
         {
             return QVector3D();
         }
 
-        const QVector3D center(ellipse->basePoint.x, ellipse->basePoint.y, ellipse->basePoint.z);
-        QVector3D majorAxis;
-        QVector3D minorAxis;
-
-        if (!tryBuildEllipseAxes(ellipse, majorAxis, minorAxis))
-        {
-            return QVector3D();
-        }
-
-        return center
-            + majorAxis * static_cast<float>(std::cos(parameter))
-            + minorAxis * static_cast<float>(std::sin(parameter));
+        return CadEllipseGeometryUtils::ellipsePointAt(geometry, parameter);
     }
 
     QVector3D ellipseTangentAt(const DRW_Ellipse* ellipse, double parameter, bool reverseDirection)
     {
-        QVector3D majorAxis;
-        QVector3D minorAxis;
+        CadEllipseGeometry geometry;
 
-        if (!tryBuildEllipseAxes(ellipse, majorAxis, minorAxis))
+        if (!CadEllipseGeometryUtils::buildEllipseGeometry(ellipse, geometry))
         {
             return QVector3D();
         }
-
-        QVector3D tangent
-        (
-            static_cast<float>(-std::sin(parameter)) * majorAxis
-            + static_cast<float>(std::cos(parameter)) * minorAxis
-        );
-
-        if (reverseDirection)
-        {
-            tangent = -tangent;
-        }
-
-        return normalizeOrZero(tangent);
+        return CadEllipseGeometryUtils::ellipseTangentAt(geometry, parameter, reverseDirection);
     }
 
     QVector3D polylineForwardStartTangent(const DRW_Polyline* polyline)
@@ -3290,17 +3244,41 @@ namespace
                     return false;
                 }
 
-                QVector<QVector3D> comparisonPoints = leftAnalysis->orderedPath;
-                comparisonPoints += rightAnalysis->orderedPath;
-
-                for (const QVector3D& point : comparisonPoints)
+                if (RotaryCutBoundaryAnalyzer::boundariesIntersect
+                (
+                    *leftAnalysis,
+                    *rightAnalysis,
+                    kEndCutConnectionTolerance
+                ))
                 {
-                    double leftX = 0.0;
-                    double rightX = 0.0;
+                    return false;
+                }
 
-                    if (!RotaryCutBoundaryAnalyzer::boundaryXAtPoint(*leftAnalysis, point, leftX)
-                        || !RotaryCutBoundaryAnalyzer::boundaryXAtPoint(*rightAnalysis, point, rightX)
-                        || rightX < leftX - kEndCutConnectionTolerance)
+                for (const QVector3D& point : rightAnalysis->orderedPath)
+                {
+                    const RotaryBoundarySide side = RotaryCutBoundaryAnalyzer::classifyPointRelativeToBoundary
+                    (
+                        *leftAnalysis,
+                        point,
+                        kEndCutConnectionTolerance
+                    );
+
+                    if (side != RotaryBoundarySide::After && side != RotaryBoundarySide::OnBoundary)
+                    {
+                        return false;
+                    }
+                }
+
+                for (const QVector3D& point : leftAnalysis->orderedPath)
+                {
+                    const RotaryBoundarySide side = RotaryCutBoundaryAnalyzer::classifyPointRelativeToBoundary
+                    (
+                        *rightAnalysis,
+                        point,
+                        kEndCutConnectionTolerance
+                    );
+
+                    if (side != RotaryBoundarySide::Before && side != RotaryBoundarySide::OnBoundary)
                     {
                         return false;
                     }
@@ -3481,17 +3459,22 @@ namespace
                                 static_cast<float>(rawPoint.y),
                                 static_cast<float>(rawPoint.z)
                             );
-                            double boundaryX = 0.0;
+                            const RotaryBoundarySide side = RotaryCutBoundaryAnalyzer::classifyPointRelativeToBoundary
+                            (
+                                *boundaryAnalysis,
+                                point,
+                                boundaryTolerance
+                            );
 
-                            if (!RotaryCutBoundaryAnalyzer::boundaryXAtPoint(*boundaryAnalysis, point, boundaryX))
+                            if (side == RotaryBoundarySide::Ambiguous)
                             {
                                 return false;
                             }
 
                             hasPointBeforeBoundary = hasPointBeforeBoundary
-                                || rawPoint.x < boundaryX - boundaryTolerance;
+                                || side == RotaryBoundarySide::Before;
                             hasPointAfterBoundary = hasPointAfterBoundary
-                                || rawPoint.x > boundaryX + boundaryTolerance;
+                                || side == RotaryBoundarySide::After;
                         }
                     }
 
@@ -3928,7 +3911,8 @@ QVector<CadItem*> Gcode_postprocessing_system::expandedSelectedRotaryEndCut(QStr
 
     for (const std::unique_ptr<CadItem>& entity : m_document.m_entities)
     {
-        if (entity != nullptr)
+        if (entity != nullptr
+            && (!entity->m_excludedAsInternalGeometry || selectedItems.contains(entity.get())))
         {
             sceneItems.push_back(entity.get());
         }
@@ -4363,7 +4347,7 @@ bool Gcode_postprocessing_system::recognizeAllRotaryEndCuts(bool interactive)
 
     for (const std::unique_ptr<CadItem>& entity : m_document.m_entities)
     {
-        if (entity != nullptr)
+        if (entity != nullptr && !entity->m_excludedAsInternalGeometry)
         {
             documentItems.push_back(entity.get());
             sceneItems.push_back(entity.get());
@@ -4434,6 +4418,9 @@ bool Gcode_postprocessing_system::recognizeAllRotaryEndCuts(bool interactive)
 
         if (!candidateSection.valid || candidateSection.outerBoundaryItems.isEmpty())
         {
+            qInfo().noquote() << QStringLiteral("[自动识别加工断面] 候选分量 %1 解析失败：%2")
+                .arg(componentId + 1)
+                .arg(candidateSection.errorMessage);
             continue;
         }
 
@@ -4450,6 +4437,9 @@ bool Gcode_postprocessing_system::recognizeAllRotaryEndCuts(bool interactive)
 
         if (!analysis.valid)
         {
+            qInfo().noquote() << QStringLiteral("[自动识别加工断面] 候选分量 %1 验证失败：%2")
+                .arg(componentId + 1)
+                .arg(analysis.errorMessage);
             continue;
         }
 
@@ -4714,17 +4704,44 @@ int Gcode_postprocessing_system::refreshWasteProcessingExclusions()
     {
         const BoundaryPosition& leftBoundary = boundaries[boundaryIndex - 1];
         const BoundaryPosition& rightBoundary = boundaries[boundaryIndex];
-        QVector<QVector3D> comparisonPoints = leftBoundary.analysis.orderedPath;
-        comparisonPoints += rightBoundary.analysis.orderedPath;
 
-        for (const QVector3D& point : comparisonPoints)
+        if (RotaryCutBoundaryAnalyzer::boundariesIntersect
+        (
+            leftBoundary.analysis,
+            rightBoundary.analysis,
+            kEndCutConnectionTolerance
+        ))
         {
-            double leftX = 0.0;
-            double rightX = 0.0;
+            boundariesHaveStableOrder = false;
+            break;
+        }
 
-            if (!RotaryCutBoundaryAnalyzer::boundaryXAtPoint(leftBoundary.analysis, point, leftX)
-                || !RotaryCutBoundaryAnalyzer::boundaryXAtPoint(rightBoundary.analysis, point, rightX)
-                || rightX < leftX - kEndCutConnectionTolerance)
+        for (const QVector3D& point : rightBoundary.analysis.orderedPath)
+        {
+            const RotaryBoundarySide side = RotaryCutBoundaryAnalyzer::classifyPointRelativeToBoundary
+            (
+                leftBoundary.analysis,
+                point,
+                kEndCutConnectionTolerance
+            );
+
+            if (side != RotaryBoundarySide::After && side != RotaryBoundarySide::OnBoundary)
+            {
+                boundariesHaveStableOrder = false;
+                break;
+            }
+        }
+
+        for (const QVector3D& point : leftBoundary.analysis.orderedPath)
+        {
+            const RotaryBoundarySide side = RotaryCutBoundaryAnalyzer::classifyPointRelativeToBoundary
+            (
+                rightBoundary.analysis,
+                point,
+                kEndCutConnectionTolerance
+            );
+
+            if (side != RotaryBoundarySide::Before && side != RotaryBoundarySide::OnBoundary)
             {
                 boundariesHaveStableOrder = false;
                 break;
@@ -4780,16 +4797,21 @@ int Gcode_postprocessing_system::refreshWasteProcessingExclusions()
                     static_cast<float>(rawPoint.y),
                     static_cast<float>(rawPoint.z)
                 );
-                double boundaryX = 0.0;
+                const RotaryBoundarySide side = RotaryCutBoundaryAnalyzer::classifyPointRelativeToBoundary
+                (
+                    boundaries[boundaryIndex].analysis,
+                    point,
+                    kEndCutConnectionTolerance
+                );
 
-                if (!RotaryCutBoundaryAnalyzer::boundaryXAtPoint(boundaries[boundaryIndex].analysis, point, boundaryX))
+                if (side == RotaryBoundarySide::Ambiguous)
                 {
                     crossesBoundary = true;
                     break;
                 }
 
-                hasPointBefore = hasPointBefore || rawPoint.x < boundaryX - kEndCutConnectionTolerance;
-                hasPointAfter = hasPointAfter || rawPoint.x > boundaryX + kEndCutConnectionTolerance;
+                hasPointBefore = hasPointBefore || side == RotaryBoundarySide::Before;
+                hasPointAfter = hasPointAfter || side == RotaryBoundarySide::After;
             }
 
             if (crossesBoundary || (hasPointBefore && hasPointAfter))

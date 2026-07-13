@@ -3,9 +3,12 @@
 #include "RotaryPathTopology.h"
 
 #include "CadItem.h"
+#include "CadEllipseGeometry.h"
 
 #include <QHash>
+#include <QDebug>
 #include <QSet>
+#include <QStringList>
 
 #include <algorithm>
 #include <cmath>
@@ -34,6 +37,15 @@ namespace
         double length = 0.0;
     };
 
+    struct TopologyPlaneFit
+    {
+        bool valid = false;
+        double a = 0.0;
+        double b = 0.0;
+        double c = 0.0;
+        double maximumDeviation = 0.0;
+    };
+
     struct GraphData
     {
         QVector<Marker> markers;
@@ -41,6 +53,7 @@ namespace
         QVector<QVector3D> nodes;
         QVector<GraphEdge> edges;
         QVector<QVector<int>> incidentEdges;
+        TopologyPlaneFit planeFit;
     };
 
     struct LoopCandidate
@@ -125,6 +138,107 @@ namespace
         return length;
     }
 
+    TopologyPlaneFit fitTopologyPlane
+    (
+        const QVector<RotaryPathTopologyRecord>& records,
+        const QVector<int>& candidateIndices,
+        double planeTolerance
+    )
+    {
+        TopologyPlaneFit fit;
+        double count = 0.0;
+        double meanX = 0.0;
+        double meanY = 0.0;
+        double meanZ = 0.0;
+
+        for (int recordIndex : candidateIndices)
+        {
+            for (const QVector3D& point : records[recordIndex].points)
+            {
+                count += 1.0;
+                meanX += point.x();
+                meanY += point.y();
+                meanZ += point.z();
+            }
+        }
+
+        if (count < 3.0)
+        {
+            return fit;
+        }
+
+        meanX /= count;
+        meanY /= count;
+        meanZ /= count;
+        double yy = 0.0;
+        double yz = 0.0;
+        double zz = 0.0;
+        double xy = 0.0;
+        double xz = 0.0;
+
+        for (int recordIndex : candidateIndices)
+        {
+            for (const QVector3D& point : records[recordIndex].points)
+            {
+                const double dx = point.x() - meanX;
+                const double dy = point.y() - meanY;
+                const double dz = point.z() - meanZ;
+                yy += dy * dy;
+                yz += dy * dz;
+                zz += dz * dz;
+                xy += dx * dy;
+                xz += dx * dz;
+            }
+        }
+
+        const double determinant = yy * zz - yz * yz;
+
+        if (std::abs(determinant) <= kEpsilon)
+        {
+            return fit;
+        }
+
+        fit.a = (xy * zz - xz * yz) / determinant;
+        fit.b = (xz * yy - xy * yz) / determinant;
+        fit.c = meanX - fit.a * meanY - fit.b * meanZ;
+        const double normalLength = std::sqrt(1.0 + fit.a * fit.a + fit.b * fit.b);
+
+        for (int recordIndex : candidateIndices)
+        {
+            for (const QVector3D& point : records[recordIndex].points)
+            {
+                const double deviation = std::abs
+                (
+                    point.x() - fit.a * point.y() - fit.b * point.z() - fit.c
+                ) / normalLength;
+                fit.maximumDeviation = std::max(fit.maximumDeviation, deviation);
+            }
+        }
+
+        fit.valid = fit.maximumDeviation <= planeTolerance;
+        return fit;
+    }
+
+    QVector3D projectToTopologyPlane(const QVector3D& point, const TopologyPlaneFit& fit)
+    {
+        if (!fit.valid)
+        {
+            return point;
+        }
+
+        const QVector3D normal
+        (
+            1.0f,
+            static_cast<float>(-fit.a),
+            static_cast<float>(-fit.b)
+        );
+        const double normalLengthSquared = static_cast<double>(normal.lengthSquared());
+        const double factor =
+            (point.x() - fit.a * point.y() - fit.b * point.z() - fit.c)
+            / normalLengthSquared;
+        return point - normal * static_cast<float>(factor);
+    }
+
     bool nativeEntityIsClosed(const CadItem* item)
     {
         if (item == nullptr || item->m_nativeEntity == nullptr)
@@ -139,8 +253,11 @@ namespace
         case DRW::ELLIPSE:
         {
             const DRW_Ellipse* ellipse = static_cast<const DRW_Ellipse*>(item->m_nativeEntity);
-            const double span = std::abs(ellipse->endparam - ellipse->staparam);
-            return std::abs(span - 2.0 * M_PI) <= 1.0e-6 || span >= 2.0 * M_PI - 1.0e-6;
+            return CadEllipseGeometryUtils::isFullEllipseParameterRange
+            (
+                ellipse->staparam,
+                ellipse->endparam
+            );
         }
         case DRW::LWPOLYLINE:
             return (static_cast<const DRW_LWPolyline*>(item->m_nativeEntity)->flags & 1) != 0;
@@ -148,6 +265,82 @@ namespace
             return (static_cast<const DRW_Polyline*>(item->m_nativeEntity)->flags & 1) != 0;
         default:
             return false;
+        }
+    }
+
+    QString entityTypeLabel(DRW::ETYPE type)
+    {
+        switch (type)
+        {
+        case DRW::LINE: return QStringLiteral("LINE");
+        case DRW::ARC: return QStringLiteral("ARC");
+        case DRW::CIRCLE: return QStringLiteral("CIRCLE");
+        case DRW::ELLIPSE: return QStringLiteral("ELLIPSE");
+        case DRW::LWPOLYLINE: return QStringLiteral("LWPOLYLINE");
+        case DRW::POLYLINE: return QStringLiteral("POLYLINE");
+        case DRW::SPLINE: return QStringLiteral("SPLINE");
+        default: return QString::number(static_cast<int>(type));
+        }
+    }
+
+    void logEllipseConnectionDiagnostics
+    (
+        const QVector<RotaryPathTopologyRecord>& records,
+        const QVector<int>& candidateIndices
+    )
+    {
+        for (int recordIndex : candidateIndices)
+        {
+            const RotaryPathTopologyRecord& record = records[recordIndex];
+
+            if (record.sourceItem == nullptr
+                || record.sourceItem->m_type != DRW::ELLIPSE
+                || record.sourceItem->m_nativeEntity == nullptr
+                || record.points.isEmpty())
+            {
+                continue;
+            }
+
+            const DRW_Ellipse* ellipse = static_cast<const DRW_Ellipse*>(record.sourceItem->m_nativeEntity);
+            double nearestEndpointDistance = std::numeric_limits<double>::max();
+
+            for (int otherIndex : candidateIndices)
+            {
+                if (otherIndex == recordIndex || records[otherIndex].points.isEmpty())
+                {
+                    continue;
+                }
+
+                for (const QVector3D& ellipseEndpoint : { record.points.front(), record.points.back() })
+                {
+                    nearestEndpointDistance = std::min
+                    (
+                        nearestEndpointDistance,
+                        distance3D(ellipseEndpoint, records[otherIndex].points.front())
+                    );
+                    nearestEndpointDistance = std::min
+                    (
+                        nearestEndpointDistance,
+                        distance3D(ellipseEndpoint, records[otherIndex].points.back())
+                    );
+                }
+            }
+
+            qInfo().noquote() << QStringLiteral
+            (
+                "[加工断面拓扑] 类型=ELLIPSE，起始参数=%1，结束参数=%2，完整=%3，"
+                "原始首点=(%4,%5,%6)，原始末点=(%7,%8,%9)，最近图元端点距离=%10 mm。"
+            )
+                .arg(ellipse->staparam, 0, 'g', 12)
+                .arg(ellipse->endparam, 0, 'g', 12)
+                .arg(record.semanticallyClosed ? QStringLiteral("是") : QStringLiteral("否"))
+                .arg(record.points.front().x(), 0, 'f', 6)
+                .arg(record.points.front().y(), 0, 'f', 6)
+                .arg(record.points.front().z(), 0, 'f', 6)
+                .arg(record.points.back().x(), 0, 'f', 6)
+                .arg(record.points.back().y(), 0, 'f', 6)
+                .arg(record.points.back().z(), 0, 'f', 6)
+                .arg(nearestEndpointDistance, 0, 'f', 6);
         }
     }
 
@@ -224,6 +417,55 @@ namespace
                 point,
                 path[segmentIndex],
                 path[segmentIndex + 1],
+                &parameter,
+                &candidateProjection
+            );
+
+            if (distance < bestDistance)
+            {
+                bestDistance = distance;
+
+                if (pathPosition != nullptr)
+                {
+                    *pathPosition = static_cast<double>(segmentIndex) + parameter;
+                }
+
+                if (projection != nullptr)
+                {
+                    *projection = candidateProjection;
+                }
+            }
+        }
+
+        return bestDistance;
+    }
+
+    double distancePointToPathOnTopologyPlane
+    (
+        const QVector3D& point,
+        const QVector<QVector3D>& path,
+        const TopologyPlaneFit& planeFit,
+        double* pathPosition = nullptr,
+        QVector3D* projection = nullptr
+    )
+    {
+        if (!planeFit.valid)
+        {
+            return distancePointToPath(point, path, pathPosition, projection);
+        }
+
+        const QVector3D projectedPoint = projectToTopologyPlane(point, planeFit);
+        double bestDistance = std::numeric_limits<double>::max();
+
+        for (int segmentIndex = 0; segmentIndex + 1 < path.size(); ++segmentIndex)
+        {
+            double parameter = 0.0;
+            QVector3D candidateProjection;
+            const double distance = pointSegmentDistance
+            (
+                projectedPoint,
+                projectToTopologyPlane(path[segmentIndex], planeFit),
+                projectToTopologyPlane(path[segmentIndex + 1], planeFit),
                 &parameter,
                 &candidateProjection
             );
@@ -419,6 +661,37 @@ namespace
         return result;
     }
 
+    QVector<QVector3D> cyclicPathBetween
+    (
+        const QVector<QVector3D>& path,
+        double startPosition,
+        double endPosition
+    )
+    {
+        if (endPosition > startPosition)
+        {
+            return pathBetween(path, startPosition, endPosition);
+        }
+
+        QVector<QVector3D> result = pathBetween
+        (
+            path,
+            startPosition,
+            static_cast<double>(path.size() - 1)
+        );
+        const QVector<QVector3D> head = pathBetween(path, 0.0, endPosition);
+
+        for (const QVector3D& point : head)
+        {
+            if (result.isEmpty() || distance3D(result.back(), point) > kEpsilon)
+            {
+                result.push_back(point);
+            }
+        }
+
+        return result;
+    }
+
     bool groupsConflict
     (
         DisjointSet& groups,
@@ -459,6 +732,16 @@ namespace
     )
     {
         GraphData graph;
+        graph.planeFit = fitTopologyPlane
+        (
+            records,
+            candidateIndices,
+            std::max(0.05, tolerance.nodeSnap * 0.25)
+        );
+        const auto topologyPoint = [&graph](const QVector3D& point)
+        {
+            return projectToTopologyPlane(point, graph.planeFit);
+        };
         graph.markerIndicesByRecord.resize(records.size());
 
         for (int recordIndex : candidateIndices)
@@ -467,8 +750,14 @@ namespace
 
             if (path.size() >= 2 && !records[recordIndex].semanticallyClosed)
             {
-                addMarker(graph.markers, recordIndex, 0.0, path.front());
-                addMarker(graph.markers, recordIndex, static_cast<double>(path.size() - 1), path.back());
+                addMarker(graph.markers, recordIndex, 0.0, topologyPoint(path.front()));
+                addMarker
+                (
+                    graph.markers,
+                    recordIndex,
+                    static_cast<double>(path.size() - 1),
+                    topologyPoint(path.back())
+                );
             }
         }
 
@@ -495,14 +784,18 @@ namespace
                         QVector3D projection;
                         const QVector3D endpoint = pointAtPosition(leftPath, endpointPosition);
 
-                        if (distancePointToPath(endpoint, rightPath, &rightPosition, &projection) <= tolerance.nodeSnap)
+                        if (distancePointToPathOnTopologyPlane
+                        (
+                            endpoint,
+                            rightPath,
+                            graph.planeFit,
+                            &rightPosition,
+                            &projection
+                        ) <= tolerance.nodeSnap)
                         {
-                            addMarker(graph.markers, leftIndex, endpointPosition, endpoint);
+                            addMarker(graph.markers, leftIndex, endpointPosition, topologyPoint(endpoint));
 
-                            if (!records[rightIndex].semanticallyClosed)
-                            {
-                                addMarker(graph.markers, rightIndex, rightPosition, projection);
-                            }
+                            addMarker(graph.markers, rightIndex, rightPosition, projection);
                         }
                     }
                 }
@@ -515,21 +808,20 @@ namespace
                         QVector3D projection;
                         const QVector3D endpoint = pointAtPosition(rightPath, endpointPosition);
 
-                        if (distancePointToPath(endpoint, leftPath, &leftPosition, &projection) <= tolerance.nodeSnap)
+                        if (distancePointToPathOnTopologyPlane
+                        (
+                            endpoint,
+                            leftPath,
+                            graph.planeFit,
+                            &leftPosition,
+                            &projection
+                        ) <= tolerance.nodeSnap)
                         {
-                            addMarker(graph.markers, rightIndex, endpointPosition, endpoint);
+                            addMarker(graph.markers, rightIndex, endpointPosition, topologyPoint(endpoint));
 
-                            if (!records[leftIndex].semanticallyClosed)
-                            {
-                                addMarker(graph.markers, leftIndex, leftPosition, projection);
-                            }
+                            addMarker(graph.markers, leftIndex, leftPosition, projection);
                         }
                     }
-                }
-
-                if (records[leftIndex].semanticallyClosed || records[rightIndex].semanticallyClosed)
-                {
-                    continue;
                 }
 
                 for (int leftSegment = 0; leftSegment + 1 < leftPath.size(); ++leftSegment)
@@ -540,12 +832,16 @@ namespace
                         double rightParameter = 0.0;
                         QVector3D leftPoint;
                         QVector3D rightPoint;
+                        const QVector3D leftStart = topologyPoint(leftPath[leftSegment]);
+                        const QVector3D leftEnd = topologyPoint(leftPath[leftSegment + 1]);
+                        const QVector3D rightStart = topologyPoint(rightPath[rightSegment]);
+                        const QVector3D rightEnd = topologyPoint(rightPath[rightSegment + 1]);
                         const double distance = segmentSegmentDistance
                         (
-                            leftPath[leftSegment],
-                            leftPath[leftSegment + 1],
-                            rightPath[rightSegment],
-                            rightPath[rightSegment + 1],
+                            leftStart,
+                            leftEnd,
+                            rightStart,
+                            rightEnd,
                             leftParameter,
                             rightParameter,
                             leftPoint,
@@ -573,15 +869,18 @@ namespace
                 continue;
             }
 
-            if (distance3D(marker.point, path.front()) <= tolerance.nodeSnap)
+            const QVector3D firstPoint = topologyPoint(path.front());
+            const QVector3D lastPoint = topologyPoint(path.back());
+
+            if (distance3D(marker.point, firstPoint) <= tolerance.nodeSnap)
             {
                 marker.position = 0.0;
-                marker.point = path.front();
+                marker.point = firstPoint;
             }
-            else if (distance3D(marker.point, path.back()) <= tolerance.nodeSnap)
+            else if (distance3D(marker.point, lastPoint) <= tolerance.nodeSnap)
             {
                 marker.position = static_cast<double>(path.size() - 1);
-                marker.point = path.back();
+                marker.point = lastPoint;
             }
         }
 
@@ -593,6 +892,43 @@ namespace
         }
 
         graph.markers = std::move(uniqueMarkers);
+
+        for (int recordIndex : candidateIndices)
+        {
+            if (!records[recordIndex].semanticallyClosed || records[recordIndex].points.size() < 3)
+            {
+                continue;
+            }
+
+            QVector<Marker> recordMarkers;
+
+            for (const Marker& marker : graph.markers)
+            {
+                if (marker.recordIndex == recordIndex)
+                {
+                    recordMarkers.push_back(marker);
+                }
+            }
+
+            if (recordMarkers.size() == 1)
+            {
+                const double period = static_cast<double>(records[recordIndex].points.size() - 1);
+                double oppositePosition = recordMarkers.front().position + period * 0.5;
+
+                if (oppositePosition >= period)
+                {
+                    oppositePosition -= period;
+                }
+
+                addMarker
+                (
+                    graph.markers,
+                    recordIndex,
+                    oppositePosition,
+                    topologyPoint(pointAtPosition(records[recordIndex].points, oppositePosition))
+                );
+            }
+        }
 
         for (int markerIndex = 0; markerIndex < graph.markers.size(); ++markerIndex)
         {
@@ -670,22 +1006,26 @@ namespace
 
         for (int recordIndex : candidateIndices)
         {
-            if (records[recordIndex].semanticallyClosed)
-            {
-                continue;
-            }
-
             QVector<int> markerIndices = graph.markerIndicesByRecord[recordIndex];
             std::sort(markerIndices.begin(), markerIndices.end(), [&graph](int left, int right)
             {
                 return graph.markers[left].position < graph.markers[right].position;
             });
 
-            for (int marker = 0; marker + 1 < markerIndices.size(); ++marker)
+            const int chunkCount = records[recordIndex].semanticallyClosed && markerIndices.size() >= 2
+                ? static_cast<int>(markerIndices.size())
+                : std::max(0, static_cast<int>(markerIndices.size()) - 1);
+
+            for (int marker = 0; marker < chunkCount; ++marker)
             {
                 const Marker& start = graph.markers[markerIndices[marker]];
-                const Marker& end = graph.markers[markerIndices[marker + 1]];
-                QVector<QVector3D> points = pathBetween(records[recordIndex].points, start.position, end.position);
+                const Marker& end = graph.markers
+                [
+                    markerIndices[(marker + 1) % markerIndices.size()]
+                ];
+                QVector<QVector3D> points = records[recordIndex].semanticallyClosed
+                    ? cyclicPathBetween(records[recordIndex].points, start.position, end.position)
+                    : pathBetween(records[recordIndex].points, start.position, end.position);
                 const double length = pathLength(points);
 
                 if (length <= tolerance.minimumEdgeLength)
@@ -694,7 +1034,8 @@ namespace
                 }
 
                 const int firstNode = nodeByRoot.value(groups.find(markerIndices[marker]));
-                const int secondNode = nodeByRoot.value(groups.find(markerIndices[marker + 1]));
+                const int secondMarker = (marker + 1) % markerIndices.size();
+                const int secondNode = nodeByRoot.value(groups.find(markerIndices[secondMarker]));
 
                 if (firstNode == secondNode)
                 {
@@ -714,6 +1055,63 @@ namespace
         }
 
         return graph;
+    }
+
+    std::vector<int> graphRecordComponentIds
+    (
+        const GraphData& graph,
+        const QVector<int>& candidateIndices
+    )
+    {
+        QHash<int, int> localByRecord;
+
+        for (int localIndex = 0; localIndex < candidateIndices.size(); ++localIndex)
+        {
+            localByRecord.insert(candidateIndices[localIndex], localIndex);
+        }
+
+        DisjointSet groups(candidateIndices.size());
+
+        for (const QVector<int>& incidentEdges : graph.incidentEdges)
+        {
+            int firstLocal = -1;
+
+            for (int edgeIndex : incidentEdges)
+            {
+                const int localIndex = localByRecord.value(graph.edges[edgeIndex].recordIndex, -1);
+
+                if (localIndex < 0)
+                {
+                    continue;
+                }
+
+                if (firstLocal < 0)
+                {
+                    firstLocal = localIndex;
+                }
+                else
+                {
+                    groups.unite(firstLocal, localIndex);
+                }
+            }
+        }
+
+        QHash<int, int> componentByRoot;
+        std::vector<int> componentIds(static_cast<size_t>(candidateIndices.size()), -1);
+
+        for (int localIndex = 0; localIndex < candidateIndices.size(); ++localIndex)
+        {
+            const int root = groups.find(localIndex);
+
+            if (!componentByRoot.contains(root))
+            {
+                componentByRoot.insert(root, componentByRoot.size());
+            }
+
+            componentIds[static_cast<size_t>(localIndex)] = componentByRoot.value(root);
+        }
+
+        return componentIds;
     }
 
     void appendEdgePoints(QVector<QVector3D>& path, const GraphEdge& edge, int fromNode)
@@ -1206,31 +1604,6 @@ RotaryPathLoopResult RotaryPathTopology::extractBestLoop
         candidateSources.push_back(m_records[index].sourceItem);
     }
 
-    const std::vector<int> componentIds = itemComponentIds(candidateSources);
-    result.connectedComponentCount = componentIds.empty()
-        ? 0
-        : (*std::max_element(componentIds.begin(), componentIds.end()) + 1);
-
-    if (result.connectedComponentCount > 1 && !preferredItems.isEmpty())
-    {
-        QSet<int> preferredComponents;
-
-        for (int localIndex = 0; localIndex < candidateSources.size(); ++localIndex)
-        {
-            if (preferredSet.contains(candidateSources[localIndex]))
-            {
-                preferredComponents.insert(componentIds[static_cast<size_t>(localIndex)]);
-            }
-        }
-
-        if (preferredComponents.size() > 1)
-        {
-            result.errorMessage = QStringLiteral("选择集中包含 %1 个互不相连的轮廓，请只选择一个加工断面。")
-                .arg(preferredComponents.size());
-            return result;
-        }
-    }
-
     QVector<LoopCandidate> candidates;
 
     for (int recordIndex : candidateIndices)
@@ -1251,6 +1624,10 @@ RotaryPathLoopResult RotaryPathTopology::extractBestLoop
     }
 
     const GraphData graph = buildGraph(m_records, candidateIndices, m_tolerance);
+    const std::vector<int> componentIds = graphRecordComponentIds(graph, candidateIndices);
+    result.connectedComponentCount = componentIds.empty()
+        ? 0
+        : (*std::max_element(componentIds.begin(), componentIds.end()) + 1);
     QVector<int> degree(graph.nodes.size(), 0);
 
     for (const GraphEdge& edge : graph.edges)
@@ -1408,6 +1785,7 @@ RotaryPathLoopResult RotaryPathTopology::extractBestLoop
 
     if (candidates.isEmpty())
     {
+        logEllipseConnectionDiagnostics(m_records, candidateIndices);
         double maximumOpenGap = 0.0;
 
         for (int left = 0; left < graph.nodes.size(); ++left)
@@ -1425,6 +1803,94 @@ RotaryPathLoopResult RotaryPathTopology::extractBestLoop
                 }
             }
         }
+
+        QVector<QStringList> typesByComponent(result.connectedComponentCount);
+        QHash<quint64, double> nearestGapByComponentPair;
+
+        for (int localIndex = 0; localIndex < candidateIndices.size(); ++localIndex)
+        {
+            const int component = componentIds[static_cast<size_t>(localIndex)];
+            const CadItem* item = m_records[candidateIndices[localIndex]].sourceItem;
+
+            if (component >= 0 && component < typesByComponent.size() && item != nullptr)
+            {
+                const QString label = entityTypeLabel(item->m_type);
+
+                if (!typesByComponent[component].contains(label))
+                {
+                    typesByComponent[component].push_back(label);
+                }
+            }
+
+            for (int rightLocal = localIndex + 1; rightLocal < candidateIndices.size(); ++rightLocal)
+            {
+                const int rightComponent = componentIds[static_cast<size_t>(rightLocal)];
+
+                if (component < 0 || rightComponent < 0 || component == rightComponent)
+                {
+                    continue;
+                }
+
+                double nearestGap = std::numeric_limits<double>::max();
+                const QVector<QVector3D>& leftPath = m_records[candidateIndices[localIndex]].points;
+                const QVector<QVector3D>& rightPath = m_records[candidateIndices[rightLocal]].points;
+
+                for (const QVector3D& point : leftPath)
+                {
+                    nearestGap = std::min
+                    (
+                        nearestGap,
+                        distancePointToPathOnTopologyPlane(point, rightPath, graph.planeFit)
+                    );
+                }
+
+                const int firstComponent = std::min(component, rightComponent);
+                const int secondComponent = std::max(component, rightComponent);
+                const quint64 key = (static_cast<quint64>(static_cast<quint32>(firstComponent)) << 32)
+                    | static_cast<quint32>(secondComponent);
+
+                if (!nearestGapByComponentPair.contains(key)
+                    || nearestGap < nearestGapByComponentPair.value(key))
+                {
+                    nearestGapByComponentPair.insert(key, nearestGap);
+                }
+            }
+        }
+
+        QStringList componentDetails;
+
+        for (int component = 0; component < typesByComponent.size(); ++component)
+        {
+            componentDetails.push_back
+            (
+                QStringLiteral("%1:[%2]").arg(component + 1).arg(typesByComponent[component].join(QLatin1Char(',')))
+            );
+        }
+
+        QStringList gapDetails;
+
+        for (auto gap = nearestGapByComponentPair.cbegin(); gap != nearestGapByComponentPair.cend(); ++gap)
+        {
+            const int firstComponent = static_cast<int>(gap.key() >> 32);
+            const int secondComponent = static_cast<int>(gap.key() & 0xffffffffu);
+            gapDetails.push_back
+            (
+                QStringLiteral("%1-%2:%3 mm")
+                    .arg(firstComponent + 1)
+                    .arg(secondComponent + 1)
+                    .arg(gap.value(), 0, 'f', 3)
+            );
+        }
+
+        const QString diagnostic = QStringLiteral
+        (
+            "候选图元 %1 个，拓扑分量 %2 个；分量实体 %3；最近分量间隙 %4；平面最大偏差 %5 mm。"
+        )
+            .arg(candidateIndices.size())
+            .arg(result.connectedComponentCount)
+            .arg(componentDetails.isEmpty() ? QStringLiteral("无") : componentDetails.join(QStringLiteral("；")))
+            .arg(gapDetails.isEmpty() ? QStringLiteral("无") : gapDetails.join(QStringLiteral("，")))
+            .arg(graph.planeFit.maximumDeviation, 0, 'f', 3);
 
         if (result.openNodeCount == 2 && maximumOpenGap > m_tolerance.closure)
         {
@@ -1450,7 +1916,30 @@ RotaryPathLoopResult RotaryPathTopology::extractBestLoop
                 .arg(maximumOpenGap, 0, 'f', 3);
         }
 
+        result.errorMessage += QLatin1Char('\n') + diagnostic;
+        qInfo().noquote() << QStringLiteral("[加工断面拓扑]") << diagnostic;
+
         return result;
+    }
+
+    if (result.connectedComponentCount > 1 && !preferredItems.isEmpty())
+    {
+        QSet<int> preferredComponents;
+
+        for (int localIndex = 0; localIndex < candidateSources.size(); ++localIndex)
+        {
+            if (preferredSet.contains(candidateSources[localIndex]))
+            {
+                preferredComponents.insert(componentIds[static_cast<size_t>(localIndex)]);
+            }
+        }
+
+        if (preferredComponents.size() > 1)
+        {
+            result.errorMessage = QStringLiteral("最终拓扑包含 %1 个互不相连的候选分量，请只选择一个加工断面。")
+                .arg(preferredComponents.size());
+            return result;
+        }
     }
 
     auto preferredCount = [&preferredSet, this](const LoopCandidate& candidate)

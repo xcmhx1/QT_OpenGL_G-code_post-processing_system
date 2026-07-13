@@ -13,6 +13,30 @@ struct RotaryCutBoundaryProfileSample
     double x = 0.0;
 };
 
+struct RotaryCutBoundaryUnwrappedSample
+{
+    double x = 0.0;
+    double perimeterPosition = 0.0;
+};
+
+enum class RotaryBoundarySide
+{
+    Before,
+    OnBoundary,
+    After,
+    Ambiguous
+};
+
+struct RotaryCutPlaneFit
+{
+    bool valid = false;
+    double a = 0.0;
+    double b = 0.0;
+    double c = 0.0;
+    double rmsDeviation = 0.0;
+    double maximumDeviation = 0.0;
+};
+
 struct RotaryCutBoundaryAnalysis
 {
     bool valid = false;
@@ -25,12 +49,25 @@ struct RotaryCutBoundaryAnalysis
     int openNodeCount = 0;
     int branchNodeCount = 0;
     int ignoredBranchItemCount = 0;
+    double signedPerimeterTravel = 0.0;
     double windingNumber = 0.0;
+    double perimeterCoverage = 0.0;
+    double perimeterTravelRatio = 0.0;
+    double backtrackRatio = 0.0;
+    double sectionPerimeter = 0.0;
+    double initialPerimeterPosition = 0.0;
+    bool singleValuedProfile = false;
+    int multiValuePhaseCount = 0;
+    double maximumMultiValueXSpan = 0.0;
+    int ambiguousProjectionPointCount = 0;
+    double maximumPerimeterJump = 0.0;
     double maximumSurfaceDeviation = 0.0;
     QVector<QVector3D> orderedPath;
     QVector<CadItem*> boundaryItems;
     QVector<QVector2D> sectionHull;
     QVector<RotaryCutBoundaryProfileSample> boundaryProfile;
+    QVector<RotaryCutBoundaryUnwrappedSample> unwrappedBoundary;
+    RotaryCutPlaneFit planeFit;
     QString errorMessage;
 };
 
@@ -50,5 +87,19 @@ public:
         const RotaryCutBoundaryAnalysis& analysis,
         const QVector3D& point,
         double& boundaryX
+    );
+
+    static RotaryBoundarySide classifyPointRelativeToBoundary
+    (
+        const RotaryCutBoundaryAnalysis& analysis,
+        const QVector3D& point,
+        double tolerance = 1.0
+    );
+
+    static bool boundariesIntersect
+    (
+        const RotaryCutBoundaryAnalysis& left,
+        const RotaryCutBoundaryAnalysis& right,
+        double tolerance = 1.0e-6
     );
 };

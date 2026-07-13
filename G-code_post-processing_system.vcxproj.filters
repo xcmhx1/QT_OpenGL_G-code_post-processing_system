@@ -600,6 +600,9 @@
     <ClInclude Include="include\CadEllipseItem.h">
       <Filter>Header Files\Item</Filter>
     </ClInclude>
+    <ClInclude Include="include\CadEllipseGeometry.h">
+      <Filter>Header Files\Item</Filter>
+    </ClInclude>
     <ClInclude Include="include\CadLineItem.h">
       <Filter>Header Files\Item</Filter>
     </ClInclude>
