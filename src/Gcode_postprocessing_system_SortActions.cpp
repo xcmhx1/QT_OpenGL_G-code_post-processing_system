@@ -14,6 +14,7 @@
 #include <QMessageBox>
 #include <QSet>
 #include <QStatusBar>
+#include <QStringList>
 
 #include <algorithm>
 #include <cmath>
@@ -179,6 +180,21 @@ namespace
         QVector<CadItem*> duplicateItems;
     };
 
+    struct BoundaryOrderDirectionStats
+    {
+        int expectedCount = 0;
+        int wrongCount = 0;
+        int onBoundaryCount = 0;
+        int ambiguousCount = 0;
+        int stateChangeCount = 0;
+        double wrongRatio = 0.0;
+        double maximumReverseRunLength = 0.0;
+        double abnormalPerimeterSpan = 0.0;
+        bool allWrongPointsTolerable = true;
+        bool significantReverse = false;
+        QVector<int> wrongIndices;
+    };
+
     std::vector<ProcessPathOption> buildPathOptionsForItem(const CadItem* item, SortStrategy strategy);
     bool isPointLexicographicallyLess(const QVector3D& left, const QVector3D& right)
     {
@@ -208,6 +224,241 @@ namespace
         const double dy = static_cast<double>(left.y()) - static_cast<double>(right.y());
         const double dz = static_cast<double>(left.z()) - static_cast<double>(right.z());
         return dx * dx + dy * dy + dz * dz;
+    }
+
+    double circularPerimeterDistance(double left, double right, double perimeter)
+    {
+        if (perimeter <= kSortEpsilon)
+        {
+            return std::abs(left - right);
+        }
+
+        const double distance = std::abs(left - right);
+        return std::min(distance, std::max(0.0, perimeter - distance));
+    }
+
+    double minimumCircularCoveringSpan(QVector<double> positions, double perimeter)
+    {
+        if (positions.size() < 2 || perimeter <= kSortEpsilon)
+        {
+            return 0.0;
+        }
+
+        std::sort(positions.begin(), positions.end());
+        double maximumGap = 0.0;
+
+        for (int index = 0; index + 1 < positions.size(); ++index)
+        {
+            maximumGap = std::max(maximumGap, positions[index + 1] - positions[index]);
+        }
+
+        maximumGap = std::max(maximumGap, positions.front() + perimeter - positions.back());
+        return std::max(0.0, perimeter - maximumGap);
+    }
+
+    QString formatDiagnosticValues(const QVector<double>& values)
+    {
+        QStringList parts;
+        parts.reserve(values.size());
+
+        for (const double value : values)
+        {
+            parts.push_back(QString::number(value, 'f', 6));
+        }
+
+        return QStringLiteral("[%1]").arg(parts.join(QStringLiteral(", ")));
+    }
+
+    QString formatDiagnosticIndices(const QVector<int>& indices)
+    {
+        QStringList parts;
+        parts.reserve(indices.size());
+
+        for (const int index : indices)
+        {
+            parts.push_back(QString::number(index));
+        }
+
+        return QStringLiteral("[%1]").arg(parts.join(QStringLiteral(", ")));
+    }
+
+    BoundaryOrderDirectionStats analyzeBoundaryOrderDirection
+    (
+        const RotaryCutBoundaryAnalysis& referenceBoundary,
+        const RotaryCutBoundaryAnalysis& candidateBoundary,
+        RotaryBoundarySide expectedSide,
+        double tolerance,
+        const QString& diagnosticLabel
+    )
+    {
+        BoundaryOrderDirectionStats stats;
+        const QVector<QVector3D> testPoints = RotaryCutBoundaryAnalyzer::buildBoundaryOrderTestPoints
+        (
+            candidateBoundary,
+            tolerance
+        );
+        const double safeTolerance = std::max(1.0e-6, tolerance);
+        const double seamTolerance = std::max
+        (
+            safeTolerance,
+            referenceBoundary.sectionPerimeter * 0.01
+        );
+        const double duplicateToleranceSquared = std::max
+        (
+            kSortEpsilon,
+            safeTolerance * safeTolerance * 1.0e-12
+        );
+        QVector<bool> wrongMask(testPoints.size(), false);
+        QVector<double> mappedPositions(testPoints.size(), 0.0);
+        QVector<int> directionalStates;
+        directionalStates.reserve(testPoints.size());
+
+        for (int index = 0; index < testPoints.size(); ++index)
+        {
+            RotaryBoundaryPointClassificationDiagnostics diagnostics;
+            const RotaryBoundarySide side = RotaryCutBoundaryAnalyzer::classifyPointRelativeToBoundary
+            (
+                referenceBoundary,
+                testPoints[index],
+                tolerance,
+                &diagnostics
+            );
+            mappedPositions[index] = diagnostics.mappedPerimeterPosition;
+
+            if (side == expectedSide)
+            {
+                ++stats.expectedCount;
+                directionalStates.push_back(0);
+                continue;
+            }
+
+            if (side == RotaryBoundarySide::OnBoundary)
+            {
+                ++stats.onBoundaryCount;
+                continue;
+            }
+
+            if (side == RotaryBoundarySide::Ambiguous)
+            {
+                ++stats.ambiguousCount;
+                continue;
+            }
+
+            ++stats.wrongCount;
+            directionalStates.push_back(1);
+            wrongMask[index] = true;
+            stats.wrongIndices.push_back(index);
+
+            const bool isFirst = index == 0;
+            const bool isLast = index + 1 == testPoints.size();
+            const bool repeatsFirst = index > 0
+                && spatialDistanceSquared(testPoints[index], testPoints.front()) <= duplicateToleranceSquared;
+            const bool nearSeam = diagnostics.validProjection
+                && diagnostics.distanceToPerimeterSeam <= seamTolerance;
+            const bool nearBoundary = diagnostics.validProjection
+                && diagnostics.minimumBoundaryDistance <= safeTolerance * 2.0;
+            stats.allWrongPointsTolerable = stats.allWrongPointsTolerable
+                && (nearSeam || repeatsFirst || nearBoundary);
+
+            qWarning().noquote() << QStringLiteral
+            (
+                "[智能分段] %1 错误侧别点：索引=%2，X/Y/Z=(%3, %4, %5)，首点=%6，末点=%7，与首点重复=%8，周向位置=%9，接缝距离=%10，位于接缝=%11，边界容差附近=%12，边界距离=%13，射线交点X=%14，去重交点X=%15，去重前/后=%16/%17。"
+            )
+                .arg(diagnosticLabel)
+                .arg(index)
+                .arg(testPoints[index].x(), 0, 'f', 6)
+                .arg(testPoints[index].y(), 0, 'f', 6)
+                .arg(testPoints[index].z(), 0, 'f', 6)
+                .arg(isFirst ? QStringLiteral("是") : QStringLiteral("否"))
+                .arg(isLast ? QStringLiteral("是") : QStringLiteral("否"))
+                .arg(repeatsFirst ? QStringLiteral("是") : QStringLiteral("否"))
+                .arg(diagnostics.mappedPerimeterPosition, 0, 'f', 6)
+                .arg(diagnostics.distanceToPerimeterSeam, 0, 'f', 6)
+                .arg(nearSeam ? QStringLiteral("是") : QStringLiteral("否"))
+                .arg(nearBoundary ? QStringLiteral("是") : QStringLiteral("否"))
+                .arg(diagnostics.minimumBoundaryDistance, 0, 'f', 6)
+                .arg(formatDiagnosticValues(diagnostics.rawRayIntersectionXs))
+                .arg(formatDiagnosticValues(diagnostics.deduplicatedRayIntersectionXs))
+                .arg(diagnostics.rawRayIntersectionXs.size())
+                .arg(diagnostics.deduplicatedRayIntersectionXs.size());
+        }
+
+        const int classifiedCount = stats.expectedCount + stats.wrongCount;
+        stats.wrongRatio = classifiedCount > 0
+            ? static_cast<double>(stats.wrongCount) / static_cast<double>(classifiedCount)
+            : 0.0;
+
+        if (directionalStates.size() > 1)
+        {
+            for (int index = 0; index < directionalStates.size(); ++index)
+            {
+                if (directionalStates[index] != directionalStates[(index + 1) % directionalStates.size()])
+                {
+                    ++stats.stateChangeCount;
+                }
+            }
+        }
+
+        QVector<double> wrongPositions;
+
+        for (const int index : stats.wrongIndices)
+        {
+            if (index >= 0 && index < mappedPositions.size())
+            {
+                wrongPositions.push_back(mappedPositions[index]);
+            }
+        }
+
+        stats.abnormalPerimeterSpan = minimumCircularCoveringSpan
+        (
+            wrongPositions,
+            referenceBoundary.sectionPerimeter
+        );
+
+        if (stats.wrongCount == testPoints.size() && !testPoints.isEmpty())
+        {
+            stats.maximumReverseRunLength = referenceBoundary.sectionPerimeter;
+        }
+        else
+        {
+            for (int index = 0; index < wrongMask.size(); ++index)
+            {
+                const int previousIndex = (index + wrongMask.size() - 1) % wrongMask.size();
+
+                if (!wrongMask[index] || wrongMask[previousIndex])
+                {
+                    continue;
+                }
+
+                double runLength = 0.0;
+                int currentIndex = index;
+                int previousWrongIndex = -1;
+
+                for (int step = 0; step < wrongMask.size() && wrongMask[currentIndex]; ++step)
+                {
+                    if (previousWrongIndex >= 0)
+                    {
+                        runLength += circularPerimeterDistance
+                        (
+                            mappedPositions[previousWrongIndex],
+                            mappedPositions[currentIndex],
+                            referenceBoundary.sectionPerimeter
+                        );
+                    }
+
+                    previousWrongIndex = currentIndex;
+                    currentIndex = (currentIndex + 1) % wrongMask.size();
+                }
+
+                stats.maximumReverseRunLength = std::max(stats.maximumReverseRunLength, runLength);
+            }
+        }
+
+        stats.significantReverse = stats.wrongCount > 0
+            && (!stats.allWrongPointsTolerable
+                || stats.maximumReverseRunLength > safeTolerance
+                || stats.abnormalPerimeterSpan > safeTolerance);
+        return stats;
     }
 
     bool isPointNearAnyPreferredStart(const QVector3D& point, const std::vector<QVector3D>& preferredPoints, double maxDistance)
@@ -3331,78 +3582,86 @@ namespace
                         .arg(boundaryIndex + 1));
                 }
 
-                int rightBefore = 0;
-                int rightAfter = 0;
-                int rightOnBoundary = 0;
-                int rightAmbiguous = 0;
-
-                for (const QVector3D& point : rightAnalysis->orderedPath)
+                const BoundaryOrderDirectionStats rightToLeft = analyzeBoundaryOrderDirection
+                (
+                    *leftAnalysis,
+                    *rightAnalysis,
+                    RotaryBoundarySide::After,
+                    kEndCutConnectionTolerance,
+                    QStringLiteral("相邻断面 %1/%2 右对左").arg(boundaryIndex).arg(boundaryIndex + 1)
+                );
+                const BoundaryOrderDirectionStats leftToRight = analyzeBoundaryOrderDirection
+                (
+                    *rightAnalysis,
+                    *leftAnalysis,
+                    RotaryBoundarySide::Before,
+                    kEndCutConnectionTolerance,
+                    QStringLiteral("相邻断面 %1/%2 左对右").arg(boundaryIndex).arg(boundaryIndex + 1)
+                );
+                const double comparisonPerimeter = std::min
+                (
+                    leftAnalysis->sectionPerimeter,
+                    rightAnalysis->sectionPerimeter
+                );
+                const double maximumReverseSpan = comparisonPerimeter * 0.01;
+                const auto directionIsStable = [maximumReverseSpan](const BoundaryOrderDirectionStats& stats)
                 {
-                    const RotaryBoundarySide side = RotaryCutBoundaryAnalyzer::classifyPointRelativeToBoundary
-                    (
-                        *leftAnalysis,
-                        point,
-                        kEndCutConnectionTolerance
-                    );
+                    return stats.ambiguousCount == 0
+                        && stats.expectedCount > stats.wrongCount
+                        && stats.expectedCount > 0
+                        && stats.wrongRatio <= 0.02
+                        && stats.allWrongPointsTolerable
+                        && stats.stateChangeCount <= 2
+                        && stats.maximumReverseRunLength <= maximumReverseSpan
+                        && stats.abnormalPerimeterSpan <= maximumReverseSpan;
+                };
+                const bool bidirectionalReverse = rightToLeft.significantReverse
+                    && leftToRight.significantReverse;
 
-                    rightBefore += side == RotaryBoundarySide::Before ? 1 : 0;
-                    rightAfter += side == RotaryBoundarySide::After ? 1 : 0;
-                    rightOnBoundary += side == RotaryBoundarySide::OnBoundary ? 1 : 0;
-                    rightAmbiguous += side == RotaryBoundarySide::Ambiguous ? 1 : 0;
-                }
-
-                int leftBefore = 0;
-                int leftAfter = 0;
-                int leftOnBoundary = 0;
-                int leftAmbiguous = 0;
-
-                for (const QVector3D& point : leftAnalysis->orderedPath)
+                if (!directionIsStable(rightToLeft)
+                    || !directionIsStable(leftToRight)
+                    || bidirectionalReverse)
                 {
-                    const RotaryBoundarySide side = RotaryCutBoundaryAnalyzer::classifyPointRelativeToBoundary
+                    return fail(QStringLiteral
                     (
-                        *rightAnalysis,
-                        point,
-                        kEndCutConnectionTolerance
-                    );
-
-                    leftBefore += side == RotaryBoundarySide::Before ? 1 : 0;
-                    leftAfter += side == RotaryBoundarySide::After ? 1 : 0;
-                    leftOnBoundary += side == RotaryBoundarySide::OnBoundary ? 1 : 0;
-                    leftAmbiguous += side == RotaryBoundarySide::Ambiguous ? 1 : 0;
+                        "相邻断面顺序不确定：断面 %1/%2；右对左 After=%3，错误=%4（%5%），OnBoundary=%6，Ambiguous=%7，错误索引=%8，最大连续反向=%9 mm，异常周向跨度=%10 mm，接缝/边界容错=%11，状态切换=%12；左对右 Before=%13，错误=%14（%15%），OnBoundary=%16，Ambiguous=%17，错误索引=%18，最大连续反向=%19 mm，异常周向跨度=%20 mm，接缝/边界容错=%21，状态切换=%22；双向明显反向=%23。"
+                    )
+                        .arg(boundaryIndex)
+                        .arg(boundaryIndex + 1)
+                        .arg(rightToLeft.expectedCount)
+                        .arg(rightToLeft.wrongCount)
+                        .arg(rightToLeft.wrongRatio * 100.0, 0, 'f', 2)
+                        .arg(rightToLeft.onBoundaryCount)
+                        .arg(rightToLeft.ambiguousCount)
+                        .arg(formatDiagnosticIndices(rightToLeft.wrongIndices))
+                        .arg(rightToLeft.maximumReverseRunLength, 0, 'f', 6)
+                        .arg(rightToLeft.abnormalPerimeterSpan, 0, 'f', 6)
+                        .arg(rightToLeft.allWrongPointsTolerable ? QStringLiteral("是") : QStringLiteral("否"))
+                        .arg(rightToLeft.stateChangeCount)
+                        .arg(leftToRight.expectedCount)
+                        .arg(leftToRight.wrongCount)
+                        .arg(leftToRight.wrongRatio * 100.0, 0, 'f', 2)
+                        .arg(leftToRight.onBoundaryCount)
+                        .arg(leftToRight.ambiguousCount)
+                        .arg(formatDiagnosticIndices(leftToRight.wrongIndices))
+                        .arg(leftToRight.maximumReverseRunLength, 0, 'f', 6)
+                        .arg(leftToRight.abnormalPerimeterSpan, 0, 'f', 6)
+                        .arg(leftToRight.allWrongPointsTolerable ? QStringLiteral("是") : QStringLiteral("否"))
+                        .arg(leftToRight.stateChangeCount)
+                        .arg(bidirectionalReverse ? QStringLiteral("是") : QStringLiteral("否")));
                 }
 
                 qInfo().noquote() << QStringLiteral
                 (
-                    "[智能分段] 相邻断面 %1/%2：右对左 Before=%3 After=%4 OnBoundary=%5 Ambiguous=%6；左对右 Before=%7 After=%8 OnBoundary=%9 Ambiguous=%10。"
+                    "[智能分段] 相邻断面 %1/%2 顺序确认：右对左 After=%3，接缝异常=%4；左对右 Before=%5，接缝异常=%6；边界不相交，异常周向跨度=%7 mm。"
                 )
                     .arg(boundaryIndex)
                     .arg(boundaryIndex + 1)
-                    .arg(rightBefore)
-                    .arg(rightAfter)
-                    .arg(rightOnBoundary)
-                    .arg(rightAmbiguous)
-                    .arg(leftBefore)
-                    .arg(leftAfter)
-                    .arg(leftOnBoundary)
-                    .arg(leftAmbiguous);
-
-                if (rightBefore > 0 || rightAmbiguous > 0 || leftAfter > 0 || leftAmbiguous > 0)
-                {
-                    return fail(QStringLiteral
-                    (
-                        "相邻断面顺序不确定：断面 %1/%2，右对左 Before=%3 After=%4 OnBoundary=%5 Ambiguous=%6，左对右 Before=%7 After=%8 OnBoundary=%9 Ambiguous=%10。"
-                    )
-                        .arg(boundaryIndex)
-                        .arg(boundaryIndex + 1)
-                        .arg(rightBefore)
-                        .arg(rightAfter)
-                        .arg(rightOnBoundary)
-                        .arg(rightAmbiguous)
-                        .arg(leftBefore)
-                        .arg(leftAfter)
-                        .arg(leftOnBoundary)
-                        .arg(leftAmbiguous));
-                }
+                    .arg(rightToLeft.expectedCount)
+                    .arg(rightToLeft.wrongCount)
+                    .arg(leftToRight.expectedCount)
+                    .arg(leftToRight.wrongCount)
+                    .arg(std::max(rightToLeft.abnormalPerimeterSpan, leftToRight.abnormalPerimeterSpan), 0, 'f', 6);
             }
         }
         else

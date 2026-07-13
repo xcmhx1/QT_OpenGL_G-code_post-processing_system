@@ -1116,9 +1116,15 @@ RotaryBoundarySide RotaryCutBoundaryAnalyzer::classifyPointRelativeToBoundary
 (
     const RotaryCutBoundaryAnalysis& analysis,
     const QVector3D& point,
-    double tolerance
+    double tolerance,
+    RotaryBoundaryPointClassificationDiagnostics* diagnostics
 )
 {
+    if (diagnostics != nullptr)
+    {
+        *diagnostics = {};
+    }
+
     if (!analysis.valid
         || analysis.sectionHull.size() < 3
         || analysis.unwrappedBoundary.size() < 2
@@ -1160,6 +1166,24 @@ RotaryBoundarySide RotaryCutBoundaryAnalyzer::classifyPointRelativeToBoundary
 
     const double perimeter = analysis.sectionPerimeter;
     double queryPosition = wrappedPosition - analysis.initialPerimeterPosition;
+    double normalizedQueryPosition = std::fmod(queryPosition, perimeter);
+
+    if (normalizedQueryPosition < 0.0)
+    {
+        normalizedQueryPosition += perimeter;
+    }
+
+    if (diagnostics != nullptr)
+    {
+        diagnostics->validProjection = true;
+        diagnostics->mappedPerimeterPosition = normalizedQueryPosition;
+        diagnostics->distanceToPerimeterSeam = std::min
+        (
+            normalizedQueryPosition,
+            perimeter - normalizedQueryPosition
+        );
+    }
+
     double minimumPosition = analysis.unwrappedBoundary.front().perimeterPosition;
     double maximumPosition = minimumPosition;
 
@@ -1176,7 +1200,17 @@ RotaryBoundarySide RotaryCutBoundaryAnalyzer::classifyPointRelativeToBoundary
 
     const double queryX = point.x();
     const double safeTolerance = std::max(1.0e-6, tolerance);
-    int crossings = 0;
+    struct RayIntersection
+    {
+        double x = 0.0;
+        int segmentIndex = -1;
+        int periodicCopy = 0;
+    };
+
+    std::vector<RayIntersection> rawIntersections;
+    double minimumBoundaryDistance = std::numeric_limits<double>::max();
+    bool onBoundary = false;
+    int periodicCopy = -1;
 
     for (const double shift : { -perimeter, 0.0, perimeter })
     {
@@ -1201,10 +1235,12 @@ RotaryBoundarySide RotaryCutBoundaryAnalyzer::classifyPointRelativeToBoundary
                 );
                 const double nearestX = first.x + edgeX * factor;
                 const double nearestS = firstS + edgeS * factor;
+                const double boundaryDistance = std::hypot(queryX - nearestX, queryPosition - nearestS);
+                minimumBoundaryDistance = std::min(minimumBoundaryDistance, boundaryDistance);
 
-                if (std::hypot(queryX - nearestX, queryPosition - nearestS) <= safeTolerance)
+                if (boundaryDistance <= safeTolerance)
                 {
-                    return RotaryBoundarySide::OnBoundary;
+                    onBoundary = true;
                 }
             }
 
@@ -1218,19 +1254,170 @@ RotaryBoundarySide RotaryCutBoundaryAnalyzer::classifyPointRelativeToBoundary
 
             const double factor = (queryPosition - firstS) / edgeS;
             const double intersectionX = first.x + edgeX * factor;
+            rawIntersections.push_back({ intersectionX, index, periodicCopy });
 
             if (std::abs(intersectionX - queryX) <= safeTolerance)
             {
-                return RotaryBoundarySide::OnBoundary;
+                onBoundary = true;
+            }
+        }
+
+        ++periodicCopy;
+    }
+
+    std::sort
+    (
+        rawIntersections.begin(),
+        rawIntersections.end(),
+        [](const RayIntersection& left, const RayIntersection& right)
+        {
+            if (left.x != right.x)
+            {
+                return left.x < right.x;
             }
 
-            crossings += intersectionX < queryX - safeTolerance ? 1 : 0;
+            if (left.segmentIndex != right.segmentIndex)
+            {
+                return left.segmentIndex < right.segmentIndex;
+            }
+
+            return left.periodicCopy < right.periodicCopy;
+        }
+    );
+
+    const int segmentCount = analysis.unwrappedBoundary.size() - 1;
+    std::vector<RayIntersection> uniqueIntersections;
+    uniqueIntersections.reserve(rawIntersections.size());
+
+    for (const RayIntersection& intersection : rawIntersections)
+    {
+        bool merged = false;
+
+        for (auto existing = uniqueIntersections.rbegin(); existing != uniqueIntersections.rend(); ++existing)
+        {
+            if (intersection.x - existing->x > safeTolerance)
+            {
+                break;
+            }
+
+            const int segmentDistance = std::abs(intersection.segmentIndex - existing->segmentIndex);
+            const bool sameSourceSegment = intersection.segmentIndex == existing->segmentIndex;
+            const bool adjacentSourceSegments = segmentDistance == 1
+                || (segmentCount > 1 && segmentDistance == segmentCount - 1);
+
+            if (std::abs(intersection.x - existing->x) <= safeTolerance
+                && (sameSourceSegment || adjacentSourceSegments))
+            {
+                existing->x = (existing->x + intersection.x) * 0.5;
+                merged = true;
+                break;
+            }
+        }
+
+        if (!merged)
+        {
+            uniqueIntersections.push_back(intersection);
         }
     }
+
+    if (diagnostics != nullptr)
+    {
+        diagnostics->minimumBoundaryDistance = std::isfinite(minimumBoundaryDistance)
+            ? minimumBoundaryDistance
+            : 0.0;
+
+        for (const RayIntersection& intersection : rawIntersections)
+        {
+            diagnostics->rawRayIntersectionXs.push_back(intersection.x);
+        }
+
+        for (const RayIntersection& intersection : uniqueIntersections)
+        {
+            diagnostics->deduplicatedRayIntersectionXs.push_back(intersection.x);
+        }
+    }
+
+    if (onBoundary)
+    {
+        return RotaryBoundarySide::OnBoundary;
+    }
+
+    const int crossings = static_cast<int>(std::count_if
+    (
+        uniqueIntersections.cbegin(),
+        uniqueIntersections.cend(),
+        [queryX, safeTolerance](const RayIntersection& intersection)
+        {
+            return intersection.x < queryX - safeTolerance;
+        }
+    ));
 
     return (crossings % 2) == 0
         ? RotaryBoundarySide::Before
         : RotaryBoundarySide::After;
+}
+
+QVector<QVector3D> RotaryCutBoundaryAnalyzer::buildBoundaryOrderTestPoints
+(
+    const RotaryCutBoundaryAnalysis& analysis,
+    double tolerance
+)
+{
+    QVector<QVector3D> testPoints;
+
+    if (!analysis.valid || analysis.orderedPath.size() < 2)
+    {
+        return testPoints;
+    }
+
+    const double duplicateTolerance = std::max
+    (
+        kSamplingDuplicateTolerance,
+        std::abs(tolerance) * 1.0e-6
+    );
+    QVector<QVector3D> path;
+    path.reserve(analysis.orderedPath.size());
+
+    for (const QVector3D& point : analysis.orderedPath)
+    {
+        if (path.isEmpty() || distance3D(path.back(), point) > duplicateTolerance)
+        {
+            path.push_back(point);
+        }
+    }
+
+    const bool repeatedClosingPoint = path.size() > 1
+        && distance3D(path.front(), path.back()) <= duplicateTolerance;
+
+    if (repeatedClosingPoint)
+    {
+        path.removeLast();
+    }
+
+    if (path.size() < 2)
+    {
+        return testPoints;
+    }
+
+    testPoints.reserve(path.size());
+
+    for (int index = 0; index + 1 < path.size(); ++index)
+    {
+        if (distance3D(path[index], path[index + 1]) <= duplicateTolerance)
+        {
+            continue;
+        }
+
+        testPoints.push_back((path[index] + path[index + 1]) * 0.5f);
+    }
+
+    if ((repeatedClosingPoint || analysis.closureGap <= duplicateTolerance)
+        && distance3D(path.back(), path.front()) > duplicateTolerance)
+    {
+        testPoints.push_back((path.back() + path.front()) * 0.5f);
+    }
+
+    return testPoints;
 }
 
 bool RotaryCutBoundaryAnalyzer::boundariesIntersect

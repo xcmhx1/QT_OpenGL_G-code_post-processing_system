@@ -27,6 +27,16 @@ enum class RotaryBoundarySide
     Ambiguous
 };
 
+struct RotaryBoundaryPointClassificationDiagnostics
+{
+    bool validProjection = false;
+    double mappedPerimeterPosition = 0.0;
+    double distanceToPerimeterSeam = 0.0;
+    double minimumBoundaryDistance = 0.0;
+    QVector<double> rawRayIntersectionXs;
+    QVector<double> deduplicatedRayIntersectionXs;
+};
+
 struct RotaryCutPlaneFit
 {
     bool valid = false;
@@ -93,6 +103,13 @@ public:
     (
         const RotaryCutBoundaryAnalysis& analysis,
         const QVector3D& point,
+        double tolerance = 1.0,
+        RotaryBoundaryPointClassificationDiagnostics* diagnostics = nullptr
+    );
+
+    static QVector<QVector3D> buildBoundaryOrderTestPoints
+    (
+        const RotaryCutBoundaryAnalysis& analysis,
         double tolerance = 1.0
     );
 
