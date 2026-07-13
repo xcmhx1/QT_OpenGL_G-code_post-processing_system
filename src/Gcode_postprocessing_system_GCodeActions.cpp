@@ -4,6 +4,8 @@
 
 #include "CadItem.h"
 #include "CadProcessVisualUtils.h"
+#include "application/messaging/DebugMessageSink.h"
+#include "application/messaging/UserInterfaceMessageSink.h"
 
 #include <QDir>
 #include <QFileDialog>
@@ -21,6 +23,31 @@ namespace
     constexpr double kPi = 3.14159265358979323846;
     constexpr double kTwoPi = 6.28318530717958647692;
     constexpr double kDedupTolerance = 1.0e-6;
+
+    Diagnostic makeExportDiagnostic
+    (
+        const OperationContext& context,
+        DiagnosticCode code,
+        DiagnosticSeverity severity,
+        const QString& operation,
+        const QString& stage,
+        const QString& userMessage,
+        const QString& technicalDetail = QString(),
+        const QVariantMap& diagnosticContext = QVariantMap()
+    )
+    {
+        Diagnostic diagnostic;
+        diagnostic.code = code;
+        diagnostic.severity = severity;
+        diagnostic.component = QStringLiteral("GCodeExport");
+        diagnostic.operation = operation;
+        diagnostic.stage = stage;
+        diagnostic.userMessage = userMessage;
+        diagnostic.technicalDetail = technicalDetail;
+        diagnostic.correlationId = context.correlationId;
+        diagnostic.context = diagnosticContext;
+        return diagnostic;
+    }
 
     qint64 quantizeDedupValue(double value)
     {
@@ -347,14 +374,35 @@ QString Gcode_postprocessing_system::defaultGCodeExportPathForCurrentDocument() 
 
 bool Gcode_postprocessing_system::prepareDocumentForGCodeExport(GGenerator::GenerationMode generationMode)
 {
+    return prepareDocumentForGCodeExport
+    (
+        generationMode,
+        createOperationContext(QStringLiteral("export-gcode"))
+    ).succeeded();
+}
+
+OperationReport Gcode_postprocessing_system::prepareDocumentForGCodeExport
+(
+    GGenerator::GenerationMode generationMode,
+    const OperationContext& context
+)
+{
+    OperationReport report;
     const int excludedCount = refreshWasteProcessingExclusions();
 
     if (excludedCount > 0)
     {
-        ui->openGLWidget->appendCommandMessage
+        report.addDiagnostic(makeExportDiagnostic
         (
-            QStringLiteral("废面规则已排除 %1 个图元，G代码不会包含这些图元。").arg(excludedCount)
-        );
+            context,
+            DiagnosticCode::None,
+            DiagnosticSeverity::Notice,
+            QStringLiteral("PrepareDocumentForGCodeExport"),
+            QStringLiteral("ApplyExclusions"),
+            QStringLiteral("废面规则已排除 %1 个图元，G代码不会包含这些图元。").arg(excludedCount),
+            QString(),
+            { { QStringLiteral("excludedCount"), excludedCount } }
+        ));
     }
 
     const bool hasProcessableEntity = std::any_of
@@ -372,13 +420,31 @@ bool Gcode_postprocessing_system::prepareDocumentForGCodeExport(GGenerator::Gene
 
     if (!hasProcessableEntity)
     {
-        QMessageBox::warning(this, QStringLiteral("导出G代码失败"), QStringLiteral("废面区间过滤后没有可加工图元。"));
-        return false;
+        report.status = OperationStatus::InvalidInput;
+        report.addDiagnostic(makeExportDiagnostic
+        (
+            context,
+            DiagnosticCode::InvalidGeometry,
+            DiagnosticSeverity::Error,
+            QStringLiteral("PrepareDocumentForGCodeExport"),
+            QStringLiteral("ValidateDocument"),
+            QStringLiteral("废面区间过滤后没有可加工图元。"),
+            QStringLiteral("No export-sortable entity remains after exclusions")
+        ));
+        return report;
     }
 
     if (!hasCompleteProcessOrderForExport(generationMode))
     {
-        ui->openGLWidget->appendCommandMessage(QStringLiteral("检测到当前图元尚未完成排序，导出前自动执行智能排序。"));
+        report.addDiagnostic(makeExportDiagnostic
+        (
+            context,
+            DiagnosticCode::MissingProcessOrder,
+            DiagnosticSeverity::Notice,
+            QStringLiteral("PrepareDocumentForGCodeExport"),
+            QStringLiteral("EnsureProcessOrder"),
+            QStringLiteral("检测到当前图元尚未完成排序，导出前自动执行智能排序。")
+        ));
 
         const bool sorted = generationMode == GGenerator::GenerationMode::Mode3D
             ? smartSortEntities3D()
@@ -386,12 +452,24 @@ bool Gcode_postprocessing_system::prepareDocumentForGCodeExport(GGenerator::Gene
 
         if (!sorted)
         {
-            QMessageBox::warning(this, QStringLiteral("导出G代码失败"), QStringLiteral("自动智能排序失败，G代码导出已取消。"));
-            return false;
+            report.status = OperationStatus::Failed;
+            report.addDiagnostic(makeExportDiagnostic
+            (
+                context,
+                DiagnosticCode::MissingProcessOrder,
+                DiagnosticSeverity::Error,
+                QStringLiteral("PrepareDocumentForGCodeExport"),
+                QStringLiteral("EnsureProcessOrder"),
+                QStringLiteral("自动智能排序失败，G代码导出已取消。"),
+                QStringLiteral("The existing smart sort operation returned false")
+            ));
+            return report;
         }
     }
 
-    return true;
+    report.status = OperationStatus::Success;
+    report.value = std::monostate{};
+    return report;
 }
 
 bool Gcode_postprocessing_system::exportGCode
@@ -400,12 +478,37 @@ bool Gcode_postprocessing_system::exportGCode
     const QString& modeDisplayName
 )
 {
+    const OperationContext context = createOperationContext(QStringLiteral("export-gcode"));
+    UserInterfaceMessageSink userInterfaceSink
+    (
+        [this](const QString& message)
+        {
+            ui->openGLWidget->appendCommandMessage(message);
+            ui->openGLWidget->refreshCommandPrompt();
+        },
+        [this](const QString& message, int durationMs)
+        {
+            statusBar()->showMessage(message, durationMs);
+        },
+        [this](const QString&, const QString& message)
+        {
+            QMessageBox::warning(this, QStringLiteral("导出G代码失败"), message);
+        },
+        true
+    );
+    DebugMessageSink debugSink;
+    MessageCenter messageCenter;
+    messageCenter.addSink(&userInterfaceSink);
+    messageCenter.addSink(&debugSink);
+
     if (generationMode == GGenerator::GenerationMode::Mode3D && !ensureFeatureAvailable(AppFeature::FourAxisExport, QStringLiteral("4轴(绕A) G代码导出")))
     {
         return false;
     }
 
-    if (!prepareDocumentForGCodeExport(generationMode))
+    const OperationReport prepareResult = prepareDocumentForGCodeExport(generationMode, context);
+    messageCenter.publish(prepareResult);
+    if (!prepareResult.succeeded())
     {
         return false;
     }
@@ -421,8 +524,6 @@ bool Gcode_postprocessing_system::exportGCode
         m_rotaryTubeSectionModel.valid && m_rotaryTubeSectionModel.centerValid
     );
 
-    QString errorMessage;
-    bool generated = false;
     QString resolvedExportPath;
     const QString exportFilters = QStringLiteral("NC 文件 (*.nc);;GCode 文件 (*.gcode);;文本文件 (*.txt)");
 
@@ -430,7 +531,16 @@ bool Gcode_postprocessing_system::exportGCode
     {
         if (m_currentDocumentPath.trimmed().isEmpty())
         {
-            QMessageBox::warning(this, QStringLiteral("导出G代码失败"), QStringLiteral("当前没有可用的DXF文件名，无法自动使用dxf文件名导出。"));
+            messageCenter.publish(makeExportDiagnostic
+            (
+                context,
+                DiagnosticCode::InvalidArgument,
+                DiagnosticSeverity::Error,
+                QStringLiteral("ExportGCode"),
+                QStringLiteral("ResolveOutputPath"),
+                QStringLiteral("当前没有可用的DXF文件名，无法自动使用dxf文件名导出。"),
+                QStringLiteral("m_currentDocumentPath is empty")
+            ));
             return false;
         }
 
@@ -478,12 +588,6 @@ bool Gcode_postprocessing_system::exportGCode
             }
         }
 
-        generated = generator.generateToFile(resolvedExportPath, &errorMessage);
-
-        if (generated)
-        {
-            saveLastGCodeExportPath(resolvedExportPath);
-        }
     }
     else
     {
@@ -505,34 +609,48 @@ bool Gcode_postprocessing_system::exportGCode
             resolvedExportPath.append(QStringLiteral(".nc"));
         }
 
-        generated = generator.generateToFile(resolvedExportPath, &errorMessage);
-
-        if (generated)
-        {
-            saveLastGCodeExportPath(resolvedExportPath);
-        }
     }
 
-    if (!generated)
+    const OperationResult<QString> buildResult = generator.buildProgramText(context);
+    messageCenter.publish(buildResult);
+    if (!buildResult.succeeded() || !buildResult.value.has_value())
     {
-        if (!errorMessage.trimmed().isEmpty())
-        {
-            QMessageBox::warning(this, QStringLiteral("导出G代码失败"), errorMessage);
-        }
-
         return false;
     }
+
+    const OperationReport writeResult = generator.writeProgramText
+    (
+        resolvedExportPath,
+        *buildResult.value,
+        context
+    );
+    messageCenter.publish(writeResult);
+    if (!writeResult.succeeded())
+    {
+        return false;
+    }
+
+    saveLastGCodeExportPath(resolvedExportPath);
 
     const QString resolvedModeDisplayName = modeDisplayName.trimmed().isEmpty()
         ? generationModeDisplayName(generationMode)
         : modeDisplayName;
 
-    ui->openGLWidget->appendCommandMessage
+    messageCenter.publish(makeExportDiagnostic
     (
-        QStringLiteral("G代码已导出（%1）。").arg(resolvedModeDisplayName)
-    );
-    ui->openGLWidget->refreshCommandPrompt();
-    statusBar()->showMessage(QStringLiteral("G代码导出完成（%1）").arg(resolvedModeDisplayName), 5000);
+        context,
+        DiagnosticCode::None,
+        DiagnosticSeverity::Notice,
+        QStringLiteral("ExportGCode"),
+        QStringLiteral("Complete"),
+        QStringLiteral("G代码已导出（%1）。").arg(resolvedModeDisplayName),
+        QString(),
+        {
+            { QStringLiteral("filePath"), resolvedExportPath },
+            { QStringLiteral("statusMessage"), QStringLiteral("G代码导出完成（%1）").arg(resolvedModeDisplayName) },
+            { QStringLiteral("statusDurationMs"), 5000 }
+        }
+    ));
     return true;
 }
 

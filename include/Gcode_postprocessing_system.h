@@ -110,6 +110,11 @@ private:
     QString defaultImportPath() const;
     QString defaultGCodeExportPathForCurrentDocument() const;
     bool prepareDocumentForGCodeExport(GGenerator::GenerationMode generationMode);
+    OperationReport prepareDocumentForGCodeExport
+    (
+        GGenerator::GenerationMode generationMode,
+        const OperationContext& context
+    );
     bool sortEntitiesByCurrentMode(bool smartSort);
     bool writeDocumentToDxf(const QString& filePath, bool updateCurrentPath, bool safeMode = false);
     QString ensureDxfSuffix(const QString& filePath) const;

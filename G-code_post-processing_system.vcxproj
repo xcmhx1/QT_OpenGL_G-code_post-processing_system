@@ -374,6 +374,26 @@ if exist "$(VCRuntimeRedistDir)\*.dll" copy /Y "$(VCRuntimeRedistDir)\*.dll" "$(
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
     </ClCompile>
+    <ClCompile Include="src\core\diagnostics\Diagnostic.cpp">
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+    </ClCompile>
+    <ClCompile Include="src\core\diagnostics\OperationContext.cpp">
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+    </ClCompile>
+    <ClCompile Include="src\application\messaging\MessageCenter.cpp">
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+    </ClCompile>
+    <ClCompile Include="src\application\messaging\DebugMessageSink.cpp">
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+    </ClCompile>
+    <ClCompile Include="src\application\messaging\UserInterfaceMessageSink.cpp">
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+    </ClCompile>
     <ClCompile Include="src\dx_iface.cpp" />
     <ClCompile Include="src\Gcode_postprocessing_system_FileActions.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
@@ -474,6 +494,12 @@ if exist "$(VCRuntimeRedistDir)\*.dll" copy /Y "$(VCRuntimeRedistDir)\*.dll" "$(
     <ClInclude Include="include\CadController.h" />
     <ClInclude Include="include\DrawStateMachine.h" />
     <ClInclude Include="include\GGenerator.h" />
+    <ClInclude Include="include\core\diagnostics\Diagnostic.h" />
+    <ClInclude Include="include\core\diagnostics\OperationContext.h" />
+    <ClInclude Include="include\core\diagnostics\OperationResult.h" />
+    <ClInclude Include="include\application\messaging\MessageCenter.h" />
+    <ClInclude Include="include\application\messaging\DebugMessageSink.h" />
+    <ClInclude Include="include\application\messaging\UserInterfaceMessageSink.h" />
     <ClInclude Include="include\GProfile.h" />
     <ClInclude Include="include\dx_data.h" />
     <ClInclude Include="include\dx_iface.h" />

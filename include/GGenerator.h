@@ -1,6 +1,8 @@
 #pragma once
 
 #include "GProfile.h"
+#include "core/diagnostics/OperationContext.h"
+#include "core/diagnostics/OperationResult.h"
 
 #include <QString>
 
@@ -29,6 +31,14 @@ public:
     GenerationMode generationMode() const;
 
     void setRotaryTubeCenter(double centerY, double centerZ, bool valid);
+
+    OperationResult<QString> buildProgramText(const OperationContext& context) const;
+    OperationReport writeProgramText
+    (
+        const QString& filePath,
+        const QString& program,
+        const OperationContext& context
+    ) const;
 
     bool generate(QWidget* parent = nullptr, QString* errorMessage = nullptr) const;
     bool generateToFile(const QString& filePath, QString* errorMessage = nullptr) const;

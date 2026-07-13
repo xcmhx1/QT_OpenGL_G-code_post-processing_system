@@ -19,7 +19,6 @@
 #include <QHash>
 #include <QDir>
 #include <QDebug>
-#include <QMessageBox>
 #include <QSettings>
 #include <QStandardPaths>
 #include <QTextStream>
@@ -196,7 +195,7 @@ namespace
         settings.setValue(QStringLiteral("gcode/lastExportPath"), filePath.trimmed());
     }
 
-    QString resolveInitialExportPath(QWidget* parent)
+    QString resolveInitialExportPath(QWidget*)
     {
         const QString lastExportPath = loadLastExportPath();
 
@@ -210,15 +209,6 @@ namespace
                 return lastExportPath;
             }
 
-            if (parent != nullptr)
-            {
-                QMessageBox::warning
-                (
-                    parent,
-                    QStringLiteral("导出目录不可用"),
-                    QStringLiteral("上次导出的目录已不存在：\n%1\n\n将改用其它默认目录。").arg(lastDirectoryPath)
-                );
-            }
         }
 
         return defaultNcPath();
@@ -1815,6 +1805,62 @@ namespace
         return true;
     }
 
+    Diagnostic makeGeneratorDiagnostic
+    (
+        const OperationContext& context,
+        DiagnosticCode code,
+        DiagnosticSeverity severity,
+        const QString& operation,
+        const QString& stage,
+        const QString& userMessage,
+        const QString& technicalDetail = QString(),
+        const QVariantMap& diagnosticContext = QVariantMap()
+    )
+    {
+        Diagnostic diagnostic;
+        diagnostic.code = code;
+        diagnostic.severity = severity;
+        diagnostic.component = QStringLiteral("GGenerator");
+        diagnostic.operation = operation;
+        diagnostic.stage = stage;
+        diagnostic.userMessage = userMessage;
+        diagnostic.technicalDetail = technicalDetail;
+        diagnostic.correlationId = context.correlationId;
+        diagnostic.context = diagnosticContext;
+        return diagnostic;
+    }
+
+    QString legacyErrorMessage(const QVector<Diagnostic>& diagnostics)
+    {
+        for (const Diagnostic& diagnostic : diagnostics)
+        {
+            if (isErrorSeverity(diagnostic.severity))
+            {
+                return diagnostic.userMessage.trimmed().isEmpty()
+                    ? diagnostic.technicalDetail
+                    : diagnostic.userMessage;
+            }
+        }
+
+        return diagnostics.isEmpty() ? QString() : diagnostics.constFirst().userMessage;
+    }
+
+    bool isGCodeGeometryType(DRW::ETYPE type)
+    {
+        switch (type)
+        {
+        case DRW::ETYPE::LINE:
+        case DRW::ETYPE::CIRCLE:
+        case DRW::ETYPE::ARC:
+        case DRW::ETYPE::ELLIPSE:
+        case DRW::ETYPE::POLYLINE:
+        case DRW::ETYPE::LWPOLYLINE:
+            return true;
+        default:
+            return false;
+        }
+    }
+
 }
 
 GGenerator::GGenerator()
@@ -1898,40 +1944,154 @@ bool GGenerator::generate(QWidget* parent, QString* errorMessage) const
     return generated;
 }
 
-bool GGenerator::generateToFile(const QString& filePath, QString* errorMessage) const
+OperationResult<QString> GGenerator::buildProgramText(const OperationContext& context) const
 {
+    OperationResult<QString> result;
+
     if (m_document == nullptr)
     {
-        if (errorMessage != nullptr)
-        {
-            *errorMessage = QStringLiteral("未设置文档，无法生成 G 代码。");
-        }
-
-        return false;
+        result.status = OperationStatus::InvalidInput;
+        result.addDiagnostic(makeGeneratorDiagnostic
+        (
+            context,
+            DiagnosticCode::MissingDocument,
+            DiagnosticSeverity::Error,
+            QStringLiteral("BuildProgramText"),
+            QStringLiteral("ValidateInput"),
+            QStringLiteral("未设置文档，无法生成 G 代码。"),
+            QStringLiteral("GGenerator::document() returned nullptr")
+        ));
+        return result;
     }
 
     if (m_profile == nullptr)
     {
-        if (errorMessage != nullptr)
-        {
-            *errorMessage = QStringLiteral("未设置 GProfile，无法生成 G 代码。");
-        }
-
-        return false;
+        result.status = OperationStatus::InvalidInput;
+        result.addDiagnostic(makeGeneratorDiagnostic
+        (
+            context,
+            DiagnosticCode::MissingProfile,
+            DiagnosticSeverity::Error,
+            QStringLiteral("BuildProgramText"),
+            QStringLiteral("ValidateInput"),
+            QStringLiteral("未设置 G 代码配置，无法生成 G 代码。"),
+            QStringLiteral("GGenerator::profile() returned nullptr")
+        ));
+        return result;
     }
 
-    QFile file(filePath);
-
-    // Line endings are emitted explicitly as CRLF. Text mode would translate
-    // the '\n' again on Windows and produce CRCRLF, which appears as blank lines.
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate))
+    int processableItemCount = 0;
+    int missingProcessOrderCount = 0;
+    for (const std::unique_ptr<CadItem>& entity : m_document->m_entities)
     {
-        if (errorMessage != nullptr)
+        if (entity == nullptr
+            || entity->m_excludedFromProcessing
+            || entity->m_nativeEntity == nullptr
+            || !isGCodeGeometryType(entity->m_type))
         {
-            *errorMessage = QStringLiteral("无法写入 G 代码文件: %1").arg(filePath);
+            continue;
         }
 
-        return false;
+        ++processableItemCount;
+        if (entity->m_processOrder < 0)
+        {
+            ++missingProcessOrderCount;
+        }
+    }
+
+    if (processableItemCount == 0)
+    {
+        result.status = OperationStatus::InvalidInput;
+        result.addDiagnostic(makeGeneratorDiagnostic
+        (
+            context,
+            DiagnosticCode::InvalidGeometry,
+            DiagnosticSeverity::Error,
+            QStringLiteral("BuildProgramText"),
+            QStringLiteral("ValidateInput"),
+            QStringLiteral("当前文档没有可生成 G 代码的图元。"),
+            QStringLiteral("No supported processable entities were found"),
+            { { QStringLiteral("processableItemCount"), processableItemCount } }
+        ));
+        return result;
+    }
+
+    if (missingProcessOrderCount > 0)
+    {
+        result.status = OperationStatus::InvalidInput;
+        result.addDiagnostic(makeGeneratorDiagnostic
+        (
+            context,
+            DiagnosticCode::MissingProcessOrder,
+            DiagnosticSeverity::Error,
+            QStringLiteral("BuildProgramText"),
+            QStringLiteral("ValidateProcessPlan"),
+            QStringLiteral("部分图元缺少加工顺序，无法生成 G 代码。"),
+            QStringLiteral("One or more processable entities have m_processOrder < 0"),
+            {
+                { QStringLiteral("expectedCount"), processableItemCount },
+                { QStringLiteral("missingCount"), missingProcessOrderCount }
+            }
+        ));
+        return result;
+    }
+
+    const QVector<CadItem*> orderedItems = collectOrderedItems(m_document);
+    struct GroupRange
+    {
+        int firstIndex = -1;
+        int lastIndex = -1;
+        int count = 0;
+    };
+    QHash<int, GroupRange> groupRanges;
+    int processableIndex = 0;
+
+    for (CadItem* item : orderedItems)
+    {
+        if (item == nullptr || item->m_nativeEntity == nullptr || !isGCodeGeometryType(item->m_type))
+        {
+            continue;
+        }
+
+        if (item->m_processContinuousGroupId >= 0)
+        {
+            GroupRange& range = groupRanges[item->m_processContinuousGroupId];
+            if (range.firstIndex < 0)
+            {
+                range.firstIndex = processableIndex;
+            }
+            range.lastIndex = processableIndex;
+            ++range.count;
+        }
+        ++processableIndex;
+    }
+
+    for (auto it = groupRanges.cbegin(); it != groupRanges.cend(); ++it)
+    {
+        const GroupRange& range = it.value();
+        if (range.lastIndex - range.firstIndex + 1 != range.count)
+        {
+            result.status = OperationStatus::Conflict;
+            Diagnostic diagnostic = makeGeneratorDiagnostic
+            (
+                context,
+                DiagnosticCode::InvalidContinuousGroup,
+                DiagnosticSeverity::Error,
+                QStringLiteral("BuildProgramText"),
+                QStringLiteral("ValidateProcessPlan"),
+                QStringLiteral("连续加工组被其它图元打断，无法安全生成 G 代码。"),
+                QStringLiteral("Continuous group members are not contiguous in process order"),
+                {
+                    { QStringLiteral("groupId"), it.key() },
+                    { QStringLiteral("firstIndex"), range.firstIndex },
+                    { QStringLiteral("lastIndex"), range.lastIndex },
+                    { QStringLiteral("actualCount"), range.count }
+                }
+            );
+            diagnostic.groupId = it.key();
+            result.addDiagnostic(diagnostic);
+            return result;
+        }
     }
 
     QString programText;
@@ -1940,7 +2100,6 @@ bool GGenerator::generateToFile(const QString& filePath, QString* errorMessage) 
 
     writeTextBlock(stream, m_profile->fileCode().header);
 
-    const QVector<CadItem*> orderedItems = collectOrderedItems(m_document);
     const GProfileRotaryAxisConfig& rotaryAxisConfig = m_profile->rotaryAxisConfig();
     RotaryExportContext rotaryExportContext;
     rotaryExportContext.axisY = rotaryAxisConfig.centerY;
@@ -2050,6 +2209,8 @@ bool GGenerator::generateToFile(const QString& filePath, QString* errorMessage) 
     RawPathPoint3D previous4AxisRawEndPoint;
     QHash<int, int> remainingItemsByContinuousGroup;
     QHash<int, RotaryOvercutPath> overcutPathsByGroup;
+    int writtenGeometryCount = 0;
+    bool partialSuccess = false;
 
     if (m_generationMode == GenerationMode::Mode3D)
     {
@@ -2104,16 +2265,57 @@ bool GGenerator::generateToFile(const QString& filePath, QString* errorMessage) 
                 && !geometryError.trimmed().isEmpty()
                 && item->m_type != DRW::ETYPE::POINT)
             {
-                if (errorMessage != nullptr)
+                const bool rawPathEmpty = item->rawPathPoints3D().empty();
+                result.status = OperationStatus::Failed;
+                Diagnostic diagnostic = makeGeneratorDiagnostic
+                (
+                    context,
+                    rawPathEmpty ? DiagnosticCode::EmptyPath : DiagnosticCode::KinematicsFailure,
+                    DiagnosticSeverity::Error,
+                    QStringLiteral("BuildRotaryControlPoints"),
+                    QStringLiteral("MachineTrajectory"),
+                    rawPathEmpty
+                        ? QStringLiteral("图元原始加工路径为空。")
+                        : QStringLiteral("图元无法生成四轴加工路径。"),
+                    geometryError,
+                    {
+                        { QStringLiteral("processOrder"), item->m_processOrder },
+                        { QStringLiteral("groupId"), item->m_processContinuousGroupId },
+                        { QStringLiteral("rawPointCount"), static_cast<qulonglong>(item->rawPathPoints3D().size()) },
+                        { QStringLiteral("controlPointCount"), static_cast<qulonglong>(item->controlPoints4Axis().size()) },
+                        { QStringLiteral("axisCenterY"), rotaryExportContext.axisY },
+                        { QStringLiteral("axisCenterZ"), rotaryExportContext.axisZ }
+                    }
+                );
+                if (item->m_processContinuousGroupId >= 0)
                 {
-                    *errorMessage = geometryError;
+                    diagnostic.groupId = item->m_processContinuousGroupId;
                 }
-
-                return false;
+                result.addDiagnostic(diagnostic);
+                return result;
             }
 
+            item->rebuildRawPathPoints3D();
+            partialSuccess = true;
+            result.addDiagnostic(makeGeneratorDiagnostic
+            (
+                context,
+                item->rawPathPoints3D().empty() ? DiagnosticCode::EmptyPath : DiagnosticCode::InvalidGeometry,
+                DiagnosticSeverity::Warning,
+                QStringLiteral("BuildProgramText"),
+                QStringLiteral("SerializeGeometry"),
+                QStringLiteral("一个图元未生成加工代码，已跳过。"),
+                QStringLiteral("writeItemGeometry returned false"),
+                {
+                    { QStringLiteral("processOrder"), item->m_processOrder },
+                    { QStringLiteral("groupId"), item->m_processContinuousGroupId },
+                    { QStringLiteral("rawPointCount"), static_cast<qulonglong>(item->rawPathPoints3D().size()) }
+                }
+            ));
             continue;
         }
+
+        ++writtenGeometryCount;
 
         bool completesContinuousGroup = false;
         const int continuousGroupId = item->m_processContinuousGroupId;
@@ -2161,6 +2363,28 @@ bool GGenerator::generateToFile(const QString& filePath, QString* errorMessage) 
                         currentItemEndPoint = overcutEndPoint;
                         currentItemRawEndPoint = overcutRawEndPoint;
                     }
+                    else
+                    {
+                        partialSuccess = true;
+                        Diagnostic diagnostic = makeGeneratorDiagnostic
+                        (
+                            context,
+                            DiagnosticCode::OvercutFailure,
+                            DiagnosticSeverity::Warning,
+                            QStringLiteral("BuildRotaryOvercut"),
+                            QStringLiteral("MachineTrajectory"),
+                            QStringLiteral("连续组未满足闭合条件，已保持原输出并跳过过切。"),
+                            QStringLiteral("writeRotaryOvercut returned false"),
+                            {
+                                { QStringLiteral("groupId"), continuousGroupId },
+                                { QStringLiteral("overcutDistance"), rotaryAxisConfig.overcutDistance },
+                                { QStringLiteral("rawPointCount"), static_cast<qulonglong>(overcutPathsByGroup.value(continuousGroupId).rawPoints.size()) },
+                                { QStringLiteral("controlPointCount"), static_cast<qulonglong>(overcutPathsByGroup.value(continuousGroupId).controlPoints.size()) }
+                            }
+                        );
+                        diagnostic.groupId = continuousGroupId;
+                        result.addDiagnostic(diagnostic);
+                    }
                 }
 
                 writeTextBlock(stream, typeCode.footer);
@@ -2180,24 +2404,169 @@ bool GGenerator::generateToFile(const QString& filePath, QString* errorMessage) 
     writeTextBlock(stream, m_profile->fileCode().footer);
     stream.flush();
 
-    const QByteArray encodedProgram = removeRedundantLaserRestartPairs(programText).toUtf8();
-    if (file.write(encodedProgram) != encodedProgram.size())
+    if (writtenGeometryCount != processableItemCount)
+    {
+        partialSuccess = true;
+        result.addDiagnostic(makeGeneratorDiagnostic
+        (
+            context,
+            DiagnosticCode::InternalInvariantViolation,
+            DiagnosticSeverity::Warning,
+            QStringLiteral("BuildProgramText"),
+            QStringLiteral("VerifyOutput"),
+            QStringLiteral("部分可加工图元未产生 G 代码。"),
+            QStringLiteral("Written geometry count differs from processable item count"),
+            {
+                { QStringLiteral("expectedCount"), processableItemCount },
+                { QStringLiteral("actualCount"), writtenGeometryCount }
+            }
+        ));
+    }
+
+    const QString optimizedProgram = removeRedundantLaserRestartPairs(programText);
+    if (optimizedProgram.isEmpty())
+    {
+        result.status = OperationStatus::Failed;
+        result.addDiagnostic(makeGeneratorDiagnostic
+        (
+            context,
+            DiagnosticCode::OutputVerificationFailure,
+            DiagnosticSeverity::Error,
+            QStringLiteral("BuildProgramText"),
+            QStringLiteral("VerifyOutput"),
+            QStringLiteral("生成的 G 代码为空。"),
+            QStringLiteral("Program text is empty after line normalization and M-code optimization"),
+            {
+                { QStringLiteral("expectedCount"), processableItemCount },
+                { QStringLiteral("actualCount"), writtenGeometryCount }
+            }
+        ));
+        return result;
+    }
+
+    result.status = partialSuccess ? OperationStatus::PartialSuccess : OperationStatus::Success;
+    result.value = optimizedProgram;
+    return result;
+}
+
+OperationReport GGenerator::writeProgramText
+(
+    const QString& filePath,
+    const QString& program,
+    const OperationContext& context
+) const
+{
+    OperationReport report;
+
+    if (filePath.trimmed().isEmpty())
+    {
+        report.status = OperationStatus::InvalidInput;
+        report.addDiagnostic(makeGeneratorDiagnostic
+        (
+            context,
+            DiagnosticCode::InvalidArgument,
+            DiagnosticSeverity::Error,
+            QStringLiteral("WriteProgramText"),
+            QStringLiteral("ValidateInput"),
+            QStringLiteral("G 代码输出路径为空。"),
+            QStringLiteral("filePath is empty")
+        ));
+        return report;
+    }
+
+    if (program.isEmpty())
+    {
+        report.status = OperationStatus::InvalidInput;
+        report.addDiagnostic(makeGeneratorDiagnostic
+        (
+            context,
+            DiagnosticCode::OutputVerificationFailure,
+            DiagnosticSeverity::Error,
+            QStringLiteral("WriteProgramText"),
+            QStringLiteral("ValidateInput"),
+            QStringLiteral("不能写入空的 G 代码程序。"),
+            QStringLiteral("program is empty"),
+            { { QStringLiteral("filePath"), filePath } }
+        ));
+        return report;
+    }
+
+    QFile file(filePath);
+    // CRLF is already explicit in program. Text mode would turn it into CRCRLF on Windows.
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate))
+    {
+        report.status = OperationStatus::Failed;
+        report.addDiagnostic(makeGeneratorDiagnostic
+        (
+            context,
+            DiagnosticCode::FileOpenFailure,
+            DiagnosticSeverity::Error,
+            QStringLiteral("WriteProgramText"),
+            QStringLiteral("OpenOutputFile"),
+            QStringLiteral("无法打开 G 代码输出文件。"),
+            file.errorString(),
+            { { QStringLiteral("filePath"), filePath } }
+        ));
+        return report;
+    }
+
+    const QByteArray encodedProgram = program.toUtf8();
+    const qint64 writtenLength = file.write(encodedProgram);
+    file.close();
+
+    if (writtenLength != encodedProgram.size())
+    {
+        report.status = OperationStatus::Failed;
+        report.addDiagnostic(makeGeneratorDiagnostic
+        (
+            context,
+            DiagnosticCode::FileWriteFailure,
+            DiagnosticSeverity::Error,
+            QStringLiteral("WriteProgramText"),
+            QStringLiteral("WriteOutputFile"),
+            QStringLiteral("G 代码文件写入不完整。"),
+            QStringLiteral("QFile::write returned an unexpected byte count"),
+            {
+                { QStringLiteral("filePath"), filePath },
+                { QStringLiteral("expectedCount"), encodedProgram.size() },
+                { QStringLiteral("actualCount"), writtenLength }
+            }
+        ));
+        return report;
+    }
+
+    report.status = OperationStatus::Success;
+    report.value = std::monostate{};
+    return report;
+}
+
+bool GGenerator::generateToFile(const QString& filePath, QString* errorMessage) const
+{
+    const OperationContext context = createOperationContext(QStringLiteral("generate-gcode"));
+    const OperationResult<QString> buildResult = buildProgramText(context);
+
+    if (!buildResult.succeeded() || !buildResult.value.has_value())
     {
         if (errorMessage != nullptr)
         {
-            *errorMessage = QStringLiteral("写入 G 代码文件失败: %1").arg(filePath);
+            *errorMessage = legacyErrorMessage(buildResult.diagnostics);
         }
-
-        file.close();
         return false;
     }
 
-    file.close();
+    const OperationReport writeResult = writeProgramText(filePath, *buildResult.value, context);
+    if (!writeResult.succeeded())
+    {
+        if (errorMessage != nullptr)
+        {
+            *errorMessage = legacyErrorMessage(writeResult.diagnostics);
+        }
+        return false;
+    }
 
     if (errorMessage != nullptr)
     {
         errorMessage->clear();
     }
-
     return true;
 }

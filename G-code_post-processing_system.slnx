@@ -3,4 +3,5 @@
     <Platform Name="x64" />
   </Configurations>
   <Project Path="G-code_post-processing_system.vcxproj" Id="863b5449-418c-4bb1-a674-c12a2ec236bf" />
+  <Project Path="tests/GCodeCharacterizationTests.vcxproj" Id="b0a8c585-3247-4e74-a4d4-6d455b51d913" />
 </Solution>
