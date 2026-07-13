@@ -1772,7 +1772,9 @@ bool GGenerator::generateToFile(const QString& filePath, QString* errorMessage) 
 
     QFile file(filePath);
 
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate))
+    // Line endings are emitted explicitly as CRLF. Text mode would translate
+    // the '\n' again on Windows and produce CRCRLF, which appears as blank lines.
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate))
     {
         if (errorMessage != nullptr)
         {
