@@ -19,6 +19,15 @@
 #include <utility>
 #include <vector>
 
+namespace
+{
+    QColor withMaximumAlpha(QColor color, int maximumAlpha)
+    {
+        color.setAlpha(std::min(color.alpha(), maximumAlpha));
+        return color;
+    }
+}
+
 void CadViewer::renderProcessOrderLabels()
 {
     const std::vector<ProcessOrderLabelOverlay> labels = buildProcessOrderLabelOverlays();
@@ -42,15 +51,18 @@ void CadViewer::renderProcessOrderLabels()
         const bool pendingSwap = label.item != nullptr
             && CadViewerUtils::toEntityId(label.item) == m_pendingProcessOrderSwapEntityId;
 
-        const QColor fillColor = pendingSwap
+        const bool emphasized = pendingSwap || label.selected;
+        const QColor baseFillColor = pendingSwap
             ? m_theme.selectedProcessLabelFillColor
             : (label.selected ? m_theme.selectedProcessLabelFillColor : m_theme.processLabelFillColor);
-        const QColor borderColor = pendingSwap
+        const QColor baseBorderColor = pendingSwap
             ? m_theme.selectedProcessLabelBorderColor
             : (label.selected ? m_theme.selectedProcessLabelBorderColor : m_theme.processLabelBorderColor);
         const QColor textColor = pendingSwap
             ? m_theme.selectedProcessLabelTextColor
             : (label.selected ? m_theme.selectedProcessLabelTextColor : m_theme.processLabelTextColor);
+        const QColor fillColor = withMaximumAlpha(baseFillColor, emphasized ? 148 : 72);
+        const QColor borderColor = withMaximumAlpha(baseBorderColor, emphasized ? 220 : 164);
 
         painter.setPen(QPen(borderColor, pendingSwap ? 1.4 : 1.0));
         painter.setBrush(fillColor);
@@ -153,12 +165,13 @@ void CadViewer::renderRotaryEndCutLabels()
         const QColor accent = label.role == RotaryEndCutRole::Waste
             ? QColor(242, 151, 36)
             : QColor(46, 166, 242);
-        QColor fill = m_theme.viewerBackgroundColor;
-        fill.setAlpha(218);
-        painter.setPen(QPen(accent, 1.6));
+        const QColor fill = withMaximumAlpha(m_theme.viewerBackgroundColor, 66);
+        const QColor border = withMaximumAlpha(accent, 168);
+        const QColor textColor = withMaximumAlpha(accent.lighter(125), 224);
+        painter.setPen(QPen(border, 1.4));
         painter.setBrush(fill);
         painter.drawRoundedRect(bubbleRect, 7.0, 7.0);
-        painter.setPen(accent.lighter(125));
+        painter.setPen(textColor);
         painter.drawText(bubbleRect, Qt::AlignCenter, text);
     }
 }
