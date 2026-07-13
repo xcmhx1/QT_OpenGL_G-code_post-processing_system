@@ -88,6 +88,46 @@ namespace
         return normalizedText;
     }
 
+    bool isStandaloneMCode(const QString& line, const QString& paddedCode, const QString& shortCode)
+    {
+        const QString normalized = line.trimmed().toUpper();
+        return normalized == paddedCode || normalized == shortCode;
+    }
+
+    QString removeRedundantLaserRestartPairs(const QString& program)
+    {
+        QString normalized = program;
+        normalized.replace("\r\n", "\n");
+        normalized.replace('\r', '\n');
+
+        QStringList optimizedLines;
+        const QStringList lines = normalized.split('\n', Qt::KeepEmptyParts);
+
+        for (const QString& line : lines)
+        {
+            if (line.trimmed().isEmpty())
+            {
+                continue;
+            }
+
+            const bool startsLaser = isStandaloneMCode(line, QStringLiteral("M03"), QStringLiteral("M3"));
+            const bool previousStopsLaser = !optimizedLines.isEmpty()
+                && isStandaloneMCode(optimizedLines.constLast(), QStringLiteral("M05"), QStringLiteral("M5"));
+
+            if (startsLaser && previousStopsLaser)
+            {
+                optimizedLines.removeLast();
+                continue;
+            }
+
+            optimizedLines.push_back(line);
+        }
+
+        return optimizedLines.isEmpty()
+            ? QString()
+            : optimizedLines.join(QStringLiteral("\r\n")) + QStringLiteral("\r\n");
+    }
+
     bool isRapidMoveLine(const QString& line)
     {
         const QString trimmedLine = line.trimmed().toUpper();
@@ -1784,7 +1824,8 @@ bool GGenerator::generateToFile(const QString& filePath, QString* errorMessage) 
         return false;
     }
 
-    QTextStream stream(&file);
+    QString programText;
+    QTextStream stream(&programText);
     stream.setEncoding(QStringConverter::Utf8);
 
     writeTextBlock(stream, m_profile->fileCode().header);
@@ -2019,6 +2060,20 @@ bool GGenerator::generateToFile(const QString& filePath, QString* errorMessage) 
     }
 
     writeTextBlock(stream, m_profile->fileCode().footer);
+    stream.flush();
+
+    const QByteArray encodedProgram = removeRedundantLaserRestartPairs(programText).toUtf8();
+    if (file.write(encodedProgram) != encodedProgram.size())
+    {
+        if (errorMessage != nullptr)
+        {
+            *errorMessage = QStringLiteral("写入 G 代码文件失败: %1").arg(filePath);
+        }
+
+        file.close();
+        return false;
+    }
+
     file.close();
 
     if (errorMessage != nullptr)

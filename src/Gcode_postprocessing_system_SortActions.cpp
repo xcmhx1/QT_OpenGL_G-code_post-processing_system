@@ -166,7 +166,7 @@ namespace
         int leftClusterIndex = -1;
         int rightClusterIndex = -1;
         double centerX = 0.0;
-        std::vector<size_t> continuousItems;
+        std::vector<std::vector<size_t>> continuousGroups;
         std::vector<size_t> topItems;
         std::vector<size_t> rightItems;
         std::vector<size_t> bottomItems;
@@ -3088,6 +3088,266 @@ namespace
         return true;
     }
 
+    bool appendContinuous3DGroup
+    (
+        const std::vector<CadItem*>& sortableItems,
+        const std::vector<size_t>& groupIndices,
+        const GProfileRotaryAxisConfig& rotaryAxisConfig,
+        std::vector<CadEditer::ProcessStateUpdate>& processUpdates,
+        std::vector<ProcessConnectionSegment>& processedSegments,
+        bool& hasCurrentEndPoint,
+        QVector3D& currentEndPoint,
+        QString* failureReason
+    )
+    {
+        struct ContinuousItem
+        {
+            size_t globalIndex = 0;
+            std::vector<ProcessPathOption> options;
+            ProcessPathOption fixedOption;
+        };
+
+        std::vector<ContinuousItem> items;
+        items.reserve(groupIndices.size());
+
+        for (const size_t index : groupIndices)
+        {
+            if (index >= sortableItems.size() || sortableItems[index] == nullptr)
+            {
+                if (failureReason != nullptr)
+                {
+                    *failureReason = QStringLiteral("连续加工组包含无效图元索引 %1。").arg(index);
+                }
+                return false;
+            }
+
+            ContinuousItem item;
+            item.globalIndex = index;
+            item.options = buildPathOptionsForItem(sortableItems[index], SortStrategy::Smart);
+            const std::vector<ProcessPathOption> fixedOptions =
+                buildPathOptionsForItem(sortableItems[index], SortStrategy::KeepDirection);
+
+            if (item.options.empty() || fixedOptions.empty())
+            {
+                if (failureReason != nullptr)
+                {
+                    *failureReason = QStringLiteral("连续加工组图元 %1 没有可用端点。").arg(index);
+                }
+                return false;
+            }
+
+            item.fixedOption = fixedOptions.front();
+            items.push_back(std::move(item));
+        }
+
+        if (items.empty())
+        {
+            return true;
+        }
+
+        const double connectionToleranceSquared =
+            kEndCutConnectionTolerance * kEndCutConnectionTolerance;
+        std::vector<std::vector<QVector3D>> looseEndpoints(items.size());
+
+        for (size_t itemIndex = 0; itemIndex < items.size(); ++itemIndex)
+        {
+            const ProcessPathOption& option = items[itemIndex].fixedOption;
+            if (spatialDistanceSquared(option.startPoint, option.endPoint) <= kSortConnectionEpsilon * kSortConnectionEpsilon)
+            {
+                continue;
+            }
+
+            for (const QVector3D& endpoint : { option.startPoint, option.endPoint })
+            {
+                bool connected = false;
+
+                for (size_t otherIndex = 0; otherIndex < items.size() && !connected; ++otherIndex)
+                {
+                    if (itemIndex == otherIndex)
+                    {
+                        continue;
+                    }
+
+                    const ProcessPathOption& other = items[otherIndex].fixedOption;
+                    connected = spatialDistanceSquared(endpoint, other.startPoint) <= connectionToleranceSquared
+                        || spatialDistanceSquared(endpoint, other.endPoint) <= connectionToleranceSquared;
+                }
+
+                if (!connected)
+                {
+                    looseEndpoints[itemIndex].push_back(endpoint);
+                }
+            }
+        }
+
+        const bool hasLooseEndpoint = std::any_of
+        (
+            looseEndpoints.cbegin(),
+            looseEndpoints.cend(),
+            [](const std::vector<QVector3D>& endpoints) { return !endpoints.empty(); }
+        );
+        std::vector<bool> visited(items.size(), false);
+        const QVector3D initialReference = hasCurrentEndPoint ? currentEndPoint : kRotaryInitialSortOrigin;
+        int selectedItem = -1;
+        const ProcessPathOption* selectedOption = nullptr;
+        double bestEntryDistance = std::numeric_limits<double>::max();
+
+        for (size_t itemIndex = 0; itemIndex < items.size(); ++itemIndex)
+        {
+            for (const ProcessPathOption& option : items[itemIndex].options)
+            {
+                if (hasLooseEndpoint)
+                {
+                    const bool startsAtLooseEndpoint = std::any_of
+                    (
+                        looseEndpoints[itemIndex].cbegin(),
+                        looseEndpoints[itemIndex].cend(),
+                        [&option, connectionToleranceSquared](const QVector3D& point)
+                        {
+                            return spatialDistanceSquared(option.startPoint, point) <= connectionToleranceSquared;
+                        }
+                    );
+
+                    if (!startsAtLooseEndpoint)
+                    {
+                        continue;
+                    }
+                }
+
+                const double entryDistance = rotarySortTravelDistance
+                (
+                    initialReference,
+                    option.startPoint,
+                    rotaryAxisConfig
+                );
+
+                if (selectedOption == nullptr
+                    || entryDistance < bestEntryDistance - kSortEpsilon
+                    || (std::abs(entryDistance - bestEntryDistance) <= kSortEpsilon
+                        && isPointLexicographicallyLess(option.startPoint, selectedOption->startPoint)))
+                {
+                    selectedItem = static_cast<int>(itemIndex);
+                    selectedOption = &option;
+                    bestEntryDistance = entryDistance;
+                }
+            }
+        }
+
+        for (size_t order = 0; order < items.size(); ++order)
+        {
+            if (order > 0)
+            {
+                selectedItem = -1;
+                selectedOption = nullptr;
+                double bestConnectionDistance = std::numeric_limits<double>::max();
+
+                for (size_t itemIndex = 0; itemIndex < items.size(); ++itemIndex)
+                {
+                    if (visited[itemIndex])
+                    {
+                        continue;
+                    }
+
+                    for (const ProcessPathOption& option : items[itemIndex].options)
+                    {
+                        const double connectionDistance = std::sqrt
+                        (
+                            spatialDistanceSquared(currentEndPoint, option.startPoint)
+                        );
+
+                        if (connectionDistance > kEndCutConnectionTolerance + kSortEpsilon)
+                        {
+                            continue;
+                        }
+
+                        if (selectedOption == nullptr
+                            || connectionDistance < bestConnectionDistance - kSortEpsilon
+                            || (std::abs(connectionDistance - bestConnectionDistance) <= kSortEpsilon
+                                && isPointLexicographicallyLess(option.startPoint, selectedOption->startPoint)))
+                        {
+                            selectedItem = static_cast<int>(itemIndex);
+                            selectedOption = &option;
+                            bestConnectionDistance = connectionDistance;
+                        }
+                    }
+                }
+            }
+
+            if (selectedItem < 0 || selectedOption == nullptr)
+            {
+                double nearestDistance = std::numeric_limits<double>::max();
+                size_t nearestGlobalIndex = 0;
+
+                for (size_t itemIndex = 0; itemIndex < items.size(); ++itemIndex)
+                {
+                    if (visited[itemIndex])
+                    {
+                        continue;
+                    }
+
+                    for (const ProcessPathOption& option : items[itemIndex].options)
+                    {
+                        const double distance = std::sqrt(spatialDistanceSquared(currentEndPoint, option.startPoint));
+                        if (distance < nearestDistance)
+                        {
+                            nearestDistance = distance;
+                            nearestGlobalIndex = items[itemIndex].globalIndex;
+                        }
+                    }
+                }
+
+                if (failureReason != nullptr)
+                {
+                    *failureReason = QStringLiteral
+                    (
+                        "连续加工组在加工序号 %1 后中断：下一图元索引=%2，端点距离=%3 mm，允许距离=%4 mm。"
+                    )
+                        .arg(processUpdates.size())
+                        .arg(nearestGlobalIndex)
+                        .arg(nearestDistance, 0, 'f', 6)
+                        .arg(kEndCutConnectionTolerance, 0, 'f', 3);
+                }
+                return false;
+            }
+
+            const size_t localIndex = static_cast<size_t>(selectedItem);
+            const size_t globalIndex = items[localIndex].globalIndex;
+            const double connectionDistance = hasCurrentEndPoint && order > 0
+                ? std::sqrt(spatialDistanceSquared(currentEndPoint, selectedOption->startPoint))
+                : 0.0;
+
+            if (order > 0 && connectionDistance > kEndCutConnectionTolerance + kSortEpsilon)
+            {
+                if (failureReason != nullptr)
+                {
+                    *failureReason = QStringLiteral
+                    (
+                        "连续加工组校验失败：图元索引=%1，端点距离=%2 mm，加工序号=%3。"
+                    )
+                        .arg(globalIndex)
+                        .arg(connectionDistance, 0, 'f', 6)
+                        .arg(processUpdates.size());
+                }
+                return false;
+            }
+
+            processUpdates.push_back
+            ({
+                sortableItems[globalIndex],
+                static_cast<int>(processUpdates.size()),
+                selectedOption->reverse,
+                selectedOption->hasCustomStart,
+                selectedOption->processStartParameter
+            });
+            visited[localIndex] = true;
+            hasCurrentEndPoint = true;
+            currentEndPoint = selectedOption->endPoint;
+            processedSegments.push_back({ selectedOption->startPoint, selectedOption->endPoint });
+        }
+
+        return true;
+    }
+
     bool tryBuildSquareTubeLazyRotaryProcessUpdates
     (
         const std::vector<CadItem*>& sortableItems,
@@ -3227,7 +3487,11 @@ namespace
             connectivityToGlobal.push_back(itemIndex);
         }
 
-        const std::vector<int> componentIds = buildItemConnectivityComponents(connectivityItems);
+        const std::vector<int> componentIds = buildItemConnectivityComponents
+        (
+            connectivityItems,
+            kEndCutConnectionTolerance
+        );
 
         if (componentIds.size() != connectivityItems.size())
         {
@@ -3798,26 +4062,16 @@ namespace
                 return boundary != manualBreakBoundaries.end() ? &boundary->analysis : nullptr;
             };
 
-        const auto assignManualItemToSegment =
-            [&](size_t componentIndex, size_t itemIndex) -> bool
+        const auto assignManualComponentToSegment =
+            [&](size_t componentIndex) -> bool
             {
-                if (itemIndex >= sortableItems.size() || sortableItems[itemIndex] == nullptr)
+                if (componentIndex >= components.size())
                 {
-                    return fail(QStringLiteral("普通分量 %1 中存在无效图元索引 %2。")
-                        .arg(componentIndex + 1)
-                        .arg(itemIndex));
+                    return fail(QStringLiteral("普通分量索引无效：%1。").arg(componentIndex + 1));
                 }
 
-                CadItem* item = sortableItems[itemIndex];
-                item->rebuildRawPathPoints3D();
-
-                if (item->rawPathPoints3D().empty())
-                {
-                    return fail(QStringLiteral("普通分量 %1 的图元没有可用于侧别判断的路径点：%2。")
-                        .arg(componentIndex + 1)
-                        .arg(describeRotaryPathItems(QVector<CadItem*>{ item })));
-                }
-
+                const RotaryFeatureComponent& component = components[componentIndex];
+                QVector<CadItem*> componentItems;
                 int leftClusterIndex = -1;
                 int rightClusterIndex = -1;
 
@@ -3837,24 +4091,48 @@ namespace
                     int onBoundaryCount = 0;
                     int ambiguousCount = 0;
 
-                    for (const RawPathPoint3D& rawPoint : item->rawPathPoints3D())
+                    for (const size_t itemIndex : component.itemIndices)
                     {
-                        const RotaryBoundarySide side = RotaryCutBoundaryAnalyzer::classifyPointRelativeToBoundary
-                        (
-                            *boundaryAnalysis,
-                            QVector3D
-                            (
-                                static_cast<float>(rawPoint.x),
-                                static_cast<float>(rawPoint.y),
-                                static_cast<float>(rawPoint.z)
-                            ),
-                            boundaryTolerance
-                        );
+                        if (itemIndex >= sortableItems.size() || sortableItems[itemIndex] == nullptr)
+                        {
+                            return fail(QStringLiteral("普通分量 %1 中存在无效图元索引 %2。")
+                                .arg(componentIndex + 1)
+                                .arg(itemIndex));
+                        }
 
-                        beforeCount += side == RotaryBoundarySide::Before ? 1 : 0;
-                        afterCount += side == RotaryBoundarySide::After ? 1 : 0;
-                        onBoundaryCount += side == RotaryBoundarySide::OnBoundary ? 1 : 0;
-                        ambiguousCount += side == RotaryBoundarySide::Ambiguous ? 1 : 0;
+                        CadItem* item = sortableItems[itemIndex];
+                        if (!componentItems.contains(item))
+                        {
+                            componentItems.push_back(item);
+                        }
+                        item->rebuildRawPathPoints3D();
+
+                        if (item->rawPathPoints3D().empty())
+                        {
+                            return fail(QStringLiteral("普通分量 %1 的图元没有可用于侧别判断的路径点：%2。")
+                                .arg(componentIndex + 1)
+                                .arg(describeRotaryPathItems(QVector<CadItem*>{ item })));
+                        }
+
+                        for (const RawPathPoint3D& rawPoint : item->rawPathPoints3D())
+                        {
+                            const RotaryBoundarySide side = RotaryCutBoundaryAnalyzer::classifyPointRelativeToBoundary
+                            (
+                                *boundaryAnalysis,
+                                QVector3D
+                                (
+                                    static_cast<float>(rawPoint.x),
+                                    static_cast<float>(rawPoint.y),
+                                    static_cast<float>(rawPoint.z)
+                                ),
+                                boundaryTolerance
+                            );
+
+                            beforeCount += side == RotaryBoundarySide::Before ? 1 : 0;
+                            afterCount += side == RotaryBoundarySide::After ? 1 : 0;
+                            onBoundaryCount += side == RotaryBoundarySide::OnBoundary ? 1 : 0;
+                            ambiguousCount += side == RotaryBoundarySide::Ambiguous ? 1 : 0;
+                        }
                     }
 
                     qInfo().noquote() << QStringLiteral
@@ -3867,7 +4145,7 @@ namespace
                         .arg(afterCount)
                         .arg(onBoundaryCount)
                         .arg(ambiguousCount)
-                        .arg(describeRotaryPathItems(QVector<CadItem*>{ item }));
+                        .arg(describeRotaryPathItems(componentItems));
 
                     if (ambiguousCount > 0)
                     {
@@ -3881,21 +4159,21 @@ namespace
                             .arg(afterCount)
                             .arg(onBoundaryCount)
                             .arg(ambiguousCount)
-                            .arg(describeRotaryPathItems(QVector<CadItem*>{ item })));
+                            .arg(describeRotaryPathItems(componentItems)));
                     }
 
                     if (beforeCount > 0 && afterCount > 0)
                     {
                         return fail(QStringLiteral
                         (
-                            "普通分量 %1 中的单个图元真正横跨断面 %2：Before=%3 After=%4 OnBoundary=%5 Ambiguous=0，%6。"
+                            "普通分量 %1 真正横跨断面 %2：Before=%3 After=%4 OnBoundary=%5 Ambiguous=0，%6。"
                         )
                             .arg(componentIndex + 1)
                             .arg(boundaryIndex + 1)
                             .arg(beforeCount)
                             .arg(afterCount)
                             .arg(onBoundaryCount)
-                            .arg(describeRotaryPathItems(QVector<CadItem*>{ item })));
+                            .arg(describeRotaryPathItems(componentItems)));
                     }
 
                     bool itemIsBefore = beforeCount > 0;
@@ -3903,7 +4181,7 @@ namespace
 
                     if (!itemIsBefore && !itemIsAfter)
                     {
-                        const double itemCenterX = rotaryBoundsCenterX(itemAnalyses[itemIndex].bounds);
+                        const double itemCenterX = rotaryBoundsCenterX(component.bounds);
                         const double boundaryCenterX = cutClusters[static_cast<size_t>(boundaryClusterIndex)].centerX;
                         itemIsBefore = itemCenterX <= boundaryCenterX;
                         itemIsAfter = !itemIsBefore;
@@ -3943,15 +4221,16 @@ namespace
                         .arg(rightClusterIndex));
                 }
 
-                const RotarySurfaceGroup surface = itemAnalyses[itemIndex].surface;
-
-                if (surface == RotarySurfaceGroup::Unknown)
+                if (componentRequiresContinuousGroup[componentIndex])
                 {
-                    segment->continuousItems.push_back(itemIndex);
+                    segment->continuousGroups.push_back(component.itemIndices);
                 }
                 else
                 {
-                    segmentItemsForSurface(*segment, surface).push_back(itemIndex);
+                    for (const size_t itemIndex : component.itemIndices)
+                    {
+                        segmentItemsForSurface(*segment, itemAnalyses[itemIndex].surface).push_back(itemIndex);
+                    }
                 }
 
                 return true;
@@ -3971,13 +4250,10 @@ namespace
 
             if (useManualBreakBoundaries)
             {
-                for (const size_t itemIndex : component.itemIndices)
+                if (!assignManualComponentToSegment(componentIndex))
                 {
-                    if (!assignManualItemToSegment(componentIndex, itemIndex))
-                    {
-                        return failCurrentOr(QStringLiteral("普通分量 %1 的图元分段失败。")
-                            .arg(componentIndex + 1));
-                    }
+                    return failCurrentOr(QStringLiteral("普通分量 %1 的图元分段失败。")
+                        .arg(componentIndex + 1));
                 }
 
                 continue;
@@ -4034,12 +4310,7 @@ namespace
 
             if (componentRequiresContinuousGroup[componentIndex])
             {
-                existingSegment->continuousItems.insert
-                (
-                    existingSegment->continuousItems.end(),
-                    component.itemIndices.begin(),
-                    component.itemIndices.end()
-                );
+                existingSegment->continuousGroups.push_back(component.itemIndices);
                 continue;
             }
 
@@ -4120,6 +4391,68 @@ namespace
 
             return true;
         };
+
+        auto appendContinuousGroup = [&](const std::vector<size_t>& rawIndices) -> bool
+        {
+            std::vector<size_t> filteredIndices;
+            filteredIndices.reserve(rawIndices.size());
+
+            for (const size_t index : rawIndices)
+            {
+                if (index < sortableItems.size() && !scheduled[index])
+                {
+                    filteredIndices.push_back(index);
+                }
+            }
+
+            if (filteredIndices.empty())
+            {
+                return true;
+            }
+
+            QString continuousFailureReason;
+            if (!appendContinuous3DGroup
+            (
+                sortableItems,
+                filteredIndices,
+                rotaryAxisConfig,
+                processUpdates,
+                processedSegments,
+                hasCurrentEndPoint,
+                currentEndPoint,
+                &continuousFailureReason
+            ))
+            {
+                QVector<CadItem*> failedItems;
+                for (const size_t index : filteredIndices)
+                {
+                    failedItems.push_back(sortableItems[index]);
+                }
+
+                return fail(QStringLiteral("连续加工组排序失败：%1；%2。")
+                    .arg(continuousFailureReason)
+                    .arg(describeRotaryPathItems(failedItems)));
+            }
+
+            for (const size_t index : filteredIndices)
+            {
+                scheduled[index] = true;
+            }
+            return true;
+        };
+
+        const auto appendContinuousGroups = [&appendContinuousGroup]
+            (const std::vector<std::vector<size_t>>& groups) -> bool
+            {
+                for (const std::vector<size_t>& group : groups)
+                {
+                    if (!appendContinuousGroup(group))
+                    {
+                        return false;
+                    }
+                }
+                return true;
+            };
 
         auto appendSurfaceSweepGroup =
             [&](const std::vector<size_t>& rawIndices, bool leftToRight) -> bool
@@ -4349,8 +4682,8 @@ namespace
             }
 
             if ((segment.leftClusterIndex >= 0
-                    && !appendGroup(cutClusters[static_cast<size_t>(segment.leftClusterIndex)].itemIndices))
-                || !appendGroup(segment.continuousItems)
+                    && !appendContinuousGroup(cutClusters[static_cast<size_t>(segment.leftClusterIndex)].itemIndices))
+                || !appendContinuousGroups(segment.continuousGroups)
                 // S-shaped machining sweep: top L->R, right R->L, bottom L->R, left R->L.
                 || !appendSurfaceSweepGroup(segment.topItems, true)
                 || !appendSurfaceSweepGroup(segment.rightItems, false)
@@ -4358,7 +4691,7 @@ namespace
                 || !appendSurfaceSweepGroup(segment.leftItems, false)
                 || !appendGroup(segment.unknownItems)
                 || (segment.rightClusterIndex >= 0
-                    && !appendGroup(cutClusters[static_cast<size_t>(segment.rightClusterIndex)].itemIndices)))
+                    && !appendContinuousGroup(cutClusters[static_cast<size_t>(segment.rightClusterIndex)].itemIndices)))
             {
                 return failCurrentOr(QStringLiteral("加工组排序失败：区间左断面=%1，右断面=%2。")
                     .arg(segment.leftClusterIndex)
