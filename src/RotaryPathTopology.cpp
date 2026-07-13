@@ -7,6 +7,7 @@
 
 #include <QHash>
 #include <QDebug>
+#include <QMap>
 #include <QSet>
 #include <QStringList>
 
@@ -1427,6 +1428,32 @@ namespace
     }
 }
 
+QString describeRotaryPathItems(const QVector<CadItem*>& items)
+{
+    QMap<QString, int> counts;
+    int validCount = 0;
+
+    for (const CadItem* item : items)
+    {
+        if (item == nullptr)
+        {
+            continue;
+        }
+
+        ++validCount;
+        ++counts[entityTypeLabel(item->m_type)];
+    }
+
+    QStringList parts{ QStringLiteral("%1 个").arg(validCount) };
+
+    for (auto count = counts.cbegin(); count != counts.cend(); ++count)
+    {
+        parts.push_back(QStringLiteral("%1=%2").arg(count.key()).arg(count.value()));
+    }
+
+    return parts.join(QLatin1Char(' '));
+}
+
 RotaryPathTopologyTolerance RotaryPathTopologyTolerance::fromConnectionTolerance(double connectionTolerance)
 {
     const double nodeSnap = std::max(1.0e-9, connectionTolerance);
@@ -1571,6 +1598,117 @@ bool RotaryPathTopology::itemsDirectlyConnected(CadItem* left, CadItem* right) c
     }
 
     return leftIndex >= 0 && rightIndex >= 0 && m_itemAdjacency[leftIndex].contains(rightIndex);
+}
+
+RotaryPathLoopResult RotaryPathTopology::extractSeededLoop
+(
+    const QVector<CadItem*>& seedItems,
+    QVector<CadItem*>* expandedItems
+) const
+{
+    RotaryPathLoopResult result;
+
+    if (seedItems.isEmpty())
+    {
+        result.errorMessage = QStringLiteral("加工断面种子图元为空。");
+        return result;
+    }
+
+    QVector<int> pending;
+    QVector<bool> included(m_records.size(), false);
+
+    for (CadItem* seed : seedItems)
+    {
+        int recordIndex = -1;
+
+        for (int index = 0; index < m_records.size(); ++index)
+        {
+            if (m_records[index].sourceItem == seed)
+            {
+                recordIndex = index;
+                break;
+            }
+        }
+
+        if (recordIndex < 0)
+        {
+            result.errorMessage = QStringLiteral("选择集中存在不属于当前候选场景的图元。");
+            return result;
+        }
+
+        if (!included[recordIndex])
+        {
+            included[recordIndex] = true;
+            pending.push_back(recordIndex);
+        }
+    }
+
+    for (int cursor = 0; cursor < pending.size(); ++cursor)
+    {
+        const int current = pending[cursor];
+
+        for (int neighbor : m_itemAdjacency[current])
+        {
+            if (!included[neighbor])
+            {
+                included[neighbor] = true;
+                pending.push_back(neighbor);
+            }
+        }
+    }
+
+    QVector<CadItem*> localItems;
+
+    for (int index = 0; index < included.size(); ++index)
+    {
+        if (included[index])
+        {
+            localItems.push_back(m_records[index].sourceItem);
+        }
+    }
+
+    result = extractBestLoop(localItems, seedItems);
+
+    if (!result.valid)
+    {
+        const RotaryPathLoopResult graphResult = extractBestLoop({}, seedItems);
+
+        if (graphResult.valid)
+        {
+            result = graphResult;
+
+            for (CadItem* item : result.usedItems)
+            {
+                if (!localItems.contains(item))
+                {
+                    localItems.push_back(item);
+                }
+            }
+        }
+    }
+
+    if (expandedItems != nullptr)
+    {
+        *expandedItems = localItems;
+    }
+
+    if (!result.valid)
+    {
+        return result;
+    }
+
+    for (CadItem* seed : seedItems)
+    {
+        if (seed != nullptr && !result.usedItems.contains(seed))
+        {
+            result.valid = false;
+            result.connectedLoop = false;
+            result.errorMessage = QStringLiteral("未能提取包含全部所选图元的唯一加工断面闭环。");
+            return result;
+        }
+    }
+
+    return result;
 }
 
 RotaryPathLoopResult RotaryPathTopology::extractBestLoop

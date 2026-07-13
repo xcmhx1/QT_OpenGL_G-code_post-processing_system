@@ -773,6 +773,8 @@ RotaryCutBoundaryAnalysis RotaryCutBoundaryAnalyzer::analyze
 )
 {
     RotaryCutBoundaryAnalysis analysis;
+    qInfo().noquote() << QStringLiteral("[断面候选] 周向分析输入：%1")
+        .arg(describeRotaryPathItems(candidateItems));
     QVector<CadItem*> topologyItems = sceneItems;
 
     for (CadItem* item : candidateItems)
@@ -789,6 +791,8 @@ RotaryCutBoundaryAnalysis RotaryCutBoundaryAnalyzer::analyze
         RotaryPathTopologyTolerance::fromConnectionTolerance(connectionTolerance)
     );
     const RotaryPathLoopResult loop = topology.extractBestLoop(candidateItems, candidateItems);
+    qInfo().noquote() << QStringLiteral("[断面候选] 最终闭环：%1")
+        .arg(describeRotaryPathItems(loop.usedItems));
     analysis.connectedComponentCount = loop.connectedComponentCount;
     analysis.openNodeCount = loop.openNodeCount;
     analysis.branchNodeCount = loop.branchNodeCount;

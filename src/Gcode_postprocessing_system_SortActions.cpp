@@ -3918,30 +3918,33 @@ QVector<CadItem*> Gcode_postprocessing_system::expandedSelectedRotaryEndCut(QStr
         }
     }
 
-    const QVector<QVector2D> directValidationHull = m_rotaryTubeSectionModel.valid
-        ? m_rotaryTubeSectionModel.sectionHull
-        : QVector<QVector2D>();
-    const RotaryCutBoundaryAnalysis directAnalysis = RotaryCutBoundaryAnalyzer::analyze
+    qInfo().noquote() << QStringLiteral("[断面候选] 选择集：%1")
+        .arg(describeRotaryPathItems(selectedItems));
+    qInfo().noquote() << QStringLiteral("[断面候选] sceneItems 过滤后：%1")
+        .arg(describeRotaryPathItems(sceneItems));
+    const RotaryPathTopology topology
     (
-        selectedItems,
         sceneItems,
-        kEndCutConnectionTolerance,
-        directValidationHull
+        RotaryPathTopologyTolerance::fromConnectionTolerance(kEndCutConnectionTolerance)
     );
+    QVector<CadItem*> connectedItems;
+    const RotaryPathLoopResult loop = topology.extractSeededLoop(selectedItems, &connectedItems);
+    qInfo().noquote() << QStringLiteral("[断面候选] 连通扩展：%1")
+        .arg(describeRotaryPathItems(connectedItems));
 
-    if (directAnalysis.valid && !directAnalysis.boundaryItems.isEmpty())
+    if (!loop.valid || loop.usedItems.isEmpty())
     {
         if (errorMessage != nullptr)
         {
-            errorMessage->clear();
+            *errorMessage = loop.errorMessage;
         }
 
-        return directAnalysis.boundaryItems;
+        return {};
     }
 
     const RotaryTubeSectionModel candidateSection = RotaryTubeGeometryAnalyzer::buildSectionModel
     (
-        selectedItems,
+        loop.usedItems,
         sceneItems,
         kEndCutConnectionTolerance
     );
@@ -3962,7 +3965,7 @@ QVector<CadItem*> Gcode_postprocessing_system::expandedSelectedRotaryEndCut(QStr
 
     const RotaryCutBoundaryAnalysis analysis = RotaryCutBoundaryAnalyzer::analyze
     (
-        candidateSection.outerBoundaryItems,
+        loop.usedItems,
         sceneItems,
         kEndCutConnectionTolerance,
         validationHull
@@ -3983,7 +3986,7 @@ QVector<CadItem*> Gcode_postprocessing_system::expandedSelectedRotaryEndCut(QStr
         errorMessage->clear();
     }
 
-    return analysis.boundaryItems.isEmpty() ? candidateSection.outerBoundaryItems : analysis.boundaryItems;
+    return analysis.boundaryItems.isEmpty() ? loop.usedItems : analysis.boundaryItems;
 }
 
 bool Gcode_postprocessing_system::assignSelectedRotaryEndCut()
@@ -4342,7 +4345,7 @@ bool Gcode_postprocessing_system::toggleSelectedRotaryEndCutAssignment()
 
 bool Gcode_postprocessing_system::recognizeAllRotaryEndCuts(bool interactive)
 {
-    std::vector<CadItem*> documentItems;
+    QVector<CadItem*> documentItems;
     QVector<CadItem*> sceneItems;
 
     for (const std::unique_ptr<CadItem>& entity : m_document.m_entities)
@@ -4354,7 +4357,7 @@ bool Gcode_postprocessing_system::recognizeAllRotaryEndCuts(bool interactive)
         }
     }
 
-    if (documentItems.empty())
+    if (documentItems.isEmpty())
     {
         const QString message = QStringLiteral("当前文档为空，未识别到加工断面。");
         ui->openGLWidget->appendCommandMessage(message);
@@ -4368,14 +4371,13 @@ bool Gcode_postprocessing_system::recognizeAllRotaryEndCuts(bool interactive)
         return false;
     }
 
-    const std::vector<int> componentIds = buildItemConnectivityComponents
+    qInfo().noquote() << QStringLiteral("[断面候选] sceneItems 过滤后：%1")
+        .arg(describeRotaryPathItems(sceneItems));
+    const RotaryPathTopology topology
     (
-        documentItems,
-        kEndCutConnectionTolerance
+        sceneItems,
+        RotaryPathTopologyTolerance::fromConnectionTolerance(kEndCutConnectionTolerance)
     );
-    const int componentCount = componentIds.empty()
-        ? 0
-        : (*std::max_element(componentIds.begin(), componentIds.end()) + 1);
     int nextBoundaryId = 0;
 
     for (CadItem* item : documentItems)
@@ -4387,39 +4389,57 @@ bool Gcode_postprocessing_system::recognizeAllRotaryEndCuts(bool interactive)
     }
 
     int recognizedCount = 0;
+    QSet<CadItem*> attemptedBoundaryItems;
 
-    for (int componentId = 0; componentId < componentCount; ++componentId)
+    for (CadItem* seedItem : documentItems)
     {
-        QVector<CadItem*> candidateItems;
-
-        for (size_t itemIndex = 0; itemIndex < documentItems.size(); ++itemIndex)
+        if (seedItem == nullptr
+            || seedItem->m_rotaryEndCutRole != RotaryEndCutRole::None
+            || attemptedBoundaryItems.contains(seedItem))
         {
-            if (componentIds[itemIndex] == componentId)
-            {
-                candidateItems.push_back(documentItems[itemIndex]);
-            }
+            continue;
         }
 
-        if (candidateItems.isEmpty()
-            || std::any_of(candidateItems.begin(), candidateItems.end(), [](const CadItem* item)
-            {
-                return item != nullptr && item->m_rotaryEndCutRole != RotaryEndCutRole::None;
-            }))
+        const QVector<CadItem*> seedItems{ seedItem };
+        QVector<CadItem*> connectedItems;
+        const RotaryPathLoopResult loop = topology.extractSeededLoop(seedItems, &connectedItems);
+
+        if (!loop.valid || loop.usedItems.isEmpty())
+        {
+            qInfo().noquote() << QStringLiteral("[自动识别加工断面] 种子 %1 提取失败：%2")
+                .arg(describeRotaryPathItems(seedItems))
+                .arg(loop.errorMessage);
+            continue;
+        }
+
+        qInfo().noquote() << QStringLiteral("[断面候选] 选择集：%1")
+            .arg(describeRotaryPathItems(seedItems));
+        qInfo().noquote() << QStringLiteral("[断面候选] 连通扩展：%1")
+            .arg(describeRotaryPathItems(connectedItems));
+
+        for (CadItem* item : loop.usedItems)
+        {
+            attemptedBoundaryItems.insert(item);
+        }
+
+        if (std::any_of(loop.usedItems.begin(), loop.usedItems.end(), [](const CadItem* item)
+        {
+            return item != nullptr && item->m_rotaryEndCutRole != RotaryEndCutRole::None;
+        }))
         {
             continue;
         }
 
         const RotaryTubeSectionModel candidateSection = RotaryTubeGeometryAnalyzer::buildSectionModel
         (
-            candidateItems,
+            loop.usedItems,
             sceneItems,
             kEndCutConnectionTolerance
         );
 
         if (!candidateSection.valid || candidateSection.outerBoundaryItems.isEmpty())
         {
-            qInfo().noquote() << QStringLiteral("[自动识别加工断面] 候选分量 %1 解析失败：%2")
-                .arg(componentId + 1)
+            qInfo().noquote() << QStringLiteral("[自动识别加工断面] 截面解析失败：%1")
                 .arg(candidateSection.errorMessage);
             continue;
         }
@@ -4429,7 +4449,7 @@ bool Gcode_postprocessing_system::recognizeAllRotaryEndCuts(bool interactive)
             : candidateSection.sectionHull;
         const RotaryCutBoundaryAnalysis analysis = RotaryCutBoundaryAnalyzer::analyze
         (
-            candidateSection.outerBoundaryItems,
+            loop.usedItems,
             sceneItems,
             kEndCutConnectionTolerance,
             validationHull
@@ -4437,14 +4457,13 @@ bool Gcode_postprocessing_system::recognizeAllRotaryEndCuts(bool interactive)
 
         if (!analysis.valid)
         {
-            qInfo().noquote() << QStringLiteral("[自动识别加工断面] 候选分量 %1 验证失败：%2")
-                .arg(componentId + 1)
+            qInfo().noquote() << QStringLiteral("[自动识别加工断面] 周向验证失败：%1")
                 .arg(analysis.errorMessage);
             continue;
         }
 
         const QVector<CadItem*>& recognizedItems = analysis.boundaryItems.isEmpty()
-            ? candidateSection.outerBoundaryItems
+            ? loop.usedItems
             : analysis.boundaryItems;
 
         for (CadItem* item : recognizedItems)

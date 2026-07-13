@@ -59,6 +59,12 @@ public:
 
     bool itemsDirectlyConnected(CadItem* left, CadItem* right) const;
 
+    RotaryPathLoopResult extractSeededLoop
+    (
+        const QVector<CadItem*>& seedItems,
+        QVector<CadItem*>* expandedItems = nullptr
+    ) const;
+
     RotaryPathLoopResult extractBestLoop
     (
         const QVector<CadItem*>& candidateItems,
@@ -70,3 +76,5 @@ private:
     QVector<RotaryPathTopologyRecord> m_records;
     QVector<QVector<int>> m_itemAdjacency;
 };
+
+QString describeRotaryPathItems(const QVector<CadItem*>& items);

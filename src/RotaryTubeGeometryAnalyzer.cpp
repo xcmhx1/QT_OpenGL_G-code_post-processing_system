@@ -5,6 +5,7 @@
 #include "CadItem.h"
 #include "RotaryPathTopology.h"
 
+#include <QDebug>
 #include <QSet>
 
 #include <algorithm>
@@ -221,46 +222,6 @@ namespace
     }
 
     double distancePointToPath(const QVector3D& point, const QVector<QVector3D>& path);
-
-    QVector<int> selectedConnectedItems
-    (
-        const QVector<CadItem*>& selectedItems,
-        const QVector<CadItem*>& sceneItems,
-        const RotaryPathTopology& topology
-    )
-    {
-        QVector<int> pending;
-        QVector<bool> included(sceneItems.size(), false);
-
-        for (CadItem* selected : selectedItems)
-        {
-            const int index = sceneItems.indexOf(selected);
-
-            if (index >= 0)
-            {
-                included[index] = true;
-                pending.push_back(index);
-                break;
-            }
-        }
-
-        for (int pendingIndex = 0; pendingIndex < pending.size(); ++pendingIndex)
-        {
-            const int current = pending[pendingIndex];
-
-            for (int candidate = 0; candidate < sceneItems.size(); ++candidate)
-            {
-                if (!included[candidate]
-                    && topology.itemsDirectlyConnected(sceneItems[current], sceneItems[candidate]))
-                {
-                    included[candidate] = true;
-                    pending.push_back(candidate);
-                }
-            }
-        }
-
-        return pending;
-    }
 
     QVector<int> peelDanglingItems
     (
@@ -752,34 +713,6 @@ namespace
         }
 
         return result.area > tolerance * tolerance ? result : TopologyOuterBoundary();
-    }
-
-    bool itemFollowsOuterBoundary
-    (
-        const QVector<QVector3D>& path,
-        int projection,
-        const QVector<QVector2D>& boundary,
-        double tolerance
-    )
-    {
-        if (path.size() < 2 || boundary.size() < 3)
-        {
-            return false;
-        }
-
-        for (int index = 0; index + 1 < path.size(); ++index)
-        {
-            const QVector2D start = projectPoint(path[index], projection);
-            const QVector2D end = projectPoint(path[index + 1], projection);
-            const QVector2D midpoint = (start + end) * 0.5f;
-
-            if (distanceToHull(midpoint, boundary) > tolerance)
-            {
-                return false;
-            }
-        }
-
-        return true;
     }
 
     enum class ItemBoundaryRelation
@@ -1308,54 +1241,51 @@ namespace
     )
     {
         RotaryTubeSectionModel model;
-        const QVector<int> core = peelDanglingItems
-        (
-            candidateIndices,
-            paths,
-            tolerance.nodeSnap,
-            topology
-        );
+        QVector<CadItem*> candidateItems;
+        candidateItems.reserve(candidateIndices.size());
 
-        if (core.isEmpty())
+        for (int itemIndex : candidateIndices)
         {
-            model.errorMessage = QStringLiteral("候选图元未能形成闭合或近似闭合的方管垂直截面。");
-            return model;
-        }
-
-        const TopologyOuterBoundary outerBoundary = buildLargestOuterBoundary(core, paths, 2, tolerance.nodeSnap);
-        QSet<int> outerBoundaryItems;
-
-        for (int itemIndex : outerBoundary.itemIndices)
-        {
-            if (itemFollowsOuterBoundary
-            (
-                paths[itemIndex],
-                2,
-                outerBoundary.polygon,
-                tolerance.boundaryDistance
-            ))
+            if (itemIndex >= 0 && itemIndex < sceneItems.size() && sceneItems[itemIndex] != nullptr)
             {
-                outerBoundaryItems.insert(itemIndex);
+                candidateItems.push_back(sceneItems[itemIndex]);
             }
         }
 
-        if (outerBoundaryItems.isEmpty())
+        const RotaryPathLoopResult loop = topology.extractBestLoop(candidateItems);
+
+        if (!loop.valid || loop.usedItems.isEmpty())
         {
-            model.errorMessage = QStringLiteral("未能从候选图元中提取唯一的最大闭合外轮廓。");
+            model.errorMessage = loop.errorMessage.isEmpty()
+                ? QStringLiteral("候选图元未能形成闭合或近似闭合的方管垂直截面。")
+                : loop.errorMessage;
             return model;
         }
 
+        qInfo().noquote() << QStringLiteral("[断面候选] 外轮廓：%1")
+            .arg(describeRotaryPathItems(loop.usedItems));
         QVector<QVector2D> sectionPoints;
-        model.sectionBoundary = outerBoundary.polygon;
+        sectionPoints.reserve(loop.orderedPath.size());
+        model.outerBoundaryItems = loop.usedItems;
 
-        for (int itemIndex : outerBoundaryItems)
+        for (const QVector3D& point : loop.orderedPath)
         {
-            model.outerBoundaryItems.push_back(sceneItems[itemIndex]);
+            const QVector2D projected(point.y(), point.z());
 
-            for (const QVector3D& point : paths[itemIndex])
+            if (model.sectionBoundary.isEmpty()
+                || (model.sectionBoundary.back() - projected).lengthSquared() > 1.0e-12f)
             {
-                sectionPoints.push_back(QVector2D(point.y(), point.z()));
+                model.sectionBoundary.push_back(projected);
             }
+
+            sectionPoints.push_back(projected);
+        }
+
+        if (model.sectionBoundary.size() > 1
+            && (model.sectionBoundary.front() - model.sectionBoundary.back()).length()
+                <= tolerance.boundaryDistance)
+        {
+            model.sectionBoundary.pop_back();
         }
 
         model.sectionHull = convexHull(std::move(sectionPoints));
@@ -1429,41 +1359,33 @@ RotaryTubeSectionModel RotaryTubeGeometryAnalyzer::buildSectionModel
         paths.push_back(record.points);
     }
 
-    QVector<int> directCandidate;
-    directCandidate.reserve(selectedItems.size());
+    QVector<CadItem*> expandedItems;
+    const RotaryPathLoopResult loop = topology.extractSeededLoop(selectedItems, &expandedItems);
+    qInfo().noquote() << QStringLiteral("[断面候选] 选择集：%1")
+        .arg(describeRotaryPathItems(selectedItems));
+    qInfo().noquote() << QStringLiteral("[断面候选] 连通扩展：%1")
+        .arg(describeRotaryPathItems(expandedItems));
 
-    for (CadItem* selectedItem : selectedItems)
+    if (!loop.valid || loop.usedItems.isEmpty())
     {
-        const int selectedIndex = sceneItems.indexOf(selectedItem);
-
-        if (selectedIndex < 0)
-        {
-            model.errorMessage = QStringLiteral("选择集中存在不属于当前文档的图元。");
-            return model;
-        }
-
-        if (!directCandidate.contains(selectedIndex)) directCandidate.push_back(selectedIndex);
-    }
-
-    model = parseSectionCandidate(directCandidate, sceneItems, paths, tolerance, topology);
-
-    if (model.valid)
-    {
+        model.errorMessage = loop.errorMessage;
         return model;
     }
 
-    const QVector<int> component = selectedConnectedItems(selectedItems, sceneItems, topology);
+    QVector<int> loopIndices;
+    loopIndices.reserve(loop.usedItems.size());
 
-    for (int selectedIndex : directCandidate)
+    for (CadItem* item : loop.usedItems)
     {
-        if (!component.contains(selectedIndex))
+        const int itemIndex = sceneItems.indexOf(item);
+
+        if (itemIndex >= 0)
         {
-            model.errorMessage = QStringLiteral("请选择同一个连续方管截面中的图元，不要同时选择多个独立轮廓。");
-            return model;
+            loopIndices.push_back(itemIndex);
         }
     }
 
-    model = parseSectionCandidate(component, sceneItems, paths, tolerance, topology);
+    model = parseSectionCandidate(loopIndices, sceneItems, paths, tolerance, topology);
     return model;
 }
 
