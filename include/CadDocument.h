@@ -10,6 +10,8 @@
 #include <utility>
 #include <vector>
 
+#include "core/geometry/EntityIdAllocator.h"
+
 class CadItem;
 class DRW_Entity;
 class dx_data;
@@ -64,6 +66,11 @@ public:
 
 signals:
     void sceneChanged();
+
+private:
+    void ensureEntityId(CadItem& item);
+
+    cadcam::geometry::EntityIdAllocator m_entityIdAllocator;
 
 public:
     // 原始文档数据

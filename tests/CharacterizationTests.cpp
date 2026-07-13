@@ -1,3 +1,4 @@
+#include "CadArcItem.h"
 #include "CadCircleItem.h"
 #include "CadDocument.h"
 #include "CadEllipseItem.h"
@@ -7,7 +8,11 @@
 #include "GGenerator.h"
 #include "GProfile.h"
 #include "application/messaging/MessageCenter.h"
+#include "compatibility/legacy/LegacyCadItemPathBridge.h"
 #include "core/diagnostics/OperationResult.h"
+#include "core/geometry/EntityIdAllocator.h"
+#include "core/geometry/GeometryCompiler.h"
+#include "infrastructure/dxf/DxfGeometryAdapter.h"
 #include "dx_data.h"
 
 #include <QDir>
@@ -17,6 +22,7 @@
 #include <algorithm>
 #include <cmath>
 #include <iostream>
+#include <limits>
 #include <memory>
 
 namespace
@@ -53,6 +59,7 @@ namespace
     {
         auto item = std::make_unique<Item>(entity.get());
         Item* rawItem = item.get();
+        rawItem->m_entityId = static_cast<cadcam::geometry::EntityId>(document.m_entities.size()) + 1;
         document.m_data->mBlock->ent.push_back(entity.release());
         document.m_entities.push_back(std::move(item));
         return rawItem;
@@ -93,6 +100,17 @@ namespace
         ellipse->endparam = 6.28318530717958647692;
         ellipse->extPoint = DRW_Coord(0.0, 0.0, 1.0);
         return ellipse;
+    }
+
+    std::unique_ptr<DRW_Arc> makeArc(double startParameter, double endParameter)
+    {
+        auto arc = std::make_unique<DRW_Arc>();
+        arc->basePoint = DRW_Coord(0.0, 0.0, 0.0);
+        arc->radious = 10.0;
+        arc->staangle = startParameter;
+        arc->endangle = endParameter;
+        arc->extPoint = DRW_Coord(0.0, 0.0, 1.0);
+        return arc;
     }
 
     OperationContext testContext(const QString& operation)
@@ -145,6 +163,24 @@ namespace
         }
 
         const QString expected = QString::fromUtf8(input.readAll());
+        if (actual != expected)
+        {
+            const QStringList expectedLines = expected.split(QStringLiteral("\r\n"));
+            const QStringList actualLines = actual.split(QStringLiteral("\r\n"));
+            const int comparedLineCount = std::min(expectedLines.size(), actualLines.size());
+            for (int index = 0; index < comparedLineCount; ++index)
+            {
+                if (expectedLines[index] == actualLines[index])
+                {
+                    continue;
+                }
+                std::cerr << "Golden mismatch " << fileName.toStdString()
+                    << " line " << (index + 1)
+                    << "\n  expected: " << expectedLines[index].toStdString()
+                    << "\n  actual:   " << actualLines[index].toStdString() << '\n';
+                break;
+            }
+        }
         check(actual == expected, fileName.toUtf8().constData());
     }
 
@@ -200,6 +236,429 @@ namespace
         check(first.received.size() == 1 && second.received.size() == 1, "MessageCenter fan-out");
         check(first.received.front().correlationId == second.received.front().correlationId, "MessageCenter correlation id");
         check(report.status == OperationStatus::PartialSuccess, "MessageCenter does not mutate report");
+    }
+
+    void testPath3DContract()
+    {
+        using namespace cadcam::geometry;
+
+        Path3D closed;
+        closed.sourceEntityId = 1;
+        closed.sourceKind = SourceGeometryKind::Circle;
+        closed.closed = true;
+        closed.vertices =
+        {
+            { { 0.0, 0.0, 0.0 }, 0.0 },
+            { { 1.0, 0.0, 0.0 }, 1.0 },
+            { { 0.0, 1.0, 0.0 }, 2.0 }
+        };
+        check(validatePath3D(closed, testContext(QStringLiteral("path-contract"))).succeeded(),
+            "closed Path3D without duplicate start");
+
+        closed.vertices.push_back(closed.vertices.front());
+        const OperationReport repeatedClosure = validatePath3D
+            (closed, testContext(QStringLiteral("path-contract")));
+        check(!repeatedClosure.succeeded()
+            && hasDiagnosticCode(repeatedClosure.diagnostics, DiagnosticCode::PathInvariantViolation),
+            "closed Path3D rejects duplicate start");
+
+        Path3D nonFinite;
+        nonFinite.sourceEntityId = 2;
+        nonFinite.sourceKind = SourceGeometryKind::Line;
+        nonFinite.vertices =
+        {
+            { { 0.0, 0.0, 0.0 }, 0.0 },
+            { { std::numeric_limits<double>::infinity(), 0.0, 0.0 }, 1.0 }
+        };
+        const OperationReport nonFiniteResult = validatePath3D
+            (nonFinite, testContext(QStringLiteral("path-contract")));
+        check(!nonFiniteResult.succeeded()
+            && hasDiagnosticCode(nonFiniteResult.diagnostics, DiagnosticCode::PathInvariantViolation),
+            "Path3D rejects non-finite coordinates");
+
+        Path3D repeated;
+        repeated.sourceEntityId = 3;
+        repeated.sourceKind = SourceGeometryKind::Line;
+        repeated.vertices =
+        {
+            { { 1.0, 2.0, 3.0 }, 0.0 },
+            { { 1.0, 2.0, 3.0 }, 1.0 }
+        };
+        const OperationReport repeatedResult = validatePath3D
+            (repeated, testContext(QStringLiteral("path-contract")));
+        check(!repeatedResult.succeeded()
+            && hasDiagnosticCode(repeatedResult.diagnostics, DiagnosticCode::PathInvariantViolation),
+            "Path3D detects adjacent duplicate vertices");
+    }
+
+    void testGeometryCompilerLineAndCircle()
+    {
+        using namespace cadcam::geometry;
+
+        GeometryCompiler compiler;
+        SamplingPolicy linePolicy;
+        SourceEntity lineSource;
+        lineSource.id = 10;
+        lineSource.kind = SourceGeometryKind::Line;
+        lineSource.geometry = LineGeometry{ { 1.0, 2.0, 3.0 }, { 4.0, 5.0, 6.0 } };
+
+        OperationResult<Path3D> lineForward = compiler.compile
+        (
+            lineSource,
+            linePolicy,
+            {},
+            testContext(QStringLiteral("compile-line"))
+        );
+        check(lineForward.succeeded() && lineForward.value->vertices.size() == 2
+            && lineForward.value->vertices.front().position.x == 1.0
+            && lineForward.value->vertices.back().position.x == 4.0,
+            "GeometryCompiler line forward");
+
+        PathCompileOptions reverse;
+        reverse.reverse = true;
+        OperationResult<Path3D> lineReverse = compiler.compile
+        (
+            lineSource,
+            linePolicy,
+            reverse,
+            testContext(QStringLiteral("compile-line"))
+        );
+        check(lineReverse.succeeded()
+            && lineReverse.value->vertices.front().position.x == 4.0
+            && lineReverse.value->vertices.back().position.x == 1.0,
+            "GeometryCompiler line reverse");
+
+        lineSource.geometry = LineGeometry{ { 1.0, 2.0, 3.0 }, { 1.0, 2.0, 3.0 } };
+        const OperationResult<Path3D> degenerate = compiler.compile
+        (
+            lineSource,
+            linePolicy,
+            {},
+            testContext(QStringLiteral("compile-line"))
+        );
+        check(!degenerate.succeeded()
+            && hasDiagnosticCode(degenerate.diagnostics, DiagnosticCode::DegenerateGeometry),
+            "GeometryCompiler zero-length line diagnostic");
+
+        SamplingPolicy invalidPolicy;
+        invalidPolicy.minimumSegments = 0;
+        const OperationResult<Path3D> invalidPolicyResult = compiler.compile
+        (
+            lineSource,
+            invalidPolicy,
+            {},
+            testContext(QStringLiteral("compile-invalid-policy"))
+        );
+        check(!invalidPolicyResult.succeeded()
+            && hasDiagnosticCode
+            (invalidPolicyResult.diagnostics, DiagnosticCode::InvalidSamplingPolicy),
+            "GeometryCompiler invalid sampling policy diagnostic");
+
+        SourceEntity circleSource;
+        circleSource.id = 11;
+        circleSource.kind = SourceGeometryKind::Circle;
+        circleSource.geometry = CircleGeometry
+        {
+            { 0.0, 0.0, 0.0 },
+            { 1.0, 0.0, 0.0 },
+            { 0.0, 1.0, 0.0 },
+            5.0
+        };
+        SamplingPolicy circlePolicy;
+        circlePolicy.chordTolerance = 0.0;
+        circlePolicy.minimumSegments = 128;
+        circlePolicy.fullTurnSegments = 128;
+        const OperationResult<Path3D> circleForward = compiler.compile
+        (
+            circleSource,
+            circlePolicy,
+            {},
+            testContext(QStringLiteral("compile-circle"))
+        );
+        const OperationResult<Path3D> circleReverse = compiler.compile
+        (
+            circleSource,
+            circlePolicy,
+            reverse,
+            testContext(QStringLiteral("compile-circle"))
+        );
+        check(circleForward.succeeded() && circleForward.value->closed
+            && circleForward.value->vertices.size() == 128,
+            "GeometryCompiler closed circle vertex count");
+        check(std::abs(circleForward.value->vertices.front().position.x) <= kTolerance
+            && std::abs(circleForward.value->vertices.front().position.y - 5.0) <= kTolerance,
+            "GeometryCompiler circle north start");
+        check(std::abs(circleForward.value->vertices.front().position.x
+                - circleReverse.value->vertices.front().position.x) <= kTolerance
+            && std::abs(circleForward.value->vertices.front().position.y
+                - circleReverse.value->vertices.front().position.y) <= kTolerance,
+            "GeometryCompiler circle same reverse start");
+        check(circleForward.value->vertices[1].position.x < 0.0
+            && circleReverse.value->vertices[1].position.x > 0.0,
+            "GeometryCompiler circle reverse traversal");
+        check(std::abs(circleForward.value->vertices.front().position.x
+                - circleForward.value->vertices.back().position.x) > 1.0e-3
+            || std::abs(circleForward.value->vertices.front().position.y
+                - circleForward.value->vertices.back().position.y) > 1.0e-3,
+            "GeometryCompiler circle omits duplicate closure");
+    }
+
+    void testGeometryCompilerArcAndEllipse()
+    {
+        using namespace cadcam::geometry;
+
+        GeometryCompiler compiler;
+        const double degrees = 3.14159265358979323846 / 180.0;
+        SourceEntity arcSource;
+        arcSource.id = 20;
+        arcSource.kind = SourceGeometryKind::Arc;
+        arcSource.geometry = ArcGeometry
+        {
+            { 0.0, 0.0, 0.0 },
+            { 1.0, 0.0, 0.0 },
+            { 0.0, 1.0, 0.0 },
+            10.0,
+            0.0,
+            90.0 * degrees
+        };
+        SamplingPolicy arcPolicy;
+        arcPolicy.chordTolerance = 0.0;
+        arcPolicy.minimumSegments = 8;
+        arcPolicy.maximumAngularStep = 5.0 * degrees;
+        const OperationResult<Path3D> ordinaryArc = compiler.compile
+        (
+            arcSource,
+            arcPolicy,
+            {},
+            testContext(QStringLiteral("compile-ordinary-arc"))
+        );
+        check(ordinaryArc.succeeded() && ordinaryArc.value->vertices.size() == 19,
+            "GeometryCompiler ordinary arc");
+
+        std::get<ArcGeometry>(arcSource.geometry).startParameter = 350.0 * degrees;
+        std::get<ArcGeometry>(arcSource.geometry).endParameter = 370.0 * degrees;
+        OperationResult<Path3D> arcForward = compiler.compile
+        (
+            arcSource,
+            arcPolicy,
+            {},
+            testContext(QStringLiteral("compile-arc"))
+        );
+        PathCompileOptions reverse;
+        reverse.reverse = true;
+        OperationResult<Path3D> arcReverse = compiler.compile
+        (
+            arcSource,
+            arcPolicy,
+            reverse,
+            testContext(QStringLiteral("compile-arc"))
+        );
+        check(arcForward.succeeded() && !arcForward.value->closed
+            && arcForward.value->vertices.size() == 9,
+            "GeometryCompiler zero-crossing arc");
+        check(arcReverse.succeeded()
+            && std::abs(arcForward.value->vertices.front().position.x
+                - arcReverse.value->vertices.back().position.x) <= kTolerance
+            && std::abs(arcForward.value->vertices.back().position.x
+                - arcReverse.value->vertices.front().position.x) <= kTolerance,
+            "GeometryCompiler arc reverse endpoints");
+
+        std::get<ArcGeometry>(arcSource.geometry).endParameter = 350.0 * degrees + 1.0e-6;
+        const OperationResult<Path3D> shortArc = compiler.compile
+        (
+            arcSource,
+            arcPolicy,
+            {},
+            testContext(QStringLiteral("compile-short-arc"))
+        );
+        check(shortArc.succeeded() && shortArc.value->vertices.size() == 9,
+            "GeometryCompiler short arc minimum segments");
+
+        SourceEntity ellipseSource;
+        ellipseSource.id = 21;
+        ellipseSource.kind = SourceGeometryKind::Ellipse;
+        ellipseSource.geometry = EllipseGeometry
+        {
+            { 3.0, 4.0, 5.0 },
+            { 6.0, 8.0, 0.0 },
+            { -4.0, 3.0, 0.0 },
+            0.0,
+            6.28318530717958647692,
+            true
+        };
+        SamplingPolicy ellipsePolicy;
+        ellipsePolicy.chordTolerance = 0.0;
+        ellipsePolicy.minimumSegments = 16;
+        ellipsePolicy.fullTurnSegments = 128;
+        const OperationResult<Path3D> ellipseForward = compiler.compile
+        (
+            ellipseSource,
+            ellipsePolicy,
+            {},
+            testContext(QStringLiteral("compile-ellipse"))
+        );
+        const OperationResult<Path3D> ellipseReverse = compiler.compile
+        (
+            ellipseSource,
+            ellipsePolicy,
+            reverse,
+            testContext(QStringLiteral("compile-ellipse"))
+        );
+        check(ellipseForward.succeeded() && ellipseForward.value->closed
+            && ellipseForward.value->vertices.size() == 128,
+            "GeometryCompiler rotated full ellipse");
+        check(std::abs(ellipseForward.value->vertices.front().position.x + 1.0) <= kTolerance
+            && std::abs(ellipseForward.value->vertices.front().position.y - 7.0) <= kTolerance,
+            "GeometryCompiler ellipse north parameter");
+        check(std::abs(ellipseForward.value->vertices.front().position.x
+                - ellipseReverse.value->vertices.front().position.x) <= kTolerance
+            && std::abs(ellipseForward.value->vertices.front().position.y
+                - ellipseReverse.value->vertices.front().position.y) <= kTolerance,
+            "GeometryCompiler ellipse same reverse start");
+
+        EllipseGeometry partial = std::get<EllipseGeometry>(ellipseSource.geometry);
+        partial.fullEllipse = false;
+        partial.startParameter = 0.0;
+        partial.endParameter = 1.57079632679489661923;
+        ellipseSource.geometry = partial;
+        const OperationResult<Path3D> partialForward = compiler.compile
+        (
+            ellipseSource,
+            ellipsePolicy,
+            {},
+            testContext(QStringLiteral("compile-partial-ellipse"))
+        );
+        const OperationResult<Path3D> partialReverse = compiler.compile
+        (
+            ellipseSource,
+            ellipsePolicy,
+            reverse,
+            testContext(QStringLiteral("compile-partial-ellipse"))
+        );
+        check(partialForward.succeeded() && !partialForward.value->closed
+            && partialForward.value->vertices.size() == 33,
+            "GeometryCompiler partial ellipse point count");
+        check(std::abs(partialForward.value->vertices.front().position.x
+                - partialReverse.value->vertices.back().position.x) <= kTolerance
+            && std::abs(partialForward.value->vertices.back().position.y
+                - partialReverse.value->vertices.front().position.y) <= kTolerance,
+            "GeometryCompiler partial ellipse reverse endpoints");
+    }
+
+    void testDxfAdapterAndLegacyBridge()
+    {
+        using namespace cadcam::geometry;
+
+        CadDocument document;
+        CadCircleItem* circle = appendItem<DRW_Circle, CadCircleItem>(document, makeCircle());
+        const OperationResult<SourceEntity> adaptedCircle = DxfGeometryAdapter::convert
+        (
+            circle->m_entityId,
+            *circle->m_nativeEntity,
+            testContext(QStringLiteral("adapt-circle"))
+        );
+        check(adaptedCircle.succeeded()
+            && adaptedCircle.value->kind == SourceGeometryKind::Circle,
+            "DxfGeometryAdapter circle");
+
+        PathCompileOptions options;
+        const OperationResult<Path3D> coreCircle = LegacyCadItemPathBridge::compile
+        (
+            *circle,
+            LegacyCadItemPathBridge::legacySamplingPolicy(*circle),
+            options,
+            testContext(QStringLiteral("legacy-circle"))
+        );
+        std::vector<RawPathPoint3D> legacyPath;
+        LegacyCadItemPathBridge::copyToLegacyRawPath(*coreCircle.value, legacyPath);
+        check(coreCircle.value->vertices.size() == 128 && legacyPath.size() == 129,
+            "Legacy bridge restores circle closure point");
+        check(legacyPath.front().x == legacyPath.back().x
+            && legacyPath.front().y == legacyPath.back().y
+            && legacyPath.front().z == legacyPath.back().z,
+            "Legacy bridge closure is exact copy");
+
+        const double degrees = 3.14159265358979323846 / 180.0;
+        CadArcItem* arc = appendItem<DRW_Arc, CadArcItem>
+            (document, makeArc(350.0 * degrees, 10.0 * degrees));
+        arc->rebuildRawPathPoints3D();
+        check(arc->rawPathPoints3D().size() == 9,
+            "Legacy arc keeps old point count");
+        const double expectedStartX = 10.0 * std::cos(350.0 * degrees);
+        const double expectedEndX = 10.0 * std::cos(10.0 * degrees);
+        check(std::abs(arc->rawPathPoints3D().front().x - expectedStartX) <= kTolerance
+            && std::abs(arc->rawPathPoints3D().back().x - expectedEndX) <= kTolerance,
+            "Legacy arc keeps exact endpoints");
+
+        auto invalidEllipse = makeEllipse();
+        invalidEllipse->ratio = 0.0;
+        const OperationResult<SourceEntity> invalidEllipseResult = DxfGeometryAdapter::convert
+        (
+            99,
+            *invalidEllipse,
+            testContext(QStringLiteral("adapt-invalid-ellipse"))
+        );
+        check(!invalidEllipseResult.succeeded()
+            && hasDiagnosticCode
+            (invalidEllipseResult.diagnostics, DiagnosticCode::GeometryAdapterFailure),
+            "DxfGeometryAdapter rejects invalid ellipse ratio");
+
+        invalidEllipse->ratio = 0.5;
+        invalidEllipse->secPoint = DRW_Coord(0.0, 0.0, 0.0);
+        const OperationResult<SourceEntity> invalidAxisResult = DxfGeometryAdapter::convert
+        (
+            100,
+            *invalidEllipse,
+            testContext(QStringLiteral("adapt-invalid-ellipse-axis"))
+        );
+        check(!invalidAxisResult.succeeded()
+            && hasDiagnosticCode
+            (invalidAxisResult.diagnostics, DiagnosticCode::GeometryAdapterFailure),
+            "DxfGeometryAdapter rejects degenerate ellipse axis");
+
+        DRW_Point point;
+        const OperationResult<SourceEntity> unsupported = DxfGeometryAdapter::convert
+        (
+            101,
+            point,
+            testContext(QStringLiteral("adapt-unsupported"))
+        );
+        check(unsupported.status == OperationStatus::NotSupported
+            && hasDiagnosticCode(unsupported.diagnostics, DiagnosticCode::UnsupportedGeometry),
+            "DxfGeometryAdapter unsupported geometry diagnostic");
+    }
+
+    void testEntityIdAllocator()
+    {
+        using namespace cadcam::geometry;
+
+        EntityIdAllocator allocator;
+        const EntityId first = allocator.ensure(0);
+        const EntityId second = allocator.ensure(0);
+        check(first != 0 && second != 0 && first != second, "EntityId uniqueness");
+
+        const EntityId removedId = first;
+        const EntityId restoredId = allocator.ensure(removedId);
+        check(restoredId == removedId, "EntityId delete/undo stability");
+
+        const EntityId copyId = allocator.ensure(0);
+        check(copyId != restoredId && copyId != second, "EntityId copy gets new id");
+
+        const EntityId highRestoredId = 5000;
+        check(allocator.ensure(highRestoredId) == highRestoredId
+            && allocator.ensure(0) > highRestoredId,
+            "EntityId reinsertion advances allocator");
+
+        auto originalEntity = makeLine(0.0, 0.0, 0.0, 1.0, 0.0, 0.0);
+        CadLineItem originalItem(originalEntity.get());
+        originalItem.m_entityId = allocator.ensure(0);
+        const EntityId originalItemId = originalItem.m_entityId;
+        const EntityId undoRestoredItemId = allocator.ensure(originalItem.m_entityId);
+        auto copiedEntity = makeLine(0.0, 1.0, 0.0, 1.0, 1.0, 0.0);
+        CadLineItem copiedItem(copiedEntity.get());
+        copiedItem.m_entityId = allocator.ensure(copiedItem.m_entityId);
+        check(undoRestoredItemId == originalItemId, "CadItem EntityId survives undo reinsertion");
+        check(copiedItem.m_entityId != originalItemId, "copied CadItem receives a new EntityId");
     }
 
     void testCircleAndEllipseNorthStart()
@@ -405,6 +864,11 @@ int main(int argc, char* argv[])
 
     testOperationResult();
     testMessageCenter();
+    testPath3DContract();
+    testGeometryCompilerLineAndCircle();
+    testGeometryCompilerArcAndEllipse();
+    testDxfAdapterAndLegacyBridge();
+    testEntityIdAllocator();
     testCircleAndEllipseNorthStart();
     testSimpleLineAndMCodeOptimization();
     testRotaryGoldenPrograms();

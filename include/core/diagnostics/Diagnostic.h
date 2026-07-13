@@ -43,6 +43,12 @@ enum class DiagnosticCode
     FileOpenFailure,
     FileWriteFailure,
     OutputVerificationFailure,
+    UnsupportedGeometry,
+    InvalidSamplingPolicy,
+    DegenerateGeometry,
+    GeometryAdapterFailure,
+    GeometryCompilationFailure,
+    PathInvariantViolation,
     InternalInvariantViolation
 };
 
@@ -64,4 +70,3 @@ struct Diagnostic
 bool isErrorSeverity(DiagnosticSeverity severity);
 QString diagnosticCodeName(DiagnosticCode code);
 QString diagnosticSeverityName(DiagnosticSeverity severity);
-

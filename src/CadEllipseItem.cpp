@@ -4,6 +4,8 @@
 
 #include "CadEllipseItem.h"
 #include "CadEllipseGeometry.h"
+#include "application/messaging/DebugMessageSink.h"
+#include "compatibility/legacy/LegacyCadItemPathBridge.h"
 
 #include <cmath>
 
@@ -24,10 +26,6 @@ bool isFullEllipsePath(const DRW_Ellipse* ellipse)
     );
 }
 
-double effectiveClosedEllipseStartParameter(const CadEllipseItem* item)
-{
-    return item != nullptr ? item->defaultProcessStartParameter() : M_PI_2;
-}
 }
 
 CadEllipseItem::CadEllipseItem(DRW_Entity* entity, QObject* parent)
@@ -94,56 +92,29 @@ double CadEllipseItem::defaultProcessStartParameter() const
 void CadEllipseItem::rebuildRawPathPoints3D()
 {
     m_rawPathPoints3D.clear();
-
-    if (m_data == nullptr)
+    cadcam::geometry::PathCompileOptions options;
+    options.reverse = m_isReverse;
+    if (m_hasCustomProcessStart && isFullEllipsePath(m_data))
     {
+        options.startParameter = m_processStartParameter;
+    }
+    const OperationResult<cadcam::geometry::Path3D> result = LegacyCadItemPathBridge::compile
+    (
+        *this,
+        LegacyCadItemPathBridge::legacySamplingPolicy(*this),
+        options,
+        createOperationContext(QStringLiteral("rebuild-ellipse-raw-path"))
+    );
+    if (result.succeeded() && result.value.has_value())
+    {
+        LegacyCadItemPathBridge::copyToLegacyRawPath(*result.value, m_rawPathPoints3D);
         return;
     }
 
-    CadEllipseGeometry geometry;
-
-    if (!CadEllipseGeometryUtils::buildEllipseGeometry(m_data, geometry))
+    DebugMessageSink sink;
+    for (const Diagnostic& diagnostic : result.diagnostics)
     {
-        return;
-    }
-
-    const bool closedPath = isFullEllipsePath(m_data);
-    double startParam = m_data->staparam;
-    double endParam = m_data->endparam;
-
-    if (closedPath)
-    {
-        startParam = effectiveClosedEllipseStartParameter(this);
-        endParam = startParam + (m_isReverse ? -kTwoPi : kTwoPi);
-    }
-    else if (m_isReverse)
-    {
-        startParam = m_data->endparam;
-        endParam = m_data->staparam;
-
-        while (endParam >= startParam)
-        {
-            endParam -= kTwoPi;
-        }
-    }
-    else
-    {
-        while (endParam <= startParam)
-        {
-            endParam += kTwoPi;
-        }
-    }
-
-    const double span = endParam - startParam;
-    const int segments = std::max(16, static_cast<int>(std::ceil(std::abs(span) / kTwoPi * kFullEllipseSegments)));
-
-    m_rawPathPoints3D.reserve(static_cast<size_t>(segments) + 1);
-
-    for (int index = 0; index <= segments; ++index)
-    {
-        const double parameter = startParam + span * static_cast<double>(index) / static_cast<double>(segments);
-        const QVector3D point = CadEllipseGeometryUtils::ellipsePointAt(geometry, parameter);
-        m_rawPathPoints3D.push_back({ point.x(), point.y(), point.z() });
+        sink.publish(diagnostic);
     }
 }
 

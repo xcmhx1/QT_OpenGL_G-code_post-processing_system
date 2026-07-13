@@ -11,6 +11,8 @@
 
 #include <libdxfrw.h>
 
+#include "core/geometry/GeometryTypes.h"
+
 // 几何数据
 struct GeometryData
 {
@@ -119,6 +121,8 @@ public:
     DRW_Entity* m_nativeEntity = nullptr;
     // 缓存实体类型，避免每次都回查原生对象。
     DRW::ETYPE m_type;
+    // 兼容字段：文档生命周期内稳定的核心图元编号，未来迁出 CadItem。
+    cadcam::geometry::EntityId m_entityId = 0;
     // 供后续排序/后处理使用的加工顺序标记。
     int m_processOrder = -1;
     // 同一闭合连续加工组共享编号；开放或未分组图元保持 -1。

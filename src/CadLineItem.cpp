@@ -3,6 +3,8 @@
 #include "pch.h"
 
 #include "CadLineItem.h"
+#include "application/messaging/DebugMessageSink.h"
+#include "compatibility/legacy/LegacyCadItemPathBridge.h"
 
 #include <cmath>
 
@@ -42,19 +44,26 @@ void CadLineItem::buildGeometryDatay()
 void CadLineItem::rebuildRawPathPoints3D()
 {
     m_rawPathPoints3D.clear();
-
-    if (m_data == nullptr)
+    cadcam::geometry::PathCompileOptions options;
+    options.reverse = m_isReverse;
+    const OperationResult<cadcam::geometry::Path3D> result = LegacyCadItemPathBridge::compile
+    (
+        *this,
+        LegacyCadItemPathBridge::legacySamplingPolicy(*this),
+        options,
+        createOperationContext(QStringLiteral("rebuild-line-raw-path"))
+    );
+    if (result.succeeded() && result.value.has_value())
     {
+        LegacyCadItemPathBridge::copyToLegacyRawPath(*result.value, m_rawPathPoints3D);
         return;
     }
 
-    m_rawPathPoints3D.reserve(2);
-
-    const DRW_Coord& startPoint = m_isReverse ? m_data->secPoint : m_data->basePoint;
-    const DRW_Coord& endPoint = m_isReverse ? m_data->basePoint : m_data->secPoint;
-
-    m_rawPathPoints3D.push_back({ startPoint.x, startPoint.y, startPoint.z });
-    m_rawPathPoints3D.push_back({ endPoint.x, endPoint.y, endPoint.z });
+    DebugMessageSink sink;
+    for (const Diagnostic& diagnostic : result.diagnostics)
+    {
+        sink.publish(diagnostic);
+    }
 }
 
 bool CadLineItem::rebuildControlPoints4Axis

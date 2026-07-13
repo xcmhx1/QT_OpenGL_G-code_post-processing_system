@@ -25,6 +25,12 @@ QString diagnosticCodeName(DiagnosticCode code)
     case DiagnosticCode::FileOpenFailure: return QStringLiteral("FileOpenFailure");
     case DiagnosticCode::FileWriteFailure: return QStringLiteral("FileWriteFailure");
     case DiagnosticCode::OutputVerificationFailure: return QStringLiteral("OutputVerificationFailure");
+    case DiagnosticCode::UnsupportedGeometry: return QStringLiteral("UnsupportedGeometry");
+    case DiagnosticCode::InvalidSamplingPolicy: return QStringLiteral("InvalidSamplingPolicy");
+    case DiagnosticCode::DegenerateGeometry: return QStringLiteral("DegenerateGeometry");
+    case DiagnosticCode::GeometryAdapterFailure: return QStringLiteral("GeometryAdapterFailure");
+    case DiagnosticCode::GeometryCompilationFailure: return QStringLiteral("GeometryCompilationFailure");
+    case DiagnosticCode::PathInvariantViolation: return QStringLiteral("PathInvariantViolation");
     case DiagnosticCode::InternalInvariantViolation: return QStringLiteral("InternalInvariantViolation");
     }
 
@@ -46,4 +52,3 @@ QString diagnosticSeverityName(DiagnosticSeverity severity)
 
     return QStringLiteral("Unknown");
 }
-

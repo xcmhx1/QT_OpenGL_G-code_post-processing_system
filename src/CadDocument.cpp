@@ -399,6 +399,7 @@ void CadDocument::clearAll()
     // m_entities 清空后会释放所有内部图元；
     // 重新创建 dx_data 则会重置原始解析结果容器。
     m_entities.clear();
+    m_entityIdAllocator.reset();
     m_data = std::make_unique<dx_data>();
     ensureLayerExists(QStringLiteral("0"));
 }
@@ -433,6 +434,7 @@ void CadDocument::init()
 
         if (std::unique_ptr<CadItem> item = createCadItemForEntity(entity))
         {
+            ensureEntityId(*item);
             item->m_color = resolveEntityDisplayColor(*this, item.get());
             m_entities.push_back(std::move(item));
         }
@@ -462,6 +464,7 @@ CadItem* CadDocument::appendEntity(std::unique_ptr<DRW_Entity> entity, std::uniq
     CadItem* rawItem = item.get();
 
     ensureLayerExists(QString::fromUtf8(nativeEntity->layer.c_str()));
+    ensureEntityId(*rawItem);
     rawItem->m_color = resolveEntityDisplayColor(*this, rawItem);
     m_data->mBlock->ent.push_back(nativeEntity);
     m_entities.push_back(std::move(item));
@@ -494,6 +497,7 @@ int CadDocument::appendEntities(std::vector<std::unique_ptr<DRW_Entity>> entitie
         }
 
         ensureLayerExists(QString::fromUtf8(entity->layer.c_str()));
+        ensureEntityId(*item);
         item->m_color = resolveEntityDisplayColor(*this, item.get());
         m_data->mBlock->ent.push_back(entity.release());
         m_entities.push_back(std::move(item));
@@ -506,6 +510,27 @@ int CadDocument::appendEntities(std::vector<std::unique_ptr<DRW_Entity>> entitie
     }
 
     return appendedCount;
+}
+
+void CadDocument::ensureEntityId(CadItem& item)
+{
+    const bool idAlreadyUsed = item.m_entityId != 0 && std::any_of
+    (
+        m_entities.cbegin(),
+        m_entities.cend(),
+        [&item](const std::unique_ptr<CadItem>& existing)
+        {
+            return existing != nullptr
+                && existing.get() != &item
+                && existing->m_entityId == item.m_entityId;
+        }
+    );
+
+    if (idAlreadyUsed)
+    {
+        item.m_entityId = 0;
+    }
+    item.m_entityId = m_entityIdAllocator.ensure(item.m_entityId);
 }
 
 std::pair<std::unique_ptr<DRW_Entity>, std::unique_ptr<CadItem>> CadDocument::takeEntity(CadItem* item)
