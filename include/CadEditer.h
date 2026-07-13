@@ -31,6 +31,7 @@ public:
         bool isReverse = false;
         bool hasCustomStart = false;
         double processStartParameter = 0.0;
+        int continuousGroupId = -1;
     };
 
     CadEditer() = default;

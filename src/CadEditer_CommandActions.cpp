@@ -1193,6 +1193,8 @@ public:
         bool newHasCustomStart = false;
         double oldProcessStartParameter = 0.0;
         double newProcessStartParameter = 0.0;
+        int oldContinuousGroupId = -1;
+        int newContinuousGroupId = -1;
     };
 
 public:
@@ -1234,6 +1236,9 @@ private:
             state.item->m_isReverse = useNewState ? state.newReverse : state.oldReverse;
             state.item->m_hasCustomProcessStart = useNewState ? state.newHasCustomStart : state.oldHasCustomStart;
             state.item->m_processStartParameter = useNewState ? state.newProcessStartParameter : state.oldProcessStartParameter;
+            state.item->m_processContinuousGroupId = useNewState
+                ? state.newContinuousGroupId
+                : state.oldContinuousGroupId;
             state.item->buildProcessDirection();
         }
 
@@ -1855,7 +1860,9 @@ bool CadEditer::setEntityProcessOrder(CadItem* item, int processOrder)
         item->m_hasCustomProcessStart,
         item->m_hasCustomProcessStart,
         item->m_processStartParameter,
-        item->m_processStartParameter
+        item->m_processStartParameter,
+        item->m_processContinuousGroupId,
+        -1
     });
 
     return executeCommand(std::make_unique<UpdateProcessStatesCommand>(m_document, std::move(states)));
@@ -1894,7 +1901,9 @@ bool CadEditer::applyEntityProcessStates(const std::vector<ProcessStateUpdate>& 
             item->m_hasCustomProcessStart,
             update.hasCustomStart,
             item->m_processStartParameter,
-            update.processStartParameter
+            update.processStartParameter,
+            item->m_processContinuousGroupId,
+            update.continuousGroupId
         });
     }
 

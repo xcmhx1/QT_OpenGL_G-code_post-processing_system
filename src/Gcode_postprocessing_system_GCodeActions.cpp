@@ -414,6 +414,12 @@ bool Gcode_postprocessing_system::exportGCode
     generator.setDocument(&m_document);
     generator.setProfile(&m_activeProfile);
     generator.setGenerationMode(generationMode);
+    generator.setRotaryTubeCenter
+    (
+        m_rotaryTubeSectionModel.centerY,
+        m_rotaryTubeSectionModel.centerZ,
+        m_rotaryTubeSectionModel.valid && m_rotaryTubeSectionModel.centerValid
+    );
 
     QString errorMessage;
     bool generated = false;

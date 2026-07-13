@@ -3,6 +3,8 @@
 #include "Gcode_postprocessing_system.h"
 
 #include "CadItem.h"
+#include "CadCircleItem.h"
+#include "CadEllipseItem.h"
 #include "CadEllipseGeometry.h"
 #include "CadOcsGeometry.h"
 #include "CadProcessVisualUtils.h"
@@ -27,8 +29,6 @@ namespace
     constexpr double kSortEpsilon = 1.0e-9;
     constexpr double kPi = 3.14159265358979323846;
     constexpr double kTwoPi = 6.28318530717958647692;
-    constexpr int kClosedCircleSampleCount = 16;
-    constexpr int kClosedEllipseSampleCount = 16;
     constexpr double kNextDistanceWeight = 0.15;
     constexpr double kDirectionPenaltyWeight = 0.35;
     constexpr double kBacktrackPenaltyWeight = 1.2;
@@ -1493,49 +1493,23 @@ namespace
         case DRW::ETYPE::CIRCLE:
         {
             const DRW_Circle* circle = static_cast<const DRW_Circle*>(item->m_nativeEntity);
+            const CadCircleItem* circleItem = static_cast<const CadCircleItem*>(item);
             const std::initializer_list<bool> reverseOptions = strategy == SortStrategy::Smart
                 ? std::initializer_list<bool>{ false, true }
                 : std::initializer_list<bool>{ item->m_isReverse };
 
-            if (strategy == SortStrategy::Smart)
+            const double startParameter = circleItem->defaultProcessStartParameter();
+            for (const bool reverse : reverseOptions)
             {
-                for (int sampleIndex = 0; sampleIndex < kClosedCircleSampleCount; ++sampleIndex)
-                {
-                    const double startParameter = kTwoPi * static_cast<double>(sampleIndex)
-                        / static_cast<double>(kClosedCircleSampleCount);
-
-                    for (const bool reverse : reverseOptions)
-                    {
-                        ProcessPathOption option;
-                        option.reverse = reverse;
-                        option.hasCustomStart = true;
-                        option.processStartParameter = startParameter;
-                        option.startPoint = circlePointAt(circle, startParameter);
-                        option.endPoint = option.startPoint;
-                        option.startTangent = circleTangentAt(circle, startParameter, reverse);
-                        option.endTangent = option.startTangent;
-                        options.push_back(option);
-                    }
-                }
-            }
-            else
-            {
-                const double startParameter = item->m_hasCustomProcessStart
-                    ? item->m_processStartParameter
-                    : kPi * 0.5;
-
-                for (const bool reverse : reverseOptions)
-                {
-                    ProcessPathOption option;
-                    option.reverse = reverse;
-                    option.hasCustomStart = item->m_hasCustomProcessStart;
-                    option.processStartParameter = startParameter;
-                    option.startPoint = circlePointAt(circle, startParameter);
-                    option.endPoint = option.startPoint;
-                    option.startTangent = circleTangentAt(circle, startParameter, reverse);
-                    option.endTangent = option.startTangent;
-                    options.push_back(option);
-                }
+                ProcessPathOption option;
+                option.reverse = reverse;
+                option.hasCustomStart = false;
+                option.processStartParameter = startParameter;
+                option.startPoint = circlePointAt(circle, startParameter);
+                option.endPoint = option.startPoint;
+                option.startTangent = circleTangentAt(circle, startParameter, reverse);
+                option.endTangent = option.startTangent;
+                options.push_back(option);
             }
 
             break;
@@ -1547,22 +1521,20 @@ namespace
 
             if (isClosed && strategy == SortStrategy::Smart)
             {
-                for (int sampleIndex = 0; sampleIndex < kClosedEllipseSampleCount; ++sampleIndex)
-                {
-                    const double parameter = kTwoPi * static_cast<double>(sampleIndex) / static_cast<double>(kClosedEllipseSampleCount);
+                const CadEllipseItem* ellipseItem = static_cast<const CadEllipseItem*>(item);
+                const double parameter = ellipseItem->defaultProcessStartParameter();
 
-                    for (const bool reverse : { false, true })
-                    {
-                        ProcessPathOption option;
-                        option.reverse = reverse;
-                        option.hasCustomStart = true;
-                        option.processStartParameter = parameter;
-                        option.startPoint = ellipsePointAt(ellipse, parameter);
-                        option.endPoint = option.startPoint;
-                        option.startTangent = ellipseTangentAt(ellipse, parameter, reverse);
-                        option.endTangent = option.startTangent;
-                        options.push_back(option);
-                    }
+                for (const bool reverse : { false, true })
+                {
+                    ProcessPathOption option;
+                    option.reverse = reverse;
+                    option.hasCustomStart = false;
+                    option.processStartParameter = parameter;
+                    option.startPoint = ellipsePointAt(ellipse, parameter);
+                    option.endPoint = option.startPoint;
+                    option.startTangent = ellipseTangentAt(ellipse, parameter, reverse);
+                    option.endTangent = option.startTangent;
+                    options.push_back(option);
                 }
             }
             else
@@ -1577,8 +1549,8 @@ namespace
 
                 if (isClosed)
                 {
-                    hasCustomStart = item->m_hasCustomProcessStart;
-                    startParam = item->m_hasCustomProcessStart ? item->m_processStartParameter : ellipse->staparam;
+                    const CadEllipseItem* ellipseItem = static_cast<const CadEllipseItem*>(item);
+                    startParam = ellipseItem->defaultProcessStartParameter();
                     endParam = startParam;
                 }
                 else
@@ -2963,6 +2935,201 @@ namespace
         }
     }
 
+    bool isCompleteCircleOrEllipse(const CadItem* item)
+    {
+        if (item == nullptr || item->m_nativeEntity == nullptr)
+        {
+            return false;
+        }
+
+        if (item->m_type == DRW::ETYPE::CIRCLE)
+        {
+            return true;
+        }
+
+        if (item->m_type != DRW::ETYPE::ELLIPSE)
+        {
+            return false;
+        }
+
+        const DRW_Ellipse* ellipse = static_cast<const DRW_Ellipse*>(item->m_nativeEntity);
+        return isFullEllipsePath(ellipse);
+    }
+
+    bool isIndividuallyClosedProcessItem(const CadItem* item)
+    {
+        if (isCompleteCircleOrEllipse(item))
+        {
+            return true;
+        }
+
+        if (item == nullptr || item->m_nativeEntity == nullptr)
+        {
+            return false;
+        }
+
+        if (item->m_type == DRW::ETYPE::POLYLINE)
+        {
+            const DRW_Polyline* polyline = static_cast<const DRW_Polyline*>(item->m_nativeEntity);
+            return (polyline->flags & 1) != 0;
+        }
+
+        if (item->m_type == DRW::ETYPE::LWPOLYLINE)
+        {
+            const DRW_LWPolyline* polyline = static_cast<const DRW_LWPolyline*>(item->m_nativeEntity);
+            return (polyline->flags & 1) != 0;
+        }
+
+        return false;
+    }
+
+    bool isClosedProcessGroup
+    (
+        const std::vector<CadItem*>& sortableItems,
+        const std::vector<size_t>& groupIndices
+    )
+    {
+        if (groupIndices.empty())
+        {
+            return false;
+        }
+
+        struct GroupEndpoints
+        {
+            QVector3D start;
+            QVector3D end;
+            bool individuallyClosed = false;
+        };
+
+        std::vector<GroupEndpoints> endpoints;
+        endpoints.reserve(groupIndices.size());
+
+        for (const size_t globalIndex : groupIndices)
+        {
+            if (globalIndex >= sortableItems.size() || sortableItems[globalIndex] == nullptr)
+            {
+                return false;
+            }
+
+            CadItem* item = sortableItems[globalIndex];
+            const std::vector<ProcessPathOption> options =
+                buildPathOptionsForItem(item, SortStrategy::KeepDirection);
+
+            if (options.empty())
+            {
+                return false;
+            }
+
+            endpoints.push_back
+            ({
+                options.front().startPoint,
+                options.front().endPoint,
+                isIndividuallyClosedProcessItem(item)
+            });
+        }
+
+        if (endpoints.size() == 1)
+        {
+            return endpoints.front().individuallyClosed;
+        }
+
+        const double toleranceSquared = kEndCutConnectionTolerance * kEndCutConnectionTolerance;
+        for (size_t endpointIndex = 0; endpointIndex < endpoints.size(); ++endpointIndex)
+        {
+            if (endpoints[endpointIndex].individuallyClosed)
+            {
+                continue;
+            }
+
+            for (const QVector3D& point : { endpoints[endpointIndex].start, endpoints[endpointIndex].end })
+            {
+                bool matched = false;
+
+                for (size_t otherIndex = 0; otherIndex < endpoints.size() && !matched; ++otherIndex)
+                {
+                    if (endpointIndex == otherIndex)
+                    {
+                        continue;
+                    }
+
+                    matched = spatialDistanceSquared(point, endpoints[otherIndex].start) <= toleranceSquared
+                        || spatialDistanceSquared(point, endpoints[otherIndex].end) <= toleranceSquared;
+                }
+
+                if (!matched)
+                {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    void assignClosedComponentGroupIds
+    (
+        const std::vector<CadItem*>& sortableItems,
+        const std::vector<int>& componentIds,
+        std::vector<CadEditer::ProcessStateUpdate>& updates
+    )
+    {
+        if (componentIds.size() != sortableItems.size())
+        {
+            return;
+        }
+
+        const int componentCount = componentIds.empty()
+            ? 0
+            : *std::max_element(componentIds.cbegin(), componentIds.cend()) + 1;
+        std::vector<std::vector<size_t>> componentIndices(static_cast<size_t>(std::max(0, componentCount)));
+
+        for (size_t itemIndex = 0; itemIndex < componentIds.size(); ++itemIndex)
+        {
+            const int componentId = componentIds[itemIndex];
+            if (componentId >= 0 && componentId < componentCount)
+            {
+                componentIndices[static_cast<size_t>(componentId)].push_back(itemIndex);
+            }
+        }
+
+        QHash<CadItem*, int> groupIdByItem;
+        int nextGroupId = 0;
+
+        for (const std::vector<size_t>& indices : componentIndices)
+        {
+            std::vector<size_t> remainingIndices;
+            remainingIndices.reserve(indices.size());
+
+            for (const size_t index : indices)
+            {
+                if (isIndividuallyClosedProcessItem(sortableItems[index]))
+                {
+                    groupIdByItem.insert(sortableItems[index], nextGroupId++);
+                }
+                else
+                {
+                    remainingIndices.push_back(index);
+                }
+            }
+
+            if (!isClosedProcessGroup(sortableItems, remainingIndices))
+            {
+                continue;
+            }
+
+            const int groupId = nextGroupId++;
+            for (const size_t index : remainingIndices)
+            {
+                groupIdByItem.insert(sortableItems[index], groupId);
+            }
+        }
+
+        for (CadEditer::ProcessStateUpdate& update : updates)
+        {
+            update.continuousGroupId = groupIdByItem.value(update.item, -1);
+        }
+    }
+
     bool appendSorted3DGroup
     (
         const std::vector<CadItem*>& sortableItems,
@@ -2973,7 +3140,8 @@ namespace
         bool& hasCurrentEndPoint,
         QVector3D& currentEndPoint,
         bool preferSweepBoundary = false,
-        double sweepBoundaryX = 0.0
+        double sweepBoundaryX = 0.0,
+        int continuousGroupId = -1
     )
     {
         if (groupIndices.empty())
@@ -3074,7 +3242,8 @@ namespace
                 static_cast<int>(processUpdates.size()),
                 bestCandidate.reverse,
                 bestCandidate.hasCustomStart,
-                bestCandidate.processStartParameter
+                bestCandidate.processStartParameter,
+                continuousGroupId
             });
             hasCurrentEndPoint = true;
             currentComponentId =
@@ -3097,6 +3266,7 @@ namespace
         std::vector<ProcessConnectionSegment>& processedSegments,
         bool& hasCurrentEndPoint,
         QVector3D& currentEndPoint,
+        int continuousGroupId,
         QString* failureReason
     )
     {
@@ -3337,7 +3507,8 @@ namespace
                 static_cast<int>(processUpdates.size()),
                 selectedOption->reverse,
                 selectedOption->hasCustomStart,
-                selectedOption->processStartParameter
+                selectedOption->processStartParameter,
+                continuousGroupId
             });
             visited[localIndex] = true;
             hasCurrentEndPoint = true;
@@ -4347,6 +4518,7 @@ namespace
         std::vector<ProcessConnectionSegment> processedSegments;
         processedSegments.reserve(sortableItems.size());
         std::vector<bool> scheduled(sortableItems.size(), false);
+        int nextContinuousGroupId = 0;
         bool hasCurrentEndPoint = false;
         QVector3D currentEndPoint;
 
@@ -4411,6 +4583,9 @@ namespace
             }
 
             QString continuousFailureReason;
+            const int continuousGroupId = isClosedProcessGroup(sortableItems, filteredIndices)
+                ? nextContinuousGroupId++
+                : -1;
             if (!appendContinuous3DGroup
             (
                 sortableItems,
@@ -4420,6 +4595,7 @@ namespace
                 processedSegments,
                 hasCurrentEndPoint,
                 currentEndPoint,
+                continuousGroupId,
                 &continuousFailureReason
             ))
             {
@@ -4509,6 +4685,32 @@ namespace
                     componentIndices[static_cast<size_t>(componentId)].push_back(localToGlobal[localIndex]);
                 }
 
+                std::vector<std::vector<size_t>> separatedComponents;
+                separatedComponents.reserve(componentIndices.size());
+                for (const std::vector<size_t>& component : componentIndices)
+                {
+                    std::vector<size_t> remainingIndices;
+                    remainingIndices.reserve(component.size());
+
+                    for (const size_t itemIndex : component)
+                    {
+                        if (isIndividuallyClosedProcessItem(sortableItems[itemIndex]))
+                        {
+                            separatedComponents.push_back({ itemIndex });
+                        }
+                        else
+                        {
+                            remainingIndices.push_back(itemIndex);
+                        }
+                    }
+
+                    if (!remainingIndices.empty())
+                    {
+                        separatedComponents.push_back(std::move(remainingIndices));
+                    }
+                }
+                componentIndices = std::move(separatedComponents);
+
                 const auto componentSweepBoundaryX = [&sortableItems, leftToRight](const std::vector<size_t>& indices)
                     {
                         bool hasPoint = false;
@@ -4560,6 +4762,9 @@ namespace
                 for (const std::vector<size_t>& component : componentIndices)
                 {
                     const double sweepBoundaryX = componentSweepBoundaryX(component);
+                    const int continuousGroupId = isClosedProcessGroup(sortableItems, component)
+                        ? nextContinuousGroupId++
+                        : -1;
 
                     if (component.size() == 1)
                     {
@@ -4579,9 +4784,27 @@ namespace
                         const QVector3D referencePoint = hasCurrentEndPoint
                             ? currentEndPoint
                             : kRotaryInitialSortOrigin;
+                        const QVector3D sweepDirection3D
+                        (
+                            leftToRight ? 1.0f : -1.0f,
+                            0.0f,
+                            0.0f
+                        );
+                        const bool preferSweepTangent = isCompleteCircleOrEllipse(sortableItems[itemIndex])
+                            && std::any_of
+                            (
+                                options.cbegin(),
+                                options.cend(),
+                                [&sweepDirection3D](const ProcessPathOption& option)
+                                {
+                                    return std::abs(QVector3D::dotProduct(option.startTangent, sweepDirection3D))
+                                        > kSurfaceSweepBoundaryTolerance;
+                                }
+                            );
                         const ProcessPathOption* selectedOption = nullptr;
                         double bestBoundaryDistance = std::numeric_limits<double>::max();
                         double bestTravelDistance = std::numeric_limits<double>::max();
+                        double bestSweepTangentDot = -std::numeric_limits<double>::max();
 
                         for (const ProcessPathOption& option : options)
                         {
@@ -4595,17 +4818,40 @@ namespace
                                 option.startPoint,
                                 rotaryAxisConfig
                             );
+                            const double sweepTangentDot = QVector3D::dotProduct
+                            (
+                                option.startTangent,
+                                sweepDirection3D
+                            );
 
-                            if (selectedOption == nullptr
-                                || boundaryDistance < bestBoundaryDistance - kSurfaceSweepBoundaryTolerance
-                                || (std::abs(boundaryDistance - bestBoundaryDistance) <= kSurfaceSweepBoundaryTolerance
-                                    && (travelDistance < bestTravelDistance - kSortEpsilon
-                                        || (std::abs(travelDistance - bestTravelDistance) <= kSortEpsilon
-                                            && isPointLexicographicallyLess(option.startPoint, selectedOption->startPoint)))))
+                            bool shouldReplace = selectedOption == nullptr;
+                            if (!shouldReplace)
+                            {
+                                const bool betterSweepTangent = preferSweepTangent
+                                    && sweepTangentDot > bestSweepTangentDot + kSortEpsilon;
+                                const bool equivalentSweepTangent = !preferSweepTangent
+                                    || std::abs(sweepTangentDot - bestSweepTangentDot) <= kSortEpsilon;
+                                const bool betterFallback = boundaryDistance
+                                        < bestBoundaryDistance - kSurfaceSweepBoundaryTolerance
+                                    || (std::abs(boundaryDistance - bestBoundaryDistance)
+                                            <= kSurfaceSweepBoundaryTolerance
+                                        && (travelDistance < bestTravelDistance - kSortEpsilon
+                                            || (std::abs(travelDistance - bestTravelDistance) <= kSortEpsilon
+                                                && isPointLexicographicallyLess
+                                                (
+                                                    option.startPoint,
+                                                    selectedOption->startPoint
+                                                ))));
+                                shouldReplace = betterSweepTangent
+                                    || (equivalentSweepTangent && betterFallback);
+                            }
+
+                            if (shouldReplace)
                             {
                                 selectedOption = &option;
                                 bestBoundaryDistance = boundaryDistance;
                                 bestTravelDistance = travelDistance;
+                                bestSweepTangentDot = sweepTangentDot;
                             }
                         }
 
@@ -4621,7 +4867,8 @@ namespace
                             static_cast<int>(processUpdates.size()),
                             selectedOption->reverse,
                             selectedOption->hasCustomStart,
-                            selectedOption->processStartParameter
+                            selectedOption->processStartParameter,
+                            continuousGroupId
                         });
                         hasCurrentEndPoint = true;
                         currentEndPoint = selectedOption->endPoint;
@@ -4640,7 +4887,8 @@ namespace
                         hasCurrentEndPoint,
                         currentEndPoint,
                         true,
-                        sweepBoundaryX
+                        sweepBoundaryX,
+                        continuousGroupId
                     ))
                     {
                         QVector<CadItem*> failedItems;
@@ -5145,6 +5393,7 @@ bool Gcode_postprocessing_system::removeInternalMachiningPaths(bool interactive)
         item->m_excludedAsInternalGeometry = true;
         item->m_excludedFromProcessing = true;
         item->m_processOrder = -1;
+        item->m_processContinuousGroupId = -1;
         ++excludedInternalCount;
     }
 
@@ -5419,6 +5668,7 @@ bool Gcode_postprocessing_system::toggleSelectedInternalPathAssignment()
         {
             item->m_excludedAsInternalGeometry = hasOrdinaryItem;
             item->m_processOrder = -1;
+            item->m_processContinuousGroupId = -1;
         }
     }
 
@@ -5527,6 +5777,7 @@ void Gcode_postprocessing_system::invalidateProcessOrdersAfterEndCutChange()
         if (entity != nullptr)
         {
             entity->m_processOrder = -1;
+            entity->m_processContinuousGroupId = -1;
         }
     }
 }
@@ -5570,6 +5821,7 @@ int Gcode_postprocessing_system::refreshWasteProcessingExclusions()
         {
             entity->m_excludedFromProcessing = true;
             entity->m_processOrder = -1;
+            entity->m_processContinuousGroupId = -1;
         }
     }
 
@@ -5759,6 +6011,7 @@ int Gcode_postprocessing_system::refreshWasteProcessingExclusions()
         {
             entity->m_excludedFromProcessing = true;
             entity->m_processOrder = -1;
+            entity->m_processContinuousGroupId = -1;
             ++excludedCount;
         }
     }
@@ -6289,6 +6542,8 @@ bool Gcode_postprocessing_system::sortEntitiesByCurrentDirection3D()
         processedSegments.push_back({ bestCandidate.startPoint, bestCandidate.endPoint });
     }
 
+    assignClosedComponentGroupIds(sortableItems, gapStartContext.componentIds, processUpdates);
+
     if (!m_editer.applyEntityProcessStates(processUpdates))
     {
         QMessageBox::warning(this, QStringLiteral("4轴(绕A)排序"), QStringLiteral("4轴排序结果写入失败。"));
@@ -6513,6 +6768,8 @@ bool Gcode_postprocessing_system::smartSortEntities3D()
         currentEndPoint = bestCandidate.endPoint;
         processedSegments.push_back({ bestCandidate.startPoint, bestCandidate.endPoint });
     }
+
+    assignClosedComponentGroupIds(sortableItems, gapStartContext.componentIds, processUpdates);
 
     if (!m_editer.applyEntityProcessStates(processUpdates))
     {

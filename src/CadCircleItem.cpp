@@ -13,30 +13,12 @@ constexpr double kAxisEps = 1.0e-8;
 constexpr double kRadToDeg = 57.2957795130823208768;
 // 统一使用 2π，避免在采样时重复书写常量。
 constexpr double kTwoPi = 6.28318530717958647692;
-constexpr double kPi = 3.14159265358979323846;
 // 圆默认采样为 128 段，兼顾显示平滑度和顶点数量。
 constexpr int kCircleSegments = 128;
 
-double normalizeAnglePositive(double angle)
-{
-    double normalized = std::fmod(angle, kTwoPi);
-
-    if (normalized < 0.0)
-    {
-        normalized += kTwoPi;
-    }
-
-    return normalized;
-}
-
 double effectiveCircleStartParameter(const CadCircleItem* item)
 {
-    if (item != nullptr && item->m_hasCustomProcessStart)
-    {
-        return normalizeAnglePositive(item->m_processStartParameter);
-    }
-
-    return kPi * 0.5;
+    return item != nullptr ? item->defaultProcessStartParameter() : M_PI_2;
 }
 
 }
@@ -80,6 +62,11 @@ void CadCircleItem::buildGeometryDatay()
 
         m_geometry.vertices.append(center + offset);
     }
+}
+
+double CadCircleItem::defaultProcessStartParameter() const
+{
+    return M_PI_2;
 }
 
 void CadCircleItem::rebuildRawPathPoints3D()

@@ -28,6 +28,8 @@ public:
     void setGenerationMode(GenerationMode generationMode);
     GenerationMode generationMode() const;
 
+    void setRotaryTubeCenter(double centerY, double centerZ, bool valid);
+
     bool generate(QWidget* parent = nullptr, QString* errorMessage = nullptr) const;
     bool generateToFile(const QString& filePath, QString* errorMessage = nullptr) const;
 
@@ -36,4 +38,7 @@ private:
     GProfile m_defaultProfile;
     GProfile* m_profile = nullptr;
     GenerationMode m_generationMode = GenerationMode::Mode2D;
+    double m_rotaryTubeCenterY = 0.0;
+    double m_rotaryTubeCenterZ = 0.0;
+    bool m_rotaryTubeCenterValid = false;
 };

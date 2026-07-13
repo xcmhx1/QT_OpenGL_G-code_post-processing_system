@@ -16,6 +16,7 @@
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QHash>
 #include <QDir>
 #include <QDebug>
 #include <QMessageBox>
@@ -32,7 +33,6 @@
 
 namespace
 {
-    constexpr double kPi = 3.14159265358979323846;
     constexpr double kTwoPi = 6.28318530717958647692;
     constexpr double kCircleTolerance = 1.0e-8;
     constexpr int kFullEllipseSegments = 128;
@@ -342,18 +342,6 @@ namespace
             + minorAxis * static_cast<float>(std::sin(parameter));
     }
 
-    double normalizeAnglePositive(double angle)
-    {
-        double normalized = std::fmod(angle, kTwoPi);
-
-        if (normalized < 0.0)
-        {
-            normalized += kTwoPi;
-        }
-
-        return normalized;
-    }
-
     bool isFullEllipsePath(const DRW_Ellipse* ellipse)
     {
         if (ellipse == nullptr)
@@ -368,22 +356,12 @@ namespace
 
     double effectiveCircleStartParameter(const CadCircleItem* item)
     {
-        if (item != nullptr && item->m_hasCustomProcessStart)
-        {
-            return normalizeAnglePositive(item->m_processStartParameter);
-        }
-
-        return kPi * 0.5;
+        return item != nullptr ? item->defaultProcessStartParameter() : M_PI_2;
     }
 
     double effectiveClosedEllipseStartParameter(const CadEllipseItem* item)
     {
-        if (item != nullptr && item->m_hasCustomProcessStart)
-        {
-            return item->m_processStartParameter;
-        }
-
-        return (item != nullptr && item->m_data != nullptr) ? item->m_data->staparam : 0.0;
+        return item != nullptr ? item->defaultProcessStartParameter() : M_PI_2;
     }
 
     size_t effectiveClosedPolylineStartIndex(const CadItem* item, size_t vertexCount)
@@ -1304,67 +1282,16 @@ namespace
         }
     }
 
-    double distanceToXAxis(const QVector3D& point, double axisY, double axisZ)
-    {
-        const double dy = point.y() - axisY;
-        const double dz = point.z() - axisZ;
-        return std::sqrt(dy * dy + dz * dz);
-    }
-
     struct RotaryExportContext
     {
         double axisY = 0.0;
         double axisZ = 0.0;
-        double judgeCenterY = 0.0;
-        double judgeCenterZ = 0.0;
-        double collisionCenterY = 0.0;
-        double collisionCenterZ = 0.0;
+        double tubeCenterY = 0.0;
+        double tubeCenterZ = 0.0;
         double safeMachineZ = 0.0;
         RotarySectionBounds sectionBounds;
         std::vector<RotaryCornerToolCenter> cornerToolCenters;
     };
-
-    double computeGlobalSafeMachineZ
-    (
-        const CadDocument* document,
-        double axisY,
-        double axisZ,
-        double extraRadialClearance
-    )
-    {
-        double maxRadius = 0.0;
-
-        if (document != nullptr)
-        {
-            for (const std::unique_ptr<CadItem>& entity : document->m_entities)
-            {
-                if (entity == nullptr || entity->m_excludedFromProcessing)
-                {
-                    continue;
-                }
-
-                for (const QVector3D& vertex : entity->m_geometry.vertices)
-                {
-                    maxRadius = std::max(maxRadius, distanceToXAxis(vertex, axisY, axisZ));
-                }
-
-                for (const RawPathPoint3D& point : entity->rawPathPoints3D())
-                {
-                    maxRadius = std::max
-                    (
-                        maxRadius,
-                        std::sqrt
-                        (
-                            (point.y - axisY) * (point.y - axisY)
-                            + (point.z - axisZ) * (point.z - axisZ)
-                        )
-                    );
-                }
-            }
-        }
-
-        return axisZ + maxRadius + extraRadialClearance;
-    }
 
     bool computeRotaryJudgeCenter
     (
@@ -1434,19 +1361,6 @@ namespace
         return true;
     }
 
-    QString collisionReferenceCenterLineModeName(CollisionReferenceCenterLineMode mode)
-    {
-        switch (mode)
-        {
-        case CollisionReferenceCenterLineMode::XAxis:
-            return QStringLiteral("XAxis");
-        case CollisionReferenceCenterLineMode::JudgeCenterLine:
-            return QStringLiteral("JudgeCenterLine");
-        default:
-            return QStringLiteral("Unknown");
-        }
-    }
-
     void writeCommentLine(QTextStream& stream, const QString& comment)
     {
         if (!comment.trimmed().isEmpty())
@@ -1455,11 +1369,11 @@ namespace
         }
     }
 
-    double computeSafeMachineZFromCollisionCenterLine
+    double computeSafeMachineZFromTubeCenter
     (
         const QVector<CadItem*>& orderedItems,
-        double collisionCenterY,
-        double collisionCenterZ,
+        double tubeCenterY,
+        double tubeCenterZ,
         double extraRadialClearance,
         double* outMaxCollisionRadius = nullptr
     )
@@ -1477,8 +1391,8 @@ namespace
 
             for (const RawPathPoint3D& point : item->rawPathPoints3D())
             {
-                const double dy = point.y - collisionCenterY;
-                const double dz = point.z - collisionCenterZ;
+                const double dy = point.y - tubeCenterY;
+                const double dz = point.z - tubeCenterZ;
                 const double radius = std::sqrt(dy * dy + dz * dz);
                 maxCollisionRadius = std::max(maxCollisionRadius, radius);
             }
@@ -1489,7 +1403,7 @@ namespace
             *outMaxCollisionRadius = maxCollisionRadius;
         }
 
-        return collisionCenterZ + maxCollisionRadius + extraRadialClearance;
+        return tubeCenterZ + maxCollisionRadius + extraRadialClearance;
     }
 
     ControlPoint4Axis machineSafeApproachPoint
@@ -1646,8 +1560,8 @@ namespace
         (
             exportContext.axisY,
             exportContext.axisZ,
-            exportContext.judgeCenterY,
-            exportContext.judgeCenterZ,
+            exportContext.tubeCenterY,
+            exportContext.tubeCenterZ,
             config.invertAAxisDirection,
             config.aAxisOffsetDegrees,
             config.keepContinuousAngle,
@@ -1712,6 +1626,195 @@ namespace
         return written;
     }
 
+    struct RotaryOvercutPath
+    {
+        std::vector<RawPathPoint3D> rawPoints;
+        std::vector<ControlPoint4Axis> controlPoints;
+        int itemCount = 0;
+        bool directlyClosed = false;
+        bool valid = true;
+    };
+
+    bool isDirectlyClosedItem(const CadItem* item)
+    {
+        if (item == nullptr || item->m_nativeEntity == nullptr)
+        {
+            return false;
+        }
+
+        switch (item->m_type)
+        {
+        case DRW::ETYPE::CIRCLE:
+            return true;
+        case DRW::ETYPE::ELLIPSE:
+            return isFullEllipsePath(static_cast<const DRW_Ellipse*>(item->m_nativeEntity));
+        case DRW::ETYPE::POLYLINE:
+            return (static_cast<const DRW_Polyline*>(item->m_nativeEntity)->flags & 1) != 0;
+        case DRW::ETYPE::LWPOLYLINE:
+            return (static_cast<const DRW_LWPolyline*>(item->m_nativeEntity)->flags & 1) != 0;
+        default:
+            return false;
+        }
+    }
+
+    void appendItemToOvercutPath(const CadItem* item, RotaryOvercutPath& path)
+    {
+        if (item == nullptr)
+        {
+            path.valid = false;
+            return;
+        }
+
+        const std::vector<RawPathPoint3D>& rawPoints = item->rawPathPoints3D();
+        const std::vector<ControlPoint4Axis>& controlPoints = item->controlPoints4Axis();
+        if (rawPoints.empty() || rawPoints.size() != controlPoints.size())
+        {
+            path.valid = false;
+            return;
+        }
+
+        ++path.itemCount;
+        path.rawPoints.insert(path.rawPoints.end(), rawPoints.cbegin(), rawPoints.cend());
+        path.controlPoints.insert(path.controlPoints.end(), controlPoints.cbegin(), controlPoints.cend());
+        path.directlyClosed = path.itemCount == 1 && isDirectlyClosedItem(item);
+    }
+
+    ControlPoint4Axis interpolateControlPoint
+    (
+        const ControlPoint4Axis& start,
+        const ControlPoint4Axis& end,
+        double ratio
+    )
+    {
+        return
+        {
+            start.x + (end.x - start.x) * ratio,
+            start.y + (end.y - start.y) * ratio,
+            start.z + (end.z - start.z) * ratio,
+            start.aDeg + (end.aDeg - start.aDeg) * ratio
+        };
+    }
+
+    RawPathPoint3D interpolateRawPathPoint
+    (
+        const RawPathPoint3D& start,
+        const RawPathPoint3D& end,
+        double ratio
+    )
+    {
+        return
+        {
+            start.x + (end.x - start.x) * ratio,
+            start.y + (end.y - start.y) * ratio,
+            start.z + (end.z - start.z) * ratio
+        };
+    }
+
+    bool writeRotaryOvercut
+    (
+        QTextStream& stream,
+        const RotaryOvercutPath& path,
+        double requestedDistance,
+        const ControlPoint4Axis& currentEndPoint,
+        ControlPoint4Axis& writtenEndPoint,
+        RawPathPoint3D& writtenRawEndPoint
+    )
+    {
+        if (requestedDistance <= kControlPointTolerance
+            || !path.valid
+            || path.rawPoints.size() < 2
+            || path.rawPoints.size() != path.controlPoints.size())
+        {
+            return false;
+        }
+
+        const bool closed = path.directlyClosed
+            || rawPathPointDistance(path.rawPoints.back(), path.rawPoints.front())
+                <= kNoLiftPathConnectionTolerance;
+        if (!closed)
+        {
+            return false;
+        }
+
+        double totalLength = 0.0;
+        for (size_t index = 1; index < path.rawPoints.size(); ++index)
+        {
+            totalLength += rawPathPointDistance(path.rawPoints[index - 1], path.rawPoints[index]);
+        }
+
+        if (totalLength <= kControlPointTolerance)
+        {
+            return false;
+        }
+
+        const double overcutDistance = std::min(requestedDistance, totalLength);
+        if (requestedDistance > totalLength + kControlPointTolerance)
+        {
+            qWarning().noquote() << QStringLiteral
+            (
+                "[四轴过切] 请求 %1 mm 超过闭环总长 %2 mm，已限制为一圈。"
+            )
+                .arg(requestedDistance, 0, 'f', 3)
+                .arg(totalLength, 0, 'f', 3);
+        }
+
+        std::vector<ControlPoint4Axis> alignedControlPoints = path.controlPoints;
+        alignControlPointsToPreviousA(alignedControlPoints, currentEndPoint.aDeg);
+
+        ControlPoint4Axis currentControlPoint = currentEndPoint;
+        RawPathPoint3D currentRawPoint = path.rawPoints.front();
+        const ControlPoint4Axis& exactStart = alignedControlPoints.front();
+        if (!areControlPointsCoincident(currentControlPoint, exactStart))
+        {
+            writeLinearMove4Axis(stream, exactStart.x, exactStart.y, exactStart.z, exactStart.aDeg);
+        }
+        currentControlPoint = exactStart;
+
+        double remainingDistance = overcutDistance;
+        for (size_t index = 1; index < path.rawPoints.size() && remainingDistance > kControlPointTolerance; ++index)
+        {
+            const RawPathPoint3D& rawStart = path.rawPoints[index - 1];
+            const RawPathPoint3D& rawEnd = path.rawPoints[index];
+            const double segmentLength = rawPathPointDistance(rawStart, rawEnd);
+            if (segmentLength <= kControlPointTolerance)
+            {
+                continue;
+            }
+
+            if (remainingDistance >= segmentLength - kControlPointTolerance)
+            {
+                const ControlPoint4Axis& segmentEnd = alignedControlPoints[index];
+                writeLinearMove4Axis(stream, segmentEnd.x, segmentEnd.y, segmentEnd.z, segmentEnd.aDeg);
+                currentControlPoint = segmentEnd;
+                currentRawPoint = rawEnd;
+                remainingDistance -= segmentLength;
+                continue;
+            }
+
+            const double ratio = remainingDistance / segmentLength;
+            currentControlPoint = interpolateControlPoint
+            (
+                alignedControlPoints[index - 1],
+                alignedControlPoints[index],
+                ratio
+            );
+            currentRawPoint = interpolateRawPathPoint(rawStart, rawEnd, ratio);
+            writeLinearMove4Axis
+            (
+                stream,
+                currentControlPoint.x,
+                currentControlPoint.y,
+                currentControlPoint.z,
+                currentControlPoint.aDeg
+            );
+            remainingDistance = 0.0;
+        }
+
+        writtenEndPoint = currentControlPoint;
+        writtenRawEndPoint = currentRawPoint;
+        return true;
+    }
+
 }
 
 GGenerator::GGenerator()
@@ -1748,6 +1851,13 @@ void GGenerator::setGenerationMode(GenerationMode generationMode)
 GGenerator::GenerationMode GGenerator::generationMode() const
 {
     return m_generationMode;
+}
+
+void GGenerator::setRotaryTubeCenter(double centerY, double centerZ, bool valid)
+{
+    m_rotaryTubeCenterY = centerY;
+    m_rotaryTubeCenterZ = centerZ;
+    m_rotaryTubeCenterValid = valid;
 }
 
 bool GGenerator::generate(QWidget* parent, QString* errorMessage) const
@@ -1835,8 +1945,6 @@ bool GGenerator::generateToFile(const QString& filePath, QString* errorMessage) 
     RotaryExportContext rotaryExportContext;
     rotaryExportContext.axisY = rotaryAxisConfig.centerY;
     rotaryExportContext.axisZ = rotaryAxisConfig.centerZ;
-    rotaryExportContext.judgeCenterY = rotaryAxisConfig.centerY;
-    rotaryExportContext.judgeCenterZ = rotaryAxisConfig.centerZ;
 
     if (m_generationMode == GenerationMode::Mode3D)
     {
@@ -1845,77 +1953,44 @@ bool GGenerator::generateToFile(const QString& filePath, QString* errorMessage) 
             buildRotaryCornerToolCenters(rotaryExportContext.sectionBounds);
     }
 
-    computeRotaryJudgeCenter
-    (
-        orderedItems,
-        rotaryExportContext.judgeCenterY,
-        rotaryExportContext.judgeCenterZ
-    );
-    switch (rotaryAxisConfig.collisionReferenceCenterLineMode)
+    if (m_rotaryTubeCenterValid)
     {
-    case CollisionReferenceCenterLineMode::XAxis:
-        rotaryExportContext.collisionCenterY = 0.0;
-        rotaryExportContext.collisionCenterZ = 0.0;
-        break;
-    case CollisionReferenceCenterLineMode::JudgeCenterLine:
-        rotaryExportContext.collisionCenterY = rotaryExportContext.judgeCenterY;
-        rotaryExportContext.collisionCenterZ = rotaryExportContext.judgeCenterZ;
-        break;
-    default:
-        rotaryExportContext.collisionCenterY = 0.0;
-        rotaryExportContext.collisionCenterZ = 0.0;
-        break;
+        rotaryExportContext.tubeCenterY = m_rotaryTubeCenterY;
+        rotaryExportContext.tubeCenterZ = m_rotaryTubeCenterZ;
+    }
+    else if (rotaryExportContext.sectionBounds.valid)
+    {
+        rotaryExportContext.tubeCenterY = 0.5
+            * (rotaryExportContext.sectionBounds.minY + rotaryExportContext.sectionBounds.maxY);
+        rotaryExportContext.tubeCenterZ = 0.5
+            * (rotaryExportContext.sectionBounds.minZ + rotaryExportContext.sectionBounds.maxZ);
+    }
+    else
+    {
+        computeRotaryJudgeCenter
+        (
+            orderedItems,
+            rotaryExportContext.tubeCenterY,
+            rotaryExportContext.tubeCenterZ
+        );
     }
 
     double maxCollisionRadius = 0.0;
-    switch (rotaryAxisConfig.collisionReferenceCenterLineMode)
-    {
-    case CollisionReferenceCenterLineMode::XAxis:
-        rotaryExportContext.safeMachineZ = computeGlobalSafeMachineZ
-        (
-            m_document,
-            rotaryExportContext.axisY,
-            rotaryExportContext.axisZ,
-            rotaryAxisConfig.safeZ
-        );
-        maxCollisionRadius = std::max(0.0, rotaryExportContext.safeMachineZ - rotaryExportContext.collisionCenterZ - rotaryAxisConfig.safeZ);
-        break;
-
-    case CollisionReferenceCenterLineMode::JudgeCenterLine:
-        rotaryExportContext.safeMachineZ = computeSafeMachineZFromCollisionCenterLine
-        (
-            orderedItems,
-            rotaryExportContext.collisionCenterY,
-            rotaryExportContext.collisionCenterZ,
-            rotaryAxisConfig.safeZ,
-            &maxCollisionRadius
-        );
-        break;
-
-    default:
-        rotaryExportContext.safeMachineZ = computeGlobalSafeMachineZ
-        (
-            m_document,
-            rotaryExportContext.axisY,
-            rotaryExportContext.axisZ,
-            rotaryAxisConfig.safeZ
-        );
-        maxCollisionRadius = std::max(0.0, rotaryExportContext.safeMachineZ - rotaryExportContext.collisionCenterZ - rotaryAxisConfig.safeZ);
-        break;
-    }
+    rotaryExportContext.safeMachineZ = computeSafeMachineZFromTubeCenter
+    (
+        orderedItems,
+        rotaryExportContext.tubeCenterY,
+        rotaryExportContext.tubeCenterZ,
+        rotaryAxisConfig.safeZ,
+        &maxCollisionRadius
+    );
 
     if (m_generationMode == GenerationMode::Mode3D)
     {
-        writeCommentLine
-        (
-            stream,
-            QStringLiteral("ROTARY SAFE CENTER MODE: %1")
-                .arg(collisionReferenceCenterLineModeName(rotaryAxisConfig.collisionReferenceCenterLineMode))
-        );
-        writeCommentLine(stream, QStringLiteral("JUDGE CENTER Y: %1").arg(formatDebugValue(rotaryExportContext.judgeCenterY)));
-        writeCommentLine(stream, QStringLiteral("JUDGE CENTER Z: %1").arg(formatDebugValue(rotaryExportContext.judgeCenterZ)));
-        writeCommentLine(stream, QStringLiteral("COLLISION CENTER Y: %1").arg(formatDebugValue(rotaryExportContext.collisionCenterY)));
-        writeCommentLine(stream, QStringLiteral("COLLISION CENTER Z: %1").arg(formatDebugValue(rotaryExportContext.collisionCenterZ)));
+        writeCommentLine(stream, QStringLiteral("TUBE CENTER Y: %1").arg(formatDebugValue(rotaryExportContext.tubeCenterY)));
+        writeCommentLine(stream, QStringLiteral("TUBE CENTER Z: %1").arg(formatDebugValue(rotaryExportContext.tubeCenterZ)));
+        writeCommentLine(stream, QStringLiteral("ROTARY AXIS Y: %1").arg(formatDebugValue(rotaryExportContext.axisY)));
+        writeCommentLine(stream, QStringLiteral("ROTARY AXIS Z: %1").arg(formatDebugValue(rotaryExportContext.axisZ)));
         writeCommentLine(stream, QStringLiteral("MAX COLLISION RADIUS: %1").arg(formatDebugValue(maxCollisionRadius)));
         writeCommentLine(stream, QStringLiteral("FINAL SAFE MACHINE Z: %1").arg(formatDebugValue(rotaryExportContext.safeMachineZ)));
 
@@ -1962,18 +2037,30 @@ bool GGenerator::generateToFile(const QString& filePath, QString* errorMessage) 
     }
 
     qDebug().noquote()
-        << QStringLiteral("[RotarySafeCenter] mode=%1 judgeCenterY=%2 judgeCenterZ=%3 collisionCenterY=%4 collisionCenterZ=%5 maxCollisionRadius=%6 finalSafeMachineZ=%7")
-            .arg(collisionReferenceCenterLineModeName(rotaryAxisConfig.collisionReferenceCenterLineMode))
-            .arg(formatDebugValue(rotaryExportContext.judgeCenterY))
-            .arg(formatDebugValue(rotaryExportContext.judgeCenterZ))
-            .arg(formatDebugValue(rotaryExportContext.collisionCenterY))
-            .arg(formatDebugValue(rotaryExportContext.collisionCenterZ))
+        << QStringLiteral("[RotarySafeCenter] tubeCenterY=%1 tubeCenterZ=%2 rotaryAxisY=%3 rotaryAxisZ=%4 maxCollisionRadius=%5 finalSafeMachineZ=%6")
+            .arg(formatDebugValue(rotaryExportContext.tubeCenterY))
+            .arg(formatDebugValue(rotaryExportContext.tubeCenterZ))
+            .arg(formatDebugValue(rotaryExportContext.axisY))
+            .arg(formatDebugValue(rotaryExportContext.axisZ))
             .arg(formatDebugValue(maxCollisionRadius))
             .arg(formatDebugValue(rotaryExportContext.safeMachineZ));
 
     bool hasPrevious4AxisEndPoint = false;
     ControlPoint4Axis previous4AxisEndPoint;
     RawPathPoint3D previous4AxisRawEndPoint;
+    QHash<int, int> remainingItemsByContinuousGroup;
+    QHash<int, RotaryOvercutPath> overcutPathsByGroup;
+
+    if (m_generationMode == GenerationMode::Mode3D)
+    {
+        for (CadItem* item : orderedItems)
+        {
+            if (item != nullptr && item->m_processContinuousGroupId >= 0)
+            {
+                remainingItemsByContinuousGroup[item->m_processContinuousGroupId] += 1;
+            }
+        }
+    }
 
     for (CadItem* item : orderedItems)
     {
@@ -2028,6 +2115,16 @@ bool GGenerator::generateToFile(const QString& filePath, QString* errorMessage) 
             continue;
         }
 
+        bool completesContinuousGroup = false;
+        const int continuousGroupId = item->m_processContinuousGroupId;
+        if (m_generationMode == GenerationMode::Mode3D && continuousGroupId >= 0)
+        {
+            appendItemToOvercutPath(item, overcutPathsByGroup[continuousGroupId]);
+            int& remainingCount = remainingItemsByContinuousGroup[continuousGroupId];
+            remainingCount = std::max(0, remainingCount - 1);
+            completesContinuousGroup = remainingCount == 0;
+        }
+
         if (!geometryText.isEmpty())
         {
             QString rapidPrefix;
@@ -2045,6 +2142,27 @@ bool GGenerator::generateToFile(const QString& filePath, QString* errorMessage) 
                 writeTextBlock(stream, colorCode.header);
                 writeTextBlock(stream, typeCode.header);
                 stream << normalizeLineEndingsToCrLf(cuttingBody);
+
+                if (completesContinuousGroup
+                    && rotaryAxisConfig.overcutDistance > kControlPointTolerance)
+                {
+                    ControlPoint4Axis overcutEndPoint;
+                    RawPathPoint3D overcutRawEndPoint;
+                    if (writeRotaryOvercut
+                    (
+                        stream,
+                        overcutPathsByGroup.value(continuousGroupId),
+                        rotaryAxisConfig.overcutDistance,
+                        currentItemEndPoint,
+                        overcutEndPoint,
+                        overcutRawEndPoint
+                    ))
+                    {
+                        currentItemEndPoint = overcutEndPoint;
+                        currentItemRawEndPoint = overcutRawEndPoint;
+                    }
+                }
+
                 writeTextBlock(stream, typeCode.footer);
                 writeTextBlock(stream, colorCode.footer);
                 writeTextBlock(stream, layerCode.footer);

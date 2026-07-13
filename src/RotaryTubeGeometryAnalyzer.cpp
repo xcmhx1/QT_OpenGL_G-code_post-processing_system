@@ -1312,6 +1312,9 @@ namespace
 
         model.yLength = maxY - minY;
         model.zWidth = maxZ - minZ;
+        model.centerY = 0.5 * (minY + maxY);
+        model.centerZ = 0.5 * (minZ + maxZ);
+        model.centerValid = true;
         const double fallbackRadius = estimateRoundedCornerRadius(model.sectionHull, tolerance.boundaryDistance);
         model.cornerRadius = estimateCornerRadiusFromEntities
         (

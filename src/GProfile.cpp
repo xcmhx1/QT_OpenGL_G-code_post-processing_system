@@ -6,6 +6,8 @@
 #include <QJsonDocument>
 #include <QJsonValue>
 
+#include <algorithm>
+
 namespace
 {
     constexpr const char* kProfileNameKey = "profileName";
@@ -22,11 +24,11 @@ namespace
     constexpr const char* kAAxisOffsetDegreesKey = "aAxisOffsetDegrees";
     constexpr const char* kSafeZKey = "safeZ";
     constexpr const char* kMachiningPlaneZOffsetKey = "machiningPlaneZOffset";
+    constexpr const char* kOvercutDistanceKey = "overcutDistance";
     constexpr const char* kInvertAAxisDirectionKey = "invertAAxisDirection";
     constexpr const char* kKeepContinuousAngleKey = "keepContinuousAngle";
     constexpr const char* kUseSafeZBeforeRapidKey = "useSafeZBeforeRapid";
     constexpr const char* kUseInitialMachinePointKey = "useInitialMachinePoint";
-    constexpr const char* kCollisionReferenceCenterLineModeKey = "collisionReferenceCenterLineMode";
     constexpr const char* kInitialMachineXKey = "initialMachineX";
     constexpr const char* kInitialMachineYKey = "initialMachineY";
     constexpr const char* kInitialMachineZKey = "initialMachineZ";
@@ -127,11 +129,11 @@ QJsonObject GProfileRotaryAxisConfig::toJson() const
     object.insert(kAAxisOffsetDegreesKey, aAxisOffsetDegrees);
     object.insert(kSafeZKey, safeZ);
     object.insert(kMachiningPlaneZOffsetKey, machiningPlaneZOffset);
+    object.insert(kOvercutDistanceKey, overcutDistance);
     object.insert(kInvertAAxisDirectionKey, invertAAxisDirection);
     object.insert(kKeepContinuousAngleKey, keepContinuousAngle);
     object.insert(kUseSafeZBeforeRapidKey, useSafeZBeforeRapid);
     object.insert(kUseInitialMachinePointKey, useInitialMachinePoint);
-    object.insert(kCollisionReferenceCenterLineModeKey, static_cast<int>(collisionReferenceCenterLineMode));
     object.insert(kInitialMachineXKey, initialMachineX);
     object.insert(kInitialMachineYKey, initialMachineY);
     object.insert(kInitialMachineZKey, initialMachineZ);
@@ -146,14 +148,16 @@ GProfileRotaryAxisConfig GProfileRotaryAxisConfig::fromJson(const QJsonObject& o
     config.aAxisOffsetDegrees = object.value(kAAxisOffsetDegreesKey).toDouble(config.aAxisOffsetDegrees);
     config.safeZ = object.value(kSafeZKey).toDouble(config.safeZ);
     config.machiningPlaneZOffset = object.value(kMachiningPlaneZOffsetKey).toDouble(config.machiningPlaneZOffset);
+    config.overcutDistance = std::clamp
+    (
+        object.value(kOvercutDistanceKey).toDouble(config.overcutDistance),
+        0.0,
+        100.0
+    );
     config.invertAAxisDirection = object.value(kInvertAAxisDirectionKey).toBool(config.invertAAxisDirection);
     config.keepContinuousAngle = object.value(kKeepContinuousAngleKey).toBool(config.keepContinuousAngle);
     config.useSafeZBeforeRapid = object.value(kUseSafeZBeforeRapidKey).toBool(config.useSafeZBeforeRapid);
     config.useInitialMachinePoint = object.value(kUseInitialMachinePointKey).toBool(config.useInitialMachinePoint);
-    config.collisionReferenceCenterLineMode = static_cast<CollisionReferenceCenterLineMode>
-    (
-        object.value(kCollisionReferenceCenterLineModeKey).toInt(static_cast<int>(config.collisionReferenceCenterLineMode))
-    );
     config.initialMachineX = object.value(kInitialMachineXKey).toDouble(config.initialMachineX);
     config.initialMachineY = object.value(kInitialMachineYKey).toDouble(config.initialMachineY);
     config.initialMachineZ = object.value(kInitialMachineZKey).toDouble(config.initialMachineZ);

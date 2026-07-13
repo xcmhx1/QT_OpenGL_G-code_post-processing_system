@@ -121,6 +121,8 @@ public:
     DRW::ETYPE m_type;
     // 供后续排序/后处理使用的加工顺序标记。
     int m_processOrder = -1;
+    // 同一闭合连续加工组共享编号；开放或未分组图元保持 -1。
+    int m_processContinuousGroupId = -1;
     // 标记当前图元是否采用反向加工方向。
     bool m_isReverse = false;
     // 标记当前图元是否显式指定了闭合路径的起刀缝点参数。

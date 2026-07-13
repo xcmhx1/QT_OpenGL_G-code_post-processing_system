@@ -15,18 +15,6 @@ constexpr double kTwoPi = 6.28318530717958647692;
 // 整椭圆的基础采样密度，局部弧段会按参数跨度缩放。
 constexpr int kFullEllipseSegments = 128;
 
-double normalizeAnglePositive(double angle)
-{
-    double normalized = std::fmod(angle, kTwoPi);
-
-    if (normalized < 0.0)
-    {
-        normalized += kTwoPi;
-    }
-
-    return normalized;
-}
-
 bool isFullEllipsePath(const DRW_Ellipse* ellipse)
 {
     return ellipse != nullptr && CadEllipseGeometryUtils::isFullEllipseParameterRange
@@ -38,14 +26,7 @@ bool isFullEllipsePath(const DRW_Ellipse* ellipse)
 
 double effectiveClosedEllipseStartParameter(const CadEllipseItem* item)
 {
-    if (item != nullptr && item->m_hasCustomProcessStart)
-    {
-        return normalizeAnglePositive(item->m_processStartParameter);
-    }
-
-    return (item != nullptr && item->m_data != nullptr)
-        ? normalizeAnglePositive(item->m_data->staparam)
-        : 0.0;
+    return item != nullptr ? item->defaultProcessStartParameter() : M_PI_2;
 }
 }
 
@@ -103,6 +84,11 @@ void CadEllipseItem::buildGeometryDatay()
         const double t = startParam + span * static_cast<double>(i) / static_cast<double>(segments);
         m_geometry.vertices.append(CadEllipseGeometryUtils::ellipsePointAt(geometry, t));
     }
+}
+
+double CadEllipseItem::defaultProcessStartParameter() const
+{
+    return M_PI_2;
 }
 
 void CadEllipseItem::rebuildRawPathPoints3D()

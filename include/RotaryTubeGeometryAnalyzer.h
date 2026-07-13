@@ -19,6 +19,9 @@ struct RotaryTubeSectionModel
     QVector<double> cornerRadii;
     double cornerConfidence = 0.0;
     double centerX = 0.0;
+    bool centerValid = false;
+    double centerY = 0.0;
+    double centerZ = 0.0;
     int inspectedCandidateCount = 0;
     int validCandidateCount = 0;
     int roundedCandidateCount = 0;

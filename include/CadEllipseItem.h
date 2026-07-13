@@ -14,6 +14,8 @@ public:
 
     void rebuildRawPathPoints3D() override;
 
+    double defaultProcessStartParameter() const;
+
     bool rebuildControlPoints4Axis
     (
         double axisY = 0.0,
