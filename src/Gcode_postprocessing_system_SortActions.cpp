@@ -10,6 +10,7 @@
 #include "RotaryPathTopology.h"
 
 #include <QDebug>
+#include <QHash>
 #include <QMessageBox>
 #include <QSet>
 #include <QStatusBar>
@@ -177,20 +178,6 @@ namespace
         size_t removedCount = 0;
         QVector<CadItem*> duplicateItems;
     };
-
-    bool hasManualRotaryEndCutAssignments(const std::vector<CadItem*>& items)
-    {
-        return std::any_of
-        (
-            items.begin(),
-            items.end(),
-            [](const CadItem* item)
-            {
-                return item != nullptr
-                    && item->m_rotaryEndCutRole == RotaryEndCutRole::Break;
-            }
-        );
-    }
 
     std::vector<ProcessPathOption> buildPathOptionsForItem(const CadItem* item, SortStrategy strategy);
     bool isPointLexicographicallyLess(const QVector3D& left, const QVector3D& right)
@@ -2853,18 +2840,51 @@ namespace
     bool tryBuildSquareTubeLazyRotaryProcessUpdates
     (
         const std::vector<CadItem*>& sortableItems,
+        const QVector<CadItem*>& documentItems,
         const GProfileRotaryAxisConfig& rotaryAxisConfig,
         std::vector<CadEditer::ProcessStateUpdate>& processUpdates,
-        const QVector<QVector2D>& configuredSectionHull
+        const QVector<QVector2D>& configuredSectionHull,
+        QString* failureReason
     )
     {
+        const auto fail = [&processUpdates, failureReason](const QString& reason)
+        {
+            processUpdates.clear();
+            const bool alreadyReported = failureReason != nullptr && *failureReason == reason;
+
+            if (failureReason != nullptr)
+            {
+                *failureReason = reason;
+            }
+
+            if (!alreadyReported)
+            {
+                qWarning().noquote() << QStringLiteral("[智能分段]") << reason;
+            }
+
+            return false;
+        };
+
+        if (failureReason != nullptr)
+        {
+            failureReason->clear();
+        }
+
+        const auto failCurrentOr = [&fail, failureReason](const QString& fallbackReason)
+        {
+            return fail(failureReason != nullptr && !failureReason->isEmpty()
+                ? *failureReason
+                : fallbackReason);
+        };
+
         if (sortableItems.size() < 3)
         {
-            return false;
+            return fail(QStringLiteral("有效加工图元不足 3 个，无法建立方管加工分段。"));
         }
 
         std::vector<RotaryItemAnalysis> itemAnalyses(sortableItems.size());
         RotaryPathBounds sectionBounds;
+        QHash<CadItem*, size_t> sortableIndexByItem;
 
         for (size_t index = 0; index < sortableItems.size(); ++index)
         {
@@ -2872,8 +2892,10 @@ namespace
 
             if (item == nullptr)
             {
-                return false;
+                return fail(QStringLiteral("有效加工图元集合中存在空图元。"));
             }
+
+            sortableIndexByItem.insert(item, index);
 
             item->rebuildRawPathPoints3D();
 
@@ -2888,7 +2910,7 @@ namespace
 
             if (!analysis.bounds.valid)
             {
-                return false;
+                return fail(QStringLiteral("图元 %1 没有有效三维加工路径。").arg(index + 1));
             }
         }
 
@@ -2899,166 +2921,217 @@ namespace
 
         if (spanX <= kSortEpsilon || sectionSize <= kSortEpsilon)
         {
-            return false;
+            return fail(QStringLiteral("加工范围尺寸无效：X跨度=%1，截面尺寸=%2。")
+                .arg(spanX, 0, 'f', 3)
+                .arg(sectionSize, 0, 'f', 3));
         }
 
         const double sectionTolerance = std::max(0.25, sectionSize * kSquareTubeSectionToleranceRatio);
-        const std::vector<int> componentIds = buildItemConnectivityComponents(sortableItems);
+        std::map<int, QVector<CadItem*>> boundaryItemsById;
+        QSet<CadItem*> boundaryItems;
+        QVector<CadItem*> analysisSceneItems;
 
-        if (componentIds.size() != sortableItems.size())
+        for (CadItem* item : documentItems)
         {
-            return false;
+            if (item == nullptr)
+            {
+                continue;
+            }
+
+            const bool isBoundary = item->m_rotaryEndCutRole != RotaryEndCutRole::None
+                && item->m_rotaryEndCutPairId >= 0;
+
+            if (!item->m_excludedAsInternalGeometry)
+            {
+                analysisSceneItems.push_back(item);
+            }
+
+            if (!isBoundary)
+            {
+                continue;
+            }
+
+            boundaryItems.insert(item);
+
+            if (item->m_rotaryEndCutRole == RotaryEndCutRole::Break)
+            {
+                boundaryItemsById[item->m_rotaryEndCutPairId].push_back(item);
+            }
+        }
+
+        const bool useManualBreakBoundaries = !boundaryItemsById.empty();
+        std::vector<CadItem*> connectivityItems;
+        std::vector<size_t> connectivityToGlobal;
+
+        for (size_t itemIndex = 0; itemIndex < sortableItems.size(); ++itemIndex)
+        {
+            CadItem* item = sortableItems[itemIndex];
+
+            if (useManualBreakBoundaries && boundaryItems.contains(item))
+            {
+                continue;
+            }
+
+            connectivityItems.push_back(item);
+            connectivityToGlobal.push_back(itemIndex);
+        }
+
+        const std::vector<int> componentIds = buildItemConnectivityComponents(connectivityItems);
+
+        if (componentIds.size() != connectivityItems.size())
+        {
+            return fail(QStringLiteral("普通图元连通分组结果数量不一致：输入 %1，结果 %2。")
+                .arg(connectivityItems.size())
+                .arg(componentIds.size()));
         }
 
         const int componentCount = componentIds.empty()
             ? 0
             : (*std::max_element(componentIds.begin(), componentIds.end()) + 1);
 
-        if (componentCount <= 0)
+        if (componentCount <= 0 && !useManualBreakBoundaries)
         {
-            return false;
+            return fail(QStringLiteral("没有可用于加工分段的普通图元连通分量。"));
         }
 
         std::vector<RotaryFeatureComponent> components(static_cast<size_t>(componentCount));
 
-        for (size_t itemIndex = 0; itemIndex < sortableItems.size(); ++itemIndex)
+        for (size_t localIndex = 0; localIndex < connectivityItems.size(); ++localIndex)
         {
-            const int componentId = componentIds[itemIndex];
+            const int componentId = componentIds[localIndex];
 
             if (componentId < 0 || componentId >= componentCount)
             {
-                return false;
+                return fail(QStringLiteral("普通图元 %1 的连通分量编号无效：%2。")
+                    .arg(localIndex + 1)
+                    .arg(componentId));
             }
 
             RotaryFeatureComponent& component = components[static_cast<size_t>(componentId)];
+            const size_t itemIndex = connectivityToGlobal[localIndex];
             component.itemIndices.push_back(itemIndex);
             mergeRotaryBounds(component.bounds, itemAnalyses[itemIndex].bounds);
         }
 
         std::vector<bool> componentIsEndCut(components.size(), false);
 
-        std::map<int, ManualRotaryBreakBoundary> manualBoundariesById;
-
-        for (size_t itemIndex = 0; itemIndex < sortableItems.size(); ++itemIndex)
-        {
-            const CadItem* item = sortableItems[itemIndex];
-
-            if (item == nullptr
-                || item->m_rotaryEndCutRole == RotaryEndCutRole::None
-                || item->m_rotaryEndCutRole == RotaryEndCutRole::Waste)
-            {
-                continue;
-            }
-
-            if (item->m_rotaryEndCutPairId < 0)
-            {
-                return false;
-            }
-
-            ManualRotaryBreakBoundary& boundary = manualBoundariesById[item->m_rotaryEndCutPairId];
-            boundary.itemIndices.push_back(itemIndex);
-        }
-
         std::vector<ManualRotaryBreakBoundary> manualBreakBoundaries;
-        manualBreakBoundaries.reserve(manualBoundariesById.size());
-        QVector<CadItem*> analysisSceneItems;
-        analysisSceneItems.reserve(static_cast<qsizetype>(sortableItems.size()));
+        manualBreakBoundaries.reserve(boundaryItemsById.size());
 
-        for (CadItem* item : sortableItems)
+        for (const auto& [boundaryId, specifiedItems] : boundaryItemsById)
         {
-            analysisSceneItems.push_back(item);
-        }
-
-        for (const auto& [boundaryId, boundary] : manualBoundariesById)
-        {
-            Q_UNUSED(boundaryId);
-
-            if (boundary.itemIndices.empty())
+            if (specifiedItems.isEmpty())
             {
-                return false;
+                return fail(QStringLiteral("断面 %1 没有指定图元。").arg(boundaryId + 1));
             }
 
-            ManualRotaryBreakBoundary analyzedBoundary = boundary;
-            QVector<CadItem*> candidateItems;
-            candidateItems.reserve(static_cast<qsizetype>(boundary.itemIndices.size()));
+            ManualRotaryBreakBoundary analyzedBoundary;
+            QVector<CadItem*> missingItems;
 
-            for (const size_t itemIndex : boundary.itemIndices)
+            for (CadItem* item : specifiedItems)
             {
-                if (itemIndex >= sortableItems.size() || sortableItems[itemIndex] == nullptr)
+                const auto sortableIndex = sortableIndexByItem.constFind(item);
+
+                if (sortableIndex == sortableIndexByItem.cend())
                 {
-                    return false;
+                    missingItems.push_back(item);
+                    continue;
                 }
 
-                candidateItems.push_back(sortableItems[itemIndex]);
+                analyzedBoundary.itemIndices.push_back(sortableIndex.value());
+            }
+
+            if (!missingItems.isEmpty())
+            {
+                return fail(QStringLiteral("断面 %1 图元缺失：指定 %2 个，可排序 %3 个，缺少 %4。")
+                    .arg(boundaryId + 1)
+                    .arg(specifiedItems.size())
+                    .arg(analyzedBoundary.itemIndices.size())
+                    .arg(describeRotaryPathItems(missingItems)));
+            }
+
+            QVector<CadItem*> boundarySceneItems = analysisSceneItems;
+
+            for (CadItem* item : specifiedItems)
+            {
+                if (item != nullptr && !boundarySceneItems.contains(item))
+                {
+                    boundarySceneItems.push_back(item);
+                }
             }
 
             analyzedBoundary.analysis = RotaryCutBoundaryAnalyzer::analyze
             (
-                candidateItems,
-                analysisSceneItems,
+                specifiedItems,
+                boundarySceneItems,
                 kEndCutConnectionTolerance,
                 configuredSectionHull
             );
 
             if (!analyzedBoundary.analysis.valid)
             {
-                return false;
+                return fail(QStringLiteral("断面 %1 重新分析失败：%2；图元 %3。")
+                    .arg(boundaryId + 1)
+                    .arg(analyzedBoundary.analysis.errorMessage)
+                    .arg(describeRotaryPathItems(specifiedItems)));
             }
+
+            const QSet<CadItem*> specifiedItemSet(specifiedItems.cbegin(), specifiedItems.cend());
+            const QSet<CadItem*> analyzedItemSet
+            (
+                analyzedBoundary.analysis.boundaryItems.cbegin(),
+                analyzedBoundary.analysis.boundaryItems.cend()
+            );
+            QVector<CadItem*> missingAnalyzedItems;
+            QVector<CadItem*> unexpectedAnalyzedItems;
+
+            for (CadItem* item : specifiedItems)
+            {
+                if (!analyzedItemSet.contains(item))
+                {
+                    missingAnalyzedItems.push_back(item);
+                }
+            }
+
+            for (CadItem* item : analyzedBoundary.analysis.boundaryItems)
+            {
+                if (!specifiedItemSet.contains(item))
+                {
+                    unexpectedAnalyzedItems.push_back(item);
+                }
+            }
+
+            if (!unexpectedAnalyzedItems.isEmpty())
+            {
+                return fail(QStringLiteral("断面 %1 组中混入普通或其他断面图元：%2。")
+                    .arg(boundaryId + 1)
+                    .arg(describeRotaryPathItems(unexpectedAnalyzedItems)));
+            }
+
+            if (!missingAnalyzedItems.isEmpty())
+            {
+                return fail(QStringLiteral("断面 %1 重新分析失败：候选 %2 个，原指定 %3 个，缺少 %4。")
+                    .arg(boundaryId + 1)
+                    .arg(analyzedBoundary.analysis.boundaryItems.size())
+                    .arg(specifiedItems.size())
+                    .arg(describeRotaryPathItems(missingAnalyzedItems)));
+            }
+
+            qInfo().noquote() << QStringLiteral
+            (
+                "[智能分段] 断面 ID=%1：指定=%2，重新收集=%3，%4，分析=成功，绕行=%5，覆盖率=%6%。"
+            )
+                .arg(boundaryId)
+                .arg(specifiedItems.size())
+                .arg(analyzedBoundary.analysis.boundaryItems.size())
+                .arg(describeRotaryPathItems(analyzedBoundary.analysis.boundaryItems))
+                .arg(analyzedBoundary.analysis.windingNumber, 0, 'f', 3)
+                .arg(analyzedBoundary.analysis.perimeterCoverage * 100.0, 0, 'f', 1);
 
             manualBreakBoundaries.push_back(std::move(analyzedBoundary));
         }
 
-        const bool useManualBreakBoundaries = !manualBreakBoundaries.empty();
-
-        if (useManualBreakBoundaries)
-        {
-            // 人工指定以完整连通切面为单位，每个切面都是独立的加工中断边界。
-            for (size_t componentIndex = 0; componentIndex < components.size(); ++componentIndex)
-            {
-                RotaryEndCutRole componentRole = RotaryEndCutRole::None;
-                int componentPairId = -1;
-
-                for (const size_t itemIndex : components[componentIndex].itemIndices)
-                {
-                    if (itemIndex >= sortableItems.size() || sortableItems[itemIndex] == nullptr)
-                    {
-                        return false;
-                    }
-
-                    const CadItem* item = sortableItems[itemIndex];
-
-                    if (item->m_rotaryEndCutRole == RotaryEndCutRole::None)
-                    {
-                        if (componentRole != RotaryEndCutRole::None)
-                        {
-                            return false;
-                        }
-
-                        continue;
-                    }
-
-                    if (componentRole == RotaryEndCutRole::None)
-                    {
-                        componentRole = item->m_rotaryEndCutRole;
-                        componentPairId = item->m_rotaryEndCutPairId;
-                        continue;
-                    }
-
-                    if (componentRole != item->m_rotaryEndCutRole
-                        || componentPairId != item->m_rotaryEndCutPairId)
-                    {
-                        return false;
-                    }
-                }
-
-                if (componentRole != RotaryEndCutRole::None)
-                {
-                    componentIsEndCut[componentIndex] = true;
-                    components[componentIndex].isEndCut = true;
-                }
-            }
-        }
-        else
+        if (!useManualBreakBoundaries)
         {
 
         for (size_t componentIndex = 0; componentIndex < components.size(); ++componentIndex)
@@ -3241,7 +3314,9 @@ namespace
 
                 if (leftAnalysis == nullptr || rightAnalysis == nullptr)
                 {
-                    return false;
+                    return fail(QStringLiteral("相邻断面分析结果缺失：左序号=%1，右序号=%2。")
+                        .arg(boundaryIndex)
+                        .arg(boundaryIndex + 1));
                 }
 
                 if (RotaryCutBoundaryAnalyzer::boundariesIntersect
@@ -3251,8 +3326,15 @@ namespace
                     kEndCutConnectionTolerance
                 ))
                 {
-                    return false;
+                    return fail(QStringLiteral("相邻断面相交：断面 %1 与断面 %2 在方管展开边界上发生交叉。")
+                        .arg(boundaryIndex)
+                        .arg(boundaryIndex + 1));
                 }
+
+                int rightBefore = 0;
+                int rightAfter = 0;
+                int rightOnBoundary = 0;
+                int rightAmbiguous = 0;
 
                 for (const QVector3D& point : rightAnalysis->orderedPath)
                 {
@@ -3263,11 +3345,16 @@ namespace
                         kEndCutConnectionTolerance
                     );
 
-                    if (side != RotaryBoundarySide::After && side != RotaryBoundarySide::OnBoundary)
-                    {
-                        return false;
-                    }
+                    rightBefore += side == RotaryBoundarySide::Before ? 1 : 0;
+                    rightAfter += side == RotaryBoundarySide::After ? 1 : 0;
+                    rightOnBoundary += side == RotaryBoundarySide::OnBoundary ? 1 : 0;
+                    rightAmbiguous += side == RotaryBoundarySide::Ambiguous ? 1 : 0;
                 }
+
+                int leftBefore = 0;
+                int leftAfter = 0;
+                int leftOnBoundary = 0;
+                int leftAmbiguous = 0;
 
                 for (const QVector3D& point : leftAnalysis->orderedPath)
                 {
@@ -3278,10 +3365,43 @@ namespace
                         kEndCutConnectionTolerance
                     );
 
-                    if (side != RotaryBoundarySide::Before && side != RotaryBoundarySide::OnBoundary)
-                    {
-                        return false;
-                    }
+                    leftBefore += side == RotaryBoundarySide::Before ? 1 : 0;
+                    leftAfter += side == RotaryBoundarySide::After ? 1 : 0;
+                    leftOnBoundary += side == RotaryBoundarySide::OnBoundary ? 1 : 0;
+                    leftAmbiguous += side == RotaryBoundarySide::Ambiguous ? 1 : 0;
+                }
+
+                qInfo().noquote() << QStringLiteral
+                (
+                    "[智能分段] 相邻断面 %1/%2：右对左 Before=%3 After=%4 OnBoundary=%5 Ambiguous=%6；左对右 Before=%7 After=%8 OnBoundary=%9 Ambiguous=%10。"
+                )
+                    .arg(boundaryIndex)
+                    .arg(boundaryIndex + 1)
+                    .arg(rightBefore)
+                    .arg(rightAfter)
+                    .arg(rightOnBoundary)
+                    .arg(rightAmbiguous)
+                    .arg(leftBefore)
+                    .arg(leftAfter)
+                    .arg(leftOnBoundary)
+                    .arg(leftAmbiguous);
+
+                if (rightBefore > 0 || rightAmbiguous > 0 || leftAfter > 0 || leftAmbiguous > 0)
+                {
+                    return fail(QStringLiteral
+                    (
+                        "相邻断面顺序不确定：断面 %1/%2，右对左 Before=%3 After=%4 OnBoundary=%5 Ambiguous=%6，左对右 Before=%7 After=%8 OnBoundary=%9 Ambiguous=%10。"
+                    )
+                        .arg(boundaryIndex)
+                        .arg(boundaryIndex + 1)
+                        .arg(rightBefore)
+                        .arg(rightAfter)
+                        .arg(rightOnBoundary)
+                        .arg(rightAmbiguous)
+                        .arg(leftBefore)
+                        .arg(leftAfter)
+                        .arg(leftOnBoundary)
+                        .arg(leftAmbiguous));
                 }
             }
         }
@@ -3303,7 +3423,8 @@ namespace
 
             if (endCutComponentIndices.size() < 2)
             {
-                return false;
+                return fail(QStringLiteral("自动加工分段失败：只识别到 %1 个端部断面候选，至少需要 2 个。")
+                    .arg(endCutComponentIndices.size()));
             }
 
             std::sort
@@ -3344,7 +3465,9 @@ namespace
         if ((!useManualBreakBoundaries && cutClusters.size() < 2)
             || (useManualBreakBoundaries && cutClusters.empty()))
         {
-            return false;
+            return fail(QStringLiteral("断面聚类失败：人工断面=%1，断面组=%2。")
+                .arg(useManualBreakBoundaries ? manualBreakBoundaries.size() : 0)
+                .arg(cutClusters.size()));
         }
 
         std::vector<RotaryLazySegment> segments;
@@ -3384,7 +3507,9 @@ namespace
             {
                 if (itemIndex >= itemAnalyses.size())
                 {
-                    return false;
+                    return fail(QStringLiteral("普通分量 %1 包含无效图元索引 %2。")
+                        .arg(componentIndex + 1)
+                        .arg(itemIndex));
                 }
 
                 const RotarySurfaceGroup surface = itemAnalyses[itemIndex].surface;
@@ -3414,6 +3539,165 @@ namespace
                 return boundary != manualBreakBoundaries.end() ? &boundary->analysis : nullptr;
             };
 
+        const auto assignManualItemToSegment =
+            [&](size_t componentIndex, size_t itemIndex) -> bool
+            {
+                if (itemIndex >= sortableItems.size() || sortableItems[itemIndex] == nullptr)
+                {
+                    return fail(QStringLiteral("普通分量 %1 中存在无效图元索引 %2。")
+                        .arg(componentIndex + 1)
+                        .arg(itemIndex));
+                }
+
+                CadItem* item = sortableItems[itemIndex];
+                item->rebuildRawPathPoints3D();
+
+                if (item->rawPathPoints3D().empty())
+                {
+                    return fail(QStringLiteral("普通分量 %1 的图元没有可用于侧别判断的路径点：%2。")
+                        .arg(componentIndex + 1)
+                        .arg(describeRotaryPathItems(QVector<CadItem*>{ item })));
+                }
+
+                int leftClusterIndex = -1;
+                int rightClusterIndex = -1;
+
+                for (size_t boundaryIndex = 0; boundaryIndex < manualBoundaryClusters.size(); ++boundaryIndex)
+                {
+                    const int boundaryClusterIndex = manualBoundaryClusters[boundaryIndex];
+                    const RotaryCutBoundaryAnalysis* boundaryAnalysis = manualBoundaryAnalysis(boundaryClusterIndex);
+
+                    if (boundaryAnalysis == nullptr)
+                    {
+                        return fail(QStringLiteral("断面 %1 的分析结果缺失。")
+                            .arg(boundaryIndex + 1));
+                    }
+
+                    int beforeCount = 0;
+                    int afterCount = 0;
+                    int onBoundaryCount = 0;
+                    int ambiguousCount = 0;
+
+                    for (const RawPathPoint3D& rawPoint : item->rawPathPoints3D())
+                    {
+                        const RotaryBoundarySide side = RotaryCutBoundaryAnalyzer::classifyPointRelativeToBoundary
+                        (
+                            *boundaryAnalysis,
+                            QVector3D
+                            (
+                                static_cast<float>(rawPoint.x),
+                                static_cast<float>(rawPoint.y),
+                                static_cast<float>(rawPoint.z)
+                            ),
+                            boundaryTolerance
+                        );
+
+                        beforeCount += side == RotaryBoundarySide::Before ? 1 : 0;
+                        afterCount += side == RotaryBoundarySide::After ? 1 : 0;
+                        onBoundaryCount += side == RotaryBoundarySide::OnBoundary ? 1 : 0;
+                        ambiguousCount += side == RotaryBoundarySide::Ambiguous ? 1 : 0;
+                    }
+
+                    qInfo().noquote() << QStringLiteral
+                    (
+                        "[智能分段] 普通分量 %1 / 断面 %2：Before=%3 After=%4 OnBoundary=%5 Ambiguous=%6，图元=%7。"
+                    )
+                        .arg(componentIndex + 1)
+                        .arg(boundaryIndex + 1)
+                        .arg(beforeCount)
+                        .arg(afterCount)
+                        .arg(onBoundaryCount)
+                        .arg(ambiguousCount)
+                        .arg(describeRotaryPathItems(QVector<CadItem*>{ item }));
+
+                    if (ambiguousCount > 0)
+                    {
+                        return fail(QStringLiteral
+                        (
+                            "普通分量 %1 的图元相对断面 %2 侧别不确定：Before=%3 After=%4 OnBoundary=%5 Ambiguous=%6，%7。"
+                        )
+                            .arg(componentIndex + 1)
+                            .arg(boundaryIndex + 1)
+                            .arg(beforeCount)
+                            .arg(afterCount)
+                            .arg(onBoundaryCount)
+                            .arg(ambiguousCount)
+                            .arg(describeRotaryPathItems(QVector<CadItem*>{ item })));
+                    }
+
+                    if (beforeCount > 0 && afterCount > 0)
+                    {
+                        return fail(QStringLiteral
+                        (
+                            "普通分量 %1 中的单个图元真正横跨断面 %2：Before=%3 After=%4 OnBoundary=%5 Ambiguous=0，%6。"
+                        )
+                            .arg(componentIndex + 1)
+                            .arg(boundaryIndex + 1)
+                            .arg(beforeCount)
+                            .arg(afterCount)
+                            .arg(onBoundaryCount)
+                            .arg(describeRotaryPathItems(QVector<CadItem*>{ item })));
+                    }
+
+                    bool itemIsBefore = beforeCount > 0;
+                    bool itemIsAfter = afterCount > 0;
+
+                    if (!itemIsBefore && !itemIsAfter)
+                    {
+                        const double itemCenterX = rotaryBoundsCenterX(itemAnalyses[itemIndex].bounds);
+                        const double boundaryCenterX = cutClusters[static_cast<size_t>(boundaryClusterIndex)].centerX;
+                        itemIsBefore = itemCenterX <= boundaryCenterX;
+                        itemIsAfter = !itemIsBefore;
+                    }
+
+                    if (!itemIsAfter)
+                    {
+                        leftClusterIndex = boundaryIndex > 0
+                            ? manualBoundaryClusters[boundaryIndex - 1]
+                            : -1;
+                        rightClusterIndex = boundaryClusterIndex;
+                        break;
+                    }
+                }
+
+                if (rightClusterIndex < 0)
+                {
+                    leftClusterIndex = manualBoundaryClusters.back();
+                }
+
+                const auto segment = std::find_if
+                (
+                    segments.begin(),
+                    segments.end(),
+                    [leftClusterIndex, rightClusterIndex](const RotaryLazySegment& candidate)
+                    {
+                        return candidate.leftClusterIndex == leftClusterIndex
+                            && candidate.rightClusterIndex == rightClusterIndex;
+                    }
+                );
+
+                if (segment == segments.end())
+                {
+                    return fail(QStringLiteral("普通分量 %1 无法匹配加工区间：左断面=%2，右断面=%3。")
+                        .arg(componentIndex + 1)
+                        .arg(leftClusterIndex)
+                        .arg(rightClusterIndex));
+                }
+
+                const RotarySurfaceGroup surface = itemAnalyses[itemIndex].surface;
+
+                if (surface == RotarySurfaceGroup::Unknown)
+                {
+                    segment->continuousItems.push_back(itemIndex);
+                }
+                else
+                {
+                    segmentItemsForSurface(*segment, surface).push_back(itemIndex);
+                }
+
+                return true;
+            };
+
         for (size_t componentIndex = 0; componentIndex < components.size(); ++componentIndex)
         {
             if (componentIsEndCut[componentIndex])
@@ -3428,75 +3712,16 @@ namespace
 
             if (useManualBreakBoundaries)
             {
-                for (size_t boundaryIndex = 0; boundaryIndex < manualBoundaryClusters.size(); ++boundaryIndex)
+                for (const size_t itemIndex : component.itemIndices)
                 {
-                    const int boundaryClusterIndex = manualBoundaryClusters[boundaryIndex];
-                    const RotaryCutBoundaryAnalysis* boundaryAnalysis = manualBoundaryAnalysis(boundaryClusterIndex);
-
-                    if (boundaryAnalysis == nullptr)
+                    if (!assignManualItemToSegment(componentIndex, itemIndex))
                     {
-                        return false;
-                    }
-
-                    bool hasPointBeforeBoundary = false;
-                    bool hasPointAfterBoundary = false;
-
-                    for (const size_t itemIndex : component.itemIndices)
-                    {
-                        if (itemIndex >= sortableItems.size() || sortableItems[itemIndex] == nullptr)
-                        {
-                            return false;
-                        }
-
-                        CadItem* item = sortableItems[itemIndex];
-                        item->rebuildRawPathPoints3D();
-
-                        for (const RawPathPoint3D& rawPoint : item->rawPathPoints3D())
-                        {
-                            const QVector3D point
-                            (
-                                static_cast<float>(rawPoint.x),
-                                static_cast<float>(rawPoint.y),
-                                static_cast<float>(rawPoint.z)
-                            );
-                            const RotaryBoundarySide side = RotaryCutBoundaryAnalyzer::classifyPointRelativeToBoundary
-                            (
-                                *boundaryAnalysis,
-                                point,
-                                boundaryTolerance
-                            );
-
-                            if (side == RotaryBoundarySide::Ambiguous)
-                            {
-                                return false;
-                            }
-
-                            hasPointBeforeBoundary = hasPointBeforeBoundary
-                                || side == RotaryBoundarySide::Before;
-                            hasPointAfterBoundary = hasPointAfterBoundary
-                                || side == RotaryBoundarySide::After;
-                        }
-                    }
-
-                    if (hasPointBeforeBoundary && hasPointAfterBoundary)
-                    {
-                        return false;
-                    }
-
-                    if (!hasPointAfterBoundary)
-                    {
-                        leftClusterIndex = boundaryIndex > 0
-                            ? manualBoundaryClusters[boundaryIndex - 1]
-                            : -1;
-                        rightClusterIndex = boundaryClusterIndex;
-                        break;
+                        return failCurrentOr(QStringLiteral("普通分量 %1 的图元分段失败。")
+                            .arg(componentIndex + 1));
                     }
                 }
 
-                if (rightClusterIndex < 0)
-                {
-                    leftClusterIndex = manualBoundaryClusters.back();
-                }
+                continue;
             }
             else
             {
@@ -3522,7 +3747,10 @@ namespace
                     && (leftClusterIndex < 0 || rightClusterIndex < 0 || leftClusterIndex == rightClusterIndex))
                 || (useManualBreakBoundaries && leftClusterIndex < 0 && rightClusterIndex < 0))
             {
-                return false;
+                return fail(QStringLiteral("普通分量 %1 无法确定相邻加工断面：左=%2，右=%3。")
+                    .arg(componentIndex + 1)
+                    .arg(leftClusterIndex)
+                    .arg(rightClusterIndex));
             }
 
             auto existingSegment = std::find_if
@@ -3560,7 +3788,9 @@ namespace
             {
                 if (itemIndex >= itemAnalyses.size())
                 {
-                    return false;
+                    return fail(QStringLiteral("普通分量 %1 包含无效图元索引 %2。")
+                        .arg(componentIndex + 1)
+                        .arg(itemIndex));
                 }
 
                 segmentItemsForSurface(*existingSegment, itemAnalyses[itemIndex].surface).push_back(itemIndex);
@@ -3569,7 +3799,7 @@ namespace
 
         if (segments.empty())
         {
-            return false;
+            return fail(QStringLiteral("没有生成任何加工区间。"));
         }
 
         std::sort
@@ -3610,7 +3840,18 @@ namespace
 
             if (!appendSorted3DGroup(sortableItems, filteredIndices, rotaryAxisConfig, processUpdates, processedSegments, hasCurrentEndPoint, currentEndPoint))
             {
-                return false;
+                QVector<CadItem*> failedItems;
+
+                for (const size_t index : filteredIndices)
+                {
+                    if (index < sortableItems.size())
+                    {
+                        failedItems.push_back(sortableItems[index]);
+                    }
+                }
+
+                return fail(QStringLiteral("加工组排序失败：%1。")
+                    .arg(describeRotaryPathItems(failedItems)));
             }
 
             for (const size_t index : filteredIndices)
@@ -3648,7 +3889,9 @@ namespace
                 const std::vector<int> componentIds = buildItemConnectivityComponents(localItems);
                 if (componentIds.size() != localItems.size())
                 {
-                    return false;
+                    return fail(QStringLiteral("平面加工组连通分组数量不一致：输入 %1，结果 %2。")
+                        .arg(localItems.size())
+                        .arg(componentIds.size()));
                 }
 
                 const int componentCount = componentIds.empty()
@@ -3656,7 +3899,7 @@ namespace
                     : *std::max_element(componentIds.begin(), componentIds.end()) + 1;
                 if (componentCount <= 0)
                 {
-                    return false;
+                    return fail(QStringLiteral("平面加工组没有有效连通分量。"));
                 }
 
                 std::vector<std::vector<size_t>> componentIndices(static_cast<size_t>(componentCount));
@@ -3666,7 +3909,9 @@ namespace
                     const int componentId = componentIds[localIndex];
                     if (componentId < 0 || componentId >= componentCount)
                     {
-                        return false;
+                        return fail(QStringLiteral("平面加工组图元 %1 的连通分量编号无效：%2。")
+                            .arg(localIndex + 1)
+                            .arg(componentId));
                     }
 
                     componentIndices[static_cast<size_t>(componentId)].push_back(localToGlobal[localIndex]);
@@ -3735,7 +3980,8 @@ namespace
 
                         if (options.empty())
                         {
-                            return false;
+                            return fail(QStringLiteral("加工组排序失败：图元没有可用走刀方向，%1。")
+                                .arg(describeRotaryPathItems(QVector<CadItem*>{ sortableItems[itemIndex] })));
                         }
 
                         const QVector3D referencePoint = hasCurrentEndPoint
@@ -3773,7 +4019,8 @@ namespace
 
                         if (selectedOption == nullptr)
                         {
-                            return false;
+                            return fail(QStringLiteral("加工组排序失败：无法为图元选择走刀方向，%1。")
+                                .arg(describeRotaryPathItems(QVector<CadItem*>{ sortableItems[itemIndex] })));
                         }
 
                         processUpdates.push_back
@@ -3804,7 +4051,18 @@ namespace
                         sweepBoundaryX
                     ))
                     {
-                        return false;
+                        QVector<CadItem*> failedItems;
+
+                        for (const size_t index : component)
+                        {
+                            if (index < sortableItems.size())
+                            {
+                                failedItems.push_back(sortableItems[index]);
+                            }
+                        }
+
+                        return fail(QStringLiteral("加工组排序失败：%1。")
+                            .arg(describeRotaryPathItems(failedItems)));
                     }
 
                     for (const size_t index : component)
@@ -3825,7 +4083,10 @@ namespace
                 || (segment.rightClusterIndex >= 0
                     && static_cast<size_t>(segment.rightClusterIndex) >= cutClusters.size()))
             {
-                return false;
+                return fail(QStringLiteral("加工区间引用了无效断面组：左=%1，右=%2，断面组总数=%3。")
+                    .arg(segment.leftClusterIndex)
+                    .arg(segment.rightClusterIndex)
+                    .arg(cutClusters.size()));
             }
 
             if ((segment.leftClusterIndex >= 0
@@ -3840,15 +4101,63 @@ namespace
                 || (segment.rightClusterIndex >= 0
                     && !appendGroup(cutClusters[static_cast<size_t>(segment.rightClusterIndex)].itemIndices)))
             {
-                processUpdates.clear();
-                return false;
+                return failCurrentOr(QStringLiteral("加工组排序失败：区间左断面=%1，右断面=%2。")
+                    .arg(segment.leftClusterIndex)
+                    .arg(segment.rightClusterIndex));
             }
         }
 
-        if (processUpdates.size() != sortableItems.size())
+        QHash<CadItem*, int> updateCounts;
+
+        for (const CadEditer::ProcessStateUpdate& update : processUpdates)
         {
-            processUpdates.clear();
-            return false;
+            updateCounts[update.item] += 1;
+        }
+
+        QVector<CadItem*> missingItems;
+        QVector<CadItem*> duplicateItems;
+        size_t sortableBoundaryCount = 0;
+        size_t sortableOrdinaryCount = 0;
+
+        for (CadItem* item : sortableItems)
+        {
+            if (item != nullptr
+                && item->m_rotaryEndCutRole != RotaryEndCutRole::None
+                && item->m_rotaryEndCutPairId >= 0)
+            {
+                ++sortableBoundaryCount;
+            }
+            else
+            {
+                ++sortableOrdinaryCount;
+            }
+
+            const int count = updateCounts.value(item, 0);
+
+            if (count == 0)
+            {
+                missingItems.push_back(item);
+            }
+            else if (count > 1)
+            {
+                duplicateItems.push_back(item);
+            }
+        }
+
+        if (processUpdates.size() != sortableItems.size()
+            || !missingItems.isEmpty()
+            || !duplicateItems.isEmpty())
+        {
+            return fail(QStringLiteral
+            (
+                "计划图元数量不一致：应生成=%1，已生成=%2，断面图元=%3，普通图元=%4，缺失=%5，重复=%6。"
+            )
+                .arg(sortableItems.size())
+                .arg(processUpdates.size())
+                .arg(sortableBoundaryCount)
+                .arg(sortableOrdinaryCount)
+                .arg(describeRotaryPathItems(missingItems))
+                .arg(describeRotaryPathItems(duplicateItems)));
         }
 
         return true;
@@ -4649,7 +4958,9 @@ int Gcode_postprocessing_system::refreshWasteProcessingExclusions()
             continue;
         }
 
-        entity->m_excludedFromProcessing = entity->m_excludedAsInternalGeometry;
+        const bool isBreakBoundary = entity->m_rotaryEndCutRole == RotaryEndCutRole::Break
+            && entity->m_rotaryEndCutPairId >= 0;
+        entity->m_excludedFromProcessing = entity->m_excludedAsInternalGeometry && !isBreakBoundary;
         sceneItems.push_back(entity.get());
 
         if (entity->m_rotaryEndCutRole == RotaryEndCutRole::None || entity->m_rotaryEndCutPairId < 0)
@@ -5205,7 +5516,18 @@ bool Gcode_postprocessing_system::sortEntitiesByCurrentDirection3D()
 
         if (!info.valid)
         {
-            continue;
+            if (entity->m_rotaryEndCutRole != RotaryEndCutRole::Break
+                || entity->m_rotaryEndCutPairId < 0)
+            {
+                continue;
+            }
+
+            entity->rebuildRawPathPoints3D();
+
+            if (entity->rawPathPoints3D().empty())
+            {
+                continue;
+            }
         }
 
         sortableItems.push_back(entity.get());
@@ -5227,13 +5549,27 @@ bool Gcode_postprocessing_system::sortEntitiesByCurrentDirection3D()
 
     const GProfileRotaryAxisConfig& rotaryAxisConfig = m_activeProfile.rotaryAxisConfig();
     std::vector<CadEditer::ProcessStateUpdate> lazyRotaryUpdates;
+    QVector<CadItem*> documentItems;
+    documentItems.reserve(static_cast<qsizetype>(m_document.m_entities.size()));
+
+    for (const std::unique_ptr<CadItem>& entity : m_document.m_entities)
+    {
+        if (entity != nullptr)
+        {
+            documentItems.push_back(entity.get());
+        }
+    }
+
+    QString segmentationFailure;
 
     if (tryBuildSquareTubeLazyRotaryProcessUpdates
     (
         sortableItems,
+        documentItems,
         rotaryAxisConfig,
         lazyRotaryUpdates,
-        m_rotaryTubeSectionModel.sectionHull
+        m_rotaryTubeSectionModel.sectionHull,
+        &segmentationFailure
     ))
     {
         if (!m_editer.applyEntityProcessStates(lazyRotaryUpdates))
@@ -5253,13 +5589,24 @@ bool Gcode_postprocessing_system::sortEntitiesByCurrentDirection3D()
         return true;
     }
 
-    if (hasManualRotaryEndCutAssignments(sortableItems))
+    if (std::any_of(documentItems.cbegin(), documentItems.cend(), [](const CadItem* item)
+        {
+            return item != nullptr
+                && item->m_rotaryEndCutRole == RotaryEndCutRole::Break
+                && item->m_rotaryEndCutPairId >= 0;
+        }))
     {
+        const QString message = segmentationFailure.isEmpty()
+            ? QStringLiteral("已指定加工断面，但无法形成稳定加工分段。")
+            : segmentationFailure;
+        ui->openGLWidget->appendCommandMessage(QStringLiteral("[智能分段] %1").arg(message));
+        ui->openGLWidget->refreshCommandPrompt();
+        statusBar()->showMessage(message, 8000);
         QMessageBox::warning
         (
             this,
             QStringLiteral("4轴(绕A)排序"),
-            QStringLiteral("已指定加工断面，但无法形成稳定加工分段。请检查是否有图元横跨加工断面，或多个三维加工断面在方管展开面上交叉。")
+            message
         );
         return false;
     }
@@ -5394,7 +5741,18 @@ bool Gcode_postprocessing_system::smartSortEntities3D()
 
         if (!info.valid)
         {
-            continue;
+            if (entity->m_rotaryEndCutRole != RotaryEndCutRole::Break
+                || entity->m_rotaryEndCutPairId < 0)
+            {
+                continue;
+            }
+
+            entity->rebuildRawPathPoints3D();
+
+            if (entity->rawPathPoints3D().empty())
+            {
+                continue;
+            }
         }
 
         sortableItems.push_back(entity.get());
@@ -5416,13 +5774,27 @@ bool Gcode_postprocessing_system::smartSortEntities3D()
 
     const GProfileRotaryAxisConfig& rotaryAxisConfig = m_activeProfile.rotaryAxisConfig();
     std::vector<CadEditer::ProcessStateUpdate> lazyRotaryUpdates;
+    QVector<CadItem*> documentItems;
+    documentItems.reserve(static_cast<qsizetype>(m_document.m_entities.size()));
+
+    for (const std::unique_ptr<CadItem>& entity : m_document.m_entities)
+    {
+        if (entity != nullptr)
+        {
+            documentItems.push_back(entity.get());
+        }
+    }
+
+    QString segmentationFailure;
 
     if (tryBuildSquareTubeLazyRotaryProcessUpdates
     (
         sortableItems,
+        documentItems,
         rotaryAxisConfig,
         lazyRotaryUpdates,
-        m_rotaryTubeSectionModel.sectionHull
+        m_rotaryTubeSectionModel.sectionHull,
+        &segmentationFailure
     ))
     {
         if (!m_editer.applyEntityProcessStates(lazyRotaryUpdates))
@@ -5442,13 +5814,24 @@ bool Gcode_postprocessing_system::smartSortEntities3D()
         return true;
     }
 
-    if (hasManualRotaryEndCutAssignments(sortableItems))
+    if (std::any_of(documentItems.cbegin(), documentItems.cend(), [](const CadItem* item)
+        {
+            return item != nullptr
+                && item->m_rotaryEndCutRole == RotaryEndCutRole::Break
+                && item->m_rotaryEndCutPairId >= 0;
+        }))
     {
+        const QString message = segmentationFailure.isEmpty()
+            ? QStringLiteral("已指定加工断面，但无法形成稳定加工分段。")
+            : segmentationFailure;
+        ui->openGLWidget->appendCommandMessage(QStringLiteral("[智能分段] %1").arg(message));
+        ui->openGLWidget->refreshCommandPrompt();
+        statusBar()->showMessage(message, 8000);
         QMessageBox::warning
         (
             this,
             QStringLiteral("4轴(绕A)智能排序"),
-            QStringLiteral("已指定加工断面，但无法形成稳定加工分段。请检查是否有图元横跨加工断面，或多个三维加工断面在方管展开面上交叉。")
+            message
         );
         return false;
     }
