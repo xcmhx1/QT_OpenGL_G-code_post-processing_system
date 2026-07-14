@@ -58,6 +58,9 @@ QString diagnosticCodeName(DiagnosticCode code)
     case DiagnosticCode::TopologyBranchIgnored: return QStringLiteral("TopologyBranchIgnored");
     case DiagnosticCode::TopologyApproximateClosure: return QStringLiteral("TopologyApproximateClosure");
     case DiagnosticCode::TopologyParityMismatch: return QStringLiteral("TopologyParityMismatch");
+    case DiagnosticCode::LegacyTopologyAdapterFailure: return QStringLiteral("LegacyTopologyAdapterFailure");
+    case DiagnosticCode::DuplicateTopologyEntityId: return QStringLiteral("DuplicateTopologyEntityId");
+    case DiagnosticCode::TopologyResultMappingFailure: return QStringLiteral("TopologyResultMappingFailure");
     case DiagnosticCode::InternalInvariantViolation: return QStringLiteral("InternalInvariantViolation");
     }
 

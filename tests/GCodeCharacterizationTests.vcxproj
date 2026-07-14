@@ -100,6 +100,7 @@
     <ClCompile Include="..\src\RotaryPathTopology.cpp" />
     <ClCompile Include="..\src\infrastructure\dxf\DxfGeometryAdapter.cpp" />
     <ClCompile Include="..\src\compatibility\legacy\LegacyCadItemPathBridge.cpp" />
+    <ClCompile Include="..\src\compatibility\legacy\LegacyCadItemTopologyAdapter.cpp" />
     <ClCompile Include="..\src\compatibility\legacy\LegacyFourAxisPathBuilder.cpp" />
     <ClCompile Include="..\src\compatibility\legacy\SplineEntityClone.cpp" />
     <ClCompile Include="..\src\compatibility\legacy\SplineProductionPathProvider.cpp" />

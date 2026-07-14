@@ -76,6 +76,9 @@ enum class DiagnosticCode
     TopologyBranchIgnored,
     TopologyApproximateClosure,
     TopologyParityMismatch,
+    LegacyTopologyAdapterFailure,
+    DuplicateTopologyEntityId,
+    TopologyResultMappingFailure,
     InternalInvariantViolation
 };
 

@@ -1717,7 +1717,7 @@ OperationResult<TopologyLoopResult> PathTopology::extractBestLoop
         result.value = loopResult;
         result.addDiagnostic(topologyDiagnostic
         (
-            m_context, DiagnosticCode::TopologyLoopNotFound, DiagnosticSeverity::Warning,
+            m_context, DiagnosticCode::TopologyLoopNotFound, DiagnosticSeverity::Error,
             QStringLiteral("no closed or approximately closed candidate was found"),
             m_tolerance, m_records.size(), graph.nodes.size(), graph.edges.size(),
             loopResult.connectedComponentCount,
@@ -1744,7 +1744,7 @@ OperationResult<TopologyLoopResult> PathTopology::extractBestLoop
             result.value = loopResult;
             result.addDiagnostic(topologyDiagnostic
             (
-                m_context, DiagnosticCode::TopologyLoopNotFound, DiagnosticSeverity::Warning,
+                m_context, DiagnosticCode::TopologyLoopNotFound, DiagnosticSeverity::Error,
                 QStringLiteral("preferred EntityIds span multiple components"),
                 m_tolerance, m_records.size(), graph.nodes.size(), graph.edges.size(),
                 loopResult.connectedComponentCount,
@@ -1805,7 +1805,7 @@ OperationResult<TopologyLoopResult> PathTopology::extractBestLoop
         result.value = loopResult;
         result.addDiagnostic(topologyDiagnostic
         (
-            m_context, DiagnosticCode::TopologyLoopNotFound, DiagnosticSeverity::Warning,
+            m_context, DiagnosticCode::TopologyLoopNotFound, DiagnosticSeverity::Error,
             QStringLiteral("multiple equally ranked loops remain"),
             m_tolerance, m_records.size(), graph.nodes.size(), graph.edges.size(),
             loopResult.connectedComponentCount,

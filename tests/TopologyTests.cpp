@@ -2,17 +2,21 @@
 
 #include "CadDocument.h"
 #include "CadItem.h"
+#include "RotaryPathTopology.h"
 #include "application/geometry/DocumentGeometrySnapshotBuilder.h"
 #include "application/geometry/GeometrySnapshotCompiler.h"
 #include "application/topology/GeometrySnapshotTopologyAdapter.h"
+#include "compatibility/legacy/LegacyCadItemTopologyAdapter.h"
 #include "compatibility/legacy/LegacyTopologyParityVerifier.h"
 #include "core/topology/PathTopology.h"
 
 #include <QCryptographicHash>
+#include <QDir>
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QFileInfo>
 
 #include <algorithm>
 #include <iostream>
@@ -31,6 +35,24 @@ namespace
     using cadcam::topology::TopologyPathRecord;
 
     int failures = 0;
+
+    class EmptyPathCadItem final : public CadItem
+    {
+    public:
+        explicit EmptyPathCadItem(DRW_Entity* entity)
+            : CadItem(entity)
+        {
+        }
+
+        void buildGeometryDatay() override
+        {
+        }
+
+        void rebuildRawPathPoints3D() override
+        {
+            m_rawPathPoints3D.clear();
+        }
+    };
 
     void check(bool condition, const char* name)
     {
@@ -399,6 +421,313 @@ namespace
         return line;
     }
 
+    std::unique_ptr<DRW_Ellipse> makeTopologyEllipse()
+    {
+        auto ellipse = std::make_unique<DRW_Ellipse>();
+        ellipse->basePoint = DRW_Coord(10.0, 30.0, 0.0);
+        ellipse->secPoint = DRW_Coord(0.0, 6.0, 0.0);
+        ellipse->ratio = 0.5;
+        ellipse->staparam = 0.0;
+        ellipse->endparam = 6.28318530717958647692;
+        ellipse->extPoint = DRW_Coord(1.0, 0.0, 0.0);
+        return ellipse;
+    }
+
+    std::unique_ptr<DRW_LWPolyline> makeTopologyBulgePolyline()
+    {
+        auto polyline = std::make_unique<DRW_LWPolyline>();
+        polyline->flags = 1;
+        polyline->extPoint = DRW_Coord(1.0, 0.0, 0.0);
+        const double points[4][2] =
+        {
+            { 45.0, 0.0 }, { 55.0, 0.0 }, { 55.0, 10.0 }, { 45.0, 10.0 }
+        };
+        for (int index = 0; index < 4; ++index)
+        {
+            auto vertex = std::make_shared<DRW_Vertex2D>();
+            vertex->x = points[index][0];
+            vertex->y = points[index][1];
+            vertex->bulge = index == 0 ? 0.25 : 0.0;
+            polyline->vertlist.push_back(vertex);
+        }
+        polyline->vertexnum = static_cast<int>(polyline->vertlist.size());
+        return polyline;
+    }
+
+    std::unique_ptr<DRW_Spline> makeTopologySpline()
+    {
+        auto spline = std::make_unique<DRW_Spline>();
+        spline->degree = 3;
+        spline->flags = 4;
+        spline->knotslist = { 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0 };
+        spline->weightlist = { 1.0, 0.8, 0.8, 1.0 };
+        spline->controllist =
+        {
+            std::make_shared<DRW_Coord>(20.0, 60.0, 0.0),
+            std::make_shared<DRW_Coord>(22.0, 64.0, 1.0),
+            std::make_shared<DRW_Coord>(24.0, 56.0, 2.0),
+            std::make_shared<DRW_Coord>(26.0, 60.0, 3.0)
+        };
+        spline->ncontrol = static_cast<dint32>(spline->controllist.size());
+        spline->nknots = static_cast<dint32>(spline->knotslist.size());
+        return spline;
+    }
+
+    void testLegacyAdapterValidationAndOrdering()
+    {
+        LegacyCadItemTopologyAdapter adapter;
+        const PathTopologyTolerance tolerance;
+        const OperationContext context =
+            createOperationContext(QStringLiteral("legacy-adapter-validation"));
+
+        CadDocument orderedDocument;
+        CadItem* first = orderedDocument.appendEntity
+            (makeDocumentLine(0, 0, 0, 0, 1, 0));
+        CadItem* second = orderedDocument.appendEntity
+            (makeDocumentLine(0, 10, 0, 0, 11, 0));
+        CadItem* third = orderedDocument.appendEntity
+            (makeDocumentLine(0, 20, 0, 0, 21, 0));
+        const QVector<CadItem*> ordered{ third, first, second };
+        const OperationResult<TopologyInput> converted =
+            adapter.convert(ordered, tolerance, context);
+        check(converted.status == OperationStatus::Success && converted.value.has_value()
+            && converted.value->records.size() == 3U,
+            "legacy adapter accepts valid CadItems");
+        check(converted.value.has_value()
+            && converted.value->records[0].entityId == third->m_entityId
+            && converted.value->records[1].entityId == first->m_entityId
+            && converted.value->records[2].entityId == second->m_entityId
+            && converted.value->records[0].sourceIndex == 0U
+            && converted.value->records[2].sourceIndex == 2U,
+            "legacy adapter preserves input source order");
+
+        const OperationResult<TopologyInput> nullItem =
+            adapter.convert({ nullptr }, tolerance, context);
+        check(nullItem.status == OperationStatus::InvalidInput
+            && !nullItem.diagnostics.isEmpty()
+            && nullItem.diagnostics.front().code
+                == DiagnosticCode::LegacyTopologyAdapterFailure,
+            "legacy adapter diagnoses null CadItem");
+
+        CadDocument zeroDocument;
+        CadItem* zero = zeroDocument.appendEntity
+            (makeDocumentLine(0, 0, 0, 0, 1, 0));
+        zero->m_entityId = 0U;
+        const OperationResult<TopologyInput> zeroId =
+            adapter.convert({ zero }, tolerance, context);
+        check(zeroId.status == OperationStatus::InvalidInput
+            && !zeroId.diagnostics.isEmpty(),
+            "legacy adapter diagnoses zero EntityId");
+
+        CadDocument duplicateDocument;
+        CadItem* duplicateFirst = duplicateDocument.appendEntity
+            (makeDocumentLine(0, 0, 0, 0, 1, 0));
+        CadItem* duplicateSecond = duplicateDocument.appendEntity
+            (makeDocumentLine(0, 2, 0, 0, 3, 0));
+        duplicateSecond->m_entityId = duplicateFirst->m_entityId;
+        const OperationResult<TopologyInput> duplicate = adapter.convert
+            ({ duplicateFirst, duplicateSecond }, tolerance, context);
+        check(duplicate.status == OperationStatus::InvalidInput
+            && !duplicate.diagnostics.isEmpty()
+            && duplicate.diagnostics.back().code
+                == DiagnosticCode::DuplicateTopologyEntityId,
+            "legacy adapter diagnoses duplicate EntityId");
+
+        DRW_Line emptyEntity;
+        EmptyPathCadItem emptyItem(&emptyEntity);
+        emptyItem.m_entityId = 900U;
+        const OperationResult<TopologyInput> emptyPath =
+            adapter.convert({ &emptyItem }, tolerance, context);
+        check(emptyPath.status == OperationStatus::InvalidInput
+            && !emptyPath.diagnostics.isEmpty(),
+            "legacy adapter diagnoses empty process path");
+    }
+
+    void testLegacyWrapperPublicApi()
+    {
+        CadDocument document;
+        QVector<CadItem*> items;
+        items.push_back(document.appendEntity(makeDocumentLine(0, 0, 0, 0, 10, 0)));
+        items.push_back(document.appendEntity(makeDocumentLine(0, 10, 0, 0, 10, 10)));
+        items.push_back(document.appendEntity(makeDocumentLine(0, 10, 10, 0, 0, 10)));
+        items.push_back(document.appendEntity(makeDocumentLine(0, 0, 10, 0, 0, 0)));
+        CadItem* branch = document.appendEntity(makeDocumentLine(0, 5, 0, 0, 5, -5));
+        items.push_back(branch);
+        CadItem* remote = document.appendEntity(makeDocumentLine(20, 30, 0, 20, 31, 0));
+        items.push_back(remote);
+
+        RotaryPathTopology topology(items, PathTopologyTolerance{});
+        check(topology.status() == OperationStatus::Success
+            && topology.records().size() == items.size(),
+            "legacy public wrapper builds through core topology");
+        check(topology.records()[0].sourceItem == items[0]
+            && topology.records()[4].sourceItem == branch
+            && topology.records()[4].sourceItemIndex == 4,
+            "legacy records map EntityId back to CadItem");
+        check(topology.itemsDirectlyConnected(items[0], items[1])
+            && !topology.itemsDirectlyConnected(items[0], remote),
+            "legacy direct connectivity delegates to core");
+        const std::vector<int> subsetComponents =
+            topology.itemComponentIds({ remote, items[0] });
+        check(subsetComponents == std::vector<int>({ 0, 1 }),
+            "legacy subset component output preserves subset order");
+        const std::vector<int> inducedSubsetComponents =
+            topology.itemComponentIds({ items[0], items[2] });
+        check(inducedSubsetComponents == std::vector<int>({ 0, 1 }),
+            "legacy subset components exclude paths through omitted items");
+
+        QVector<CadItem*> expanded;
+        const RotaryPathLoopResult seeded = topology.extractSeededLoop
+            ({ items[0] }, &expanded);
+        check(seeded.valid && seeded.connectedLoop && seeded.usedItems.size() == 4
+            && seeded.ignoredBranchItems == QVector<CadItem*>({ branch }),
+            "legacy seeded loop maps used and ignored items");
+        check(expanded.size() == 5 && expanded.contains(branch)
+            && !expanded.contains(remote),
+            "legacy seeded loop preserves expanded connected items");
+
+        CadDocument preferredDocument;
+        QVector<CadItem*> preferredItems;
+        for (double x : { 0.0, 20.0 })
+        {
+            preferredItems.push_back(preferredDocument.appendEntity
+                (makeDocumentLine(x, 0, 0, x, 10, 0)));
+            preferredItems.push_back(preferredDocument.appendEntity
+                (makeDocumentLine(x, 10, 0, x, 10, 10)));
+            preferredItems.push_back(preferredDocument.appendEntity
+                (makeDocumentLine(x, 10, 10, x, 0, 10)));
+            preferredItems.push_back(preferredDocument.appendEntity
+                (makeDocumentLine(x, 0, 10, x, 0, 0)));
+        }
+        RotaryPathTopology preferredTopology(preferredItems, PathTopologyTolerance{});
+        const RotaryPathLoopResult preferred = preferredTopology.extractBestLoop
+            (preferredItems, { preferredItems[4] });
+        check(preferred.valid && preferred.usedItems.contains(preferredItems[4])
+            && !preferred.usedItems.contains(preferredItems[0]),
+            "legacy best loop honors preferred items");
+    }
+
+    void testLegacyAdapterProcessSemanticsAndTypes()
+    {
+        LegacyCadItemTopologyAdapter adapter;
+        const PathTopologyTolerance tolerance;
+        const OperationContext context =
+            createOperationContext(QStringLiteral("legacy-adapter-process-semantics"));
+
+        CadDocument lineDocument;
+        CadItem* line = lineDocument.appendEntity
+            (makeDocumentLine(0, 0, 0, 10, 0, 0));
+        const OperationResult<TopologyInput> forward =
+            adapter.convert({ line }, tolerance, context);
+        line->m_isReverse = true;
+        const OperationResult<TopologyInput> reverse =
+            adapter.convert({ line }, tolerance, context);
+        check(forward.value.has_value() && reverse.value.has_value()
+            && forward.value->records.front().points.front().x
+                == reverse.value->records.front().points.back().x
+            && forward.value->records.front().points.back().x
+                == reverse.value->records.front().points.front().x,
+            "legacy adapter preserves reverse process direction");
+
+        CadDocument circleDocument;
+        auto circle = std::make_unique<DRW_Circle>();
+        circle->basePoint = DRW_Coord(0.0, 0.0, 0.0);
+        circle->radious = 5.0;
+        circle->extPoint = DRW_Coord(0.0, 0.0, 1.0);
+        CadItem* circleItem = circleDocument.appendEntity(std::move(circle));
+        const OperationResult<TopologyInput> defaultCircle =
+            adapter.convert({ circleItem }, tolerance, context);
+        circleItem->m_hasCustomProcessStart = true;
+        circleItem->m_processStartParameter = 0.0;
+        circleItem->m_isReverse = true;
+        const OperationResult<TopologyInput> customCircle =
+            adapter.convert({ circleItem }, tolerance, context);
+        check(defaultCircle.value.has_value() && customCircle.value.has_value()
+            && customCircle.value->records.front().semanticallyClosed
+            && (defaultCircle.value->records.front().points.front().x
+                    != customCircle.value->records.front().points.front().x
+                || defaultCircle.value->records.front().points.front().y
+                    != customCircle.value->records.front().points.front().y),
+            "legacy adapter preserves custom closed start and reverse semantics");
+
+        CadDocument mixedDocument;
+        mixedDocument.appendEntity(makeTopologyEllipse());
+        mixedDocument.appendEntity(makeTopologyBulgePolyline());
+        mixedDocument.appendEntity(makeTopologySpline());
+        DocumentGeometrySnapshotBuilder sourceBuilder;
+        const OperationResult<GeometrySourceSnapshot> source = sourceBuilder.capture
+            (mixedDocument, createOperationContext(QStringLiteral("topology-mixed-capture")));
+        GeometrySnapshotCompiler compiler;
+        cadcam::geometry::SamplingPolicy compatibilityPolicy;
+        compatibilityPolicy.chordTolerance = 0.0;
+        compatibilityPolicy.singlePrecisionEvaluation = true;
+        const OperationResult<GeometrySnapshot> snapshot = compiler.compile
+        (
+            *source.value,
+            compatibilityPolicy,
+            GeometryExecutionMode::Serial,
+            task(QStringLiteral("topology-mixed-compile"))
+        );
+        LegacyTopologyParityOptions options;
+        for (const GeometrySnapshotEntry& entry : snapshot.value->entries)
+        {
+            options.candidates.push_back(entry.attributes.entityId);
+        }
+        LegacyTopologyParityVerifier verifier;
+        const OperationResult<LegacyTopologyParityReport> parity = verifier.verify
+        (
+            mixedDocument, *snapshot.value, options, tolerance,
+            task(QStringLiteral("topology-mixed-adapter-parity"))
+        );
+        check(parity.value.has_value() && parity.value->recordsEquivalent
+            && parity.value->adjacencyEquivalent && parity.value->componentsEquivalent
+            && parity.value->bestLoopEquivalent && parity.value->exactEquivalent,
+            "ellipse bulge polyline and spline adapter parity");
+    }
+
+    void testLegacyWrapperApproximateClosureAndSourceBoundary()
+    {
+        CadDocument document;
+        QVector<CadItem*> items;
+        items.push_back(document.appendEntity(makeDocumentLine(0, 0, 0.5, 0, 10, 0)));
+        items.push_back(document.appendEntity(makeDocumentLine(0, 10, 0, 0, 10, 10)));
+        items.push_back(document.appendEntity(makeDocumentLine(0, 10, 10, 0, 0, 10)));
+        items.push_back(document.appendEntity(makeDocumentLine(0, 0, 10, 0, 0, 0)));
+        RotaryPathTopology topology(items, PathTopologyTolerance{});
+        const RotaryPathLoopResult loop = topology.extractSeededLoop({ items[0] });
+        bool hasApproximateDiagnostic = false;
+        for (const Diagnostic& diagnostic : topology.diagnostics())
+        {
+            hasApproximateDiagnostic = hasApproximateDiagnostic
+                || diagnostic.code == DiagnosticCode::TopologyApproximateClosure;
+        }
+        check(loop.valid && loop.approximatelyClosed && hasApproximateDiagnostic,
+            "legacy wrapper exposes approximate closure diagnostic");
+
+        CadDocument openDocument;
+        CadItem* openItem = openDocument.appendEntity
+            (makeDocumentLine(0, 0, 0, 0, 10, 0));
+        RotaryPathTopology openTopology({ openItem }, PathTopologyTolerance{});
+        const RotaryPathLoopResult openLoop = openTopology.extractBestLoop({ openItem });
+        check(!openLoop.valid && !openLoop.errorMessage.isEmpty(),
+            "legacy wrapper maps core failure diagnostic to error message");
+
+        const QString sourcePath = QFileInfo(QString::fromUtf8(__FILE__))
+            .absoluteDir().absoluteFilePath(QStringLiteral("../src/RotaryPathTopology.cpp"));
+        QFile sourceFile(sourcePath);
+        check(sourceFile.open(QIODevice::ReadOnly), "legacy topology wrapper source opens");
+        const QByteArray sourceText = sourceFile.readAll();
+        const QByteArray forbidden[] =
+        {
+            "pathsConnected", "segmentSegmentDistance", "enumerateSimpleCycles",
+            "DisjointSet", "fitTopologyPlane"
+        };
+        for (const QByteArray& symbol : forbidden)
+        {
+            check(!sourceText.contains(symbol), "legacy topology source has no core algorithm copy");
+        }
+    }
+
     void testLegacyParity()
     {
         CadDocument document;
@@ -453,6 +782,10 @@ int runTopologyTests()
     testLoopsBranchesAndGolden();
     testClosedKindsInclinedAndMixedLoops();
     testAdapterCancellationRevisionAndDeterminism();
+    testLegacyAdapterValidationAndOrdering();
+    testLegacyWrapperPublicApi();
+    testLegacyAdapterProcessSemanticsAndTypes();
+    testLegacyWrapperApproximateClosureAndSourceBoundary();
     testLegacyParity();
     return failures;
 }

@@ -1,22 +1,18 @@
 #pragma once
 
+#include "core/topology/PathTopology.h"
+
 #include <QString>
 #include <QVector>
 #include <QVector3D>
 
+#include <map>
+#include <optional>
 #include <vector>
 
 class CadItem;
 
-struct RotaryPathTopologyTolerance
-{
-    double nodeSnap = 1.0;
-    double closure = 1.0;
-    double intersection = 0.01;
-    double minimumEdgeLength = 1.0e-6;
-
-    static RotaryPathTopologyTolerance fromConnectionTolerance(double connectionTolerance);
-};
+using RotaryPathTopologyTolerance = cadcam::topology::PathTopologyTolerance;
 
 struct RotaryPathTopologyRecord
 {
@@ -42,8 +38,6 @@ struct RotaryPathLoopResult
     QString errorMessage;
 };
 
-// Shared path topology used by section recognition, cut-boundary validation and sorting.
-// Raw paths are rebuilt once when this object is constructed.
 class RotaryPathTopology
 {
 public:
@@ -54,9 +48,7 @@ public:
     );
 
     const QVector<RotaryPathTopologyRecord>& records() const;
-
     std::vector<int> itemComponentIds(const QVector<CadItem*>& subset = {}) const;
-
     bool itemsDirectlyConnected(CadItem* left, CadItem* right) const;
 
     RotaryPathLoopResult extractSeededLoop
@@ -71,10 +63,24 @@ public:
         const QVector<CadItem*>& preferredItems = {}
     ) const;
 
+    OperationStatus status() const;
+    const QVector<Diagnostic>& diagnostics() const;
+
 private:
-    RotaryPathTopologyTolerance m_tolerance;
+    std::vector<cadcam::geometry::EntityId> entityIds
+        (const QVector<CadItem*>& items) const;
+    RotaryPathLoopResult mapLoopResult
+        (const OperationResult<cadcam::topology::TopologyLoopResult>& coreResult) const;
+    void addMappingDiagnostic
+        (cadcam::geometry::EntityId entityId, const QString& detail) const;
+
     QVector<RotaryPathTopologyRecord> m_records;
-    QVector<QVector<int>> m_itemAdjacency;
+    std::optional<cadcam::topology::PathTopology> m_topology;
+    std::map<cadcam::geometry::EntityId, CadItem*> m_itemById;
+    std::map<CadItem*, cadcam::geometry::EntityId> m_idByItem;
+    mutable OperationStatus m_status = OperationStatus::InternalError;
+    mutable QVector<Diagnostic> m_diagnostics;
+    OperationContext m_context;
 };
 
 QString describeRotaryPathItems(const QVector<CadItem*>& items);

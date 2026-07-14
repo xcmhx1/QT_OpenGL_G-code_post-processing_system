@@ -191,7 +191,7 @@ namespace
         diagnostic.component = QStringLiteral("LegacyTopologyParityVerifier");
         diagnostic.operation = QStringLiteral("VerifyTopologyParity");
         diagnostic.stage = QStringLiteral("CompareLegacyAndCore");
-        diagnostic.userMessage = QStringLiteral("新旧拓扑影子结果存在差异。");
+        diagnostic.userMessage = QStringLiteral("两种拓扑输入适配结果存在差异。");
         diagnostic.technicalDetail = detail;
         diagnostic.correlationId = context.correlationId;
         diagnostic.context.insert(QStringLiteral("entityId"), static_cast<qulonglong>(0U));
