@@ -19,7 +19,9 @@
 #include "core/geometry/NurbsCurveEvaluator.h"
 #include "core/machine/RotaryKinematics.h"
 #include "core/machine/RotaryTrajectoryBuilder.h"
+#include "core/nc/NcProgramBuilder.h"
 #include "infrastructure/dxf/DxfGeometryAdapter.h"
+#include "infrastructure/nc/GCodePostProcessor.h"
 #include "SplineParity.h"
 #include "SplineProductionTests.h"
 #include "GeometrySnapshotTests.h"
@@ -1799,6 +1801,138 @@ namespace
             && hasDiagnosticCode(stale.diagnostics, DiagnosticCode::MachineTrajectoryRevisionMismatch),
             "stale process plan revision is rejected");
     }
+
+    void testNcProgramPipeline()
+    {
+        using namespace cadcam;
+        machine::MachineTrajectory trajectory;
+        trajectory.contentRevision = 25;
+        trajectory.rotaryContext.tubeCenterY = 1.25;
+        trajectory.rotaryContext.tubeCenterZ = -2.5;
+        trajectory.rotaryContext.rotaryAxisY = 3.0;
+        trajectory.rotaryContext.rotaryAxisZ = 4.0;
+        trajectory.rotaryContext.maximumCollisionRadius = 50.0;
+        trajectory.rotaryContext.safeMachineZ = 55.0;
+
+        machine::EntityTrajectory entity;
+        entity.entityId = 42;
+        entity.sourceKind = geometry::SourceGeometryKind::Line;
+        entity.sourceIndex = 3;
+        entity.processOrder = 0;
+        entity.processGroupId = 7;
+        entity.approachMoves.push_back
+            ({ machine::MachineMoveKind::Rapid, { 1.0, 2.0, 3.0, 4.0 }, 42, 7 });
+        entity.cuttingMoves.push_back
+            ({ machine::MachineMoveKind::Cutting, { 5.0, 6.0, 7.0, 8.0 }, 42, 7 });
+        entity.cuttingMoves.push_back
+            ({ machine::MachineMoveKind::CuttingConnection, { 9.0, 10.0, 11.0, 12.0 }, 42, 7 });
+        entity.overcutMoves.push_back
+            ({ machine::MachineMoveKind::Overcut, { 13.0, 14.0, 15.0, 16.0 }, 42, 7 });
+        trajectory.entities.push_back(entity);
+
+        nc::NcEntityMetadata metadata;
+        metadata.entityId = 42;
+        metadata.sourceKind = geometry::SourceGeometryKind::Line;
+        metadata.sourceIndex = 3;
+        metadata.processOrder = 0;
+        metadata.processGroupId = 7;
+        metadata.entityTypeKey = "LINE";
+        metadata.layerKey = "CUT";
+        metadata.colorKey = "#FFFFFF";
+        const OperationContext context = testContext(QStringLiteral("nc-program-pipeline"));
+        const auto built = nc::NcProgramBuilder::buildRotary
+            (trajectory, { metadata }, context);
+        check(built.succeeded() && built.value.has_value()
+            && built.value->entities.size() == 1
+            && built.value->entities[0].motions.size() == 4,
+            "machine trajectory maps to one NC entity block");
+        if (!built.value.has_value()) return;
+
+        const auto& motions = built.value->entities[0].motions;
+        check(motions[0].kind == nc::NcMotionKind::Rapid
+            && motions[0].sourceKind == nc::NcSourceMoveKind::Rapid
+            && motions[1].kind == nc::NcMotionKind::Linear
+            && motions[1].sourceKind == nc::NcSourceMoveKind::Cutting
+            && motions[2].kind == nc::NcMotionKind::Linear
+            && motions[2].sourceKind == nc::NcSourceMoveKind::CuttingConnection
+            && motions[3].kind == nc::NcMotionKind::Linear
+            && motions[3].sourceKind == nc::NcSourceMoveKind::Overcut,
+            "all machine move kinds map to NC motion semantics");
+
+        const auto missing = nc::NcProgramBuilder::buildRotary(trajectory, {}, context);
+        check(!missing.succeeded()
+            && hasDiagnosticCode(missing.diagnostics, DiagnosticCode::NcProgramMetadataMissing),
+            "missing NC metadata is rejected");
+        const auto duplicate = nc::NcProgramBuilder::buildRotary
+            (trajectory, { metadata, metadata }, context);
+        check(!duplicate.succeeded()
+            && hasDiagnosticCode(duplicate.diagnostics, DiagnosticCode::NcProgramDuplicateEntity),
+            "duplicate NC metadata is rejected");
+
+        infrastructure::nc::GCodePostProcessorProfile profile;
+        profile.programHeader = QStringLiteral("M05\r\nM03\r\nM05 X1\r\nM03 ; keep");
+        profile.programFooter = QStringLiteral("M30");
+        profile.entityTypeBlocks.insert(QStringLiteral("LINE"),
+            { QStringLiteral("TYPE_HEADER"), QStringLiteral("TYPE_FOOTER") });
+        profile.layerBlocks.insert(QStringLiteral("CUT"),
+            { QStringLiteral("LAYER_HEADER"), QStringLiteral("LAYER_FOOTER") });
+        profile.colorBlocks.insert(QStringLiteral("#FFFFFF"),
+            { QStringLiteral("COLOR_HEADER"), QStringLiteral("COLOR_FOOTER") });
+        const auto rendered = infrastructure::nc::GCodePostProcessor::render
+            (*built.value, profile, context);
+        check(rendered.succeeded() && rendered.value.has_value(),
+            "NC program renders through independent postprocessor");
+        if (rendered.value.has_value())
+        {
+            const QString& text = *rendered.value;
+            check(text.contains(QStringLiteral("G00 X1.00000 Y2.00000 Z3.00000 A4.00000\r\n"))
+                && text.count(QStringLiteral("G01 ")) == 3,
+                "rapid and linear motion text uses five decimals");
+            check(text.contains(QStringLiteral("(TUBE CENTER Y: 1.250000)\r\n")),
+                "rotary comments use six decimals");
+            check(text.indexOf(QStringLiteral("LAYER_HEADER"))
+                    < text.indexOf(QStringLiteral("COLOR_HEADER"))
+                && text.indexOf(QStringLiteral("COLOR_HEADER"))
+                    < text.indexOf(QStringLiteral("TYPE_HEADER"))
+                && text.indexOf(QStringLiteral("TYPE_FOOTER"))
+                    < text.indexOf(QStringLiteral("COLOR_FOOTER"))
+                && text.indexOf(QStringLiteral("COLOR_FOOTER"))
+                    < text.indexOf(QStringLiteral("LAYER_FOOTER")),
+                "entity code block order remains unchanged");
+            check(!text.contains(QStringLiteral("M05\r\nM03\r\n"))
+                && text.contains(QStringLiteral("M05 X1\r\nM03 ; keep\r\n")),
+                "only standalone adjacent M05 M03 pair is removed");
+            check(!text.contains(QStringLiteral("\r\r\n"))
+                && !text.contains(QStringLiteral("\r\n\r\n"))
+                && text.endsWith(QStringLiteral("\r\n")),
+                "postprocessor emits single CRLF without blank lines");
+        }
+
+        trajectory.contentRevision = 0;
+        const auto stale = nc::NcProgramBuilder::buildRotary
+            (trajectory, { metadata }, context);
+        check(!stale.succeeded() && !stale.value.has_value()
+            && hasDiagnosticCode(stale.diagnostics, DiagnosticCode::NcProgramInputInvalid),
+            "invalid NC revision produces no partial program");
+
+        CadDocument staleDocument;
+        CadLineItem* staleLine = appendItem<DRW_Line, CadLineItem>
+            (staleDocument, makeLine(0.0, 0.0, 10.0, 10.0, 0.0, 10.0));
+        planning::ProcessPlan stalePlan;
+        stalePlan.contentRevision = staleDocument.contentRevision() + 1;
+        stalePlan.assignments.push_back({ staleLine->m_entityId, 0, -1, false, std::nullopt });
+        GProfile staleProfile = GProfile::createDefaultRotaryProfile();
+        GGenerator staleGenerator;
+        staleGenerator.setDocument(&staleDocument);
+        staleGenerator.setProfile(&staleProfile);
+        staleGenerator.setGenerationMode(GGenerator::GenerationMode::Mode3D);
+        staleGenerator.setProcessPlan(&stalePlan);
+        staleGenerator.setRotaryTubeCenter(0.0, 0.0, true);
+        const auto staleText = staleGenerator.buildProgramText(context);
+        check(!staleText.succeeded() && !staleText.value.has_value()
+            && hasDiagnosticCode(staleText.diagnostics, DiagnosticCode::MachineTrajectoryRevisionMismatch),
+            "revision conflict produces no partial G-code text");
+    }
 }
 
 int main(int argc, char* argv[])
@@ -1827,6 +1961,7 @@ int main(int argc, char* argv[])
     testSimpleLineAndMCodeOptimization();
     testRotaryGoldenPrograms();
     testMachineTrajectoryCore();
+    testNcProgramPipeline();
     testFailures();
     failureCount += runSplineProductionTests(updateSplineProductionGoldenFiles);
     failureCount += runGeometrySnapshotTests();

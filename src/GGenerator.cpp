@@ -1,7 +1,8 @@
 ﻿#include "pch.h"
 
 #include "GGenerator.h"
-#include "application/machine/MachineTrajectoryService.h"
+#include "application/nc/NcProgramService.h"
+#include "infrastructure/nc/GCodePostProcessor.h"
 
 #include "CadArcItem.h"
 #include "CadCircleItem.h"
@@ -18,7 +19,6 @@
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
-#include <QHash>
 #include <QDir>
 #include <QDebug>
 #include <QSettings>
@@ -42,16 +42,6 @@ namespace
     QString formatCoord(double value)
     {
         return QString::number(value, 'f', 5);
-    }
-
-    QString formatAngle(double value)
-    {
-        return QString::number(value, 'f', 5);
-    }
-
-    QString formatDebugValue(double value)
-    {
-        return QString::number(value, 'f', 6);
     }
 
     QVector<QVector3D> buildEllipsePolyline(const CadEllipseItem* item);
@@ -89,18 +79,13 @@ namespace
         return normalizedText;
     }
 
-    void writeCommentLine(QTextStream& stream, const QString& text)
-    {
-        stream << '(' << text << ")\r\n";
-    }
-
     bool isStandaloneMCode(const QString& line, const QString& paddedCode, const QString& shortCode)
     {
         const QString normalized = line.trimmed().toUpper();
         return normalized == paddedCode || normalized == shortCode;
     }
 
-    QString removeRedundantLaserRestartPairs(const QString& program)
+    QString removeRedundantLaserRestartPairs2D(const QString& program)
     {
         QString normalized = program;
         normalized.replace("\r\n", "\n");
@@ -441,26 +426,6 @@ namespace
             << "G01 X" << formatCoord(point.x())
             << " Y" << formatCoord(point.y())
             << " Z" << formatCoord(point.z())
-            << "\r\n";
-    }
-
-    void writeRapidMove4Axis(QTextStream& stream, double x, double y, double z, double aDeg)
-    {
-        stream
-            << "G00 X" << formatCoord(x)
-            << " Y" << formatCoord(y)
-            << " Z" << formatCoord(z)
-            << " A" << formatAngle(aDeg)
-            << "\r\n";
-    }
-
-    void writeLinearMove4Axis(QTextStream& stream, double x, double y, double z, double aDeg)
-    {
-        stream
-            << "G01 X" << formatCoord(x)
-            << " Y" << formatCoord(y)
-            << " Z" << formatCoord(z)
-            << " A" << formatAngle(aDeg)
             << "\r\n";
     }
 
@@ -1188,128 +1153,39 @@ OperationResult<QString> GGenerator::buildRotaryProgramText(const OperationConte
         return result;
     }
 
-    TaskContext taskContext;
-    taskContext.operationContext = context;
-    MachineTrajectoryService service;
     std::optional<cadcam::geometry::Vector2d> explicitCenter;
     if (m_rotaryTubeCenterValid)
         explicitCenter = cadcam::geometry::Vector2d{ m_rotaryTubeCenterY, m_rotaryTubeCenterZ };
-    auto trajectoryResult = service.buildRotaryTrajectory
+    NcProgramService service;
+    auto programResult = service.buildRotaryProgram
     (
         *m_document,
         *m_processPlan,
         m_tubeSectionModel,
         m_profile->rotaryAxisConfig(),
-        taskContext,
+        context,
         explicitCenter
     );
-    result.mergeDiagnostics(trajectoryResult);
-    if (!trajectoryResult.succeeded() || !trajectoryResult.value.has_value())
+    result.mergeDiagnostics(programResult);
+    if (!programResult.succeeded() || !programResult.value.has_value())
     {
-        result.status = trajectoryResult.status;
+        result.status = programResult.status;
         return result;
     }
 
-    QHash<quint64, CadItem*> itemsById;
-    for (const auto& ownedItem : m_document->m_entities)
-        if (ownedItem != nullptr) itemsById.insert(ownedItem->m_entityId, ownedItem.get());
-
-    QString programText;
-    QTextStream stream(&programText);
-    stream.setEncoding(QStringConverter::Utf8);
-    writeTextBlock(stream, m_profile->fileCode().header);
-
-    const auto& trajectory = *trajectoryResult.value;
-    const auto& rotary = trajectory.rotaryContext;
-    writeCommentLine(stream, QStringLiteral("TUBE CENTER Y: %1").arg(formatDebugValue(rotary.tubeCenterY)));
-    writeCommentLine(stream, QStringLiteral("TUBE CENTER Z: %1").arg(formatDebugValue(rotary.tubeCenterZ)));
-    writeCommentLine(stream, QStringLiteral("ROTARY AXIS Y: %1").arg(formatDebugValue(rotary.rotaryAxisY)));
-    writeCommentLine(stream, QStringLiteral("ROTARY AXIS Z: %1").arg(formatDebugValue(rotary.rotaryAxisZ)));
-    writeCommentLine(stream, QStringLiteral("MAX COLLISION RADIUS: %1").arg(formatDebugValue(rotary.maximumCollisionRadius)));
-    writeCommentLine(stream, QStringLiteral("FINAL SAFE MACHINE Z: %1").arg(formatDebugValue(rotary.safeMachineZ)));
-    if (rotary.hasSectionBounds)
+    const auto postProfile = cadcam::infrastructure::nc::makeGCodePostProcessorProfile(*m_profile);
+    auto rendered = cadcam::infrastructure::nc::GCodePostProcessor::render
+        (*programResult.value, postProfile, context);
+    result.mergeDiagnostics(rendered);
+    if (!rendered.succeeded() || !rendered.value.has_value())
     {
-        writeCommentLine(stream, QStringLiteral("SQUARE TUBE SECTION Y: %1 -> %2")
-            .arg(formatDebugValue(rotary.sectionMinimumY)).arg(formatDebugValue(rotary.sectionMaximumY)));
-        writeCommentLine(stream, QStringLiteral("SQUARE TUBE SECTION Z: %1 -> %2")
-            .arg(formatDebugValue(rotary.sectionMinimumZ)).arg(formatDebugValue(rotary.sectionMaximumZ)));
-        if (m_tubeSectionModel.has_value())
-        {
-            for (const auto& corner : m_tubeSectionModel->corners)
-            {
-                const QString name = corner.zDirection > 0
-                    ? (corner.yDirection > 0 ? QStringLiteral("TOP RIGHT") : QStringLiteral("TOP LEFT"))
-                    : (corner.yDirection > 0 ? QStringLiteral("BOTTOM RIGHT") : QStringLiteral("BOTTOM LEFT"));
-                writeCommentLine(stream, QStringLiteral("SQUARE TUBE %1 CORNER CENTER Y/Z: %2, %3")
-                    .arg(name).arg(formatDebugValue(corner.center.x)).arg(formatDebugValue(corner.center.y)));
-            }
-        }
-    }
-
-    const auto writeMove = [&stream](const cadcam::machine::MachineMove& move)
-    {
-        const auto& point = move.target;
-        if (move.kind == cadcam::machine::MachineMoveKind::Rapid)
-            writeRapidMove4Axis(stream, point.x, point.y, point.z, point.aDegrees);
-        else
-            writeLinearMove4Axis(stream, point.x, point.y, point.z, point.aDegrees);
-    };
-
-    for (const auto& entity : trajectory.entities)
-    {
-        CadItem* item = itemsById.value(entity.entityId, nullptr);
-        if (item == nullptr || item->m_nativeEntity == nullptr)
-        {
-            result.status = OperationStatus::Failed;
-            result.addDiagnostic(makeGeneratorDiagnostic
-            (
-                context,
-                DiagnosticCode::MachineTrajectoryEntityMissing,
-                DiagnosticSeverity::Error,
-                QStringLiteral("BuildRotaryProgramText"),
-                QStringLiteral("ResolveEntityMetadata"),
-                QStringLiteral("四轴轨迹引用的图元已不在当前文档中。"),
-                QString(),
-                { { QStringLiteral("entityId"), QVariant::fromValue<qulonglong>(entity.entityId) } }
-            ));
-            return result;
-        }
-
-        for (const auto& move : entity.approachMoves) writeMove(move);
-        if (entity.cuttingMoves.empty() && entity.overcutMoves.empty()) continue;
-
-        const GProfileCodeBlock typeCode = m_profile->entityTypeCode(entityTypeKey(item));
-        const GProfileCodeBlock layerCode = m_profile->layerCode(entityLayerKey(item));
-        const GProfileCodeBlock colorCode = m_profile->entityColorCode(entityColorKey(item));
-        writeTextBlock(stream, layerCode.header);
-        writeTextBlock(stream, colorCode.header);
-        writeTextBlock(stream, typeCode.header);
-        for (const auto& move : entity.cuttingMoves) writeMove(move);
-        for (const auto& move : entity.overcutMoves) writeMove(move);
-        writeTextBlock(stream, typeCode.footer);
-        writeTextBlock(stream, colorCode.footer);
-        writeTextBlock(stream, layerCode.footer);
-    }
-
-    writeTextBlock(stream, m_profile->fileCode().footer);
-    stream.flush();
-    const QString optimized = removeRedundantLaserRestartPairs(programText);
-    if (optimized.isEmpty())
-    {
-        result.status = OperationStatus::Failed;
-        result.addDiagnostic(makeGeneratorDiagnostic
-        (
-            context,
-            DiagnosticCode::OutputVerificationFailure,
-            DiagnosticSeverity::Error,
-            QStringLiteral("BuildRotaryProgramText"),
-            QStringLiteral("VerifyOutput"),
-            QStringLiteral("生成的四轴 G 代码为空。")
-        ));
+        result.status = rendered.status;
         return result;
     }
-    result.status = trajectoryResult.status;
-    result.value = optimized;
+    result.status = programResult.status == OperationStatus::PartialSuccess
+        ? OperationStatus::PartialSuccess
+        : rendered.status;
+    result.value = std::move(rendered.value);
     return result;
 }
 
@@ -1430,7 +1306,7 @@ OperationResult<QString> GGenerator::buildProgramText(const OperationContext& co
             QStringLiteral("部分可加工图元未产生 G 代码。")
         ));
     }
-    const QString optimized = removeRedundantLaserRestartPairs(programText);
+    const QString optimized = removeRedundantLaserRestartPairs2D(programText);
     if (optimized.isEmpty())
     {
         result.status = OperationStatus::Failed;

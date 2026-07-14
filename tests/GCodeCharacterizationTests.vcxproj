@@ -101,7 +101,10 @@
     <ClCompile Include="..\src\core\machining\TubeSection.cpp" />
     <ClCompile Include="..\src\core\machine\RotaryKinematics.cpp" />
     <ClCompile Include="..\src\core\machine\RotaryTrajectoryBuilder.cpp" />
+    <ClCompile Include="..\src\core\nc\NcProgramBuilder.cpp" />
     <ClCompile Include="..\src\application\machine\MachineTrajectoryService.cpp" />
+    <ClCompile Include="..\src\application\nc\NcProgramService.cpp" />
+    <ClCompile Include="..\src\infrastructure\nc\GCodePostProcessor.cpp" />
     <ClCompile Include="..\src\core\planning\ProcessPlanBuilder.cpp" />
     <ClCompile Include="..\src\RotaryPathTopology.cpp" />
     <ClCompile Include="..\src\RotaryTubeGeometryAnalyzer.cpp" />
@@ -110,6 +113,7 @@
     <ClCompile Include="..\src\compatibility\legacy\LegacyCadItemPathBridge.cpp" />
     <ClCompile Include="..\src\compatibility\legacy\LegacyCadItemTopologyAdapter.cpp" />
     <ClCompile Include="..\src\compatibility\legacy\LegacyProcessPlanAdapter.cpp" />
+    <ClCompile Include="..\src\compatibility\legacy\DocumentNcMetadataAdapter.cpp" />
     <ClCompile Include="..\src\compatibility\legacy\SplineEntityClone.cpp" />
     <ClCompile Include="..\src\compatibility\legacy\SplineProductionPathProvider.cpp" />
     <ClCompile Include="..\src\compatibility\legacy\GeometrySnapshotParityVerifier.cpp" />

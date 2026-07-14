@@ -107,6 +107,17 @@ QString diagnosticCodeName(DiagnosticCode code)
     case DiagnosticCode::MachineTrajectorySafeMoveFailed: return QStringLiteral("MachineTrajectorySafeMoveFailed");
     case DiagnosticCode::MachineTrajectoryOvercutFailed: return QStringLiteral("MachineTrajectoryOvercutFailed");
     case DiagnosticCode::MachineTrajectoryInvariantViolation: return QStringLiteral("MachineTrajectoryInvariantViolation");
+    case DiagnosticCode::NcProgramInputInvalid: return QStringLiteral("NcProgramInputInvalid");
+    case DiagnosticCode::NcProgramRevisionMismatch: return QStringLiteral("NcProgramRevisionMismatch");
+    case DiagnosticCode::NcProgramEntityMissing: return QStringLiteral("NcProgramEntityMissing");
+    case DiagnosticCode::NcProgramMetadataMissing: return QStringLiteral("NcProgramMetadataMissing");
+    case DiagnosticCode::NcProgramDuplicateEntity: return QStringLiteral("NcProgramDuplicateEntity");
+    case DiagnosticCode::NcProgramUnsupportedMotion: return QStringLiteral("NcProgramUnsupportedMotion");
+    case DiagnosticCode::NcProgramInvariantViolation: return QStringLiteral("NcProgramInvariantViolation");
+    case DiagnosticCode::GCodeProfileInvalid: return QStringLiteral("GCodeProfileInvalid");
+    case DiagnosticCode::GCodeEntityBlockMissing: return QStringLiteral("GCodeEntityBlockMissing");
+    case DiagnosticCode::GCodeRenderingFailed: return QStringLiteral("GCodeRenderingFailed");
+    case DiagnosticCode::GCodeTextOptimizationFailed: return QStringLiteral("GCodeTextOptimizationFailed");
     case DiagnosticCode::InternalInvariantViolation: return QStringLiteral("InternalInvariantViolation");
     }
 

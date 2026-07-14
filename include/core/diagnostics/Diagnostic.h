@@ -125,6 +125,17 @@ enum class DiagnosticCode
     MachineTrajectorySafeMoveFailed,
     MachineTrajectoryOvercutFailed,
     MachineTrajectoryInvariantViolation,
+    NcProgramInputInvalid,
+    NcProgramRevisionMismatch,
+    NcProgramEntityMissing,
+    NcProgramMetadataMissing,
+    NcProgramDuplicateEntity,
+    NcProgramUnsupportedMotion,
+    NcProgramInvariantViolation,
+    GCodeProfileInvalid,
+    GCodeEntityBlockMissing,
+    GCodeRenderingFailed,
+    GCodeTextOptimizationFailed,
     InternalInvariantViolation
 };
 
