@@ -458,6 +458,21 @@ QVector3D CadViewer::applySnapToGroundPosition
 
                         break;
                     }
+                    case DRW::ETYPE::SPLINE:
+                    {
+                        const QVector<QVector3D>& vertices = item->m_geometry.vertices;
+                        if (!vertices.isEmpty())
+                        {
+                            appendEndpoint(vertices.constFirst());
+                            const DRW_Spline* spline =
+                                static_cast<const DRW_Spline*>(item->m_nativeEntity);
+                            if ((spline->flags & (1 | 2)) == 0)
+                            {
+                                appendEndpoint(vertices.constLast());
+                            }
+                        }
+                        break;
+                    }
                     default:
                         break;
                     }
@@ -491,6 +506,7 @@ QVector3D CadViewer::applySnapToGroundPosition
                     }
                     case DRW::ETYPE::POLYLINE:
                     case DRW::ETYPE::LWPOLYLINE:
+                    case DRW::ETYPE::SPLINE:
                     {
                         const QVector<QVector3D>& vertices = item->m_geometry.vertices;
 

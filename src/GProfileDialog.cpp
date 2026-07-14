@@ -1121,6 +1121,7 @@ QStringList GProfileDialog::supportedEntityTypes()
         QStringLiteral("ELLIPSE"),
         QStringLiteral("POLYLINE"),
         QStringLiteral("LWPOLYLINE"),
+        QStringLiteral("SPLINE"),
         QStringLiteral("POINT")
     };
 }
@@ -1162,6 +1163,11 @@ QString GProfileDialog::displayNameForEntityType(const QString& entityTypeKey)
     if (normalizedKey == QStringLiteral("LWPOLYLINE"))
     {
         return QStringLiteral("轻量多段线 (LWPOLYLINE)");
+    }
+
+    if (normalizedKey == QStringLiteral("SPLINE"))
+    {
+        return QStringLiteral("样条曲线 (SPLINE)");
     }
 
     if (normalizedKey == QStringLiteral("POINT"))

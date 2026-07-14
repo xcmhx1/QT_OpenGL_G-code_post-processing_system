@@ -1745,6 +1745,44 @@ namespace
 
             break;
         }
+        case DRW::ETYPE::SPLINE:
+        {
+            const QVector<QVector3D>& vertices = item->m_geometry.vertices;
+            if (vertices.size() < 2)
+            {
+                break;
+            }
+            const DRW_Spline* spline =
+                static_cast<const DRW_Spline*>(item->m_nativeEntity);
+            const bool isClosed = (spline->flags & (1 | 2)) != 0;
+            const QVector3D forwardStart = vertices.constFirst();
+            const QVector3D forwardEnd = isClosed
+                ? forwardStart : vertices.constLast();
+            const QVector3D forwardStartTangent =
+                normalizeOrZero(vertices.at(1) - vertices.constFirst());
+            const QVector3D reverseStartTangent =
+                normalizeOrZero(vertices.at(vertices.size() - 2) - vertices.constLast());
+            const QVector3D forwardEndTangent = isClosed
+                ? -reverseStartTangent
+                : normalizeOrZero(vertices.constLast() - vertices.at(vertices.size() - 2));
+            const QVector3D reverseEndTangent = -forwardStartTangent;
+            const std::initializer_list<bool> reverseOptions = strategy == SortStrategy::Smart
+                ? std::initializer_list<bool>{ false, true }
+                : std::initializer_list<bool>{ item->m_isReverse };
+            for (const bool reverse : reverseOptions)
+            {
+                ProcessPathOption option;
+                option.reverse = reverse;
+                option.startPoint = reverse ? forwardEnd : forwardStart;
+                option.endPoint = reverse ? forwardStart : forwardEnd;
+                option.startTangent = reverse
+                    ? reverseStartTangent : forwardStartTangent;
+                option.endTangent = reverse
+                    ? reverseEndTangent : forwardEndTangent;
+                options.push_back(option);
+            }
+            break;
+        }
         default:
             break;
         }
@@ -2978,6 +3016,13 @@ namespace
         {
             const DRW_LWPolyline* polyline = static_cast<const DRW_LWPolyline*>(item->m_nativeEntity);
             return (polyline->flags & 1) != 0;
+        }
+
+        if (item->m_type == DRW::ETYPE::SPLINE)
+        {
+            const DRW_Spline* spline =
+                static_cast<const DRW_Spline*>(item->m_nativeEntity);
+            return (spline->flags & (1 | 2)) != 0;
         }
 
         return false;

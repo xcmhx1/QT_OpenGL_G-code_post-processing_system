@@ -275,6 +275,39 @@ namespace
             .arg(buildLWPolylineVertexSequenceToken(polyline->vertlist));
     }
 
+    QString buildSplineDuplicateKey(const DRW_Spline* spline)
+    {
+        if (spline == nullptr)
+        {
+            return QString();
+        }
+        QStringList values
+        {
+            QStringLiteral("SPLINE"),
+            QString::number(spline->flags),
+            QString::number(spline->degree)
+        };
+        for (double knot : spline->knotslist)
+        {
+            values.push_back(dedupNumberToken(knot));
+        }
+        for (double weight : spline->weightlist)
+        {
+            values.push_back(dedupNumberToken(weight));
+        }
+        for (const std::shared_ptr<DRW_Coord>& point : spline->controllist)
+        {
+            values.push_back(point != nullptr
+                ? dedupCoordToken(*point) : QStringLiteral("NULL"));
+        }
+        for (const std::shared_ptr<DRW_Coord>& point : spline->fitlist)
+        {
+            values.push_back(point != nullptr
+                ? dedupCoordToken(*point) : QStringLiteral("NULL"));
+        }
+        return values.join('|');
+    }
+
     QString duplicateGeometryKey(const CadItem* item)
     {
         if (item == nullptr || item->m_nativeEntity == nullptr)
@@ -296,6 +329,8 @@ namespace
             return buildPolylineDuplicateKey(static_cast<const DRW_Polyline*>(item->m_nativeEntity));
         case DRW::ETYPE::LWPOLYLINE:
             return buildLWPolylineDuplicateKey(static_cast<const DRW_LWPolyline*>(item->m_nativeEntity));
+        case DRW::ETYPE::SPLINE:
+            return buildSplineDuplicateKey(static_cast<const DRW_Spline*>(item->m_nativeEntity));
         default:
             return QString();
         }
@@ -311,6 +346,7 @@ namespace
         case DRW::ETYPE::ELLIPSE:
         case DRW::ETYPE::POLYLINE:
         case DRW::ETYPE::LWPOLYLINE:
+        case DRW::ETYPE::SPLINE:
             return true;
         default:
             return false;

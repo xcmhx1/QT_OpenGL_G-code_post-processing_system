@@ -18,6 +18,7 @@
 #include "core/geometry/NurbsCurveEvaluator.h"
 #include "infrastructure/dxf/DxfGeometryAdapter.h"
 #include "SplineParity.h"
+#include "SplineProductionTests.h"
 #include "dx_data.h"
 
 #include <QDir>
@@ -41,6 +42,7 @@ namespace
     int failureCount = 0;
     bool updateGoldenFiles = false;
     bool updateSplineGoldenFiles = false;
+    bool updateSplineProductionGoldenFiles = false;
 
     void check(bool condition, const char* name)
     {
@@ -1657,6 +1659,8 @@ int main(int argc, char* argv[])
             || argument == QStringLiteral("--update-golden");
         updateSplineGoldenFiles = updateSplineGoldenFiles
             || argument == QStringLiteral("--update-spline-golden");
+        updateSplineProductionGoldenFiles = updateSplineProductionGoldenFiles
+            || argument == QStringLiteral("--update-spline-production-golden");
     }
 
     testOperationResult();
@@ -1672,6 +1676,7 @@ int main(int argc, char* argv[])
     testSimpleLineAndMCodeOptimization();
     testRotaryGoldenPrograms();
     testFailures();
+    failureCount += runSplineProductionTests(updateSplineProductionGoldenFiles);
 
     if (failureCount == 0)
     {

@@ -277,6 +277,36 @@ namespace CadEditerWorkflowInternal
             std::reverse(polyline->vertlist.begin(), polyline->vertlist.end());
             return true;
         }
+        case DRW::ETYPE::SPLINE:
+        {
+            DRW_Spline* spline = static_cast<DRW_Spline*>(entity);
+            const auto reflectCoordinate = [&lineStart, &lineEnd]
+            (const std::shared_ptr<DRW_Coord>& coordinate)
+            {
+                if (coordinate == nullptr)
+                {
+                    return;
+                }
+                const QVector3D mirrored = reflectPointAcrossLine
+                (
+                    QVector3D(coordinate->x, coordinate->y, coordinate->z),
+                    lineStart,
+                    lineEnd
+                );
+                coordinate->x = mirrored.x();
+                coordinate->y = mirrored.y();
+                coordinate->z = mirrored.z();
+            };
+            for (const std::shared_ptr<DRW_Coord>& point : spline->controllist)
+            {
+                reflectCoordinate(point);
+            }
+            for (const std::shared_ptr<DRW_Coord>& point : spline->fitlist)
+            {
+                reflectCoordinate(point);
+            }
+            return true;
+        }
         default:
             break;
         }

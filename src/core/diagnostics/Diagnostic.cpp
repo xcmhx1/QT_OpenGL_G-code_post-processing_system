@@ -45,6 +45,11 @@ QString diagnosticCodeName(DiagnosticCode code)
     case DiagnosticCode::SplineSubdivisionLimit: return QStringLiteral("SplineSubdivisionLimit");
     case DiagnosticCode::SplinePointLimitExceeded: return QStringLiteral("SplinePointLimitExceeded");
     case DiagnosticCode::SplineFitPointFallbackUsed: return QStringLiteral("SplineFitPointFallbackUsed");
+    case DiagnosticCode::SplineProductionCompileFailure: return QStringLiteral("SplineProductionCompileFailure");
+    case DiagnosticCode::SplineLegacyFallbackUsed: return QStringLiteral("SplineLegacyFallbackUsed");
+    case DiagnosticCode::SplineLegacyParityMismatch: return QStringLiteral("SplineLegacyParityMismatch");
+    case DiagnosticCode::SplineDisplayPathFailure: return QStringLiteral("SplineDisplayPathFailure");
+    case DiagnosticCode::SplineControlPointFailure: return QStringLiteral("SplineControlPointFailure");
     case DiagnosticCode::InternalInvariantViolation: return QStringLiteral("InternalInvariantViolation");
     }
 

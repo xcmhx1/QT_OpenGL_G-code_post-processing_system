@@ -5,6 +5,7 @@
 #include "pch.h"
 
 #include "CadPreviewBuilder.h"
+#include "compatibility/legacy/SplineEntityClone.h"
 
 // CAD 模块内部依赖
 #include "CadDocument.h"
@@ -782,6 +783,8 @@ namespace
             return std::make_unique<DRW_LWPolyline>(*static_cast<const DRW_LWPolyline*>(entity));
         case DRW::ETYPE::POLYLINE:
             return std::make_unique<DRW_Polyline>(*static_cast<const DRW_Polyline*>(entity));
+        case DRW::ETYPE::SPLINE:
+            return cloneSplineEntity(static_cast<const DRW_Spline*>(entity));
         default:
             return nullptr;
         }

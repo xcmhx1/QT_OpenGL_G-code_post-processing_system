@@ -63,6 +63,11 @@ enum class DiagnosticCode
     SplineSubdivisionLimit,
     SplinePointLimitExceeded,
     SplineFitPointFallbackUsed,
+    SplineProductionCompileFailure,
+    SplineLegacyFallbackUsed,
+    SplineLegacyParityMismatch,
+    SplineDisplayPathFailure,
+    SplineControlPointFailure,
     InternalInvariantViolation
 };
 

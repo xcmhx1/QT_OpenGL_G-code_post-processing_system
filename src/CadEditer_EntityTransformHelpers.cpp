@@ -2,6 +2,7 @@
 #include "pch.h"
 
 #include "CadEditerWorkflowInternal.h"
+#include "compatibility/legacy/SplineEntityClone.h"
 
 #include <algorithm>
 #include <cmath>
@@ -79,6 +80,25 @@ namespace CadEditerWorkflowInternal
             for (const std::shared_ptr<DRW_Vertex>& vertex : polyline->vertlist)
             {
                 translateCoord(vertex->basePoint, delta);
+            }
+            break;
+        }
+        case DRW::ETYPE::SPLINE:
+        {
+            DRW_Spline* spline = static_cast<DRW_Spline*>(entity);
+            for (const std::shared_ptr<DRW_Coord>& point : spline->controllist)
+            {
+                if (point != nullptr)
+                {
+                    translateCoord(*point, delta);
+                }
+            }
+            for (const std::shared_ptr<DRW_Coord>& point : spline->fitlist)
+            {
+                if (point != nullptr)
+                {
+                    translateCoord(*point, delta);
+                }
             }
             break;
         }
@@ -224,6 +244,25 @@ namespace CadEditerWorkflowInternal
             }
             break;
         }
+        case DRW::ETYPE::SPLINE:
+        {
+            DRW_Spline* spline = static_cast<DRW_Spline*>(entity);
+            for (const std::shared_ptr<DRW_Coord>& point : spline->controllist)
+            {
+                if (point != nullptr)
+                {
+                    rotateCoordAround(*point, basePoint, radians);
+                }
+            }
+            for (const std::shared_ptr<DRW_Coord>& point : spline->fitlist)
+            {
+                if (point != nullptr)
+                {
+                    rotateCoordAround(*point, basePoint, radians);
+                }
+            }
+            break;
+        }
         default:
             break;
         }
@@ -302,6 +341,25 @@ namespace CadEditerWorkflowInternal
             for (const std::shared_ptr<DRW_Vertex>& vertex : polyline->vertlist)
             {
                 scaleCoordAround(vertex->basePoint, basePoint, scaleFactor);
+            }
+            break;
+        }
+        case DRW::ETYPE::SPLINE:
+        {
+            DRW_Spline* spline = static_cast<DRW_Spline*>(entity);
+            for (const std::shared_ptr<DRW_Coord>& point : spline->controllist)
+            {
+                if (point != nullptr)
+                {
+                    scaleCoordAround(*point, basePoint, scaleFactor);
+                }
+            }
+            for (const std::shared_ptr<DRW_Coord>& point : spline->fitlist)
+            {
+                if (point != nullptr)
+                {
+                    scaleCoordAround(*point, basePoint, scaleFactor);
+                }
             }
             break;
         }
@@ -876,6 +934,8 @@ namespace CadEditerWorkflowInternal
             return std::make_unique<DRW_LWPolyline>(*static_cast<const DRW_LWPolyline*>(entity));
         case DRW::ETYPE::POLYLINE:
             return std::make_unique<DRW_Polyline>(*static_cast<const DRW_Polyline*>(entity));
+        case DRW::ETYPE::SPLINE:
+            return cloneSplineEntity(static_cast<const DRW_Spline*>(entity));
         default:
             return nullptr;
         }

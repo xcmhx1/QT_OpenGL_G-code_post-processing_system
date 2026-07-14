@@ -999,6 +999,7 @@ bool isProcessVisualizable(const CadItem* item)
     case DRW::ETYPE::ELLIPSE:
     case DRW::ETYPE::POLYLINE:
     case DRW::ETYPE::LWPOLYLINE:
+    case DRW::ETYPE::SPLINE:
         return true;
     default:
         return false;
@@ -1134,6 +1135,22 @@ CadProcessVisualInfo buildProcessVisualInfo(const CadItem* item)
             : lwPolylineForwardStartTangent(polyline);
         break;
     }
+    case DRW::ETYPE::SPLINE:
+    {
+        const QVector<QVector3D>& vertices = item->m_geometry.vertices;
+        if (vertices.size() < 2)
+        {
+            return info;
+        }
+        const DRW_Spline* spline = static_cast<const DRW_Spline*>(item->m_nativeEntity);
+        info.closedPath = (spline->flags & (1 | 2)) != 0;
+        info.forwardStartPoint = vertices.constFirst();
+        info.forwardEndPoint = info.closedPath
+            ? info.forwardStartPoint : vertices.constLast();
+        info.labelAnchor = hasGeometryAnchor ? preferredAnchor : info.forwardStartPoint;
+        info.direction = normalizeOrZero(vertices.at(1) - vertices.constFirst());
+        break;
+    }
     default:
         return info;
     }
@@ -1180,6 +1197,17 @@ CadProcessVisualInfo buildProcessVisualInfo(const CadItem* item)
             info.direction = info.closedPath
                 ? lwPolylineReverseStartTangentAt(polyline, effectiveClosedPolylineStartIndex(item, polyline->vertlist.size()))
                 : lwPolylineReverseStartTangent(polyline);
+            break;
+        }
+        case DRW::ETYPE::SPLINE:
+        {
+            const QVector<QVector3D>& vertices = item->m_geometry.vertices;
+            if (vertices.size() >= 2)
+            {
+                const int startIndex = vertices.size() - 1;
+                info.direction = normalizeOrZero
+                    (vertices.at(startIndex - 1) - vertices.at(startIndex));
+            }
             break;
         }
         default:

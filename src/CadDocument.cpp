@@ -11,6 +11,7 @@
 #include "CadLWPolylineItem.h"
 #include "CadPointItem.h"
 #include "CadPolylineItem.h"
+#include "CadSplineItem.h"
 #include "CadSplineConverter.h"
 #include "CadXlineItem.h"
 #include "dx_data.h"
@@ -114,6 +115,8 @@ namespace
             return convertPolylineToLightweight(static_cast<const DRW_Polyline*>(entity));
         case DRW::ETYPE::LWPOLYLINE:
             return std::make_unique<DRW_LWPolyline>(*static_cast<const DRW_LWPolyline*>(entity));
+        case DRW::ETYPE::SPLINE:
+            return convertSplineToPolyline(static_cast<const DRW_Spline*>(entity));
         default:
             return nullptr;
         }
@@ -315,6 +318,8 @@ std::unique_ptr<CadItem> CadDocument::createCadItemForEntity(DRW_Entity* entity)
 
     case DRW::ETYPE::POLYLINE:
         return std::make_unique<CadPolylineItem>(entity);
+    case DRW::ETYPE::SPLINE:
+        return std::make_unique<CadSplineItem>(entity);
 
     default:
         // 未适配的实体类型暂时不进入当前场景图元系统。
@@ -406,30 +411,11 @@ void CadDocument::clearAll()
 
 void CadDocument::init()
 {
-    // SPLINE 在导入边界转换成 3D POLYLINE，后续统一复用多段线完整链路。
-    for (auto iterator = m_data->mBlock->ent.begin(); iterator != m_data->mBlock->ent.end(); ++iterator)
+    for (DRW_Entity* entity : m_data->mBlock->ent)
     {
-        DRW_Entity* entity = *iterator;
-
         if (entity == nullptr)
         {
             continue;
-        }
-
-        if (entity->eType == DRW::ETYPE::SPLINE)
-        {
-            std::unique_ptr<DRW_Polyline> polyline =
-                convertSplineToPolyline(static_cast<const DRW_Spline*>(entity));
-
-            if (polyline == nullptr)
-            {
-                qWarning() << "CadDocument::init() skipped an invalid SPLINE entity.";
-                continue;
-            }
-
-            delete entity;
-            entity = polyline.release();
-            *iterator = entity;
         }
 
         if (std::unique_ptr<CadItem> item = createCadItemForEntity(entity))

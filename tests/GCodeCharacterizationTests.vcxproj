@@ -67,7 +67,8 @@
   <ItemGroup>
     <ClCompile Include="CharacterizationTests.cpp" />
     <ClCompile Include="SplineParity.cpp" />
-    <ClCompile Include="TestCadDocumentSupport.cpp" />
+    <ClCompile Include="SplineProductionTests.cpp" />
+    <ClCompile Include="..\src\CadDocument.cpp" />
     <ClCompile Include="..\src\CadItem.cpp" />
     <ClCompile Include="..\src\CadLineItem.cpp" />
     <ClCompile Include="..\src\CadCircleItem.cpp" />
@@ -75,6 +76,10 @@
     <ClCompile Include="..\src\CadEllipseItem.cpp" />
     <ClCompile Include="..\src\CadPolylineItem.cpp" />
     <ClCompile Include="..\src\CadLWPolylineItem.cpp" />
+    <ClCompile Include="..\src\CadSplineItem.cpp" />
+    <ClCompile Include="..\src\CadPointItem.cpp" />
+    <ClCompile Include="..\src\CadXlineItem.cpp" />
+    <ClCompile Include="..\src\dx_iface.cpp" />
     <ClCompile Include="..\src\CadSplineConverter.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
@@ -88,17 +93,31 @@
     <ClCompile Include="..\src\core\geometry\NurbsCurveEvaluator.cpp" />
     <ClCompile Include="..\src\infrastructure\dxf\DxfGeometryAdapter.cpp" />
     <ClCompile Include="..\src\compatibility\legacy\LegacyCadItemPathBridge.cpp" />
+    <ClCompile Include="..\src\compatibility\legacy\LegacyFourAxisPathBuilder.cpp" />
+    <ClCompile Include="..\src\compatibility\legacy\SplineEntityClone.cpp" />
+    <ClCompile Include="..\src\compatibility\legacy\SplineProductionPathProvider.cpp" />
     <ClCompile Include="..\src\application\messaging\MessageCenter.cpp" />
     <ClCompile Include="..\src\application\messaging\DebugMessageSink.cpp" />
     <ClCompile Include="..\src\libdxfrw\drw_base.cpp" />
+    <ClCompile Include="..\src\libdxfrw\drw_classes.cpp" />
     <ClCompile Include="..\src\libdxfrw\drw_entities.cpp" />
     <ClCompile Include="..\src\libdxfrw\drw_header.cpp" />
+    <ClCompile Include="..\src\libdxfrw\drw_objects.cpp" />
     <ClCompile Include="..\src\libdxfrw\intern\drw_dbg.cpp" />
     <ClCompile Include="..\src\libdxfrw\intern\drw_textcodec.cpp" />
     <ClCompile Include="..\src\libdxfrw\intern\dwgbuffer.cpp" />
+    <ClCompile Include="..\src\libdxfrw\intern\dwgreader.cpp" />
+    <ClCompile Include="..\src\libdxfrw\intern\dwgreader15.cpp" />
+    <ClCompile Include="..\src\libdxfrw\intern\dwgreader18.cpp" />
+    <ClCompile Include="..\src\libdxfrw\intern\dwgreader21.cpp" />
+    <ClCompile Include="..\src\libdxfrw\intern\dwgreader24.cpp" />
+    <ClCompile Include="..\src\libdxfrw\intern\dwgreader27.cpp" />
+    <ClCompile Include="..\src\libdxfrw\intern\dwgutil.cpp" />
     <ClCompile Include="..\src\libdxfrw\intern\dxfreader.cpp" />
     <ClCompile Include="..\src\libdxfrw\intern\dxfwriter.cpp" />
     <ClCompile Include="..\src\libdxfrw\intern\rscodec.cpp" />
+    <ClCompile Include="..\src\libdxfrw\libdwgr.cpp" />
+    <ClCompile Include="..\src\libdxfrw\libdxfrw.cpp" />
   </ItemGroup>
   <ItemGroup>
     <QtMoc Include="..\include\CadItem.h" />

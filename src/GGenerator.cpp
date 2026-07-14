@@ -12,6 +12,7 @@
 #include "CadLWPolylineItem.h"
 #include "CadPointItem.h"
 #include "CadPolylineItem.h"
+#include "CadSplineItem.h"
 
 #include <QFile>
 #include <QFileDialog>
@@ -235,6 +236,8 @@ namespace
             return QStringLiteral("POLYLINE");
         case DRW::ETYPE::LWPOLYLINE:
             return QStringLiteral("LWPOLYLINE");
+        case DRW::ETYPE::SPLINE:
+            return QStringLiteral("SPLINE");
         case DRW::ETYPE::POINT:
             return QStringLiteral("POINT");
         default:
@@ -925,6 +928,36 @@ namespace
         return true;
     }
 
+    bool writeSplineEntity(QTextStream& stream, const CadSplineItem* item)
+    {
+        if (item == nullptr)
+        {
+            return false;
+        }
+        CadSplineItem* writableItem = const_cast<CadSplineItem*>(item);
+        writableItem->rebuildRawPathPoints3D();
+        const std::vector<RawPathPoint3D>& points = writableItem->rawPathPoints3D();
+        if (points.size() < 2U)
+        {
+            return false;
+        }
+        const auto toVector = [](const RawPathPoint3D& point)
+        {
+            return QVector3D
+            (
+                static_cast<float>(point.x),
+                static_cast<float>(point.y),
+                static_cast<float>(point.z)
+            );
+        };
+        writeRapidMove3Axis(stream, toVector(points.front()));
+        for (std::size_t index = 1U; index < points.size(); ++index)
+        {
+            writeLinearMove3Axis(stream, toVector(points[index]));
+        }
+        return true;
+    }
+
     bool writeItemGeometry(QTextStream& stream, const CadItem* item)
     {
         if (item == nullptr)
@@ -946,6 +979,8 @@ namespace
             return writePolylineEntity(stream, static_cast<const CadPolylineItem*>(item));
         case DRW::ETYPE::LWPOLYLINE:
             return writeLWPolylineEntity(stream, static_cast<const CadLWPolylineItem*>(item));
+        case DRW::ETYPE::SPLINE:
+            return writeSplineEntity(stream, static_cast<const CadSplineItem*>(item));
         case DRW::ETYPE::POINT:
             return false;
         default:
@@ -1642,6 +1677,8 @@ namespace
             return (static_cast<const DRW_Polyline*>(item->m_nativeEntity)->flags & 1) != 0;
         case DRW::ETYPE::LWPOLYLINE:
             return (static_cast<const DRW_LWPolyline*>(item->m_nativeEntity)->flags & 1) != 0;
+        case DRW::ETYPE::SPLINE:
+            return (static_cast<const DRW_Spline*>(item->m_nativeEntity)->flags & (1 | 2)) != 0;
         default:
             return false;
         }
@@ -1855,6 +1892,7 @@ namespace
         case DRW::ETYPE::ELLIPSE:
         case DRW::ETYPE::POLYLINE:
         case DRW::ETYPE::LWPOLYLINE:
+        case DRW::ETYPE::SPLINE:
             return true;
         default:
             return false;

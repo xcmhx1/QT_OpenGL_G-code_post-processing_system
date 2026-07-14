@@ -42,7 +42,8 @@ namespace
             QStringLiteral("CIRCLE"),
             QStringLiteral("ELLIPSE"),
             QStringLiteral("POLYLINE"),
-            QStringLiteral("LWPOLYLINE")
+            QStringLiteral("LWPOLYLINE"),
+            QStringLiteral("SPLINE")
         };
     }
 
@@ -386,7 +387,13 @@ bool GProfile::containsEntityTypeCode(const QString& entityType) const
 
 GProfileCodeBlock GProfile::entityTypeCode(const QString& entityType) const
 {
-    return m_entityTypeCodes.value(normalizeEntityTypeKey(entityType));
+    const QString normalizedKey = normalizeEntityTypeKey(entityType);
+    if (normalizedKey == QStringLiteral("SPLINE")
+        && !m_entityTypeCodes.contains(normalizedKey))
+    {
+        return m_entityTypeCodes.value(QStringLiteral("POLYLINE"));
+    }
+    return m_entityTypeCodes.value(normalizedKey);
 }
 
 void GProfile::removeEntityTypeCode(const QString& entityType)

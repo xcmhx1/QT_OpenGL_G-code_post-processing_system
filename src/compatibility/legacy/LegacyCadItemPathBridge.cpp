@@ -1,5 +1,6 @@
 #include "compatibility/legacy/LegacyCadItemPathBridge.h"
 
+#include "compatibility/legacy/SplineProductionPathProvider.h"
 #include "infrastructure/dxf/DxfGeometryAdapter.h"
 
 namespace
@@ -34,6 +35,9 @@ cadcam::geometry::SamplingPolicy LegacyCadItemPathBridge::legacySamplingPolicy(c
         policy.minimumBulgeSegments = 4;
         policy.fullTurnSegments = 128;
         break;
+    case DRW::ETYPE::SPLINE:
+        policy.minimumSegments = 1;
+        break;
     case DRW::ETYPE::LINE:
     default:
         policy.minimumSegments = 1;
@@ -67,6 +71,18 @@ OperationResult<cadcam::geometry::Path3D> LegacyCadItemPathBridge::compile
         diagnostic.entityId = item.m_entityId;
         result.addDiagnostic(diagnostic);
         return result;
+    }
+
+    if (item.m_type == DRW::ETYPE::SPLINE)
+    {
+        return SplineProductionPathProvider::build
+        (
+            item.m_entityId,
+            *static_cast<const DRW_Spline*>(item.m_nativeEntity),
+            policy,
+            options,
+            context
+        );
     }
 
     OperationResult<cadcam::geometry::SourceEntity> sourceResult = DxfGeometryAdapter::convert

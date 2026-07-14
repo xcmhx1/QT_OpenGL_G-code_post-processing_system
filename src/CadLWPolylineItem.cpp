@@ -5,13 +5,12 @@
 #include "CadLWPolylineItem.h"
 #include "application/messaging/DebugMessageSink.h"
 #include "compatibility/legacy/LegacyCadItemPathBridge.h"
+#include "compatibility/legacy/LegacyFourAxisPathBuilder.h"
 
 #include <cmath>
 
 namespace
 {
-    constexpr double kAxisEps = 1.0e-8;
-    constexpr double kRadToDeg = 57.2957795130823208768;
     constexpr double kTwoPi = 6.28318530717958647692;
     // 轻量多段线的 bulge 圆弧离散策略与普通多段线保持一致。
     constexpr int kFullCircleSegments = 128;
@@ -345,170 +344,31 @@ bool CadLWPolylineItem::rebuildControlPoints4Axis
 {
     clearPathCaches();
     rebuildRawPathPoints3D();
-
-    if (m_rawPathPoints3D.empty())
+    const LegacyFourAxisPathOptions options
+    {
+        axisY, axisZ, judgeCenterY, judgeCenterZ,
+        invertAAxisDirection, aAxisOffsetDegrees, keepContinuousAngle
+    };
+    const OperationResult<std::vector<ControlPoint4Axis>> result =
+        LegacyFourAxisPathBuilder::build
+        (
+            m_rawPathPoints3D,
+            options,
+            m_entityId,
+            createOperationContext(QStringLiteral("rebuild-lwpolyline-four-axis-path"))
+        );
+    if (!result.succeeded() || !result.value.has_value())
     {
         if (errorMessage != nullptr)
         {
             *errorMessage = QStringLiteral("轻量多段线原始路径点集为空。");
         }
-
         return false;
     }
-
-    m_controlPoints4Axis.clear();
-    m_controlPoints4Axis.reserve(m_rawPathPoints3D.size());
-
-    auto applyAnglePolicy = [&](double rawA, bool hasPrevious, double previousA) -> double
-        {
-            if (invertAAxisDirection)
-            {
-                rawA = -rawA;
-            }
-
-            rawA += aAxisOffsetDegrees;
-            rawA = normalizeAngle180(rawA);
-
-            if (hasPrevious && keepContinuousAngle)
-            {
-                rawA = unwrapAngleNear(previousA, rawA);
-            }
-
-            return rawA;
-        };
-
-    constexpr double kPlaneEps = 1.0e-8;
-
-    double minY = m_rawPathPoints3D.front().y;
-    double maxY = m_rawPathPoints3D.front().y;
-    double minZ = m_rawPathPoints3D.front().z;
-    double maxZ = m_rawPathPoints3D.front().z;
-
-    double sumY = 0.0;
-    double sumZ = 0.0;
-
-    for (const RawPathPoint3D& point : m_rawPathPoints3D)
-    {
-        minY = std::min(minY, point.y);
-        maxY = std::max(maxY, point.y);
-        minZ = std::min(minZ, point.z);
-        maxZ = std::max(maxZ, point.z);
-
-        sumY += point.y;
-        sumZ += point.z;
-    }
-
-    const double avgY = sumY / static_cast<double>(m_rawPathPoints3D.size());
-    const double avgZ = sumZ / static_cast<double>(m_rawPathPoints3D.size());
-
-    const bool inPlaneParallelXZ = (maxY - minY) < kPlaneEps;
-    const bool inPlaneParallelXY = (maxZ - minZ) < kPlaneEps;
-
-    bool useFixedA = false;
-    double fixedRawA = 0.0;
-
-    if (inPlaneParallelXZ)
-    {
-        if (avgY > judgeCenterY + kPlaneEps)
-        {
-            fixedRawA = 90.0;
-            useFixedA = true;
-        }
-        else if (avgY < judgeCenterY - kPlaneEps)
-        {
-            fixedRawA = -90.0;
-            useFixedA = true;
-        }
-        else
-        {
-            fixedRawA = (avgZ >= judgeCenterZ) ? 0.0 : 180.0;
-            useFixedA = true;
-        }
-    }
-    else if (inPlaneParallelXY)
-    {
-        if (avgZ > judgeCenterZ + kPlaneEps)
-        {
-            fixedRawA = 0.0;
-            useFixedA = true;
-        }
-        else if (avgZ < judgeCenterZ - kPlaneEps)
-        {
-            fixedRawA = 180.0;
-            useFixedA = true;
-        }
-        else
-        {
-            fixedRawA = (avgY >= judgeCenterY) ? 90.0 : -90.0;
-            useFixedA = true;
-        }
-    }
-
-    if (useFixedA)
-    {
-        const double fixedA = applyAnglePolicy(fixedRawA, false, 0.0);
-        const double angleRad = fixedA / kRadToDeg;
-        const double c = std::cos(angleRad);
-        const double s = std::sin(angleRad);
-
-        for (const RawPathPoint3D& point : m_rawPathPoints3D)
-        {
-            const double dy = point.y - axisY;
-            const double dz = point.z - axisZ;
-
-            const double machineX = point.x;
-            const double machineY = axisY + dy * c - dz * s;
-            const double machineZ = axisZ + dy * s + dz * c;
-
-            m_controlPoints4Axis.push_back({ machineX, machineY, machineZ, fixedA });
-        }
-    }
-    else
-    {
-        bool hasPrevious = false;
-        double previousA = 0.0;
-
-        for (const RawPathPoint3D& point : m_rawPathPoints3D)
-        {
-            const double dy = point.y - axisY;
-            const double dz = point.z - axisZ;
-            const double radiusSquared = dy * dy + dz * dz;
-            const double radius = std::sqrt(radiusSquared);
-
-            double aDeg = 0.0;
-
-            if (radiusSquared < kAxisEps * kAxisEps)
-            {
-                if (hasPrevious)
-                {
-                    aDeg = previousA;
-                }
-                else
-                {
-                    aDeg = applyAnglePolicy(0.0, false, 0.0);
-                }
-            }
-            else
-            {
-                const double rawA = std::atan2(dy, dz) * kRadToDeg;
-                aDeg = applyAnglePolicy(rawA, hasPrevious, previousA);
-            }
-
-            const double machineX = point.x;
-            const double machineY = axisY;
-            const double machineZ = axisZ + radius;
-
-            m_controlPoints4Axis.push_back({ machineX, machineY, machineZ, aDeg });
-
-            previousA = aDeg;
-            hasPrevious = true;
-        }
-    }
-
+    m_controlPoints4Axis = *result.value;
     if (errorMessage != nullptr)
     {
         errorMessage->clear();
     }
-
     return true;
 }
