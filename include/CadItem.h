@@ -76,11 +76,11 @@ public:
     DRW::ETYPE m_type;
     // 兼容字段：文档生命周期内稳定的核心图元编号，未来迁出 CadItem。
     cadcam::geometry::EntityId m_entityId = 0;
-    // 供后续排序/后处理使用的加工顺序标记。
+    // Compatibility projection of the current ProcessPlan. Not a planning or NC source of truth.
     int m_processOrder = -1;
-    // 同一闭合连续加工组共享编号；开放或未分组图元保持 -1。
+    // Compatibility projection of the current ProcessPlan. Not a planning or NC source of truth.
     int m_processContinuousGroupId = -1;
-    // 标记当前图元是否采用反向加工方向。
+    // Compatibility projection of the current ProcessPlan. Not a planning or NC source of truth.
     bool m_isReverse = false;
     // 标记当前图元是否显式指定了闭合路径的起刀缝点参数。
     bool m_hasCustomProcessStart = false;

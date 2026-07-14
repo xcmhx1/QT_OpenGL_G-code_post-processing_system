@@ -196,6 +196,17 @@ OperationResult<QString> GGenerator::buildRotaryProgramText(const OperationConte
         ));
         return result;
     }
+    if (m_processPlan->mode != cadcam::planning::ProcessPlanMode::Rotary4Axis)
+    {
+        result.status = OperationStatus::Conflict;
+        result.addDiagnostic(makeGeneratorDiagnostic
+        (
+            context, DiagnosticCode::ProcessPlanModeMismatch, DiagnosticSeverity::Error,
+            QStringLiteral("BuildRotaryProgramText"), QStringLiteral("ValidateProcessPlan"),
+            QStringLiteral("四轴 G 代码只能使用四轴加工计划。")
+        ));
+        return result;
+    }
 
     std::optional<cadcam::geometry::Vector2d> explicitCenter;
     if (m_rotaryTubeCenterValid)
@@ -253,8 +264,21 @@ OperationResult<QString> GGenerator::buildProgramText(const OperationContext& co
     }
     if (m_generationMode == GenerationMode::Mode3D) return buildRotaryProgramText(context);
 
+    if (m_processPlan == nullptr
+        || m_processPlan->mode != cadcam::planning::ProcessPlanMode::Planar3Axis)
+    {
+        result.status = OperationStatus::Conflict;
+        result.addDiagnostic(makeGeneratorDiagnostic
+        (
+            context, DiagnosticCode::ProcessPlanModeMismatch, DiagnosticSeverity::Error,
+            QStringLiteral("BuildProgramText"), QStringLiteral("ValidateProcessPlan"),
+            QStringLiteral("三轴 G 代码需要有效的三轴加工计划。")
+        ));
+        return result;
+    }
+
     NcProgramService service;
-    auto program = service.buildPlanarProgram(*m_document, context);
+    auto program = service.buildPlanarProgram(*m_document, *m_processPlan, context);
     result.mergeDiagnostics(program);
     if (!program.succeeded() || !program.value.has_value())
     {

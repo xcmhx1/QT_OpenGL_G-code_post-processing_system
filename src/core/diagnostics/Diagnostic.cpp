@@ -95,6 +95,10 @@ QString diagnosticCodeName(DiagnosticCode code)
     case DiagnosticCode::ProcessPlanningInvariantViolation: return QStringLiteral("ProcessPlanningInvariantViolation");
     case DiagnosticCode::ProcessPlanApplyConflict: return QStringLiteral("ProcessPlanApplyConflict");
     case DiagnosticCode::ProcessPlanEntityMissing: return QStringLiteral("ProcessPlanEntityMissing");
+    case DiagnosticCode::ProcessPlanModeMismatch: return QStringLiteral("ProcessPlanModeMismatch");
+    case DiagnosticCode::PlanarPlanningInputInvalid: return QStringLiteral("PlanarPlanningInputInvalid");
+    case DiagnosticCode::PlanarPlanningNoProcessableEntities: return QStringLiteral("PlanarPlanningNoProcessableEntities");
+    case DiagnosticCode::PlanarPlanningOrderingFailed: return QStringLiteral("PlanarPlanningOrderingFailed");
     case DiagnosticCode::MachineTrajectoryInputInvalid: return QStringLiteral("MachineTrajectoryInputInvalid");
     case DiagnosticCode::MachineTrajectoryRevisionMismatch: return QStringLiteral("MachineTrajectoryRevisionMismatch");
     case DiagnosticCode::MachineTrajectoryEntityMissing: return QStringLiteral("MachineTrajectoryEntityMissing");

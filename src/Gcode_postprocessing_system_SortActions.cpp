@@ -39,15 +39,12 @@ namespace
     constexpr double kRotaryDirectionPenaltyWeight = 0.2;
     constexpr double kSortConnectionEpsilon = 1.0e-6;
     constexpr double kEndCutConnectionTolerance = 1.0;
-    constexpr double kNearGapPriorityDistance2D = 1.0;
     constexpr double kNearGapPriorityDistance3D = 1.0;
-    constexpr double kPreferredStartGapDistance2D = 1.0;
     constexpr double kPreferredStartGapDistance3D = 1.0;
     constexpr double kRotaryPlaneMatchToleranceDegrees = 3.0;
     constexpr double kSurfaceSweepBoundaryTolerance = 1.0e-4;
     constexpr double kSquareTubeSectionToleranceRatio = 0.015;
     constexpr double kSortDedupCoordinateTolerance = 1.0e-4;
-    const QVector3D kSortOrigin(0.0f, 0.0f, 0.0f);
     // The machine starts above the workpiece at this pose; use it to select the
     // left end-cut seam that requires the least initial A-axis rotation.
     const QVector3D kRotaryInitialSortOrigin(0.0f, 0.0f, 500.0f);
@@ -145,13 +142,6 @@ namespace
         }
 
         return left.z() < right.z();
-    }
-
-    double planarDistanceSquared(const QVector3D& left, const QVector3D& right)
-    {
-        const double dx = static_cast<double>(left.x()) - static_cast<double>(right.x());
-        const double dy = static_cast<double>(left.y()) - static_cast<double>(right.y());
-        return dx * dx + dy * dy;
     }
 
     double spatialDistanceSquared(const QVector3D& left, const QVector3D& right)
@@ -496,11 +486,6 @@ namespace
         return std::abs(dx) + spatialDistance + angleDistance * kRotaryAngleDistanceWeight;
     }
 
-    QVector3D flattenToSortPlane(const QVector3D& point)
-    {
-        return QVector3D(point.x(), point.y(), 0.0f);
-    }
-
     double pointToSegmentDistanceSquared(const QVector3D& point, const QVector3D& segmentStart, const QVector3D& segmentEnd)
     {
         const QVector3D segment = segmentEnd - segmentStart;
@@ -623,54 +608,9 @@ namespace
         return static_cast<double>(QVector3D::dotProduct(delta, delta));
     }
 
-    double planarSegmentToSegmentDistance(const QVector3D& firstStart, const QVector3D& firstEnd, const QVector3D& secondStart, const QVector3D& secondEnd)
-    {
-        return std::sqrt
-        (
-            segmentToSegmentDistanceSquared
-            (
-                flattenToSortPlane(firstStart),
-                flattenToSortPlane(firstEnd),
-                flattenToSortPlane(secondStart),
-                flattenToSortPlane(secondEnd)
-            )
-        );
-    }
-
     double spatialSegmentToSegmentDistance(const QVector3D& firstStart, const QVector3D& firstEnd, const QVector3D& secondStart, const QVector3D& secondEnd)
     {
         return std::sqrt(segmentToSegmentDistanceSquared(firstStart, firstEnd, secondStart, secondEnd));
-    }
-
-    double computeClosestConnectionDistance2D
-    (
-        const std::vector<ProcessConnectionSegment>& processedSegments,
-        const QVector3D& candidateStartPoint,
-        const QVector3D& candidateEndPoint
-    )
-    {
-        if (processedSegments.empty())
-        {
-            return std::numeric_limits<double>::max();
-        }
-
-        double bestDistance = std::numeric_limits<double>::max();
-
-        for (const ProcessConnectionSegment& segment : processedSegments)
-        {
-            bestDistance = std::min
-            (
-                bestDistance,
-                planarSegmentToSegmentDistance(segment.startPoint, segment.endPoint, candidateStartPoint, candidateEndPoint)
-            );
-
-            if (bestDistance <= kSortConnectionEpsilon)
-            {
-                return 0.0;
-            }
-        }
-
-        return bestDistance;
     }
 
     double computeClosestConnectionDistance3D
@@ -1224,47 +1164,6 @@ namespace
         }
 
         return 0;
-    }
-
-    QVector3D computeSweepDirection(const std::vector<CadItem*>& sortableItems)
-    {
-        bool hasAnchor = false;
-        QVector3D minPoint;
-        QVector3D maxPoint;
-
-        for (CadItem* item : sortableItems)
-        {
-            const CadProcessVisualInfo info = buildProcessVisualInfo(item);
-
-            if (!info.valid)
-            {
-                continue;
-            }
-
-            if (!hasAnchor)
-            {
-                minPoint = info.labelAnchor;
-                maxPoint = info.labelAnchor;
-                hasAnchor = true;
-                continue;
-            }
-
-            minPoint.setX(std::min(minPoint.x(), info.labelAnchor.x()));
-            minPoint.setY(std::min(minPoint.y(), info.labelAnchor.y()));
-            maxPoint.setX(std::max(maxPoint.x(), info.labelAnchor.x()));
-            maxPoint.setY(std::max(maxPoint.y(), info.labelAnchor.y()));
-        }
-
-        if (!hasAnchor)
-        {
-            return normalizeOrZero(QVector3D(1.0f, 1.0f, 0.0f));
-        }
-
-        const QVector3D diagonal(maxPoint.x() - minPoint.x(), maxPoint.y() - minPoint.y(), 0.0f);
-        const QVector3D normalized = normalizeOrZero(diagonal);
-        return normalized.lengthSquared() > kSortEpsilon
-            ? normalized
-            : normalizeOrZero(QVector3D(1.0f, 1.0f, 0.0f));
     }
 
     QVector3D computeRotarySweepDirection(const std::vector<CadItem*>& sortableItems, const GProfileRotaryAxisConfig& config)
@@ -2111,57 +2010,6 @@ namespace
         return result;
     }
 
-    bool tryFindNearestNextStartPoint
-    (
-        const std::vector<CadItem*>& sortableItems,
-        const std::vector<bool>& visited,
-        SortStrategy strategy,
-        size_t currentIndex,
-        const QVector3D& currentEndPoint,
-        QVector3D& nextStartPoint
-    )
-    {
-        int bestIndex = -1;
-        double bestDistance = std::numeric_limits<double>::max();
-        QVector3D bestStartPoint;
-
-        for (size_t index = 0; index < sortableItems.size(); ++index)
-        {
-            if (index == currentIndex || visited[index])
-            {
-                continue;
-            }
-
-            const std::vector<ProcessPathOption> options = buildPathOptionsForItem(sortableItems[index], strategy);
-
-            for (const ProcessPathOption& option : options)
-            {
-                const double distance = std::sqrt(planarDistanceSquared(option.startPoint, currentEndPoint));
-                const bool shouldReplace = bestIndex < 0
-                    || distance < bestDistance - kSortEpsilon
-                    || (std::abs(distance - bestDistance) <= kSortEpsilon
-                        && isPointLexicographicallyLess(option.startPoint, bestStartPoint));
-
-                if (!shouldReplace)
-                {
-                    continue;
-                }
-
-                bestIndex = static_cast<int>(index);
-                bestDistance = distance;
-                bestStartPoint = option.startPoint;
-            }
-        }
-
-        if (bestIndex < 0)
-        {
-            return false;
-        }
-
-        nextStartPoint = bestStartPoint;
-        return true;
-    }
-
     bool tryFindNearestNextStartPoint3D
     (
         const std::vector<CadItem*>& sortableItems,
@@ -2212,153 +2060,6 @@ namespace
 
         nextStartPoint = bestStartPoint;
         return true;
-    }
-
-    SortCandidate chooseNext2DSortCandidate
-    (
-        const std::vector<CadItem*>& sortableItems,
-        const std::vector<bool>& visited,
-        const std::vector<ProcessConnectionSegment>& processedSegments,
-        const GapStartSelectionContext& gapStartContext,
-        SortStrategy strategy,
-        int currentComponentId,
-        int restrictedComponentId,
-        bool preferPreferredGapStart,
-        bool hasCurrentEndPoint,
-        const QVector3D& currentEndPoint,
-        const QVector3D& sweepDirection
-    )
-    {
-        SortCandidate bestCandidate;
-        const std::vector<bool> visitedComponents = buildVisitedComponentMask(visited, gapStartContext.componentIds);
-        const bool mustStayInCurrentComponent = hasCurrentEndPoint
-            && hasRemainingUnvisitedInComponent(visited, gapStartContext.componentIds, currentComponentId);
-        const QVector3D referencePoint = hasCurrentEndPoint ? currentEndPoint : kSortOrigin;
-        const QVector3D normalizedSweepDirection = normalizeOrZero(sweepDirection);
-        const double referenceProgress = static_cast<double>(QVector3D::dotProduct(referencePoint, normalizedSweepDirection));
-
-        for (size_t index = 0; index < sortableItems.size(); ++index)
-        {
-            if (visited[index])
-            {
-                continue;
-            }
-
-            const std::vector<ProcessPathOption> options = buildPathOptionsForItem(sortableItems[index], strategy);
-
-            for (const ProcessPathOption& option : options)
-            {
-                const int componentId = index < gapStartContext.componentIds.size()
-                    ? gapStartContext.componentIds[index]
-                    : -1;
-
-                if (mustStayInCurrentComponent && componentId != currentComponentId)
-                {
-                    continue;
-                }
-
-                if (restrictedComponentId >= 0 && componentId != restrictedComponentId)
-                {
-                    continue;
-                }
-
-                const std::vector<QVector3D> emptyPreferredPoints;
-                const std::vector<QVector3D>& componentPreferredPoints =
-                    (componentId >= 0 && static_cast<size_t>(componentId) < gapStartContext.preferredStartPointsByComponent.size())
-                    ? gapStartContext.preferredStartPointsByComponent[static_cast<size_t>(componentId)]
-                    : emptyPreferredPoints;
-                const double connectionDistance = computeClosestConnectionDistance2D(processedSegments, option.startPoint, option.endPoint);
-                const bool directlyConnected = connectionDistance <= kSortConnectionEpsilon;
-                const bool bestDirectlyConnected = bestCandidate.connectionDistance <= kSortConnectionEpsilon;
-                const double entryDistance = std::sqrt(planarDistanceSquared(option.startPoint, referencePoint));
-                const double currentGapDistance = hasCurrentEndPoint
-                    ? std::sqrt(planarDistanceSquared(option.startPoint, currentEndPoint))
-                    : entryDistance;
-                const bool nearCurrentGap = hasCurrentEndPoint && currentGapDistance <= kNearGapPriorityDistance2D;
-                const bool bestNearCurrentGap = hasCurrentEndPoint && bestCandidate.gapDistance <= kNearGapPriorityDistance2D;
-                const bool preferredGapStart = preferPreferredGapStart
-                    && componentId == restrictedComponentId
-                    && isPointNearAnyPreferredStart(option.startPoint, componentPreferredPoints, kPreferredStartGapDistance2D);
-                const bool bestPreferredGapStart =
-                    preferPreferredGapStart
-                    && restrictedComponentId >= 0
-                    && bestCandidate.index >= 0
-                    && static_cast<size_t>(bestCandidate.index) < gapStartContext.componentIds.size()
-                    && gapStartContext.componentIds[static_cast<size_t>(bestCandidate.index)] == restrictedComponentId
-                    && static_cast<size_t>(restrictedComponentId) < gapStartContext.preferredStartPointsByComponent.size()
-                    && isPointNearAnyPreferredStart
-                    (
-                        bestCandidate.startPoint,
-                        gapStartContext.preferredStartPointsByComponent[static_cast<size_t>(restrictedComponentId)],
-                        kPreferredStartGapDistance2D
-                    );
-                QVector3D nextStartPoint;
-                const bool hasNextStartPoint = tryFindNearestNextStartPoint
-                (
-                    sortableItems,
-                    visited,
-                    strategy,
-                    index,
-                    option.endPoint,
-                    nextStartPoint
-                );
-                const double nextDistance = hasNextStartPoint
-                    ? std::sqrt(planarDistanceSquared(nextStartPoint, option.endPoint))
-                    : 0.0;
-                const double candidateProgress = static_cast<double>(QVector3D::dotProduct(option.startPoint, normalizedSweepDirection));
-                const double backtrackDistance = hasCurrentEndPoint && normalizedSweepDirection.lengthSquared() > kSortEpsilon
-                    ? std::max(0.0, referenceProgress - candidateProgress)
-                    : 0.0;
-                const double continuityPenalty =
-                    movementContinuityPenalty(option.startPoint - referencePoint, option.startTangent)
-                    + (hasNextStartPoint ? movementContinuityPenalty(nextStartPoint - option.endPoint, option.endTangent) : 0.0);
-                const double continuityScale = std::max(1.0, 0.5 * (entryDistance + nextDistance));
-                const double optionScore = entryDistance
-                    + nextDistance * kNextDistanceWeight
-                    + backtrackDistance * kBacktrackPenaltyWeight
-                    + continuityScale * kDirectionPenaltyWeight * continuityPenalty;
-
-                const bool shouldReplace = bestCandidate.index < 0
-                    || (preferPreferredGapStart && preferredGapStart && !bestPreferredGapStart)
-                    || (preferPreferredGapStart
-                        && preferredGapStart == bestPreferredGapStart
-                        && (entryDistance < bestCandidate.priorityDistance - kSortEpsilon
-                            || (std::abs(entryDistance - bestCandidate.priorityDistance) <= kSortEpsilon
-                                && (optionScore < bestCandidate.score - kSortEpsilon
-                                    || (std::abs(optionScore - bestCandidate.score) <= kSortEpsilon
-                                        && isPointLexicographicallyLess(option.startPoint, bestCandidate.startPoint))))))
-                    || (nearCurrentGap && !bestNearCurrentGap)
-                    || (directlyConnected && !bestDirectlyConnected)
-                    || (nearCurrentGap == bestNearCurrentGap
-                        && directlyConnected == bestDirectlyConnected
-                        && (!preferPreferredGapStart || preferredGapStart == bestPreferredGapStart)
-                        && (connectionDistance < bestCandidate.connectionDistance - kSortEpsilon
-                            || (std::abs(connectionDistance - bestCandidate.connectionDistance) <= kSortEpsilon
-                                && (optionScore < bestCandidate.score - kSortEpsilon
-                                    || (std::abs(optionScore - bestCandidate.score) <= kSortEpsilon
-                                        && (entryDistance < bestCandidate.priorityDistance - kSortEpsilon
-                                            || (std::abs(entryDistance - bestCandidate.priorityDistance) <= kSortEpsilon
-                                                && isPointLexicographicallyLess(option.startPoint, bestCandidate.startPoint))))))));
-
-                if (!shouldReplace)
-                {
-                    continue;
-                }
-
-                bestCandidate.index = static_cast<int>(index);
-                bestCandidate.reverse = option.reverse;
-                bestCandidate.hasCustomStart = option.hasCustomStart;
-                bestCandidate.processStartParameter = option.processStartParameter;
-                bestCandidate.connectionDistance = connectionDistance;
-                bestCandidate.priorityDistance = entryDistance;
-                bestCandidate.gapDistance = currentGapDistance;
-                bestCandidate.score = optionScore;
-                bestCandidate.startPoint = option.startPoint;
-                bestCandidate.endPoint = option.endPoint;
-            }
-        }
-
-        return bestCandidate;
     }
 
     SortCandidate chooseNext3DSortCandidate
@@ -2590,20 +2291,6 @@ namespace
         return bestCandidate;
     }
 
-    int nextProcessOrder(const CadDocument& document)
-    {
-        int maxOrder = -1;
-
-        for (const std::unique_ptr<CadItem>& entity : document.m_entities)
-        {
-            if (entity != nullptr)
-            {
-                maxOrder = std::max(maxOrder, entity->m_processOrder);
-            }
-        }
-
-        return maxOrder + 1;
-    }
 }
 
 bool Gcode_postprocessing_system::sortEntitiesByCurrentMode(bool smartSort)
@@ -3578,315 +3265,79 @@ int Gcode_postprocessing_system::refreshWasteProcessingExclusions()
 
 bool Gcode_postprocessing_system::sortEntitiesByCurrentDirection()
 {
-    if (m_document.m_entities.empty())
-    {
-        QMessageBox::warning(this, QStringLiteral("3轴排序"), QStringLiteral("当前文档为空，无法执行排序。"));
-        return false;
-    }
-
-    std::vector<CadItem*> sortableItems;
-
-    for (const std::unique_ptr<CadItem>& entity : m_document.m_entities)
-    {
-        if (entity == nullptr)
-        {
-            continue;
-        }
-
-        const CadProcessVisualInfo info = buildProcessVisualInfo(entity.get());
-
-        if (!info.valid)
-        {
-            continue;
-        }
-
-        sortableItems.push_back(entity.get());
-    }
-
-    const SortableDedupResult dedupResult = deduplicateSortableItems(sortableItems);
-
-    if (!dedupResult.duplicateItems.isEmpty() && !m_editer.deleteEntities(dedupResult.duplicateItems))
-    {
-        QMessageBox::warning(this, QStringLiteral("3轴排序"), QStringLiteral("重复图元自动去重失败，排序已中止。"));
-        return false;
-    }
-
-    if (sortableItems.empty())
-    {
-        QMessageBox::warning(this, QStringLiteral("3轴排序"), QStringLiteral("当前文档中没有可参与 G 代码排序的图元。"));
-        return false;
-    }
-
-    const QVector3D sweepDirection = computeSweepDirection(sortableItems);
-    const GapStartSelectionContext gapStartContext = buildGapStartSelectionContext(sortableItems, kPreferredStartGapDistance2D);
-    std::vector<CadEditer::ProcessStateUpdate> processUpdates;
-    std::vector<ProcessConnectionSegment> processedSegments;
-    std::vector<bool> visited(sortableItems.size(), false);
-
-    processUpdates.reserve(sortableItems.size());
-    processedSegments.reserve(sortableItems.size());
-
-    bool hasCurrentEndPoint = false;
-    int currentComponentId = -1;
-    QVector3D currentEndPoint;
-
-    for (size_t order = 0; order < sortableItems.size(); ++order)
-    {
-        SortCandidate bestCandidate = chooseNext2DSortCandidate
-        (
-            sortableItems,
-            visited,
-            processedSegments,
-            gapStartContext,
-            SortStrategy::KeepDirection,
-            currentComponentId,
-            -1,
-            false,
-            hasCurrentEndPoint,
-            currentEndPoint,
-            sweepDirection
-        );
-
-        const std::vector<bool> visitedComponents = buildVisitedComponentMask(visited, gapStartContext.componentIds);
-        const int selectedComponentId =
-            bestCandidate.index >= 0 && static_cast<size_t>(bestCandidate.index) < gapStartContext.componentIds.size()
-            ? gapStartContext.componentIds[static_cast<size_t>(bestCandidate.index)]
-            : -1;
-        const bool enteringFreshPreferredComponent =
-            selectedComponentId >= 0
-            && static_cast<size_t>(selectedComponentId) < visitedComponents.size()
-            && !visitedComponents[static_cast<size_t>(selectedComponentId)]
-            && static_cast<size_t>(selectedComponentId) < gapStartContext.preferredStartPointsByComponent.size()
-            && !gapStartContext.preferredStartPointsByComponent[static_cast<size_t>(selectedComponentId)].empty();
-
-        if (enteringFreshPreferredComponent)
-        {
-            bestCandidate = chooseNext2DSortCandidate
-            (
-                sortableItems,
-                visited,
-                processedSegments,
-                gapStartContext,
-                SortStrategy::KeepDirection,
-                currentComponentId,
-                selectedComponentId,
-                true,
-                hasCurrentEndPoint,
-                currentEndPoint,
-                sweepDirection
-            );
-        }
-
-        if (bestCandidate.index < 0)
-        {
-            QMessageBox::warning(this, QStringLiteral("3轴排序"), QStringLiteral("排序过程中出现无效图元，排序已中止。"));
-            return false;
-        }
-
-        visited[static_cast<size_t>(bestCandidate.index)] = true;
-        processUpdates.push_back
-        ({
-            sortableItems[static_cast<size_t>(bestCandidate.index)],
-            static_cast<int>(order),
-            sortableItems[static_cast<size_t>(bestCandidate.index)]->m_isReverse,
-            sortableItems[static_cast<size_t>(bestCandidate.index)]->m_hasCustomProcessStart,
-            sortableItems[static_cast<size_t>(bestCandidate.index)]->m_processStartParameter
-        });
-        hasCurrentEndPoint = true;
-        currentComponentId =
-            static_cast<size_t>(bestCandidate.index) < gapStartContext.componentIds.size()
-            ? gapStartContext.componentIds[static_cast<size_t>(bestCandidate.index)]
-            : -1;
-        currentEndPoint = bestCandidate.endPoint;
-        processedSegments.push_back({ bestCandidate.startPoint, bestCandidate.endPoint });
-    }
-
-    if (!m_editer.applyEntityProcessStates(processUpdates))
-    {
-        QMessageBox::warning(this, QStringLiteral("3轴排序"), QStringLiteral("排序结果写入失败。"));
-        return false;
-    }
-
-    ui->openGLWidget->appendCommandMessage
-    (
-        QStringLiteral("3轴排序完成，共更新 %1 个图元的加工顺序，首件已按最接近原点的当前起点选取，并保留当前加工方向设置。%2")
-            .arg(processUpdates.size())
-            .arg(dedupResult.removedCount > 0 ? QStringLiteral("已自动删除 %1 个重复图元。").arg(dedupResult.removedCount) : QString())
-    );
-    ui->openGLWidget->refreshCommandPrompt();
-    statusBar()->showMessage(QStringLiteral("3轴排序完成，共更新 %1 个图元").arg(processUpdates.size()), 5000);
-    return true;
+    return sortEntitiesWithProcessPlan2D(QStringLiteral("3轴排序"));
 }
 
 bool Gcode_postprocessing_system::assignSelectedEntityProcessOrder()
 {
-    CadItem* selectedItem = ui->openGLWidget->selectedEntity();
-
-    if (selectedItem == nullptr)
-    {
-        QMessageBox::warning(this, QStringLiteral("排序"), QStringLiteral("请先选择一个图元。"));
-        return false;
-    }
-
-    if (!isProcessVisualizable(selectedItem))
-    {
-        QMessageBox::warning(this, QStringLiteral("排序"), QStringLiteral("当前图元类型暂不支持加工排序。"));
-        return false;
-    }
-
-    const int processOrder = nextProcessOrder(m_document);
-
-    if (!m_editer.setEntityProcessOrder(selectedItem, processOrder))
-    {
-        QMessageBox::warning(this, QStringLiteral("排序"), QStringLiteral("当前图元加工顺序设置失败。"));
-        return false;
-    }
-
-    ui->openGLWidget->appendCommandMessage(QStringLiteral("当前选中图元已设置为第 %1 个加工对象。").arg(processOrder + 1));
-    ui->openGLWidget->refreshCommandPrompt();
-    statusBar()->showMessage(QStringLiteral("已设置加工顺序 #%1").arg(processOrder + 1), 5000);
-    return true;
+    return sortEntitiesWithProcessPlan2D(QStringLiteral("3轴排序"));
 }
 
 bool Gcode_postprocessing_system::smartSortEntities()
 {
+    return sortEntitiesWithProcessPlan2D(QStringLiteral("3轴智能排序"));
+}
+
+bool Gcode_postprocessing_system::sortEntitiesWithProcessPlan2D(const QString& commandTitle)
+{
     if (m_document.m_entities.empty())
     {
-        QMessageBox::warning(this, QStringLiteral("3轴智能排序"), QStringLiteral("当前文档为空，无法执行智能排序。"));
+        QMessageBox::warning(this, commandTitle, QStringLiteral("当前文档为空，无法执行排序。"));
         return false;
     }
 
-    std::vector<CadItem*> sortableItems;
-
+    std::vector<CadItem*> dedupCandidates;
     for (const std::unique_ptr<CadItem>& entity : m_document.m_entities)
     {
-        if (entity == nullptr)
-        {
-            continue;
-        }
-
-        const CadProcessVisualInfo info = buildProcessVisualInfo(entity.get());
-
-        if (!info.valid)
-        {
-            continue;
-        }
-
-        sortableItems.push_back(entity.get());
+        if (entity != nullptr && buildProcessVisualInfo(entity.get()).valid)
+            dedupCandidates.push_back(entity.get());
     }
-
-    const SortableDedupResult dedupResult = deduplicateSortableItems(sortableItems);
-
-    if (!dedupResult.duplicateItems.isEmpty() && !m_editer.deleteEntities(dedupResult.duplicateItems))
+    const SortableDedupResult dedupResult = deduplicateSortableItems(dedupCandidates);
+    if (!dedupResult.duplicateItems.isEmpty()
+        && !m_editer.deleteEntities(dedupResult.duplicateItems))
     {
-        QMessageBox::warning(this, QStringLiteral("3轴智能排序"), QStringLiteral("重复图元自动去重失败，排序已中止。"));
+        QMessageBox::warning(this, commandTitle, QStringLiteral("重复图元自动去重失败，排序已中止。"));
         return false;
     }
 
-    if (sortableItems.empty())
+    cadcam::planning::PlanarProcessPlanningPolicy policy;
+    policy.allowReverse = true;
+    policy.preserveUserDirection = true;
+    policy.initialPosition = { 0.0, 0.0, 0.0 };
+    policy.hasInitialPosition = true;
+    policy.numericalEpsilon = 1.0e-5;
+    const OperationContext context = createOperationContext(QStringLiteral("BuildAndApplyPlanarProcessPlan"));
+    ProcessPlanningService service;
+    auto plan = service.buildPlanarPlan(m_document, policy, context);
+    if (!plan.succeeded() || !plan.value.has_value())
     {
-        QMessageBox::warning(this, QStringLiteral("3轴智能排序"), QStringLiteral("当前文档中没有可参与 G 代码排序的图元。"));
+        QString message = QStringLiteral("无法生成三轴加工计划。");
+        for (const Diagnostic& diagnostic : plan.diagnostics)
+        {
+            if (!diagnostic.userMessage.trimmed().isEmpty())
+            {
+                message = diagnostic.userMessage;
+                break;
+            }
+        }
+        ui->openGLWidget->appendCommandMessage(QStringLiteral("[加工计划] %1").arg(message));
+        ui->openGLWidget->refreshCommandPrompt();
+        statusBar()->showMessage(message, 8000);
+        QMessageBox::warning(this, commandTitle, message);
         return false;
     }
 
-    const QVector3D sweepDirection = computeSweepDirection(sortableItems);
-    const GapStartSelectionContext gapStartContext = buildGapStartSelectionContext(sortableItems, kPreferredStartGapDistance2D);
-    std::vector<CadEditer::ProcessStateUpdate> processUpdates;
-    std::vector<ProcessConnectionSegment> processedSegments;
-    std::vector<bool> visited(sortableItems.size(), false);
-
-    processUpdates.reserve(sortableItems.size());
-    processedSegments.reserve(sortableItems.size());
-
-    bool hasCurrentEndPoint = false;
-    int currentComponentId = -1;
-    QVector3D currentEndPoint;
-
-    for (size_t order = 0; order < sortableItems.size(); ++order)
-    {
-        SortCandidate bestCandidate = chooseNext2DSortCandidate
-        (
-            sortableItems,
-            visited,
-            processedSegments,
-            gapStartContext,
-            SortStrategy::Smart,
-            currentComponentId,
-            -1,
-            false,
-            hasCurrentEndPoint,
-            currentEndPoint,
-            sweepDirection
-        );
-
-        const std::vector<bool> visitedComponents = buildVisitedComponentMask(visited, gapStartContext.componentIds);
-        const int selectedComponentId =
-            bestCandidate.index >= 0 && static_cast<size_t>(bestCandidate.index) < gapStartContext.componentIds.size()
-            ? gapStartContext.componentIds[static_cast<size_t>(bestCandidate.index)]
-            : -1;
-        const bool enteringFreshPreferredComponent =
-            selectedComponentId >= 0
-            && static_cast<size_t>(selectedComponentId) < visitedComponents.size()
-            && !visitedComponents[static_cast<size_t>(selectedComponentId)]
-            && static_cast<size_t>(selectedComponentId) < gapStartContext.preferredStartPointsByComponent.size()
-            && !gapStartContext.preferredStartPointsByComponent[static_cast<size_t>(selectedComponentId)].empty();
-
-        if (enteringFreshPreferredComponent)
-        {
-            bestCandidate = chooseNext2DSortCandidate
-            (
-                sortableItems,
-                visited,
-                processedSegments,
-                gapStartContext,
-                SortStrategy::Smart,
-                currentComponentId,
-                selectedComponentId,
-                true,
-                hasCurrentEndPoint,
-                currentEndPoint,
-                sweepDirection
-            );
-        }
-
-        if (bestCandidate.index < 0)
-        {
-            QMessageBox::warning(this, QStringLiteral("3轴智能排序"), QStringLiteral("智能排序过程中出现无效图元，排序已中止。"));
-            return false;
-        }
-
-        visited[static_cast<size_t>(bestCandidate.index)] = true;
-        processUpdates.push_back
-        ({
-            sortableItems[static_cast<size_t>(bestCandidate.index)],
-            static_cast<int>(order),
-            bestCandidate.reverse,
-            bestCandidate.hasCustomStart,
-            bestCandidate.processStartParameter
-        });
-        hasCurrentEndPoint = true;
-        currentComponentId =
-            static_cast<size_t>(bestCandidate.index) < gapStartContext.componentIds.size()
-            ? gapStartContext.componentIds[static_cast<size_t>(bestCandidate.index)]
-            : -1;
-        currentEndPoint = bestCandidate.endPoint;
-        processedSegments.push_back({ bestCandidate.startPoint, bestCandidate.endPoint });
-    }
-
-    if (!m_editer.applyEntityProcessStates(processUpdates))
-    {
-        QMessageBox::warning(this, QStringLiteral("3轴智能排序"), QStringLiteral("智能排序结果写入失败。"));
-        return false;
-    }
-
-    ui->openGLWidget->appendCommandMessage
-    (
-        QStringLiteral("3轴智能排序完成，共更新 %1 个图元的加工顺序，并已对闭合图元的方向/起刀缝点做连续性优化。%2")
-            .arg(processUpdates.size())
-            .arg(dedupResult.removedCount > 0 ? QStringLiteral("已自动删除 %1 个重复图元。").arg(dedupResult.removedCount) : QString())
-    );
+    m_currentProcessPlan = std::move(*plan.value);
+    const QString message = QStringLiteral("%1完成：最近距离排序，共安排 %2 个图元，排除 %3 个图元。%4")
+        .arg(commandTitle)
+        .arg(m_currentProcessPlan->assignments.size())
+        .arg(m_currentProcessPlan->exclusions.size())
+        .arg(dedupResult.removedCount > 0
+            ? QStringLiteral("已自动删除 %1 个重复图元。").arg(dedupResult.removedCount)
+            : QString());
+    ui->openGLWidget->appendCommandMessage(message);
     ui->openGLWidget->refreshCommandPrompt();
-    statusBar()->showMessage(QStringLiteral("3轴智能排序完成，共更新 %1 个图元").arg(processUpdates.size()), 5000);
+    statusBar()->showMessage(message, 5000);
     return true;
 }
 
@@ -3938,7 +3389,7 @@ bool Gcode_postprocessing_system::sortEntitiesWithProcessPlan3D(const QString& c
     const std::optional<cadcam::machining::TubeSectionModel> section =
         m_rotaryTubeSectionModel.coreModel;
     ProcessPlanningService service;
-    auto planResult = service.build(m_document, section, policy, context);
+    auto planResult = service.buildRotaryPlan(m_document, section, policy, context);
     if (!planResult.succeeded() || !planResult.value.has_value())
     {
         QString message = QStringLiteral("无法生成加工计划。");

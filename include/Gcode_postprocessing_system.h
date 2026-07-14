@@ -141,6 +141,7 @@ private:
     bool sortEntitiesByCurrentDirection();
     bool assignSelectedEntityProcessOrder();
     bool smartSortEntities();
+    bool sortEntitiesWithProcessPlan2D(const QString& commandTitle);
     bool sortEntitiesByCurrentDirection3D();
     bool smartSortEntities3D();
     bool sortEntitiesWithProcessPlan3D(const QString& commandTitle);
@@ -161,7 +162,6 @@ private:
     int refreshWasteProcessingExclusions();
     void invalidateProcessOrdersAfterEndCutChange();
     void invalidateCurrentProcessPlan();
-    bool hasCompleteProcessOrderForExport(GGenerator::GenerationMode generationMode) const;
 
 private:
     Ui::Gcode_postprocessing_systemClass* ui = nullptr;

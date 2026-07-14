@@ -3,6 +3,7 @@
 #include "core/diagnostics/OperationContext.h"
 #include "core/diagnostics/OperationResult.h"
 #include "core/nc/PlanarNcProgramBuilder.h"
+#include "core/planning/ProcessPlan.h"
 
 #include <cstdint>
 #include <vector>
@@ -21,6 +22,7 @@ public:
     static OperationResult<PlanarNcCapture> capture
     (
         CadDocument& document,
+        const cadcam::planning::ProcessPlan& plan,
         const OperationContext& context
     );
 };

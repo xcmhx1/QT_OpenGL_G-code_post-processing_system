@@ -268,6 +268,18 @@ OperationReport LegacyProcessPlanAdapter::apply
 ) const
 {
     OperationReport result;
+    if (plan.mode != cadcam::planning::ProcessPlanMode::Planar3Axis
+        && plan.mode != cadcam::planning::ProcessPlanMode::Rotary4Axis)
+    {
+        result.status = OperationStatus::Conflict;
+        result.addDiagnostic(adapterDiagnostic
+        (
+            context, DiagnosticCode::ProcessPlanModeMismatch,
+            QStringLiteral("加工计划模式无效，计划未应用。"),
+            QStringLiteral("ProcessPlan mode is invalid."), document.contentRevision()
+        ));
+        return result;
+    }
     if (QThread::currentThread() != document.thread() || document.contentRevision() != plan.contentRevision)
     {
         result.status = OperationStatus::Conflict;
@@ -366,6 +378,8 @@ OperationReport LegacyProcessPlanAdapter::apply
     for (const cadcam::planning::ProcessAssignment& assignment : plan.assignments)
     {
         if (assignment.processOrder < 0 || items.find(assignment.entityId) == items.end()
+            || (plan.mode == cadcam::planning::ProcessPlanMode::Planar3Axis
+                && assignment.continuousGroupId != -1)
             || !referenced.insert(assignment.entityId).second
             || !processOrders.insert(assignment.processOrder).second)
         {
@@ -414,6 +428,9 @@ OperationReport LegacyProcessPlanAdapter::apply
         (void)entityId;
         item->m_processOrder = -1;
         item->m_processContinuousGroupId = -1;
+        item->m_isReverse = false;
+        item->m_hasCustomProcessStart = false;
+        item->m_processStartParameter = 0.0;
         item->m_excludedFromProcessing = false;
     }
     for (const cadcam::planning::ProcessExclusion& exclusion : plan.exclusions)

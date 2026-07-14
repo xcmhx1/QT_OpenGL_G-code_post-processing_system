@@ -178,6 +178,7 @@ void CadViewer::renderRotaryEndCutLabels()
 
 std::vector<CadViewer::ProcessOrderLabelOverlay> CadViewer::buildProcessOrderLabelOverlays() const
 {
+    // Compatibility projection of the current ProcessPlan. Not a planning or NC source of truth.
     if (!m_processVisualsVisible || !m_processOrderVisible)
     {
         return {};

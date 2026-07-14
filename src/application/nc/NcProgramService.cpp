@@ -10,11 +10,26 @@
 OperationResult<cadcam::nc::NcProgram> NcProgramService::buildPlanarProgram
 (
     CadDocument& document,
+    const cadcam::planning::ProcessPlan& processPlan,
     const OperationContext& context
 ) const
 {
     OperationResult<cadcam::nc::NcProgram> result;
-    auto capture = DocumentPlanarNcInputAdapter::capture(document, context);
+    if (processPlan.mode != cadcam::planning::ProcessPlanMode::Planar3Axis)
+    {
+        result.status = OperationStatus::Conflict;
+        Diagnostic diagnostic;
+        diagnostic.code = DiagnosticCode::ProcessPlanModeMismatch;
+        diagnostic.severity = DiagnosticSeverity::Error;
+        diagnostic.component = QStringLiteral("NcProgramService");
+        diagnostic.operation = context.operationName;
+        diagnostic.stage = QStringLiteral("validate-planar-plan-mode");
+        diagnostic.userMessage = QStringLiteral("三轴 NC 只能使用三轴加工计划。");
+        diagnostic.correlationId = context.correlationId;
+        result.addDiagnostic(diagnostic);
+        return result;
+    }
+    auto capture = DocumentPlanarNcInputAdapter::capture(document, processPlan, context);
     result.mergeDiagnostics(capture);
     if (!capture.succeeded() || !capture.value.has_value())
     {
@@ -22,7 +37,8 @@ OperationResult<cadcam::nc::NcProgram> NcProgramService::buildPlanarProgram
         return result;
     }
 
-    if (capture.value->contentRevision != document.contentRevision())
+    if (capture.value->contentRevision != document.contentRevision()
+        || capture.value->contentRevision != processPlan.contentRevision)
     {
         result.status = OperationStatus::Conflict;
         Diagnostic diagnostic;

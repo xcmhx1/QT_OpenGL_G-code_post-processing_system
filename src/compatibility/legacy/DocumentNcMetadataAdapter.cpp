@@ -133,6 +133,13 @@ OperationResult<std::vector<cadcam::nc::NcEntityMetadata>> DocumentNcMetadataAda
 )
 {
     OperationResult<std::vector<cadcam::nc::NcEntityMetadata>> result;
+    if (plan.mode != cadcam::planning::ProcessPlanMode::Rotary4Axis)
+    {
+        result.status = OperationStatus::Conflict;
+        result.addDiagnostic(adapterDiagnostic(DiagnosticCode::ProcessPlanModeMismatch,
+            QStringLiteral("四轴 NC 元数据只能从四轴加工计划捕获。"), context));
+        return result;
+    }
     if (document.thread() != QThread::currentThread())
     {
         result.status = OperationStatus::Conflict;

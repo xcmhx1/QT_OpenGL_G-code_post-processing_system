@@ -162,10 +162,13 @@ namespace
         GGenerator generator;
         std::optional<cadcam::planning::ProcessPlan> plan;
         std::optional<cadcam::machining::TubeSectionModel> section;
-        if (mode == GGenerator::GenerationMode::Mode3D)
+        if (!document.m_entities.empty())
         {
             plan.emplace();
             plan->contentRevision = document.contentRevision();
+            plan->mode = mode == GGenerator::GenerationMode::Mode3D
+                ? cadcam::planning::ProcessPlanMode::Rotary4Axis
+                : cadcam::planning::ProcessPlanMode::Planar3Axis;
             for (const auto& item : document.m_entities)
             {
                 if (item == nullptr || item->m_processOrder < 0) continue;
@@ -174,6 +177,9 @@ namespace
                        item->m_isReverse, item->m_hasCustomProcessStart
                            ? std::optional<double>(item->m_processStartParameter) : std::nullopt });
             }
+        }
+        if (mode == GGenerator::GenerationMode::Mode3D)
+        {
             section.emplace();
             section->contentRevision = document.contentRevision();
             section->geometry.centerY = 0.0;

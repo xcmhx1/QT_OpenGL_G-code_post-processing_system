@@ -79,6 +79,14 @@ OperationResult<cadcam::machine::MachineTrajectory> MachineTrajectoryService::bu
 {
     using namespace cadcam;
     OperationResult<machine::MachineTrajectory> result;
+    if (plan.mode != planning::ProcessPlanMode::Rotary4Axis)
+    {
+        result.status = OperationStatus::Conflict;
+        result.addDiagnostic(serviceDiagnostic(DiagnosticCode::ProcessPlanModeMismatch,
+            QStringLiteral("四轴轨迹只能使用四轴加工计划。"),
+            taskContext.operationContext));
+        return result;
+    }
     DocumentGeometrySnapshotBuilder snapshotBuilder;
     auto captured = snapshotBuilder.capture(document, taskContext.operationContext);
     result.mergeDiagnostics(captured);

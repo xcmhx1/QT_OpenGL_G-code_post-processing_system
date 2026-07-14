@@ -14,6 +14,7 @@ public:
     OperationResult<cadcam::nc::NcProgram> buildPlanarProgram
     (
         CadDocument& document,
+        const cadcam::planning::ProcessPlan& processPlan,
         const OperationContext& context
     ) const;
 

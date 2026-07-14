@@ -12,6 +12,7 @@
 #include "compatibility/legacy/LegacyProcessPlanAdapter.h"
 #include "compatibility/legacy/LegacyTopologyParityVerifier.h"
 #include "core/machining/TubeCutBoundary.h"
+#include "core/planning/PlanarProcessPlanBuilder.h"
 #include "core/planning/ProcessPlanBuilder.h"
 #include "core/topology/PathTopology.h"
 
@@ -1372,6 +1373,126 @@ namespace
         }
     }
 
+    void testPlanarProcessPlanningCore()
+    {
+        const OperationContext context = createOperationContext
+            (QStringLiteral("planar-process-planning-core-test"));
+        auto entity = []
+        (
+            EntityId id,
+            std::size_t sourceIndex,
+            SourceGeometryKind kind,
+            std::initializer_list<Vector3d> points,
+            bool closed = false,
+            std::optional<double> startParameter = std::nullopt
+        )
+        {
+            PlanarPlanningEntity value;
+            value.entityId = id;
+            value.sourceIndex = sourceIndex;
+            value.sourceKind = kind;
+            value.sourceEntity.id = id;
+            value.sourceEntity.kind = kind;
+            value.path.sourceEntityId = id;
+            value.path.sourceKind = kind;
+            value.path.closed = closed;
+            std::size_t parameter = 0U;
+            for (const Vector3d& point : points)
+                value.path.vertices.push_back({ point, static_cast<double>(parameter++) });
+            value.customStartParameter = startParameter;
+            return value;
+        };
+        auto assignment = [](const ProcessPlan& plan, EntityId id)
+            -> const ProcessAssignment*
+        {
+            const auto found = std::find_if(plan.assignments.cbegin(), plan.assignments.cend(),
+                [id](const ProcessAssignment& value) { return value.entityId == id; });
+            return found == plan.assignments.cend() ? nullptr : &*found;
+        };
+
+        PlanarProcessPlanningPolicy policy;
+        policy.allowReverse = true;
+        policy.preserveUserDirection = true;
+        policy.hasInitialPosition = true;
+        policy.initialPosition = { 0.0, 0.0, 0.0 };
+
+        PlanarProcessPlanningInput nearestInput;
+        nearestInput.contentRevision = 7U;
+        nearestInput.entities =
+        {
+            entity(2000U, 0U, SourceGeometryKind::Line,
+                { { 10.0, 0.0, 0.0 }, { 11.0, 0.0, 0.0 } }),
+            entity(2001U, 1U, SourceGeometryKind::Line,
+                { { 3.0, 0.0, 0.0 }, { 4.0, 0.0, 0.0 } }),
+            entity(2002U, 2U, SourceGeometryKind::Line,
+                { { 20.0, 0.0, 0.0 }, { 21.0, 0.0, 0.0 } })
+        };
+        const auto nearest = PlanarProcessPlanBuilder::build(nearestInput, policy, context);
+        check(nearest.succeeded() && nearest.value.has_value()
+            && nearest.value->mode == ProcessPlanMode::Planar3Axis
+            && nearest.value->assignments.size() == 3U
+            && nearest.value->assignments[0].entityId == 2001U
+            && nearest.value->assignments[1].entityId == 2000U
+            && nearest.value->assignments[2].entityId == 2002U,
+            "planar plan orders three open paths by nearest entry");
+
+        PlanarProcessPlanningInput reverseInput;
+        reverseInput.contentRevision = 8U;
+        reverseInput.entities =
+        {
+            entity(2100U, 0U, SourceGeometryKind::Line,
+                { { 10.0, 0.0, 0.0 }, { 1.0, 0.0, 0.0 } })
+        };
+        const auto reversed = PlanarProcessPlanBuilder::build(reverseInput, policy, context);
+        check(reversed.succeeded() && reversed.value.has_value()
+            && reversed.value->assignments.size() == 1U
+            && reversed.value->assignments.front().reverse,
+            "planar plan chooses the closer reverse entry");
+
+        PlanarProcessPlanningInput stableInput;
+        stableInput.contentRevision = 9U;
+        stableInput.entities =
+        {
+            entity(2202U, 2U, SourceGeometryKind::Line,
+                { { 5.0, 0.0, 0.0 }, { 6.0, 0.0, 0.0 } }),
+            entity(2201U, 1U, SourceGeometryKind::Line,
+                { { 0.0, 5.0, 0.0 }, { 0.0, 6.0, 0.0 } }),
+            entity(2200U, 1U, SourceGeometryKind::Line,
+                { { -5.0, 0.0, 0.0 }, { -6.0, 0.0, 0.0 } })
+        };
+        const auto stable = PlanarProcessPlanBuilder::build(stableInput, policy, context);
+        check(stable.succeeded() && stable.value.has_value()
+            && stable.value->assignments.front().entityId == 2200U,
+            "planar equal distances use source index then entity id");
+
+        PlanarProcessPlanningInput closedInput;
+        closedInput.contentRevision = 10U;
+        closedInput.entities =
+        {
+            entity(2300U, 0U, SourceGeometryKind::Circle,
+                { { 1.0, 0.0, 0.0 }, { 0.0, 1.0, 0.0 } }, true),
+            entity(2301U, 1U, SourceGeometryKind::Ellipse,
+                { { 2.0, 0.0, 0.0 }, { 0.0, 1.0, 0.0 } }, true),
+            entity(2302U, 2U, SourceGeometryKind::Polyline,
+                { { 3.0, 0.0, 0.0 }, { 4.0, 0.0, 0.0 }, { 4.0, 1.0, 0.0 } },
+                true, 2.0)
+        };
+        const auto closed = PlanarProcessPlanBuilder::build(closedInput, policy, context);
+        const ProcessAssignment* circle = closed.value.has_value()
+            ? assignment(*closed.value, 2300U) : nullptr;
+        const ProcessAssignment* ellipse = closed.value.has_value()
+            ? assignment(*closed.value, 2301U) : nullptr;
+        const ProcessAssignment* polyline = closed.value.has_value()
+            ? assignment(*closed.value, 2302U) : nullptr;
+        check(closed.succeeded() && circle != nullptr && ellipse != nullptr
+            && circle->startParameter.has_value() && ellipse->startParameter.has_value()
+            && std::abs(*circle->startParameter - 1.57079632679489661923) <= 1.0e-12
+            && std::abs(*ellipse->startParameter - 1.57079632679489661923) <= 1.0e-12,
+            "planar circle and ellipse retain north-pole starts");
+        check(polyline != nullptr && polyline->startParameter == std::optional<double>(2.0),
+            "planar closed polyline retains custom start");
+    }
+
     void testLegacyAdapterValidationAndOrdering()
     {
         LegacyCadItemTopologyAdapter adapter;
@@ -1754,6 +1875,7 @@ int runTopologyTests()
     testTubeCutBoundaryCore();
     testTubeSectionCore();
     testProcessPlanningCore();
+    testPlanarProcessPlanningCore();
     testLegacyAdapterValidationAndOrdering();
     testLegacyWrapperPublicApi();
     testLegacyAdapterProcessSemanticsAndTypes();

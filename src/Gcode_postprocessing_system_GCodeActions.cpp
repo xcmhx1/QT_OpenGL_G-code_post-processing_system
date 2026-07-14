@@ -424,18 +424,15 @@ OperationReport Gcode_postprocessing_system::prepareDocumentForGCodeExport
 )
 {
     OperationReport report;
+    const cadcam::planning::ProcessPlanMode requiredPlanMode =
+        generationMode == GGenerator::GenerationMode::Mode3D
+        ? cadcam::planning::ProcessPlanMode::Rotary4Axis
+        : cadcam::planning::ProcessPlanMode::Planar3Axis;
     const bool hasCurrentProcessPlan = m_currentProcessPlan.has_value()
-        && m_currentProcessPlan->contentRevision == m_document.contentRevision();
-    const int excludedCount = generationMode == GGenerator::GenerationMode::Mode3D
-        ? (hasCurrentProcessPlan ? static_cast<int>(std::count_if
-        (
-            m_document.m_entities.cbegin(), m_document.m_entities.cend(),
-            [](const std::unique_ptr<CadItem>& item)
-            {
-                return item != nullptr && item->m_excludedFromProcessing;
-            }
-        )) : 0)
-        : refreshWasteProcessingExclusions();
+        && m_currentProcessPlan->contentRevision == m_document.contentRevision()
+        && m_currentProcessPlan->mode == requiredPlanMode;
+    const int excludedCount = hasCurrentProcessPlan
+        ? static_cast<int>(m_currentProcessPlan->exclusions.size()) : 0;
 
     if (excludedCount > 0)
     {
@@ -452,19 +449,19 @@ OperationReport Gcode_postprocessing_system::prepareDocumentForGCodeExport
         ));
     }
 
-    const bool hasProcessableEntity = std::any_of
-    (
-        m_document.m_entities.begin(),
-        m_document.m_entities.end(),
-        [generationMode](const std::unique_ptr<CadItem>& entity)
-        {
-            return entity != nullptr
-                && (generationMode == GGenerator::GenerationMode::Mode3D
-                    || !entity->m_excludedFromProcessing)
-                && entity->m_nativeEntity != nullptr
-                && isExportSortableEntityType(entity->m_type);
-        }
-    );
+    const bool hasProcessableEntity = hasCurrentProcessPlan
+        ? !m_currentProcessPlan->assignments.empty()
+        : std::any_of
+        (
+            m_document.m_entities.begin(),
+            m_document.m_entities.end(),
+            [](const std::unique_ptr<CadItem>& entity)
+            {
+                return entity != nullptr
+                    && entity->m_nativeEntity != nullptr
+                    && isExportSortableEntityType(entity->m_type);
+            }
+        );
 
     if (!hasProcessableEntity)
     {
@@ -482,9 +479,8 @@ OperationReport Gcode_postprocessing_system::prepareDocumentForGCodeExport
         return report;
     }
 
-    const bool requiresCurrentProcessPlan = generationMode == GGenerator::GenerationMode::Mode3D
-        && !hasCurrentProcessPlan;
-    if (requiresCurrentProcessPlan || !hasCompleteProcessOrderForExport(generationMode))
+    const bool requiresCurrentProcessPlan = !hasCurrentProcessPlan;
+    if (requiresCurrentProcessPlan)
     {
         report.addDiagnostic(makeExportDiagnostic
         (
@@ -569,8 +565,7 @@ bool Gcode_postprocessing_system::exportGCode
     generator.setGenerationMode(generationMode);
     generator.setProcessPlan
     (
-        generationMode == GGenerator::GenerationMode::Mode3D && m_currentProcessPlan.has_value()
-            ? &*m_currentProcessPlan : nullptr
+        m_currentProcessPlan.has_value() ? &*m_currentProcessPlan : nullptr
     );
     generator.setTubeSectionModel(m_rotaryTubeSectionModel.coreModel);
     generator.setRotaryTubeCenter
@@ -776,50 +771,6 @@ bool Gcode_postprocessing_system::removeDuplicateEntities(bool interactive)
     ui->openGLWidget->appendCommandMessage(QStringLiteral("去重完成，删除重复图元 %1 个").arg(duplicates.size()));
     statusBar()->showMessage(QStringLiteral("去重完成，删除重复图元 %1 个").arg(duplicates.size()), 4000);
     return true;
-}
-
-bool Gcode_postprocessing_system::hasCompleteProcessOrderForExport(GGenerator::GenerationMode generationMode) const
-{
-    Q_UNUSED(generationMode);
-
-    int sortableCount = 0;
-    bool hasMissingOrder = false;
-    QSet<int> assignedOrders;
-
-    for (const std::unique_ptr<CadItem>& entity : m_document.m_entities)
-    {
-        const CadItem* item = entity.get();
-
-        if (item == nullptr
-            || item->m_excludedFromProcessing
-            || item->m_nativeEntity == nullptr
-            || !isExportSortableEntityType(item->m_type))
-        {
-            continue;
-        }
-
-        ++sortableCount;
-
-        if (item->m_processOrder < 0)
-        {
-            hasMissingOrder = true;
-            continue;
-        }
-
-        if (assignedOrders.contains(item->m_processOrder))
-        {
-            return false;
-        }
-
-        assignedOrders.insert(item->m_processOrder);
-    }
-
-    if (sortableCount <= 1)
-    {
-        return true;
-    }
-
-    return !hasMissingOrder && assignedOrders.size() == sortableCount;
 }
 
 QString Gcode_postprocessing_system::generationModeDisplayName(GGenerator::GenerationMode generationMode) const

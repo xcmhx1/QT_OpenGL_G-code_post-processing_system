@@ -578,6 +578,7 @@ namespace cadcam::planning
 
         ProcessPlan plan;
         plan.contentRevision = input.contentRevision;
+        plan.mode = ProcessPlanMode::Rotary4Axis;
         plan.orderingStrategy = policy.orderingStrategy;
         std::unordered_map<EntityId, const PlanningEntity*> entities;
         std::unordered_set<EntityId> seen;

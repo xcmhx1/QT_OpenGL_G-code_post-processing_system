@@ -10,6 +10,7 @@
 
 namespace cadcam::planning
 {
+    enum class ProcessPlanMode { Planar3Axis, Rotary4Axis };
     enum class ProcessOrderingStrategy { NearestNext, LazyRotation };
     enum class BoundaryRole { None, Break, Waste };
     enum class ProcessGroupKind { SingleEntity, ConnectedChain, ClosedLoop, BreakBoundary, WasteBoundary };
@@ -73,6 +74,7 @@ namespace cadcam::planning
     struct ProcessPlan
     {
         std::uint64_t contentRevision = 0;
+        ProcessPlanMode mode = ProcessPlanMode::Planar3Axis;
         ProcessOrderingStrategy orderingStrategy = ProcessOrderingStrategy::NearestNext;
         std::vector<ProcessAssignment> assignments;
         std::vector<ProcessGroup> groups;

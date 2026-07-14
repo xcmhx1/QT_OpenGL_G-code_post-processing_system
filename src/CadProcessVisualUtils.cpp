@@ -1010,6 +1010,7 @@ CadProcessVisualInfo buildProcessVisualInfo(const CadItem* item)
 {
     CadProcessVisualInfo info;
 
+    // Compatibility projection of the current ProcessPlan. Not a planning or NC source of truth.
     if (item == nullptr || item->m_excludedFromProcessing)
     {
         return info;

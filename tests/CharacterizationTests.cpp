@@ -145,10 +145,13 @@ namespace
     )
     {
         std::optional<cadcam::planning::ProcessPlan> plan;
-        if (mode == GGenerator::GenerationMode::Mode3D && !document.m_entities.empty())
+        if (!document.m_entities.empty())
         {
             plan.emplace();
             plan->contentRevision = document.contentRevision();
+            plan->mode = mode == GGenerator::GenerationMode::Mode3D
+                ? cadcam::planning::ProcessPlanMode::Rotary4Axis
+                : cadcam::planning::ProcessPlanMode::Planar3Axis;
             std::vector<CadItem*> ordered;
             for (const auto& item : document.m_entities)
                 if (item != nullptr && item->m_processOrder >= 0) ordered.push_back(item.get());
@@ -163,7 +166,8 @@ namespace
                     ({ item->m_entityId, item->m_processOrder, item->m_processContinuousGroupId,
                        item->m_isReverse, item->m_hasCustomProcessStart
                            ? std::optional<double>(item->m_processStartParameter) : std::nullopt });
-                if (item->m_processContinuousGroupId >= 0)
+                if (mode == GGenerator::GenerationMode::Mode3D
+                    && item->m_processContinuousGroupId >= 0)
                 {
                     auto& group = groups[item->m_processContinuousGroupId];
                     group.groupId = item->m_processContinuousGroupId;
@@ -1793,6 +1797,7 @@ namespace
             (revisionDocument, makeLine(0.0, 0.0, 10.0, 10.0, 0.0, 10.0));
         planning::ProcessPlan stalePlan;
         stalePlan.contentRevision = revisionDocument.contentRevision() + 1;
+        stalePlan.mode = planning::ProcessPlanMode::Rotary4Axis;
         stalePlan.assignments.push_back({ revisionLine->m_entityId, 0, -1, false, std::nullopt });
         MachineTrajectoryService service;
         GProfileRotaryAxisConfig config;
@@ -1921,6 +1926,7 @@ namespace
             (staleDocument, makeLine(0.0, 0.0, 10.0, 10.0, 0.0, 10.0));
         planning::ProcessPlan stalePlan;
         stalePlan.contentRevision = staleDocument.contentRevision() + 1;
+        stalePlan.mode = planning::ProcessPlanMode::Rotary4Axis;
         stalePlan.assignments.push_back({ staleLine->m_entityId, 0, -1, false, std::nullopt });
         GProfile staleProfile = GProfile::createDefaultRotaryProfile();
         GGenerator staleGenerator;
@@ -2064,6 +2070,47 @@ namespace
                 < blockText.value->indexOf(QStringLiteral("TYPE")),
             "planar rapid precedes layer color type headers");
     }
+
+    void testPlanarProcessPlanIsNcSourceOfTruth()
+    {
+        using namespace cadcam;
+        CadDocument document;
+        CadLineItem* line = appendItem<DRW_Line, CadLineItem>
+            (document, makeLine(0.0, 0.0, 0.0, 10.0, 0.0, 0.0));
+        planning::ProcessPlan plan;
+        plan.contentRevision = document.contentRevision();
+        plan.mode = planning::ProcessPlanMode::Planar3Axis;
+        plan.assignments.push_back({ line->m_entityId, 0, -1, false, std::nullopt });
+
+        GProfile profile = GProfile::createDefaultLaserProfile();
+        GGenerator generator;
+        generator.setDocument(&document);
+        generator.setProfile(&profile);
+        generator.setGenerationMode(GGenerator::GenerationMode::Mode2D);
+        generator.setProcessPlan(&plan);
+        const OperationContext context = testContext(QStringLiteral("planar-plan-source-of-truth"));
+        const auto before = generator.buildProgramText(context);
+
+        line->m_processOrder = 91;
+        line->m_processContinuousGroupId = 37;
+        line->m_isReverse = true;
+        line->m_hasCustomProcessStart = true;
+        line->m_processStartParameter = 0.75;
+        line->m_excludedFromProcessing = true;
+        const auto after = generator.buildProgramText(context);
+        check(before.succeeded() && after.succeeded()
+            && before.value.has_value() && after.value.has_value()
+            && *before.value == *after.value,
+            "planar NC ignores legacy CadItem process fields when plan is unchanged");
+
+        planning::ProcessPlan wrongMode = plan;
+        wrongMode.mode = planning::ProcessPlanMode::Rotary4Axis;
+        generator.setProcessPlan(&wrongMode);
+        const auto rejected = generator.buildProgramText(context);
+        check(rejected.status == OperationStatus::Conflict
+            && hasDiagnosticCode(rejected.diagnostics, DiagnosticCode::ProcessPlanModeMismatch),
+            "planar NC rejects rotary process plan mode");
+    }
 }
 
 int main(int argc, char* argv[])
@@ -2094,6 +2141,7 @@ int main(int argc, char* argv[])
     testMachineTrajectoryCore();
     testNcProgramPipeline();
     testPlanarNcProgramPipeline();
+    testPlanarProcessPlanIsNcSourceOfTruth();
     testFailures();
     failureCount += runSplineProductionTests(updateSplineProductionGoldenFiles);
     failureCount += runGeometrySnapshotTests();

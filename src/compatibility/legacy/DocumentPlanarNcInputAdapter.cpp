@@ -16,24 +16,29 @@ namespace
     Diagnostic planarDiagnostic
     (
         DiagnosticCode code,
-        DiagnosticSeverity severity,
         const QString& message,
         const OperationContext& context,
-        std::uint64_t revision,
+        const cadcam::planning::ProcessPlan& plan,
         cadcam::geometry::EntityId entityId = 0
     )
     {
         Diagnostic diagnostic;
         diagnostic.code = code;
-        diagnostic.severity = severity;
+        diagnostic.severity = DiagnosticSeverity::Error;
         diagnostic.component = QStringLiteral("DocumentPlanarNcInputAdapter");
         diagnostic.operation = context.operationName;
         diagnostic.stage = QStringLiteral("capture-planar-input");
         diagnostic.userMessage = message;
         diagnostic.correlationId = context.correlationId;
-        diagnostic.context.insert(QStringLiteral("contentRevision"),
-            QVariant::fromValue<qulonglong>(revision));
-        if (entityId != 0) diagnostic.entityId = entityId;
+        diagnostic.context =
+        {
+            { QStringLiteral("contentRevision"), QVariant::fromValue<qulonglong>(plan.contentRevision) },
+            { QStringLiteral("planMode"), plan.mode == cadcam::planning::ProcessPlanMode::Planar3Axis
+                ? QStringLiteral("Planar3Axis") : QStringLiteral("Rotary4Axis") },
+            { QStringLiteral("assignmentCount"), static_cast<qulonglong>(plan.assignments.size()) },
+            { QStringLiteral("excludedCount"), static_cast<qulonglong>(plan.exclusions.size()) }
+        };
+        if (entityId != 0U) diagnostic.entityId = entityId;
         return diagnostic;
     }
 
@@ -48,95 +53,115 @@ namespace
 OperationResult<PlanarNcCapture> DocumentPlanarNcInputAdapter::capture
 (
     CadDocument& document,
+    const cadcam::planning::ProcessPlan& plan,
     const OperationContext& context
 )
 {
     OperationResult<PlanarNcCapture> result;
-    const std::uint64_t revision = document.contentRevision();
     if (document.thread() != QThread::currentThread())
     {
         result.status = OperationStatus::Conflict;
         result.addDiagnostic(planarDiagnostic(DiagnosticCode::PlanarNcInputInvalid,
-            DiagnosticSeverity::Error,
-            QStringLiteral("三轴 NC 输入只能在文档线程中捕获。"), context, revision));
+            QStringLiteral("三轴 NC 输入只能在文档线程中捕获。"), context, plan));
+        return result;
+    }
+    if (plan.mode != cadcam::planning::ProcessPlanMode::Planar3Axis)
+    {
+        result.status = OperationStatus::Conflict;
+        result.addDiagnostic(planarDiagnostic(DiagnosticCode::ProcessPlanModeMismatch,
+            QStringLiteral("三轴 NC 只能使用三轴加工计划。"), context, plan));
+        return result;
+    }
+    if (plan.contentRevision == 0U || document.contentRevision() != plan.contentRevision)
+    {
+        result.status = OperationStatus::Conflict;
+        result.addDiagnostic(planarDiagnostic(DiagnosticCode::PlanarNcRevisionMismatch,
+            QStringLiteral("三轴加工计划与当前文档版本不一致。"), context, plan));
         return result;
     }
 
     DocumentGeometrySnapshotBuilder snapshotBuilder;
-    auto snapshotResult = snapshotBuilder.capture(document, context);
-    result.mergeDiagnostics(snapshotResult);
-    if (!snapshotResult.succeeded() || !snapshotResult.value.has_value())
+    auto snapshot = snapshotBuilder.capture(document, context);
+    result.mergeDiagnostics(snapshot);
+    if (!snapshot.succeeded() || !snapshot.value.has_value())
     {
-        result.status = snapshotResult.status;
-        return result;
-    }
-    if (revision == 0 || snapshotResult.value->contentRevision != revision
-        || document.contentRevision() != revision)
-    {
-        result.status = OperationStatus::Conflict;
-        result.addDiagnostic(planarDiagnostic(DiagnosticCode::PlanarNcRevisionMismatch,
-            DiagnosticSeverity::Error,
-            QStringLiteral("文档在三轴 NC 输入捕获期间已变更。"), context, revision));
+        result.status = snapshot.status;
         return result;
     }
 
     std::map<cadcam::geometry::EntityId, const GeometrySourceEntry*> sources;
-    for (const GeometrySourceEntry& entry : snapshotResult.value->entries)
+    std::map<cadcam::geometry::EntityId, std::pair<CadItem*, std::size_t>> items;
+    for (const GeometrySourceEntry& entry : snapshot.value->entries)
     {
-        if (entry.attributes.entityId != 0)
-            sources.emplace(entry.attributes.entityId, &entry);
-    }
-
-    std::vector<std::pair<CadItem*, std::size_t>> ordered;
-    std::set<int> processOrders;
-    std::set<cadcam::geometry::EntityId> entityIds;
-    bool skippedInvalid = false;
-    for (std::size_t index = 0; index < document.m_entities.size(); ++index)
-    {
-        CadItem* item = document.m_entities[index].get();
-        if (item == nullptr || item->m_excludedFromProcessing) continue;
-        const auto found = sources.find(item->m_entityId);
-        const GeometrySourceEntry* source = found == sources.end() ? nullptr : found->second;
-        if (source == nullptr || !processable(source->sourceKind)) continue;
-        if (!source->sourceEntity.has_value())
-        {
-            skippedInvalid = true;
-            result.addDiagnostic(planarDiagnostic(DiagnosticCode::PlanarNcEntityMissing,
-                DiagnosticSeverity::Warning,
-                QStringLiteral("图元的几何快照无效，已跳过。"), context, revision, item->m_entityId));
-            continue;
-        }
-        if (item->m_processOrder < 0 || !processOrders.insert(item->m_processOrder).second
-            || item->m_entityId == 0 || !entityIds.insert(item->m_entityId).second)
+        if (entry.attributes.entityId == 0U
+            || !sources.emplace(entry.attributes.entityId, &entry).second)
         {
             result.status = OperationStatus::InvalidInput;
             result.addDiagnostic(planarDiagnostic(DiagnosticCode::PlanarNcInputInvalid,
-                DiagnosticSeverity::Error,
-                QStringLiteral("三轴加工顺序缺失、重复，或图元编号无效。"), context,
-                revision, item->m_entityId));
+                QStringLiteral("文档几何快照包含无效或重复图元编号。"), context, plan,
+                entry.attributes.entityId));
             return result;
         }
-        ordered.emplace_back(item, index);
+        CadItem* item = entry.sourceIndex < document.m_entities.size()
+            ? document.m_entities[entry.sourceIndex].get() : nullptr;
+        if (item == nullptr || item->m_entityId != entry.attributes.entityId)
+        {
+            result.status = OperationStatus::Conflict;
+            result.addDiagnostic(planarDiagnostic(DiagnosticCode::PlanarNcEntityMissing,
+                QStringLiteral("加工计划图元已不在当前文档中。"), context, plan,
+                entry.attributes.entityId));
+            return result;
+        }
+        items.emplace(entry.attributes.entityId, std::make_pair(item, entry.sourceIndex));
     }
 
-    std::sort(ordered.begin(), ordered.end(), [](const auto& left, const auto& right)
+    std::set<cadcam::geometry::EntityId> referenced;
+    for (const auto& exclusion : plan.exclusions)
     {
-        return left.first->m_processOrder < right.first->m_processOrder;
-    });
+        if (items.find(exclusion.entityId) == items.end()
+            || !referenced.insert(exclusion.entityId).second)
+        {
+            result.status = OperationStatus::Conflict;
+            result.addDiagnostic(planarDiagnostic(DiagnosticCode::PlanarNcEntityMissing,
+                QStringLiteral("三轴计划排除项引用了缺失或重复图元。"), context, plan,
+                exclusion.entityId));
+            return result;
+        }
+    }
 
-    PlanarNcCapture capture;
-    capture.contentRevision = revision;
-    capture.entities.reserve(ordered.size());
-    for (std::size_t order = 0; order < ordered.size(); ++order)
+    std::vector<cadcam::planning::ProcessAssignment> assignments = plan.assignments;
+    std::sort(assignments.begin(), assignments.end(), [](const auto& left, const auto& right)
     {
-        CadItem& item = *ordered[order].first;
-        const GeometrySourceEntry* source = sources.at(item.m_entityId);
+        return left.processOrder < right.processOrder;
+    });
+    PlanarNcCapture capture;
+    capture.contentRevision = plan.contentRevision;
+    capture.entities.reserve(assignments.size());
+    for (std::size_t order = 0; order < assignments.size(); ++order)
+    {
+        const auto& assignment = assignments[order];
+        const auto itemFound = items.find(assignment.entityId);
+        const auto sourceFound = sources.find(assignment.entityId);
+        if (assignment.processOrder != static_cast<int>(order)
+            || assignment.continuousGroupId != -1
+            || itemFound == items.end() || sourceFound == sources.end()
+            || !referenced.insert(assignment.entityId).second
+            || !sourceFound->second->sourceEntity.has_value()
+            || !processable(sourceFound->second->sourceKind))
+        {
+            result.status = OperationStatus::Conflict;
+            result.addDiagnostic(planarDiagnostic(DiagnosticCode::PlanarNcInputInvalid,
+                QStringLiteral("三轴计划的顺序、分组或图元几何无效。"), context, plan,
+                assignment.entityId));
+            return result;
+        }
+
         auto metadata = DocumentNcMetadataAdapter::captureEntity
         (
-            item,
-            ordered[order].second,
-            static_cast<int>(order),
-            item.m_processContinuousGroupId,
+            *itemFound->second.first,
+            itemFound->second.second,
+            assignment.processOrder,
+            assignment.continuousGroupId,
             context
         );
         result.mergeDiagnostics(metadata);
@@ -145,34 +170,29 @@ OperationResult<PlanarNcCapture> DocumentPlanarNcInputAdapter::capture
             result.status = metadata.status;
             return result;
         }
-
         cadcam::nc::PlanarNcEntityInput input;
-        input.sourceEntity = *source->sourceEntity;
+        input.sourceEntity = *sourceFound->second->sourceEntity;
         input.metadata = std::move(*metadata.value);
-        input.reverse = item.m_isReverse;
-        if (item.m_hasCustomProcessStart)
-            input.startParameter = item.m_processStartParameter;
+        input.reverse = assignment.reverse;
+        input.startParameter = assignment.startParameter;
         capture.entities.push_back(std::move(input));
     }
 
-    if (document.contentRevision() != revision)
+    if (referenced.size() != items.size() || document.contentRevision() != plan.contentRevision)
     {
         result.status = OperationStatus::Conflict;
         result.addDiagnostic(planarDiagnostic(DiagnosticCode::PlanarNcRevisionMismatch,
-            DiagnosticSeverity::Error,
-            QStringLiteral("文档在三轴 NC 输入捕获期间已变更。"), context, revision));
+            QStringLiteral("三轴计划未完整覆盖当前文档，或文档已变更。"), context, plan));
         return result;
     }
     if (capture.entities.empty())
     {
         result.status = OperationStatus::InvalidInput;
         result.addDiagnostic(planarDiagnostic(DiagnosticCode::PlanarNcInputInvalid,
-            DiagnosticSeverity::Error,
-            QStringLiteral("文档中没有已排序的可加工图元。"), context, revision));
+            QStringLiteral("三轴加工计划中没有可生成 NC 的图元。"), context, plan));
         return result;
     }
-
-    result.status = skippedInvalid ? OperationStatus::PartialSuccess : OperationStatus::Success;
+    result.status = OperationStatus::Success;
     result.value = std::move(capture);
     return result;
 }
