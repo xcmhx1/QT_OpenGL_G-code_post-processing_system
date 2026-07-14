@@ -2,6 +2,7 @@
 // 文档模型模块，负责持有原始 DXF 数据、内部图元容器以及场景变更通知。
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <QList>
 #include <QColor>
@@ -21,6 +22,19 @@ class CadDocument : public QObject
 {
     Q_OBJECT
 public:
+    class ContentChangeBatch
+    {
+    public:
+        explicit ContentChangeBatch(CadDocument& document);
+        ContentChangeBatch(ContentChangeBatch&& other) noexcept;
+        ContentChangeBatch(const ContentChangeBatch&) = delete;
+        ContentChangeBatch& operator=(const ContentChangeBatch&) = delete;
+        ~ContentChangeBatch();
+
+    private:
+        CadDocument* m_document = nullptr;
+    };
+
     explicit CadDocument(QObject* parent = nullptr);
     ~CadDocument() override;
 
@@ -47,7 +61,10 @@ public:
     std::pair<std::unique_ptr<DRW_Entity>, std::unique_ptr<CadItem>> takeEntity(CadItem* item);
 
     // 当底层实体数据变更后，重建图元几何并通知视图刷新
-    bool refreshEntity(CadItem* item);
+    bool refreshEntity(CadItem* item, bool geometryContentChanged = true);
+
+    std::uint64_t contentRevision() const;
+    ContentChangeBatch beginContentChangeBatch();
 
     // 当仅有图元元数据变更时，通知场景刷新
     void notifySceneChanged();
@@ -69,8 +86,14 @@ signals:
 
 private:
     void ensureEntityId(CadItem& item);
+    void beginContentChange();
+    void endContentChange();
+    void markContentChanged();
 
     cadcam::geometry::EntityIdAllocator m_entityIdAllocator;
+    std::uint64_t m_contentRevision = 0;
+    int m_contentChangeDepth = 0;
+    bool m_contentChangePending = false;
 
 public:
     // 原始文档数据

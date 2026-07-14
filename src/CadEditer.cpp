@@ -68,6 +68,7 @@ bool CadEditer::undo()
 
     std::unique_ptr<EditCommand> command = std::move(m_undoStack.back());
     m_undoStack.pop_back();
+    auto contentBatch = m_document->beginContentChangeBatch();
 
     if (!command->undo())
     {
@@ -90,6 +91,7 @@ bool CadEditer::redo()
 
     std::unique_ptr<EditCommand> command = std::move(m_redoStack.back());
     m_redoStack.pop_back();
+    auto contentBatch = m_document->beginContentChangeBatch();
 
     if (!command->execute())
     {

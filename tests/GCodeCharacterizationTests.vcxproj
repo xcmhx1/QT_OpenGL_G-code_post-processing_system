@@ -68,6 +68,7 @@
     <ClCompile Include="CharacterizationTests.cpp" />
     <ClCompile Include="SplineParity.cpp" />
     <ClCompile Include="SplineProductionTests.cpp" />
+    <ClCompile Include="GeometrySnapshotTests.cpp" />
     <ClCompile Include="..\src\CadDocument.cpp" />
     <ClCompile Include="..\src\CadItem.cpp" />
     <ClCompile Include="..\src\CadLineItem.cpp" />
@@ -91,11 +92,14 @@
     <ClCompile Include="..\src\core\geometry\Path3D.cpp" />
     <ClCompile Include="..\src\core\geometry\GeometryCompiler.cpp" />
     <ClCompile Include="..\src\core\geometry\NurbsCurveEvaluator.cpp" />
+    <ClCompile Include="..\src\application\geometry\DocumentGeometrySnapshotBuilder.cpp" />
+    <ClCompile Include="..\src\application\geometry\GeometrySnapshotCompiler.cpp" />
     <ClCompile Include="..\src\infrastructure\dxf\DxfGeometryAdapter.cpp" />
     <ClCompile Include="..\src\compatibility\legacy\LegacyCadItemPathBridge.cpp" />
     <ClCompile Include="..\src\compatibility\legacy\LegacyFourAxisPathBuilder.cpp" />
     <ClCompile Include="..\src\compatibility\legacy\SplineEntityClone.cpp" />
     <ClCompile Include="..\src\compatibility\legacy\SplineProductionPathProvider.cpp" />
+    <ClCompile Include="..\src\compatibility\legacy\GeometrySnapshotParityVerifier.cpp" />
     <ClCompile Include="..\src\application\messaging\MessageCenter.cpp" />
     <ClCompile Include="..\src\application\messaging\DebugMessageSink.cpp" />
     <ClCompile Include="..\src\libdxfrw\drw_base.cpp" />

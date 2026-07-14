@@ -19,6 +19,7 @@
 #include "infrastructure/dxf/DxfGeometryAdapter.h"
 #include "SplineParity.h"
 #include "SplineProductionTests.h"
+#include "GeometrySnapshotTests.h"
 #include "dx_data.h"
 
 #include <QDir>
@@ -1677,6 +1678,7 @@ int main(int argc, char* argv[])
     testRotaryGoldenPrograms();
     testFailures();
     failureCount += runSplineProductionTests(updateSplineProductionGoldenFiles);
+    failureCount += runGeometrySnapshotTests();
 
     if (failureCount == 0)
     {

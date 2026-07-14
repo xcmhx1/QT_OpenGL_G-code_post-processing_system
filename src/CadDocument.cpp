@@ -334,6 +334,26 @@ CadDocument::CadDocument(QObject* parent)
     clearAll();
 }
 
+CadDocument::ContentChangeBatch::ContentChangeBatch(CadDocument& document)
+    : m_document(&document)
+{
+    m_document->beginContentChange();
+}
+
+CadDocument::ContentChangeBatch::ContentChangeBatch(ContentChangeBatch&& other) noexcept
+    : m_document(other.m_document)
+{
+    other.m_document = nullptr;
+}
+
+CadDocument::ContentChangeBatch::~ContentChangeBatch()
+{
+    if (m_document != nullptr)
+    {
+        m_document->endContentChange();
+    }
+}
+
 CadDocument::~CadDocument()
 {
     clearAll();
@@ -341,6 +361,7 @@ CadDocument::~CadDocument()
 
 void CadDocument::readDxfDocument(const QString& filePath)
 {
+    ContentChangeBatch contentBatch(*this);
     // 导入新文件前先清空现有文档，避免旧实体与新实体混杂。
     clearAll();
 
@@ -401,16 +422,20 @@ bool CadDocument::eportDxfDocument(const QString& filePath, bool safeMode)
 
 void CadDocument::clearAll()
 {
+    ContentChangeBatch contentBatch(*this);
     // m_entities 清空后会释放所有内部图元；
     // 重新创建 dx_data 则会重置原始解析结果容器。
     m_entities.clear();
     m_entityIdAllocator.reset();
     m_data = std::make_unique<dx_data>();
     ensureLayerExists(QStringLiteral("0"));
+    markContentChanged();
 }
 
 void CadDocument::init()
 {
+    ContentChangeBatch contentBatch(*this);
+    bool initializedAnyEntity = false;
     for (DRW_Entity* entity : m_data->mBlock->ent)
     {
         if (entity == nullptr)
@@ -423,12 +448,18 @@ void CadDocument::init()
             ensureEntityId(*item);
             item->m_color = resolveEntityDisplayColor(*this, item.get());
             m_entities.push_back(std::move(item));
+            initializedAnyEntity = true;
         }
+    }
+    if (initializedAnyEntity)
+    {
+        markContentChanged();
     }
 }
 
 CadItem* CadDocument::appendEntity(std::unique_ptr<DRW_Entity> entity, std::unique_ptr<CadItem> item)
 {
+    ContentChangeBatch contentBatch(*this);
     if (entity == nullptr)
     {
         return nullptr;
@@ -455,12 +486,14 @@ CadItem* CadDocument::appendEntity(std::unique_ptr<DRW_Entity> entity, std::uniq
     m_data->mBlock->ent.push_back(nativeEntity);
     m_entities.push_back(std::move(item));
 
+    markContentChanged();
     emit sceneChanged();
     return rawItem;
 }
 
 int CadDocument::appendEntities(std::vector<std::unique_ptr<DRW_Entity>> entities, bool replaceExisting)
 {
+    ContentChangeBatch contentBatch(*this);
     int appendedCount = 0;
 
     if (replaceExisting)
@@ -492,6 +525,7 @@ int CadDocument::appendEntities(std::vector<std::unique_ptr<DRW_Entity>> entitie
 
     if (replaceExisting || appendedCount > 0)
     {
+        markContentChanged();
         emit sceneChanged();
     }
 
@@ -557,11 +591,12 @@ std::pair<std::unique_ptr<DRW_Entity>, std::unique_ptr<CadItem>> CadDocument::ta
     m_data->mBlock->ent.erase(nativeIt);
     m_entities.erase(itemIt);
 
+    markContentChanged();
     emit sceneChanged();
     return { std::move(entity), std::move(removedItem) };
 }
 
-bool CadDocument::refreshEntity(CadItem* item)
+bool CadDocument::refreshEntity(CadItem* item, bool geometryContentChanged)
 {
     // 原始实体被改动后，需要重新生成离散几何、方向和最终显示颜色。
     if (!containsEntity(item))
@@ -573,6 +608,10 @@ bool CadDocument::refreshEntity(CadItem* item)
     item->buildProcessDirection();
     item->m_color = resolveEntityDisplayColor(*this, item);
 
+    if (geometryContentChanged)
+    {
+        markContentChanged();
+    }
     emit sceneChanged();
     return true;
 }
@@ -580,6 +619,45 @@ bool CadDocument::refreshEntity(CadItem* item)
 void CadDocument::notifySceneChanged()
 {
     emit sceneChanged();
+}
+
+std::uint64_t CadDocument::contentRevision() const
+{
+    return m_contentRevision;
+}
+
+CadDocument::ContentChangeBatch CadDocument::beginContentChangeBatch()
+{
+    return ContentChangeBatch(*this);
+}
+
+void CadDocument::beginContentChange()
+{
+    ++m_contentChangeDepth;
+}
+
+void CadDocument::endContentChange()
+{
+    if (m_contentChangeDepth <= 0)
+    {
+        return;
+    }
+    --m_contentChangeDepth;
+    if (m_contentChangeDepth == 0 && m_contentChangePending)
+    {
+        ++m_contentRevision;
+        m_contentChangePending = false;
+    }
+}
+
+void CadDocument::markContentChanged()
+{
+    if (m_contentChangeDepth > 0)
+    {
+        m_contentChangePending = true;
+        return;
+    }
+    ++m_contentRevision;
 }
 
 bool CadDocument::containsEntity(const CadItem* item) const
@@ -662,6 +740,7 @@ bool CadDocument::ensureLayerExists(const QString& layerName)
     DRW_Layer layer;
     layer.name = normalizedLayerName.toUtf8().constData();
     m_data->layers.push_back(layer);
+    markContentChanged();
     return true;
 }
 

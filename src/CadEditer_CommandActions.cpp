@@ -1163,7 +1163,7 @@ private:
         }
 
         m_item->m_isReverse = isReverse;
-        return m_document->refreshEntity(m_item);
+        return m_document->refreshEntity(m_item, false);
     }
 
 private:
@@ -2043,6 +2043,7 @@ bool CadEditer::executeCommand(std::unique_ptr<EditCommand> command)
         return false;
     }
 
+    auto contentBatch = m_document->beginContentChangeBatch();
     if (!command->execute())
     {
         return false;
