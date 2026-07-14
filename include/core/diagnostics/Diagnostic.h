@@ -100,6 +100,19 @@ enum class DiagnosticCode
     TubeSectionMultipleOuterLoops,
     TubeSectionPreparationFailed,
     TubeSectionInteriorClassificationFailed,
+    ProcessPlanningInputInvalid,
+    ProcessPlanningRevisionMismatch,
+    ProcessPlanningNoProcessableEntities,
+    ProcessPlanningBoundaryInvalid,
+    ProcessPlanningBoundaryKeepsConnected,
+    ProcessPlanningBoundaryClassificationFailed,
+    ProcessPlanningPrecedenceCycle,
+    ProcessPlanningGroupBuildFailed,
+    ProcessPlanningDirectionFailed,
+    ProcessPlanningOrderingFailed,
+    ProcessPlanningInvariantViolation,
+    ProcessPlanApplyConflict,
+    ProcessPlanEntityMissing,
     InternalInvariantViolation
 };
 

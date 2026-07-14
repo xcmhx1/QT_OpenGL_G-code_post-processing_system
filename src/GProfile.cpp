@@ -25,6 +25,7 @@ namespace
     constexpr const char* kSafeZKey = "safeZ";
     constexpr const char* kMachiningPlaneZOffsetKey = "machiningPlaneZOffset";
     constexpr const char* kOvercutDistanceKey = "overcutDistance";
+    constexpr const char* kLazyRotationProcessingKey = "lazyRotationProcessing";
     constexpr const char* kInvertAAxisDirectionKey = "invertAAxisDirection";
     constexpr const char* kKeepContinuousAngleKey = "keepContinuousAngle";
     constexpr const char* kUseSafeZBeforeRapidKey = "useSafeZBeforeRapid";
@@ -131,6 +132,7 @@ QJsonObject GProfileRotaryAxisConfig::toJson() const
     object.insert(kSafeZKey, safeZ);
     object.insert(kMachiningPlaneZOffsetKey, machiningPlaneZOffset);
     object.insert(kOvercutDistanceKey, overcutDistance);
+    object.insert(kLazyRotationProcessingKey, lazyRotationProcessing);
     object.insert(kInvertAAxisDirectionKey, invertAAxisDirection);
     object.insert(kKeepContinuousAngleKey, keepContinuousAngle);
     object.insert(kUseSafeZBeforeRapidKey, useSafeZBeforeRapid);
@@ -155,6 +157,8 @@ GProfileRotaryAxisConfig GProfileRotaryAxisConfig::fromJson(const QJsonObject& o
         0.0,
         100.0
     );
+    config.lazyRotationProcessing = object.value(kLazyRotationProcessingKey)
+        .toBool(config.lazyRotationProcessing);
     config.invertAAxisDirection = object.value(kInvertAAxisDirectionKey).toBool(config.invertAAxisDirection);
     config.keepContinuousAngle = object.value(kKeepContinuousAngleKey).toBool(config.keepContinuousAngle);
     config.useSafeZBeforeRapid = object.value(kUseSafeZBeforeRapidKey).toBool(config.useSafeZBeforeRapid);

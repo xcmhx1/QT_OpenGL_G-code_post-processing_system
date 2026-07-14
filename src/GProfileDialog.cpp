@@ -4,6 +4,7 @@
 #include "GProfilePathStore.h"
 
 #include <QColorDialog>
+#include <QCheckBox>
 #include <QComboBox>
 #include <QDialogButtonBox>
 #include <QDoubleSpinBox>
@@ -435,6 +436,11 @@ void GProfileDialog::buildUi()
     m_rotaryOvercutDistanceSpinBox->setSuffix(QStringLiteral(" mm"));
     rotaryFormLayout->addRow(QStringLiteral("过切距离"), m_rotaryOvercutDistanceSpinBox);
 
+    m_lazyRotationProcessingCheckBox = new QCheckBox(QStringLiteral("懒旋转加工"), rotaryTab);
+    m_lazyRotationProcessingCheckBox->setToolTip
+        (QStringLiteral("仅改变当前满足中断切面约束的加工组选择策略；默认关闭。"));
+    rotaryFormLayout->addRow(QString(), m_lazyRotationProcessingCheckBox);
+
     rotaryLayout->addLayout(rotaryFormLayout);
     rotaryLayout->addStretch(1);
     tabWidget->addTab(rotaryTab, QStringLiteral("四轴加工"));
@@ -616,6 +622,8 @@ void GProfileDialog::applyProfile(const GProfile& profile)
     m_rotaryClearanceSpinBox->setValue(profile.rotaryAxisConfig().safeZ);
     m_rotaryPlaneZOffsetSpinBox->setValue(profile.rotaryAxisConfig().machiningPlaneZOffset);
     m_rotaryOvercutDistanceSpinBox->setValue(profile.rotaryAxisConfig().overcutDistance);
+    m_lazyRotationProcessingCheckBox->setChecked
+        (profile.rotaryAxisConfig().lazyRotationProcessing);
 
     refreshEntityTypeList();
     refreshLayerRuleList();
@@ -634,6 +642,9 @@ GProfile GProfileDialog::collectProfile() const
     rotaryConfig.overcutDistance = m_rotaryOvercutDistanceSpinBox != nullptr
         ? m_rotaryOvercutDistanceSpinBox->value()
         : rotaryConfig.overcutDistance;
+    rotaryConfig.lazyRotationProcessing = m_lazyRotationProcessingCheckBox != nullptr
+        ? m_lazyRotationProcessingCheckBox->isChecked()
+        : rotaryConfig.lazyRotationProcessing;
     profile.setRotaryAxisConfig(rotaryConfig);
     profile.setProfileName(m_profileNameEdit->text().trimmed());
     profile.setFileCode

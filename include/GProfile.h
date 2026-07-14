@@ -23,6 +23,7 @@ struct GProfileRotaryAxisConfig
     double safeZ = 5.0; // 四轴离轴额外距离
     double machiningPlaneZOffset = 0.0; // 相对实时加工平面的 Z 修正
     double overcutDistance = 2.0; // 闭合路径沿原方向继续加工的距离
+    bool lazyRotationProcessing = false;
     bool invertAAxisDirection = false;
     bool keepContinuousAngle = true;
     bool useSafeZBeforeRapid = true;

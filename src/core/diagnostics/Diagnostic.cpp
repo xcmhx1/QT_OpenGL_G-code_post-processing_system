@@ -82,6 +82,19 @@ QString diagnosticCodeName(DiagnosticCode code)
     case DiagnosticCode::TubeSectionMultipleOuterLoops: return QStringLiteral("TubeSectionMultipleOuterLoops");
     case DiagnosticCode::TubeSectionPreparationFailed: return QStringLiteral("TubeSectionPreparationFailed");
     case DiagnosticCode::TubeSectionInteriorClassificationFailed: return QStringLiteral("TubeSectionInteriorClassificationFailed");
+    case DiagnosticCode::ProcessPlanningInputInvalid: return QStringLiteral("ProcessPlanningInputInvalid");
+    case DiagnosticCode::ProcessPlanningRevisionMismatch: return QStringLiteral("ProcessPlanningRevisionMismatch");
+    case DiagnosticCode::ProcessPlanningNoProcessableEntities: return QStringLiteral("ProcessPlanningNoProcessableEntities");
+    case DiagnosticCode::ProcessPlanningBoundaryInvalid: return QStringLiteral("ProcessPlanningBoundaryInvalid");
+    case DiagnosticCode::ProcessPlanningBoundaryKeepsConnected: return QStringLiteral("ProcessPlanningBoundaryKeepsConnected");
+    case DiagnosticCode::ProcessPlanningBoundaryClassificationFailed: return QStringLiteral("ProcessPlanningBoundaryClassificationFailed");
+    case DiagnosticCode::ProcessPlanningPrecedenceCycle: return QStringLiteral("ProcessPlanningPrecedenceCycle");
+    case DiagnosticCode::ProcessPlanningGroupBuildFailed: return QStringLiteral("ProcessPlanningGroupBuildFailed");
+    case DiagnosticCode::ProcessPlanningDirectionFailed: return QStringLiteral("ProcessPlanningDirectionFailed");
+    case DiagnosticCode::ProcessPlanningOrderingFailed: return QStringLiteral("ProcessPlanningOrderingFailed");
+    case DiagnosticCode::ProcessPlanningInvariantViolation: return QStringLiteral("ProcessPlanningInvariantViolation");
+    case DiagnosticCode::ProcessPlanApplyConflict: return QStringLiteral("ProcessPlanApplyConflict");
+    case DiagnosticCode::ProcessPlanEntityMissing: return QStringLiteral("ProcessPlanEntityMissing");
     case DiagnosticCode::InternalInvariantViolation: return QStringLiteral("InternalInvariantViolation");
     }
 

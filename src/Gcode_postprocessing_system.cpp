@@ -847,6 +847,7 @@ void Gcode_postprocessing_system::openProfileSettingsDialog()
     }
 
     refreshAvailableProfilesUi();
+    invalidateCurrentProcessPlan();
     saveSelectedProfileId(m_activeProfileId);
 
     const QString profileName = m_activeProfile.profileName().trimmed().isEmpty()
@@ -1007,6 +1008,7 @@ bool Gcode_postprocessing_system::applyLoadedProfileById(const QString& profileI
 
     m_activeProfileId = profileId;
     m_activeProfile = m_loadedProfiles.value(profileId, GProfile::createDefaultLaserProfile());
+    invalidateCurrentProcessPlan();
     saveSelectedProfileId(m_activeProfileId);
     refreshAvailableProfilesUi();
 
@@ -1408,6 +1410,7 @@ void Gcode_postprocessing_system::applyGenerationPreference(GCodeGenerationPrefe
     }
 
     m_generationPreference = preference;
+    invalidateCurrentProcessPlan();
     saveGenerationPreference(m_generationPreference);
 
     if (m_generationModeAutoAction != nullptr)
@@ -1534,7 +1537,15 @@ void Gcode_postprocessing_system::initializeToolPanel()
     ui->mainToolBar->setFloatable(false);
     ui->mainToolBar->addWidget(m_toolPanelWidget);
 
-    connect(&m_document, &CadDocument::sceneChanged, this, [this]() { syncToolPanelState(); });
+    connect(&m_document, &CadDocument::sceneChanged, this, [this]()
+    {
+        if (m_currentProcessPlan.has_value()
+            && m_currentProcessPlan->contentRevision != m_document.contentRevision())
+        {
+            invalidateCurrentProcessPlan();
+        }
+        syncToolPanelState();
+    });
     connect(ui->openGLWidget, &CadViewer::selectedEntityChanged, this, [this](CadItem*) { syncToolPanelState(); });
 
     connect

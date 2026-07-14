@@ -9,8 +9,10 @@
 #include "application/geometry/GeometrySnapshotCompiler.h"
 #include "application/topology/GeometrySnapshotTopologyAdapter.h"
 #include "compatibility/legacy/LegacyCadItemTopologyAdapter.h"
+#include "compatibility/legacy/LegacyProcessPlanAdapter.h"
 #include "compatibility/legacy/LegacyTopologyParityVerifier.h"
 #include "core/machining/TubeCutBoundary.h"
+#include "core/planning/ProcessPlanBuilder.h"
 #include "core/topology/PathTopology.h"
 
 #include <QCryptographicHash>
@@ -46,6 +48,7 @@ namespace
     using cadcam::topology::TopologyInput;
     using cadcam::topology::TopologyLoopResult;
     using cadcam::topology::TopologyPathRecord;
+    using namespace cadcam::planning;
 
     int failures = 0;
 
@@ -1093,6 +1096,282 @@ namespace
             "recognized section geometry feeds positive negative and zero winding cuts");
     }
 
+    struct PlanningFixture
+    {
+        ProcessPlanningInput input;
+        PathTopology topology;
+    };
+
+    CoreTubeSectionModel planningTubeSection()
+    {
+        CoreTubeSectionModel model;
+        model.contentRevision = 42U;
+        model.geometry.boundary =
+        {
+            { -5.0, 4.0 }, { 5.0, 4.0 }, { 5.0, -4.0 }, { -5.0, -4.0 }
+        };
+        model.geometry.centerY = 0.0;
+        model.geometry.centerZ = 0.0;
+        model.geometry.yLength = 10.0;
+        model.geometry.zWidth = 8.0;
+        const auto prepared = TubeCutBoundaryClassifier::prepareSection
+        (
+            model.geometry,
+            createOperationContext(QStringLiteral("planning-section"))
+        );
+        check(prepared.succeeded() && prepared.value.has_value(),
+            "planning section prepares");
+        if (prepared.value.has_value()) model.geometry = *prepared.value;
+        return model;
+    }
+
+    std::optional<PlanningFixture> planningFixture
+    (
+        std::vector<TopologyPathRecord> records,
+        const std::map<EntityId, std::pair<BoundaryRole, int>>& roles = {}
+    )
+    {
+        TopologyInput topologyInput;
+        topologyInput.contentRevision = 42U;
+        topologyInput.records = records;
+        const auto built = PathTopologyBuilder{}.build
+        (
+            topologyInput,
+            PathTopologyTolerance{},
+            task(QStringLiteral("process-planning-fixture"))
+        );
+        check(built.succeeded() && built.value.has_value(),
+            "process planning topology builds");
+        if (!built.value.has_value()) return std::nullopt;
+
+        PlanningFixture fixture;
+        fixture.topology = *built.value;
+        fixture.input.contentRevision = topologyInput.contentRevision;
+        fixture.input.topologyInput = std::move(topologyInput);
+        fixture.input.topology = &fixture.topology;
+        fixture.input.tubeSection = planningTubeSection();
+        for (const TopologyPathRecord& topologyRecord : fixture.input.topologyInput.records)
+        {
+            PlanningEntity entity;
+            entity.entityId = topologyRecord.entityId;
+            entity.sourceIndex = topologyRecord.sourceIndex;
+            entity.sourceKind = topologyRecord.sourceKind;
+            entity.path.sourceEntityId = topologyRecord.entityId;
+            entity.path.sourceKind = topologyRecord.sourceKind;
+            entity.path.closed = topologyRecord.semanticallyClosed;
+            for (std::size_t index = 0; index < topologyRecord.points.size(); ++index)
+                entity.path.vertices.push_back
+                    ({ topologyRecord.points[index], static_cast<double>(index) });
+            const auto role = roles.find(topologyRecord.entityId);
+            if (role != roles.end())
+            {
+                entity.boundaryRole = role->second.first;
+                entity.boundaryPairId = role->second.second;
+            }
+            fixture.input.entities.push_back(std::move(entity));
+        }
+        return fixture;
+    }
+
+    int orderOf(const ProcessPlan& plan, EntityId entityId)
+    {
+        const auto found = std::find_if
+        (
+            plan.assignments.cbegin(), plan.assignments.cend(),
+            [entityId](const ProcessAssignment& value) { return value.entityId == entityId; }
+        );
+        return found != plan.assignments.cend() ? found->processOrder : -1;
+    }
+
+    void testProcessPlanningCore()
+    {
+        const OperationContext context = createOperationContext
+            (QStringLiteral("process-planning-core-test"));
+        ProcessPlanningPolicy policy;
+        policy.initialPosition = { 0.0, 0.0, 4.0 };
+
+        auto nearestFixture = planningFixture
+        ({
+            record(0U, 1000U, {{ 2.0, -1.0, 4.0 }, { 3.0, -1.0, 4.0 }}),
+            record(1U, 1001U, {{ 10.0, 1.0, 4.0 }, { 11.0, 1.0, 4.0 }})
+        });
+        if (!nearestFixture.has_value()) return;
+        nearestFixture->input.topology = &nearestFixture->topology;
+        const auto nearest = ProcessPlanBuilder::build
+            (nearestFixture->input, policy, context);
+        check(nearest.succeeded() && nearest.value.has_value()
+            && orderOf(*nearest.value, 1000U) < orderOf(*nearest.value, 1001U),
+            "nearest strategy chooses spatially nearest group");
+
+        std::vector<TopologyPathRecord> breakRecords
+        {
+            record(0U, 1100U, {{ 1.0, -2.0, 4.0 }, { 2.0, -2.0, 4.0 }}),
+            record(1U, 1101U, {{ 7.0, -2.0, 4.0 }, { 8.0, -2.0, 4.0 }})
+        };
+        std::vector<TopologyPathRecord> boundary = rectangleRecords
+            (2U, 1110U, 5.0, -5.0, 5.0, -4.0, 4.0);
+        breakRecords.insert(breakRecords.end(), boundary.begin(), boundary.end());
+        std::map<EntityId, std::pair<BoundaryRole, int>> roles;
+        for (EntityId id = 1110U; id < 1114U; ++id) roles[id] = { BoundaryRole::Break, 3 };
+        auto breakFixture = planningFixture(std::move(breakRecords), roles);
+        if (!breakFixture.has_value()) return;
+        breakFixture->input.topology = &breakFixture->topology;
+        ProcessPlanningPolicy constrainedNearestPolicy = policy;
+        constrainedNearestPolicy.initialPosition = { 8.0, -2.0, 4.0 };
+        const auto constrained = ProcessPlanBuilder::build
+            (breakFixture->input, constrainedNearestPolicy, context);
+        check(constrained.succeeded() && constrained.value.has_value()
+            && orderOf(*constrained.value, 1100U) >= 0
+            && orderOf(*constrained.value, 1101U) < orderOf(*constrained.value, 1100U)
+            && orderOf(*constrained.value, 1100U) < orderOf(*constrained.value, 1110U),
+            "nearest mode may choose a right group early but keeps Left before Break");
+
+        auto lazyFixture = planningFixture
+        ({
+            record(0U, 1200U, {{ 1.0, -1.0, -4.0 }, { 2.0, -1.0, -4.0 }}),
+            record(1U, 1201U, {{ 10.0, 1.0, 4.0 }, { 11.0, 1.0, 4.0 }})
+        });
+        if (!lazyFixture.has_value()) return;
+        lazyFixture->input.topology = &lazyFixture->topology;
+        policy.orderingStrategy = ProcessOrderingStrategy::LazyRotation;
+        const auto lazy = ProcessPlanBuilder::build(lazyFixture->input, policy, context);
+        check(lazy.succeeded() && lazy.value.has_value()
+            && orderOf(*lazy.value, 1201U) < orderOf(*lazy.value, 1200U),
+            "lazy strategy prioritizes lower rotation cost");
+
+        breakFixture->input.topology = &breakFixture->topology;
+        const auto constrainedLazy = ProcessPlanBuilder::build
+            (breakFixture->input, policy, context);
+        check(constrainedLazy.succeeded() && constrainedLazy.value.has_value()
+            && orderOf(*constrainedLazy.value, 1100U) < orderOf(*constrainedLazy.value, 1110U),
+            "break precedence blocks lazy strategy from selecting boundary early");
+
+        std::vector<TopologyPathRecord> twoBreaks
+        {
+            record(0U, 1300U, {{ 1.0, -2.0, 4.0 }, { 2.0, -2.0, 4.0 }}),
+            record(1U, 1301U, {{ 7.0, -2.0, 4.0 }, { 8.0, -2.0, 4.0 }})
+        };
+        auto firstBoundary = rectangleRecords(2U, 1310U, 5.0, -5.0, 5.0, -4.0, 4.0);
+        auto secondBoundary = rectangleRecords(6U, 1320U, 10.0, -5.0, 5.0, -4.0, 4.0);
+        twoBreaks.insert(twoBreaks.end(), firstBoundary.begin(), firstBoundary.end());
+        twoBreaks.insert(twoBreaks.end(), secondBoundary.begin(), secondBoundary.end());
+        std::map<EntityId, std::pair<BoundaryRole, int>> twoRoles;
+        for (EntityId id = 1310U; id < 1314U; ++id) twoRoles[id] = { BoundaryRole::Break, 7 };
+        for (EntityId id = 1320U; id < 1324U; ++id) twoRoles[id] = { BoundaryRole::Break, 2 };
+        auto twoFixture = planningFixture(std::move(twoBreaks), twoRoles);
+        if (!twoFixture.has_value()) return;
+        twoFixture->input.topology = &twoFixture->topology;
+        policy.orderingStrategy = ProcessOrderingStrategy::NearestNext;
+        const auto twoPlan = ProcessPlanBuilder::build(twoFixture->input, policy, context);
+        check(twoPlan.succeeded() && twoPlan.value.has_value()
+            && orderOf(*twoPlan.value, 1300U) < orderOf(*twoPlan.value, 1310U)
+            && orderOf(*twoPlan.value, 1301U) < orderOf(*twoPlan.value, 1320U)
+            && orderOf(*twoPlan.value, 1310U) < orderOf(*twoPlan.value, 1320U),
+            "multiple break boundaries independently enforce spatial precedence");
+
+        std::vector<TopologyPathRecord> mixedRecords
+        {
+            record(0U, 1400U, {{ 3.0, 0.0, 4.0 }, { 7.0, 0.0, 4.0 }})
+        };
+        auto mixedBoundary = rectangleRecords(1U, 1410U, 5.0, -5.0, 5.0, -4.0, 4.0);
+        mixedRecords.insert(mixedRecords.end(), mixedBoundary.begin(), mixedBoundary.end());
+        std::map<EntityId, std::pair<BoundaryRole, int>> mixedRoles;
+        for (EntityId id = 1410U; id < 1414U; ++id) mixedRoles[id] = { BoundaryRole::Break, 1 };
+        auto mixedFixture = planningFixture(std::move(mixedRecords), mixedRoles);
+        if (!mixedFixture.has_value()) return;
+        mixedFixture->input.topology = &mixedFixture->topology;
+        const auto mixed = ProcessPlanBuilder::build(mixedFixture->input, policy, context);
+        check(!mixed.succeeded() && std::any_of
+        (
+            mixed.diagnostics.cbegin(), mixed.diagnostics.cend(),
+            [](const Diagnostic& diagnostic)
+            {
+                return diagnostic.code == DiagnosticCode::ProcessPlanningBoundaryClassificationFailed;
+            }
+        ), "mixed boundary side rejects process plan");
+
+        CadDocument document;
+        CadItem* unchanged = document.appendEntity(makeDocumentLine(0, 0, 0, 1, 0, 0));
+        unchanged->m_processOrder = 27;
+        ProcessPlan stalePlan;
+        stalePlan.contentRevision = document.contentRevision() + 1U;
+        stalePlan.assignments.push_back({ unchanged->m_entityId, 0, -1, false, std::nullopt });
+        const OperationReport apply = LegacyProcessPlanAdapter{}.apply(document, stalePlan, context);
+        check(!apply.succeeded() && unchanged->m_processOrder == 27,
+            "revision conflict leaves CadItem unchanged");
+
+        ProcessPlan missingEntityPlan;
+        missingEntityPlan.contentRevision = document.contentRevision();
+        missingEntityPlan.assignments.push_back
+            ({ unchanged->m_entityId, 0, -1, false, std::nullopt });
+        missingEntityPlan.assignments.push_back
+            ({ unchanged->m_entityId + 1000U, 1, -1, false, std::nullopt });
+        const OperationReport missingEntityApply = LegacyProcessPlanAdapter{}.apply
+            (document, missingEntityPlan, context);
+        check(!missingEntityApply.succeeded() && unchanged->m_processOrder == 27,
+            "missing EntityId leaves CadItem unchanged");
+
+        CadDocument cycleDocument;
+        CadItem* cycleFirst = cycleDocument.appendEntity
+            (makeDocumentLine(0, 0, 0, 1, 0, 0));
+        CadItem* cycleSecond = cycleDocument.appendEntity
+            (makeDocumentLine(2, 0, 0, 3, 0, 0));
+        cycleFirst->m_processOrder = 41;
+        cycleSecond->m_processOrder = 42;
+        ProcessPlan cyclePlan;
+        cyclePlan.contentRevision = cycleDocument.contentRevision();
+        cyclePlan.groups.push_back
+            ({ 0, ProcessGroupKind::SingleEntity, false, { cycleFirst->m_entityId } });
+        cyclePlan.groups.push_back
+            ({ 1, ProcessGroupKind::SingleEntity, false, { cycleSecond->m_entityId } });
+        cyclePlan.assignments.push_back
+            ({ cycleFirst->m_entityId, 0, -1, false, std::nullopt });
+        cyclePlan.assignments.push_back
+            ({ cycleSecond->m_entityId, 1, -1, false, std::nullopt });
+        cyclePlan.precedenceConstraints.push_back({ 0, 1, 1 });
+        cyclePlan.precedenceConstraints.push_back({ 1, 0, 2 });
+        const OperationReport cycleApply = LegacyProcessPlanAdapter{}.apply
+            (cycleDocument, cyclePlan, context);
+        check(!cycleApply.succeeded()
+            && cycleFirst->m_processOrder == 41
+            && cycleSecond->m_processOrder == 42,
+            "precedence cycle is rejected without partial CadItem writes");
+
+        CadDocument mixedDocument;
+        mixedDocument.appendEntity(makeDocumentLine(0, 0, 4, 1, 0, 4));
+        auto pointEntity = std::make_unique<DRW_Point>();
+        pointEntity->basePoint = { 0.0, 0.0, 0.0 };
+        CadItem* pointItem = mixedDocument.appendEntity(std::move(pointEntity));
+        cadcam::topology::PathTopology mixedTopology;
+        CoreTubeSectionModel mixedSection = planningTubeSection();
+        mixedSection.contentRevision = mixedDocument.contentRevision();
+        const auto captured = LegacyProcessPlanAdapter{}.capture
+        (
+            mixedDocument, mixedSection, policy.connectionTolerance,
+            mixedTopology, context
+        );
+        check(captured.succeeded() && captured.value.has_value()
+            && captured.value->entities.size() == 2U
+            && captured.value->topologyInput.records.size() == 1U,
+            "unsupported entities remain in planning input but not topology");
+        if (captured.value.has_value())
+        {
+            const auto mixedDocumentPlan = ProcessPlanBuilder::build
+                (*captured.value, policy, context);
+            check(mixedDocumentPlan.succeeded() && mixedDocumentPlan.value.has_value()
+                && std::any_of
+                (
+                    mixedDocumentPlan.value->exclusions.cbegin(),
+                    mixedDocumentPlan.value->exclusions.cend(),
+                    [pointItem](const ProcessExclusion& exclusion)
+                    {
+                        return exclusion.entityId == pointItem->m_entityId
+                            && exclusion.reason == ProcessExclusionReason::UnsupportedGeometry;
+                    }
+                ), "unsupported entity becomes a ProcessPlan exclusion");
+        }
+    }
+
     void testLegacyAdapterValidationAndOrdering()
     {
         LegacyCadItemTopologyAdapter adapter;
@@ -1474,6 +1753,7 @@ int runTopologyTests()
     testSectionAnalyzersRequireStrictLoop();
     testTubeCutBoundaryCore();
     testTubeSectionCore();
+    testProcessPlanningCore();
     testLegacyAdapterValidationAndOrdering();
     testLegacyWrapperPublicApi();
     testLegacyAdapterProcessSemanticsAndTypes();

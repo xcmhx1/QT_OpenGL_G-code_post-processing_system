@@ -9,6 +9,7 @@
 #include <QStringList>
 
 class QComboBox;
+class QCheckBox;
 class QDialogButtonBox;
 class QDoubleSpinBox;
 class QLineEdit;
@@ -89,6 +90,7 @@ private:
     QDoubleSpinBox* m_rotaryClearanceSpinBox = nullptr;
     QDoubleSpinBox* m_rotaryPlaneZOffsetSpinBox = nullptr;
     QDoubleSpinBox* m_rotaryOvercutDistanceSpinBox = nullptr;
+    QCheckBox* m_lazyRotationProcessingCheckBox = nullptr;
 
     QListWidget* m_entityTypeListWidget = nullptr;
     QPlainTextEdit* m_entityTypeHeaderEdit = nullptr;

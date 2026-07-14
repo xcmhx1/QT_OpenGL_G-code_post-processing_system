@@ -424,7 +424,18 @@ OperationReport Gcode_postprocessing_system::prepareDocumentForGCodeExport
 )
 {
     OperationReport report;
-    const int excludedCount = refreshWasteProcessingExclusions();
+    const bool hasCurrentProcessPlan = m_currentProcessPlan.has_value()
+        && m_currentProcessPlan->contentRevision == m_document.contentRevision();
+    const int excludedCount = generationMode == GGenerator::GenerationMode::Mode3D
+        ? (hasCurrentProcessPlan ? static_cast<int>(std::count_if
+        (
+            m_document.m_entities.cbegin(), m_document.m_entities.cend(),
+            [](const std::unique_ptr<CadItem>& item)
+            {
+                return item != nullptr && item->m_excludedFromProcessing;
+            }
+        )) : 0)
+        : refreshWasteProcessingExclusions();
 
     if (excludedCount > 0)
     {
@@ -445,10 +456,11 @@ OperationReport Gcode_postprocessing_system::prepareDocumentForGCodeExport
     (
         m_document.m_entities.begin(),
         m_document.m_entities.end(),
-        [](const std::unique_ptr<CadItem>& entity)
+        [generationMode](const std::unique_ptr<CadItem>& entity)
         {
             return entity != nullptr
-                && !entity->m_excludedFromProcessing
+                && (generationMode == GGenerator::GenerationMode::Mode3D
+                    || !entity->m_excludedFromProcessing)
                 && entity->m_nativeEntity != nullptr
                 && isExportSortableEntityType(entity->m_type);
         }
@@ -470,7 +482,9 @@ OperationReport Gcode_postprocessing_system::prepareDocumentForGCodeExport
         return report;
     }
 
-    if (!hasCompleteProcessOrderForExport(generationMode))
+    const bool requiresCurrentProcessPlan = generationMode == GGenerator::GenerationMode::Mode3D
+        && !hasCurrentProcessPlan;
+    if (requiresCurrentProcessPlan || !hasCompleteProcessOrderForExport(generationMode))
     {
         report.addDiagnostic(makeExportDiagnostic
         (

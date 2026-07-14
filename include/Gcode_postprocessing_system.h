@@ -11,10 +11,13 @@
 #include "GGenerator.h"
 #include "RotaryTubeGeometryAnalyzer.h"
 #include "GProfile.h"
+#include "core/planning/ProcessPlan.h"
 
 #include <QtWidgets/QMainWindow>
 #include <QtGlobal>
 #include <QMap>
+
+#include <optional>
 
 #include "ui_Gcode_postprocessing_system.h"
 
@@ -140,6 +143,7 @@ private:
     bool smartSortEntities();
     bool sortEntitiesByCurrentDirection3D();
     bool smartSortEntities3D();
+    bool sortEntitiesWithProcessPlan3D(const QString& commandTitle);
     bool smartAssignSelectedRotaryEndCut();
     bool assignSelectedRotaryEndCut();
     bool assignSelectedWasteEndCut();
@@ -156,6 +160,7 @@ private:
     void showMachiningContextMenu(const QPoint& globalPos);
     int refreshWasteProcessingExclusions();
     void invalidateProcessOrdersAfterEndCutChange();
+    void invalidateCurrentProcessPlan();
     bool hasCompleteProcessOrderForExport(GGenerator::GenerationMode generationMode) const;
 
 private:
@@ -178,6 +183,7 @@ private:
     AppLicense m_license;
     RotaryTubeSectionModel m_rotaryTubeSectionModel;
     GProfile m_activeProfile = GProfile::createDefaultLaserProfile();
+    std::optional<cadcam::planning::ProcessPlan> m_currentProcessPlan;
     QString m_currentLayerName = QStringLiteral("0");
     QColor m_currentColor = QColor(Qt::white);
     int m_currentColorIndex = 256;
