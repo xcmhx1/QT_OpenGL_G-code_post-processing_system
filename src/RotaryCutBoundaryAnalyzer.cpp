@@ -101,52 +101,6 @@ namespace
         return std::isfinite(deviation);
     }
 
-    TubeSectionGeometry buildSectionGeometry(const RotaryTubeSectionModel& model)
-    {
-        TubeSectionGeometry section;
-        const QVector<QVector2D>* sourceBoundary = nullptr;
-
-        if (model.sectionBoundary.size() >= 4)
-        {
-            sourceBoundary = &model.sectionBoundary;
-        }
-        else if (model.roundedCornerCount == 0 && model.sectionHull.size() == 4)
-        {
-            sourceBoundary = &model.sectionHull;
-        }
-
-        if (sourceBoundary == nullptr)
-        {
-            return section;
-        }
-
-        section.boundary.reserve(static_cast<std::size_t>(sourceBoundary->size()));
-
-        double minimumY = std::numeric_limits<double>::max();
-        double maximumY = std::numeric_limits<double>::lowest();
-        double minimumZ = std::numeric_limits<double>::max();
-        double maximumZ = std::numeric_limits<double>::lowest();
-
-        for (const QVector2D& point : *sourceBoundary)
-        {
-            section.boundary.push_back({ point.x(), point.y() });
-            minimumY = std::min(minimumY, static_cast<double>(point.x()));
-            maximumY = std::max(maximumY, static_cast<double>(point.x()));
-            minimumZ = std::min(minimumZ, static_cast<double>(point.y()));
-            maximumZ = std::max(maximumZ, static_cast<double>(point.y()));
-        }
-
-        section.centerY = model.centerValid
-            ? model.centerY
-            : (minimumY + maximumY) * 0.5;
-        section.centerZ = model.centerValid
-            ? model.centerZ
-            : (minimumZ + maximumZ) * 0.5;
-        section.yLength = model.yLength > 0.0 ? model.yLength : maximumY - minimumY;
-        section.zWidth = model.zWidth > 0.0 ? model.zWidth : maximumZ - minimumZ;
-        return section;
-    }
-
     QString firstDiagnosticMessage(const QVector<Diagnostic>& diagnostics)
     {
         for (const Diagnostic& diagnostic : diagnostics)
@@ -259,7 +213,9 @@ RotaryCutBoundaryAnalysis RotaryCutBoundaryAnalyzer::analyze
         }
     }
 
-    const TubeSectionGeometry sourceSection = buildSectionGeometry(sectionModel);
+    const TubeSectionGeometry sourceSection = sectionModel.coreModel.has_value()
+        ? sectionModel.coreModel->geometry
+        : TubeSectionGeometry{};
     const OperationResult<TubeCutAnalysis> coreResult = TubeCutBoundaryClassifier::analyze
     (
         orderedPath,

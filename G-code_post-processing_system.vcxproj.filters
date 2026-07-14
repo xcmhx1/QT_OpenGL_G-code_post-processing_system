@@ -364,6 +364,9 @@
     <ClCompile Include="src\core\machining\TubeCutBoundary.cpp">
       <Filter>Source Files\Model</Filter>
     </ClCompile>
+    <ClCompile Include="src\core\machining\TubeSection.cpp">
+      <Filter>Source Files\Model</Filter>
+    </ClCompile>
     <ClCompile Include="src\RotaryPathTopology.cpp">
       <Filter>Source Files\Model</Filter>
     </ClCompile>
@@ -592,6 +595,9 @@
       <Filter>Header Files\Model</Filter>
     </ClInclude>
     <ClInclude Include="include\core\machining\TubeCutBoundary.h">
+      <Filter>Header Files\Model</Filter>
+    </ClInclude>
+    <ClInclude Include="include\core\machining\TubeSection.h">
       <Filter>Header Files\Model</Filter>
     </ClInclude>
     <ClInclude Include="include\RotaryPathTopology.h">

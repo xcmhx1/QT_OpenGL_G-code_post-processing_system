@@ -73,6 +73,15 @@ QString diagnosticCodeName(DiagnosticCode code)
     case DiagnosticCode::CutBoundaryWindingMismatch: return QStringLiteral("CutBoundaryWindingMismatch");
     case DiagnosticCode::CutBoundaryMultipleWinding: return QStringLiteral("CutBoundaryMultipleWinding");
     case DiagnosticCode::CutBoundaryKeepsTubeConnected: return QStringLiteral("CutBoundaryKeepsTubeConnected");
+    case DiagnosticCode::TubeSectionInputInvalid: return QStringLiteral("TubeSectionInputInvalid");
+    case DiagnosticCode::TubeSectionLoopUnavailable: return QStringLiteral("TubeSectionLoopUnavailable");
+    case DiagnosticCode::TubeSectionNotPerpendicular: return QStringLiteral("TubeSectionNotPerpendicular");
+    case DiagnosticCode::TubeSectionBoundaryInvalid: return QStringLiteral("TubeSectionBoundaryInvalid");
+    case DiagnosticCode::TubeSectionSelfIntersection: return QStringLiteral("TubeSectionSelfIntersection");
+    case DiagnosticCode::TubeSectionAreaInvalid: return QStringLiteral("TubeSectionAreaInvalid");
+    case DiagnosticCode::TubeSectionMultipleOuterLoops: return QStringLiteral("TubeSectionMultipleOuterLoops");
+    case DiagnosticCode::TubeSectionPreparationFailed: return QStringLiteral("TubeSectionPreparationFailed");
+    case DiagnosticCode::TubeSectionInteriorClassificationFailed: return QStringLiteral("TubeSectionInteriorClassificationFailed");
     case DiagnosticCode::InternalInvariantViolation: return QStringLiteral("InternalInvariantViolation");
     }
 

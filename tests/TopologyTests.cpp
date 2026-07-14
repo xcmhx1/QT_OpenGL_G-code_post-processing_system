@@ -37,6 +37,9 @@ namespace
     using cadcam::machining::TubeCutBoundaryClassifier;
     using cadcam::machining::TubeCutResult;
     using cadcam::machining::TubeSectionGeometry;
+    using cadcam::machining::TubeSectionAnalyzer;
+    using cadcam::machining::TubeSectionPolicy;
+    using CoreTubeSectionModel = cadcam::machining::TubeSectionModel;
     using cadcam::topology::PathTopology;
     using cadcam::topology::PathTopologyBuilder;
     using cadcam::topology::PathTopologyTolerance;
@@ -884,6 +887,212 @@ namespace
             "multiple winding remains indeterminate");
     }
 
+    struct TubeSectionFixture
+    {
+        TopologyInput input;
+        PathTopology topology;
+    };
+
+    std::vector<TopologyPathRecord> rectangleRecords
+    (
+        std::size_t sourceIndex,
+        EntityId entityId,
+        double x,
+        double minimumY,
+        double maximumY,
+        double minimumZ,
+        double maximumZ
+    )
+    {
+        return
+        {
+            record(sourceIndex, entityId,
+                {{ x, minimumY, maximumZ }, { x, maximumY, maximumZ }}),
+            record(sourceIndex + 1, entityId + 1,
+                {{ x, maximumY, maximumZ }, { x, maximumY, minimumZ }}),
+            record(sourceIndex + 2, entityId + 2,
+                {{ x, maximumY, minimumZ }, { x, minimumY, minimumZ }}),
+            record(sourceIndex + 3, entityId + 3,
+                {{ x, minimumY, minimumZ }, { x, minimumY, maximumZ }})
+        };
+    }
+
+    std::optional<TubeSectionFixture> tubeSectionFixture
+    (
+        std::vector<TopologyPathRecord> records
+    )
+    {
+        TopologyInput input;
+        input.contentRevision = 42U;
+        input.records = std::move(records);
+        const OperationResult<PathTopology> built = PathTopologyBuilder{}.build
+        (
+            input,
+            PathTopologyTolerance{},
+            task(QStringLiteral("tube-section-fixture"))
+        );
+        check(built.succeeded() && built.value.has_value(),
+            "tube section fixture topology builds");
+        if (!built.succeeded() || !built.value.has_value()) return std::nullopt;
+        return TubeSectionFixture{ std::move(input), *built.value };
+    }
+
+    void testTubeSectionCore()
+    {
+        TubeSectionPolicy policy;
+        const OperationContext context = createOperationContext
+            (QStringLiteral("tube-section-core-test"));
+        const auto exactFixture = tubeSectionFixture
+            (rectangleRecords(0U, 100U, 0.0, -5.0, 5.0, -4.0, 4.0));
+        if (!exactFixture.has_value()) return;
+        const OperationResult<CoreTubeSectionModel> exact =
+            TubeSectionAnalyzer::buildFromSelection
+        (
+            exactFixture->input,
+            exactFixture->topology,
+            { 100U },
+            policy,
+            context
+        );
+        check(exact.succeeded() && exact.value.has_value()
+            && exact.value->outerBoundaryEntityIds.size() == 4U
+            && std::abs(exact.value->geometry.yLength - 10.0) <= 1.0e-9
+            && std::abs(exact.value->geometry.zWidth - 8.0) <= 1.0e-9,
+            "exact rectangular tube section is recognized");
+        if (!exact.value.has_value()) return;
+
+        std::vector<TopologyPathRecord> nested = rectangleRecords
+            (0U, 200U, 0.0, -10.0, 10.0, -8.0, 8.0);
+        std::vector<TopologyPathRecord> inner = rectangleRecords
+            (4U, 204U, 0.0, -3.0, 3.0, -2.0, 2.0);
+        nested.insert(nested.end(), inner.begin(), inner.end());
+        const auto nestedFixture = tubeSectionFixture(std::move(nested));
+        if (!nestedFixture.has_value()) return;
+        const OperationResult<CoreTubeSectionModel> best = TubeSectionAnalyzer::findBest
+            (nestedFixture->input, nestedFixture->topology, policy, context);
+        check(best.succeeded() && best.value.has_value()
+            && best.value->outerBoundaryEntityIds.size() == 4U
+            && std::find(best.value->outerBoundaryEntityIds.cbegin(),
+                best.value->outerBoundaryEntityIds.cend(), 200U)
+                != best.value->outerBoundaryEntityIds.cend()
+            && std::find(best.value->outerBoundaryEntityIds.cbegin(),
+                best.value->outerBoundaryEntityIds.cend(), 204U)
+                == best.value->outerBoundaryEntityIds.cend(),
+            "outer rectangle is selected over contained rectangle");
+        if (!best.value.has_value()) return;
+
+        std::vector<TopologyPathRecord> open = rectangleRecords
+            (0U, 300U, 0.0, -5.0, 5.0, -5.0, 5.0);
+        open.pop_back();
+        const auto openFixture = tubeSectionFixture(std::move(open));
+        if (!openFixture.has_value()) return;
+        const OperationResult<CoreTubeSectionModel> openResult =
+            TubeSectionAnalyzer::findBest
+                (openFixture->input, openFixture->topology, policy, context);
+        check(!openResult.succeeded() && !openResult.value.has_value(),
+            "open rectangle is not recognized as tube section");
+
+        std::vector<TopologyPathRecord> inclined
+        {
+            record(0U, 400U, {{ 0.0, -5.0, 5.0 }, { 0.4, 5.0, 5.0 }}),
+            record(1U, 401U, {{ 0.4, 5.0, 5.0 }, { 0.4, 5.0, -5.0 }}),
+            record(2U, 402U, {{ 0.4, 5.0, -5.0 }, { 0.0, -5.0, -5.0 }}),
+            record(3U, 403U, {{ 0.0, -5.0, -5.0 }, { 0.0, -5.0, 5.0 }})
+        };
+        const auto inclinedFixture = tubeSectionFixture(std::move(inclined));
+        if (!inclinedFixture.has_value()) return;
+        const OperationResult<CoreTubeSectionModel> inclinedResult =
+            TubeSectionAnalyzer::buildFromSelection
+                (inclinedFixture->input, inclinedFixture->topology,
+                 { 400U }, policy, context);
+        check(!inclinedResult.succeeded()
+            && std::any_of(inclinedResult.diagnostics.cbegin(), inclinedResult.diagnostics.cend(), [](const Diagnostic& value)
+            {
+                return value.code == DiagnosticCode::TubeSectionNotPerpendicular;
+            }),
+            "inclined section is rejected");
+
+        std::vector<TopologyPathRecord> withInternalLine = rectangleRecords
+            (0U, 500U, 0.0, -5.0, 5.0, -5.0, 5.0);
+        withInternalLine.push_back(record(4U, 504U,
+            {{ 0.0, -2.0, 0.0 }, { 0.0, 2.0, 0.0 }}));
+        const auto lineFixture = tubeSectionFixture(std::move(withInternalLine));
+        if (!lineFixture.has_value()) return;
+        const OperationResult<CoreTubeSectionModel> lineSection =
+            TubeSectionAnalyzer::buildFromSelection
+                (lineFixture->input, lineFixture->topology, { 500U }, policy, context);
+        check(lineSection.succeeded() && lineSection.value.has_value(),
+            "tube section with internal line remains recognizable");
+        if (!lineSection.value.has_value()) return;
+        const auto lineClassification = TubeSectionAnalyzer::classifyInternalPaths
+            (lineFixture->input, lineFixture->topology, *lineSection.value, policy, context);
+        check(lineClassification.succeeded() && lineClassification.value.has_value()
+            && std::find(lineClassification.value->physicalInteriorEntityIds.cbegin(),
+                lineClassification.value->physicalInteriorEntityIds.cend(), 504U)
+                != lineClassification.value->physicalInteriorEntityIds.cend(),
+            "interior line is classified as physical interior");
+
+        const auto nestedClassification = TubeSectionAnalyzer::classifyInternalPaths
+            (nestedFixture->input, nestedFixture->topology, *best.value, policy, context);
+        check(nestedClassification.succeeded() && nestedClassification.value.has_value()
+            && std::find(nestedClassification.value->topologicalInteriorEntityIds.cbegin(),
+                nestedClassification.value->topologicalInteriorEntityIds.cend(), 204U)
+                != nestedClassification.value->topologicalInteriorEntityIds.cend(),
+            "contained closed loop is classified as topological interior");
+        check(nestedClassification.value.has_value()
+            && std::none_of(best.value->outerBoundaryEntityIds.cbegin(),
+                best.value->outerBoundaryEntityIds.cend(), [&nestedClassification](EntityId entityId)
+                {
+                    return std::find
+                    (
+                        nestedClassification.value->physicalInteriorEntityIds.cbegin(),
+                        nestedClassification.value->physicalInteriorEntityIds.cend(),
+                        entityId
+                    ) != nestedClassification.value->physicalInteriorEntityIds.cend()
+                    || std::find
+                    (
+                        nestedClassification.value->topologicalInteriorEntityIds.cbegin(),
+                        nestedClassification.value->topologicalInteriorEntityIds.cend(),
+                        entityId
+                    ) != nestedClassification.value->topologicalInteriorEntityIds.cend();
+                }),
+            "outer boundary entities are never classified as interior");
+
+        const auto analyzeCut = [&exact, &context](std::vector<Vector3d> path)
+        {
+            return TubeCutBoundaryClassifier::analyze
+            (
+                path,
+                exact.value->outerBoundaryEntityIds,
+                0.0,
+                exact.value->geometry,
+                context
+            );
+        };
+        const auto positiveCut = analyzeCut
+        ({
+            { 0.0, -5.0, 4.0 }, { 0.0, 5.0, 4.0 },
+            { 0.0, 5.0, -4.0 }, { 0.0, -5.0, -4.0 }
+        });
+        const auto negativeCut = analyzeCut
+        ({
+            { 0.0, -5.0, 4.0 }, { 0.0, -5.0, -4.0 },
+            { 0.0, 5.0, -4.0 }, { 0.0, 5.0, 4.0 }
+        });
+        const auto bridgeCut = analyzeCut
+        ({
+            { 0.0, -5.0, 4.0 }, { 0.0, 5.0, 4.0 },
+            { 0.0, 5.0, -4.0 }, { 0.0, -5.0, -4.0 },
+            { 1.0, -5.0, 4.0 }, { 1.0, -5.0, -4.0 },
+            { 1.0, 5.0, -4.0 }, { 1.0, 5.0, 4.0 }
+        });
+        check(positiveCut.value.has_value() && positiveCut.value->winding == 1
+            && negativeCut.value.has_value() && negativeCut.value->winding == -1
+            && bridgeCut.value.has_value()
+            && bridgeCut.value->result == TubeCutResult::KeepsLeftAndRight,
+            "recognized section geometry feeds positive negative and zero winding cuts");
+    }
+
     void testLegacyAdapterValidationAndOrdering()
     {
         LegacyCadItemTopologyAdapter adapter;
@@ -1264,6 +1473,7 @@ int runTopologyTests()
     testAdapterCancellationRevisionAndDeterminism();
     testSectionAnalyzersRequireStrictLoop();
     testTubeCutBoundaryCore();
+    testTubeSectionCore();
     testLegacyAdapterValidationAndOrdering();
     testLegacyWrapperPublicApi();
     testLegacyAdapterProcessSemanticsAndTypes();

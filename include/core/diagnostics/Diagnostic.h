@@ -91,6 +91,15 @@ enum class DiagnosticCode
     CutBoundaryWindingMismatch,
     CutBoundaryMultipleWinding,
     CutBoundaryKeepsTubeConnected,
+    TubeSectionInputInvalid,
+    TubeSectionLoopUnavailable,
+    TubeSectionNotPerpendicular,
+    TubeSectionBoundaryInvalid,
+    TubeSectionSelfIntersection,
+    TubeSectionAreaInvalid,
+    TubeSectionMultipleOuterLoops,
+    TubeSectionPreparationFailed,
+    TubeSectionInteriorClassificationFailed,
     InternalInvariantViolation
 };
 

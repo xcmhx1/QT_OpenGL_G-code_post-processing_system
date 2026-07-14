@@ -98,6 +98,7 @@
     <ClCompile Include="..\src\application\topology\GeometrySnapshotTopologyAdapter.cpp" />
     <ClCompile Include="..\src\core\topology\PathTopology.cpp" />
     <ClCompile Include="..\src\core\machining\TubeCutBoundary.cpp" />
+    <ClCompile Include="..\src\core\machining\TubeSection.cpp" />
     <ClCompile Include="..\src\RotaryPathTopology.cpp" />
     <ClCompile Include="..\src\RotaryTubeGeometryAnalyzer.cpp" />
     <ClCompile Include="..\src\RotaryCutBoundaryAnalyzer.cpp" />

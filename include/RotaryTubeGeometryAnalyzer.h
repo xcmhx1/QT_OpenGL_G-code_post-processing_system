@@ -1,16 +1,20 @@
 #pragma once
 
+#include "core/machining/TubeSection.h"
+
 #include <QVector>
 #include <QVector2D>
 #include <QString>
+
+#include <optional>
 
 class CadItem;
 
 struct RotaryTubeSectionModel
 {
     bool valid = false;
+    std::optional<cadcam::machining::TubeSectionModel> coreModel;
     QVector<QVector2D> sectionBoundary;
-    QVector<QVector2D> sectionHull;
     QVector<CadItem*> outerBoundaryItems;
     double yLength = 0.0;
     double zWidth = 0.0;

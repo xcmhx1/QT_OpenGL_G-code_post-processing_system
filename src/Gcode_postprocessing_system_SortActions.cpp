@@ -5365,7 +5365,7 @@ bool Gcode_postprocessing_system::recognizeRotaryTubeSection(bool interactive)
     m_rotaryTubeSectionModel = recognized;
     syncToolPanelState();
     const QString message = QStringLiteral("方管垂直截面识别完成，共提取 %1 个外轮廓点；内部线和无用支线已忽略。")
-        .arg(recognized.sectionHull.size());
+        .arg(recognized.sectionBoundary.size());
     ui->openGLWidget->appendCommandMessage(message);
     statusBar()->showMessage(message, 5000);
     return true;
