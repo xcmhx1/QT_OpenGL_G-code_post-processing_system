@@ -7,6 +7,7 @@
 #include <QVector3D>
 
 #include <cmath>
+#include <limits>
 #include <memory>
 #include <vector>
 
@@ -77,6 +78,50 @@ namespace
             { QStringLiteral("is3DPolyline"), is3DPolyline }
         };
         return values;
+    }
+
+    QVariantMap splineContext(EntityId entityId, const SplineGeometry& spline)
+    {
+        return
+        {
+            { QStringLiteral("entityId"), static_cast<qulonglong>(entityId) },
+            { QStringLiteral("degree"), spline.degree },
+            { QStringLiteral("controlPointCount"),
+                static_cast<qulonglong>(spline.controlPoints.size()) },
+            { QStringLiteral("knotCount"), static_cast<qulonglong>(spline.knots.size()) },
+            { QStringLiteral("weightCount"), static_cast<qulonglong>(spline.weights.size()) },
+            { QStringLiteral("fitPointCount"), static_cast<qulonglong>(spline.fitPoints.size()) },
+            { QStringLiteral("parameterStart"), spline.parameterStart },
+            { QStringLiteral("parameterEnd"), spline.parameterEnd },
+            { QStringLiteral("subdivisionDepth"), -1 },
+            { QStringLiteral("generatedPointCount"), 0 },
+            { QStringLiteral("closed"), spline.closed },
+            { QStringLiteral("periodic"), spline.periodic },
+            { QStringLiteral("rational"), spline.rational }
+        };
+    }
+
+    Diagnostic makeSplineAdapterDiagnostic
+    (
+        EntityId entityId,
+        const SplineGeometry& spline,
+        const OperationContext& context,
+        DiagnosticCode code,
+        DiagnosticSeverity severity,
+        const QString& detail
+    )
+    {
+        Diagnostic diagnostic = makeAdapterDiagnostic
+        (
+            entityId,
+            context,
+            code,
+            QStringLiteral("DXF 样条曲线数据无效。"),
+            detail,
+            splineContext(entityId, spline)
+        );
+        diagnostic.severity = severity;
+        return diagnostic;
     }
 
     bool buildPolylinePlane
@@ -633,6 +678,164 @@ OperationResult<cadcam::geometry::SourceEntity> DxfGeometryAdapter::convert
             entityId, QStringLiteral("LWPOLYLINE"), std::move(vertices), closed,
             false, origin, axisU, axisV, context
         );
+    }
+    case DRW::ETYPE::SPLINE:
+    {
+        const auto& spline = static_cast<const DRW_Spline&>(entity);
+        SplineGeometry geometry;
+        geometry.degree = spline.degree;
+        geometry.closed = (spline.flags & 1) != 0;
+        geometry.periodic = (spline.flags & 2) != 0;
+        geometry.rational = (spline.flags & 4) != 0;
+        geometry.knots = spline.knotslist;
+        geometry.weights = spline.weightlist;
+        geometry.controlPoints.reserve(spline.controllist.size());
+        geometry.fitPoints.reserve(spline.fitlist.size());
+
+        const double nan = (std::numeric_limits<double>::quiet_NaN)();
+        bool controlPointsFinite = true;
+        for (const std::shared_ptr<DRW_Coord>& point : spline.controllist)
+        {
+            if (!point)
+            {
+                geometry.controlPoints.push_back({ nan, nan, nan });
+                controlPointsFinite = false;
+                continue;
+            }
+            const Vector3d converted = toVector3d(*point);
+            geometry.controlPoints.push_back(converted);
+            controlPointsFinite = controlPointsFinite && finiteVector(converted);
+        }
+
+        std::size_t validFitPointCount = 0U;
+        bool fitPointsFinite = true;
+        for (const std::shared_ptr<DRW_Coord>& point : spline.fitlist)
+        {
+            if (!point)
+            {
+                geometry.fitPoints.push_back({ nan, nan, nan });
+                fitPointsFinite = false;
+                continue;
+            }
+            const Vector3d converted = toVector3d(*point);
+            geometry.fitPoints.push_back(converted);
+            if (finiteVector(converted))
+            {
+                ++validFitPointCount;
+            }
+            else
+            {
+                fitPointsFinite = false;
+            }
+        }
+
+        if (geometry.weights.size() < geometry.controlPoints.size())
+        {
+            geometry.weights.resize(geometry.controlPoints.size(), 1.0);
+        }
+        bool weightsValid = true;
+        for (double weight : geometry.weights)
+        {
+            weightsValid = weightsValid
+                && std::isfinite(weight)
+                && std::abs(weight) > 1.0e-15;
+        }
+        bool knotsValid = !geometry.knots.empty();
+        for (std::size_t index = 0; index < geometry.knots.size(); ++index)
+        {
+            knotsValid = knotsValid
+                && std::isfinite(geometry.knots[index])
+                && (index == 0U || geometry.knots[index] >= geometry.knots[index - 1U]);
+        }
+
+        const std::size_t controlCount = geometry.controlPoints.size();
+        const bool degreeValid = geometry.degree >= 1
+            && controlCount > static_cast<std::size_t>(geometry.degree);
+        const std::size_t requiredKnotCount = degreeValid
+            ? controlCount + static_cast<std::size_t>(geometry.degree) + 1U
+            : 0U;
+        knotsValid = knotsValid && degreeValid
+            && geometry.knots.size() >= requiredKnotCount;
+        if (knotsValid)
+        {
+            geometry.parameterStart = geometry.knots[static_cast<std::size_t>(geometry.degree)];
+            geometry.parameterEnd = geometry.knots[controlCount];
+        }
+        const bool domainValid = knotsValid
+            && std::isfinite(geometry.parameterStart)
+            && std::isfinite(geometry.parameterEnd)
+            && geometry.parameterEnd > geometry.parameterStart;
+        const bool exactValid = degreeValid
+            && controlPointsFinite
+            && knotsValid
+            && weightsValid
+            && domainValid;
+        const bool fallbackAvailable = validFitPointCount >= 2U;
+
+        SourceEntity splineSource;
+        splineSource.id = entityId;
+        splineSource.kind = SourceGeometryKind::Spline;
+        splineSource.geometry = geometry;
+
+        const DiagnosticSeverity invalidSeverity = fallbackAvailable
+            ? DiagnosticSeverity::Warning
+            : DiagnosticSeverity::Error;
+        if (!degreeValid)
+        {
+            result.addDiagnostic(makeSplineAdapterDiagnostic
+            (entityId, geometry, context, DiagnosticCode::InvalidSplineDegree,
+                invalidSeverity, QStringLiteral("degree or control point count is invalid")));
+        }
+        if (!controlPointsFinite)
+        {
+            result.addDiagnostic(makeSplineAdapterDiagnostic
+            (entityId, geometry, context, DiagnosticCode::InvalidSplineControlPoints,
+                invalidSeverity, QStringLiteral("control point is null, NaN or infinity")));
+        }
+        if (!knotsValid)
+        {
+            result.addDiagnostic(makeSplineAdapterDiagnostic
+            (entityId, geometry, context, DiagnosticCode::InvalidSplineKnots,
+                invalidSeverity, QStringLiteral("knot vector is invalid")));
+        }
+        if (!weightsValid)
+        {
+            result.addDiagnostic(makeSplineAdapterDiagnostic
+            (entityId, geometry, context, DiagnosticCode::InvalidSplineWeights,
+                invalidSeverity, QStringLiteral("weight is zero, NaN or infinity")));
+        }
+        if (!domainValid)
+        {
+            result.addDiagnostic(makeSplineAdapterDiagnostic
+            (entityId, geometry, context, DiagnosticCode::InvalidSplineParameterDomain,
+                invalidSeverity, QStringLiteral("effective parameter domain is invalid")));
+        }
+        if (!fitPointsFinite)
+        {
+            result.addDiagnostic(makeSplineAdapterDiagnostic
+            (entityId, geometry, context, DiagnosticCode::InvalidSpline,
+                exactValid ? DiagnosticSeverity::Warning : invalidSeverity,
+                QStringLiteral("fit point is null, NaN or infinity")));
+        }
+
+        if (!exactValid && !fallbackAvailable)
+        {
+            result.status = OperationStatus::InvalidInput;
+            if (result.diagnostics.isEmpty())
+            {
+                result.addDiagnostic(makeSplineAdapterDiagnostic
+                (entityId, geometry, context, DiagnosticCode::InvalidSpline,
+                    DiagnosticSeverity::Error,
+                    QStringLiteral("exact NURBS and fit-point fallback are both unavailable")));
+            }
+            return result;
+        }
+
+        result.status = exactValid && fitPointsFinite
+            ? OperationStatus::Success
+            : OperationStatus::PartialSuccess;
+        result.value = std::move(splineSource);
+        return result;
     }
     default:
         result.status = OperationStatus::NotSupported;

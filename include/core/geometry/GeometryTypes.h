@@ -74,13 +74,28 @@ namespace cadcam::geometry
         bool closed = false;
     };
 
+    struct SplineGeometry
+    {
+        int degree = 0;
+        std::vector<Vector3d> controlPoints;
+        std::vector<double> weights;
+        std::vector<double> knots;
+        std::vector<Vector3d> fitPoints;
+        bool closed = false;
+        bool periodic = false;
+        bool rational = false;
+        double parameterStart = 0.0;
+        double parameterEnd = 0.0;
+    };
+
     using GeometryVariant = std::variant
     <
         LineGeometry,
         CircleGeometry,
         ArcGeometry,
         EllipseGeometry,
-        PolylineGeometry
+        PolylineGeometry,
+        SplineGeometry
     >;
 
     struct SourceEntity

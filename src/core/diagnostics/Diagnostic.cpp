@@ -35,6 +35,16 @@ QString diagnosticCodeName(DiagnosticCode code)
     case DiagnosticCode::InvalidPolylineVertex: return QStringLiteral("InvalidPolylineVertex");
     case DiagnosticCode::InvalidBulge: return QStringLiteral("InvalidBulge");
     case DiagnosticCode::PolylinePlaneFailure: return QStringLiteral("PolylinePlaneFailure");
+    case DiagnosticCode::InvalidSpline: return QStringLiteral("InvalidSpline");
+    case DiagnosticCode::InvalidSplineDegree: return QStringLiteral("InvalidSplineDegree");
+    case DiagnosticCode::InvalidSplineControlPoints: return QStringLiteral("InvalidSplineControlPoints");
+    case DiagnosticCode::InvalidSplineKnots: return QStringLiteral("InvalidSplineKnots");
+    case DiagnosticCode::InvalidSplineWeights: return QStringLiteral("InvalidSplineWeights");
+    case DiagnosticCode::InvalidSplineParameterDomain: return QStringLiteral("InvalidSplineParameterDomain");
+    case DiagnosticCode::SplineEvaluationFailure: return QStringLiteral("SplineEvaluationFailure");
+    case DiagnosticCode::SplineSubdivisionLimit: return QStringLiteral("SplineSubdivisionLimit");
+    case DiagnosticCode::SplinePointLimitExceeded: return QStringLiteral("SplinePointLimitExceeded");
+    case DiagnosticCode::SplineFitPointFallbackUsed: return QStringLiteral("SplineFitPointFallbackUsed");
     case DiagnosticCode::InternalInvariantViolation: return QStringLiteral("InternalInvariantViolation");
     }
 

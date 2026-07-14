@@ -53,6 +53,16 @@ enum class DiagnosticCode
     InvalidPolylineVertex,
     InvalidBulge,
     PolylinePlaneFailure,
+    InvalidSpline,
+    InvalidSplineDegree,
+    InvalidSplineControlPoints,
+    InvalidSplineKnots,
+    InvalidSplineWeights,
+    InvalidSplineParameterDomain,
+    SplineEvaluationFailure,
+    SplineSubdivisionLimit,
+    SplinePointLimitExceeded,
+    SplineFitPointFallbackUsed,
     InternalInvariantViolation
 };
 

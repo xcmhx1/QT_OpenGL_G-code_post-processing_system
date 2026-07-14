@@ -9,6 +9,18 @@
 
 namespace cadcam::geometry
 {
+    struct SplineSamplingPolicy
+    {
+        double minimumTolerance = 1.0e-6;
+        double relativeChordTolerance = 5.0e-4;
+        double relativeMaximumSegmentLength = 1.0 / 64.0;
+        double knotSpanTolerance = 1.0e-7;
+        int maximumSubdivisionDepth = 12;
+        int maximumPoints = 65536;
+        int fitFallbackSamplesPerSpan = 16;
+        bool allowFitPointFallback = true;
+    };
+
     struct PathVertex3D
     {
         Vector3d position;
@@ -34,6 +46,7 @@ namespace cadcam::geometry
         int minimumBulgeSegments = 4;
         int maximumSegments = 65536;
         bool singlePrecisionEvaluation = false;
+        SplineSamplingPolicy spline;
     };
 
     struct PathCompileOptions

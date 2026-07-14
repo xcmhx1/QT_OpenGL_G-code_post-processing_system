@@ -7,6 +7,7 @@
 #include "CadLWPolylineItem.h"
 #include "CadOcsGeometry.h"
 #include "CadPolylineItem.h"
+#include "CadSplineConverter.h"
 #include "GGenerator.h"
 #include "GProfile.h"
 #include "application/messaging/MessageCenter.h"
@@ -14,12 +15,17 @@
 #include "core/diagnostics/OperationResult.h"
 #include "core/geometry/EntityIdAllocator.h"
 #include "core/geometry/GeometryCompiler.h"
+#include "core/geometry/NurbsCurveEvaluator.h"
 #include "infrastructure/dxf/DxfGeometryAdapter.h"
+#include "SplineParity.h"
 #include "dx_data.h"
 
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 
 #include <algorithm>
 #include <array>
@@ -34,6 +40,7 @@ namespace
     constexpr double kHalfPi = 1.57079632679489661923;
     int failureCount = 0;
     bool updateGoldenFiles = false;
+    bool updateSplineGoldenFiles = false;
 
     void check(bool condition, const char* name)
     {
@@ -185,6 +192,79 @@ namespace
             }
         }
         check(actual == expected, fileName.toUtf8().constData());
+    }
+
+    void verifySplineGolden
+    (
+        const QString& fileName,
+        const OperationResult<cadcam::geometry::Path3D>& result
+    )
+    {
+        check(result.succeeded() && result.value.has_value(),
+            "spline golden path available");
+        if (!result.succeeded() || !result.value.has_value())
+        {
+            return;
+        }
+
+        QJsonObject root;
+        root.insert(QStringLiteral("status"),
+            result.status == OperationStatus::PartialSuccess
+                ? QStringLiteral("PartialSuccess")
+                : QStringLiteral("Success"));
+        root.insert(QStringLiteral("pointCount"),
+            static_cast<qint64>(result.value->vertices.size()));
+        root.insert(QStringLiteral("closed"), result.value->closed);
+
+        QJsonArray parameters;
+        QJsonArray points;
+        for (const cadcam::geometry::PathVertex3D& vertex : result.value->vertices)
+        {
+            parameters.append(vertex.sourceParameter);
+            QJsonArray point;
+            point.append(vertex.position.x);
+            point.append(vertex.position.y);
+            point.append(vertex.position.z);
+            points.append(point);
+        }
+        root.insert(QStringLiteral("parameters"), parameters);
+        root.insert(QStringLiteral("points"), points);
+
+        QJsonArray diagnostics;
+        for (const Diagnostic& diagnostic : result.diagnostics)
+        {
+            diagnostics.append(diagnosticCodeName(diagnostic.code));
+        }
+        root.insert(QStringLiteral("diagnostics"), diagnostics);
+
+        const QByteArray actual = QJsonDocument(root).toJson(QJsonDocument::Indented);
+        const QString directory = QDir(goldenDirectory()).filePath(QStringLiteral("spline"));
+        const QString filePath = QDir(directory).filePath(fileName);
+
+        if (updateSplineGoldenFiles)
+        {
+            QDir().mkpath(directory);
+            QFile output(filePath);
+            check(output.open(QIODevice::WriteOnly | QIODevice::Truncate),
+                "open spline golden output");
+            if (output.isOpen())
+            {
+                output.write(actual);
+                output.close();
+            }
+            return;
+        }
+
+        QFile input(filePath);
+        check(input.open(QIODevice::ReadOnly), "open spline golden input");
+        if (!input.isOpen())
+        {
+            return;
+        }
+
+        const QByteArray expected = input.readAll();
+        const QByteArray checkName = fileName.toUtf8();
+        check(actual == expected, checkName.constData());
     }
 
     void testOperationResult()
@@ -948,6 +1028,399 @@ namespace
             "Legacy POLYLINE delegates and restores closure point");
     }
 
+    void testSplineGeometryCore()
+    {
+        using namespace cadcam::geometry;
+
+        auto makeSpline = []
+        (
+            int degree,
+            const std::vector<Vector3d>& controls,
+            const std::vector<double>& knots,
+            const std::vector<double>& weights = {},
+            const std::vector<Vector3d>& fitPoints = {},
+            int flags = 0
+        )
+        {
+            auto spline = std::make_unique<DRW_Spline>();
+            spline->degree = degree;
+            spline->flags = flags;
+            spline->knotslist = knots;
+            spline->weightlist = weights;
+            for (const Vector3d& point : controls)
+            {
+                spline->controllist.push_back
+                    (std::make_shared<DRW_Coord>(point.x, point.y, point.z));
+            }
+            for (const Vector3d& point : fitPoints)
+            {
+                spline->fitlist.push_back
+                    (std::make_shared<DRW_Coord>(point.x, point.y, point.z));
+            }
+            spline->ncontrol = static_cast<dint32>(spline->controllist.size());
+            spline->nknots = static_cast<dint32>(spline->knotslist.size());
+            spline->nfit = static_cast<dint32>(spline->fitlist.size());
+            return spline;
+        };
+
+        auto adaptSpline = []
+        (const DRW_Spline& spline, EntityId id)
+        {
+            return DxfGeometryAdapter::convert
+            (id, spline, testContext(QStringLiteral("adapt-spline")));
+        };
+
+        auto compileSpline = [&]
+        (
+            const DRW_Spline& spline,
+            EntityId id,
+            const SamplingPolicy& policy = SamplingPolicy{},
+            const PathCompileOptions& options = PathCompileOptions{}
+        )
+        {
+            const OperationResult<SourceEntity> source = adaptSpline(spline, id);
+            if (!source.succeeded() || !source.value.has_value())
+            {
+                OperationResult<Path3D> failed;
+                failed.status = source.status;
+                failed.mergeDiagnostics(source);
+                return failed;
+            }
+            GeometryCompiler compiler;
+            OperationResult<Path3D> result = compiler.compile
+            (
+                *source.value,
+                policy,
+                options,
+                testContext(QStringLiteral("compile-spline"))
+            );
+            result.mergeDiagnostics(source);
+            return result;
+        };
+
+        const auto linear = makeSpline
+        (
+            1,
+            { { 0.0, 0.0, 0.0 }, { 10.0, 0.0, 0.0 } },
+            { 0.0, 0.0, 1.0, 1.0 }
+        );
+        const OperationResult<SourceEntity> linearSource = adaptSpline(*linear, 301);
+        check(linearSource.succeeded()
+            && linearSource.value->kind == SourceGeometryKind::Spline,
+            "SPLINE adapts without polyline conversion");
+        const SplineGeometry& linearGeometry =
+            std::get<SplineGeometry>(linearSource.value->geometry);
+        check(linearGeometry.degree == 1
+            && linearGeometry.controlPoints.size() == 2
+            && linearGeometry.weights.size() == 2
+            && linearGeometry.weights[0] == 1.0
+            && linearGeometry.parameterStart == 0.0
+            && linearGeometry.parameterEnd == 1.0,
+            "SplineGeometry preserves data and fills missing weights");
+
+        NurbsCurveEvaluator evaluator;
+        const OperationResult<Vector3d> linearQuarter = evaluator.evaluate
+        (linearGeometry, 0.25, testContext(QStringLiteral("evaluate-linear-spline")));
+        check(linearQuarter.succeeded()
+            && std::abs(linearQuarter.value->x - 2.5) <= kTolerance,
+            "Degree-one NURBS evaluation");
+        const OperationResult<Path3D> linearPath = compileSpline(*linear, 302);
+        check(linearPath.succeeded() && !linearPath.value->closed
+            && std::abs(linearPath.value->vertices.front().position.x) <= kTolerance
+            && std::abs(linearPath.value->vertices.back().position.x - 10.0) <= kTolerance,
+            "Open degree-one spline path endpoints");
+
+        const auto quadratic = makeSpline
+        (
+            2,
+            { { 0.0, 0.0, 0.0 }, { 5.0, 10.0, 0.0 }, { 10.0, 0.0, 0.0 } },
+            { 0.0, 0.0, 0.0, 1.0, 1.0, 1.0 }
+        );
+        const OperationResult<Path3D> quadraticPath = compileSpline(*quadratic, 303);
+        check(quadraticPath.succeeded() && quadraticPath.value->vertices.size() > 2,
+            "Quadratic spline adaptive path");
+
+        const auto quartic = makeSpline
+        (
+            4,
+            {
+                { 0.0, 0.0, 0.0 }, { 2.0, 5.0, 0.0 }, { 5.0, -3.0, 0.0 },
+                { 8.0, 5.0, 0.0 }, { 10.0, 0.0, 0.0 }
+            },
+            { 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0 }
+        );
+        check(compileSpline(*quartic, 319).succeeded(),
+            "Higher-degree NURBS evaluation");
+
+        const auto cubic = makeSpline
+        (
+            3,
+            {
+                { 0.0, 0.0, 0.0 }, { 3.0, 8.0, 0.0 },
+                { 7.0, -4.0, 0.0 }, { 10.0, 0.0, 0.0 }
+            },
+            { 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0 }
+        );
+        const OperationResult<Path3D> cubicPath = compileSpline(*cubic, 304);
+        check(cubicPath.succeeded() && cubicPath.value->vertices.size() > 8,
+            "Cubic clamped NURBS adaptive path");
+        bool cubicParametersIncrease = true;
+        for (std::size_t index = 1; index < cubicPath.value->vertices.size(); ++index)
+        {
+            cubicParametersIncrease = cubicParametersIncrease
+                && cubicPath.value->vertices[index].sourceParameter
+                    > cubicPath.value->vertices[index - 1].sourceParameter;
+        }
+        check(cubicParametersIncrease, "Spline source parameters increase forward");
+
+        PathCompileOptions reverseOptions;
+        reverseOptions.reverse = true;
+        const OperationResult<Path3D> reversedCubic =
+            compileSpline(*cubic, 305, SamplingPolicy{}, reverseOptions);
+        bool reverseParametersDecrease = reversedCubic.succeeded();
+        for (std::size_t index = 1;
+            reverseParametersDecrease && index < reversedCubic.value->vertices.size(); ++index)
+        {
+            reverseParametersDecrease =
+                reversedCubic.value->vertices[index].sourceParameter
+                    < reversedCubic.value->vertices[index - 1].sourceParameter;
+        }
+        check(reverseParametersDecrease
+            && std::abs(reversedCubic.value->vertices.front().position.x - 10.0) <= kTolerance,
+            "Spline reverse preserves decreasing source parameters");
+
+        const auto nonUniform = makeSpline
+        (
+            2,
+            {
+                { 0.0, 0.0, 0.0 }, { 2.0, 4.0, 0.0 }, { 5.0, -1.0, 0.0 },
+                { 8.0, 3.0, 0.0 }, { 10.0, 0.0, 0.0 }
+            },
+            { 0.0, 0.0, 0.0, 0.2, 0.75, 1.0, 1.0, 1.0 }
+        );
+        const OperationResult<Path3D> nonUniformPath = compileSpline(*nonUniform, 306);
+        check(nonUniformPath.succeeded()
+            && nonUniformPath.value->vertices.front().sourceParameter == 0.0
+            && nonUniformPath.value->vertices.back().sourceParameter == 1.0,
+            "Nonuniform knots and multiple nonzero spans");
+
+        const auto repeatedKnots = makeSpline
+        (
+            2,
+            {
+                { 0.0, 0.0, 0.0 }, { 2.0, 4.0, 0.0 }, { 5.0, 0.0, 0.0 },
+                { 8.0, -4.0, 0.0 }, { 10.0, 0.0, 0.0 }
+            },
+            { 0.0, 0.0, 0.0, 0.5, 0.5, 1.0, 1.0, 1.0 }
+        );
+        check(compileSpline(*repeatedKnots, 307).succeeded(),
+            "Repeated knots evaluate without duplicate span endpoints");
+
+        const double rootHalf = std::sqrt(0.5);
+        const auto rationalQuarterCircle = makeSpline
+        (
+            2,
+            { { 1.0, 0.0, 0.0 }, { 1.0, 1.0, 0.0 }, { 0.0, 1.0, 0.0 } },
+            { 0.0, 0.0, 0.0, 1.0, 1.0, 1.0 },
+            { 1.0, rootHalf, 1.0 },
+            {},
+            4
+        );
+        const OperationResult<SourceEntity> rationalSource =
+            adaptSpline(*rationalQuarterCircle, 308);
+        const SplineGeometry& rationalGeometry =
+            std::get<SplineGeometry>(rationalSource.value->geometry);
+        const OperationResult<Vector3d> rationalMiddle = evaluator.evaluate
+        (rationalGeometry, 0.5, testContext(QStringLiteral("evaluate-rational-spline")));
+        check(rationalMiddle.succeeded()
+            && std::abs(rationalMiddle.value->x - rootHalf) <= kTolerance
+            && std::abs(rationalMiddle.value->y - rootHalf) <= kTolerance,
+            "Rational quarter-circle and non-unit weight evaluation");
+
+        const auto closedSpline = makeSpline
+        (
+            2,
+            {
+                { 0.0, 0.0, 0.0 }, { 5.0, 8.0, 0.0 },
+                { 10.0, 0.0, 0.0 }, { 5.0, -8.0, 0.0 }, { 0.0, 0.0, 0.0 }
+            },
+            { 0.0, 0.0, 0.0, 0.33, 0.66, 1.0, 1.0, 1.0 },
+            {}, {}, 1
+        );
+        const OperationResult<Path3D> closedPath = compileSpline(*closedSpline, 309);
+        check(closedPath.succeeded() && closedPath.value->closed
+            && (std::abs(closedPath.value->vertices.front().position.x
+                    - closedPath.value->vertices.back().position.x) > 1.0e-6
+                || std::abs(closedPath.value->vertices.front().position.y
+                    - closedPath.value->vertices.back().position.y) > 1.0e-6
+                || std::abs(closedPath.value->vertices.front().position.z
+                    - closedPath.value->vertices.back().position.z) > 1.0e-6),
+            "Closed spline core path does not repeat start");
+
+        const auto periodicSpline = makeSpline
+        (
+            2,
+            {
+                { 0.0, 0.0, 0.0 }, { 3.0, 5.0, 0.0 }, { 6.0, 0.0, 0.0 },
+                { 3.0, -5.0, 0.0 }, { 0.0, 0.0, 0.0 }
+            },
+            { 0.0, 0.0, 0.0, 0.25, 0.75, 1.0, 1.0, 1.0 },
+            {}, {}, 2
+        );
+        const OperationResult<Path3D> periodicPath = compileSpline(*periodicSpline, 310);
+        check(periodicPath.succeeded() && periodicPath.value->closed
+            && std::get<SplineGeometry>(adaptSpline(*periodicSpline, 311).value->geometry).periodic,
+            "Periodic spline semantic and closed path");
+
+        const auto shortSpan = makeSpline
+        (
+            2,
+            {
+                { 0.0, 0.0, 0.0 }, { 2.0, 1.0, 0.0 }, { 4.0, 0.0, 0.0 },
+                { 6.0, 1.0, 0.0 }, { 8.0, 0.0, 0.0 }
+            },
+            { 0.0, 0.0, 0.0, 1.0e-9, 0.5, 1.0, 1.0, 1.0 }
+        );
+        check(compileSpline(*shortSpan, 312).succeeded(),
+            "Extremely short knot span follows compatibility tolerance");
+
+        const std::vector<Vector3d> fallbackPoints
+        {
+            { 0.0, 0.0, 0.0 }, { 3.0, 4.0, 0.0 },
+            { 7.0, -2.0, 0.0 }, { 10.0, 0.0, 0.0 }
+        };
+        const auto fitOnly = makeSpline(0, {}, {}, {}, fallbackPoints);
+        const OperationResult<SourceEntity> fitOnlySource = adaptSpline(*fitOnly, 313);
+        const OperationResult<Path3D> fitOnlyPath = compileSpline(*fitOnly, 314);
+        check(fitOnlySource.status == OperationStatus::PartialSuccess
+            && fitOnlyPath.status == OperationStatus::PartialSuccess
+            && hasDiagnosticCode
+                (fitOnlyPath.diagnostics, DiagnosticCode::SplineFitPointFallbackUsed),
+            "Fit-point-only spline returns explicit fallback warning");
+
+        auto invalidControlWithFit = makeSpline
+        (
+            2,
+            {
+                { 0.0, 0.0, 0.0 },
+                { std::numeric_limits<double>::quiet_NaN(), 2.0, 0.0 },
+                { 4.0, 0.0, 0.0 }
+            },
+            { 0.0, 0.0, 0.0, 1.0, 1.0, 1.0 },
+            {}, fallbackPoints
+        );
+        const OperationResult<Path3D> invalidControlFallback =
+            compileSpline(*invalidControlWithFit, 315);
+        check(invalidControlFallback.status == OperationStatus::PartialSuccess
+            && hasDiagnosticCode
+                (invalidControlFallback.diagnostics,
+                    DiagnosticCode::SplineFitPointFallbackUsed),
+            "Invalid controls with valid fit points use fallback");
+
+        const auto invalidKnotsWithFit = makeSpline
+        (
+            2,
+            { { 0.0, 0.0, 0.0 }, { 2.0, 3.0, 0.0 }, { 4.0, 0.0, 0.0 } },
+            { 0.0, 0.0, 0.5, 0.25, 1.0, 1.0 },
+            {}, fallbackPoints
+        );
+        const OperationResult<Path3D> invalidKnotsFallback =
+            compileSpline(*invalidKnotsWithFit, 320);
+        check(invalidKnotsFallback.status == OperationStatus::PartialSuccess
+            && hasDiagnosticCode
+                (invalidKnotsFallback.diagnostics, DiagnosticCode::InvalidSplineKnots)
+            && hasDiagnosticCode
+                (invalidKnotsFallback.diagnostics,
+                    DiagnosticCode::SplineFitPointFallbackUsed),
+            "Invalid knots with valid fit points use fallback");
+
+        const auto invalidWeightsWithFit = makeSpline
+        (
+            2,
+            { { 0.0, 0.0, 0.0 }, { 2.0, 3.0, 0.0 }, { 4.0, 0.0, 0.0 } },
+            { 0.0, 0.0, 0.0, 1.0, 1.0, 1.0 },
+            { 1.0, 0.0, 1.0 }, fallbackPoints, 4
+        );
+        const OperationResult<Path3D> invalidWeightsFallback =
+            compileSpline(*invalidWeightsWithFit, 321);
+        check(invalidWeightsFallback.status == OperationStatus::PartialSuccess
+            && hasDiagnosticCode
+                (invalidWeightsFallback.diagnostics, DiagnosticCode::InvalidSplineWeights)
+            && hasDiagnosticCode
+                (invalidWeightsFallback.diagnostics,
+                    DiagnosticCode::SplineFitPointFallbackUsed),
+            "Invalid weights with valid fit points use fallback");
+
+        const OperationResult<Vector3d> outsideDomain = evaluator.evaluate
+        (linearGeometry, 2.0, testContext(QStringLiteral("evaluate-outside-domain")));
+        check(!outsideDomain.succeeded()
+            && hasDiagnosticCode
+                (outsideDomain.diagnostics, DiagnosticCode::InvalidSplineParameterDomain),
+            "NURBS evaluator rejects parameters outside the valid domain");
+
+        const auto whollyInvalid = makeSpline(0, {}, {}, {}, {});
+        const OperationResult<SourceEntity> whollyInvalidResult =
+            adaptSpline(*whollyInvalid, 316);
+        check(!whollyInvalidResult.succeeded()
+            && hasDiagnosticCode
+                (whollyInvalidResult.diagnostics, DiagnosticCode::InvalidSplineDegree),
+            "Invalid controls and fit points fail adaptation");
+
+        SamplingPolicy depthLimitedPolicy;
+        depthLimitedPolicy.spline.maximumSubdivisionDepth = 0;
+        depthLimitedPolicy.spline.relativeChordTolerance = 0.0;
+        depthLimitedPolicy.spline.relativeMaximumSegmentLength = 1.0e-9;
+        const OperationResult<Path3D> depthLimited =
+            compileSpline(*cubic, 317, depthLimitedPolicy);
+        check(!depthLimited.succeeded()
+            && hasDiagnosticCode
+                (depthLimited.diagnostics, DiagnosticCode::SplineSubdivisionLimit),
+            "Spline subdivision depth limit diagnostic");
+
+        SamplingPolicy pointLimitedPolicy;
+        pointLimitedPolicy.spline.maximumPoints = 2;
+        pointLimitedPolicy.spline.maximumSubdivisionDepth = 30;
+        pointLimitedPolicy.spline.relativeChordTolerance = 0.0;
+        pointLimitedPolicy.spline.relativeMaximumSegmentLength = 1.0e-6;
+        const OperationResult<Path3D> pointLimited =
+            compileSpline(*cubic, 318, pointLimitedPolicy);
+        check(!pointLimited.succeeded()
+            && hasDiagnosticCode
+                (pointLimited.diagnostics, DiagnosticCode::SplinePointLimitExceeded),
+            "Spline point limit diagnostic");
+
+        auto checkLegacyParity = []
+        (const DRW_Spline& spline, const char* testName)
+        {
+            check(compareSplineWithLegacy(spline).equivalent, testName);
+        };
+        checkLegacyParity(*linear, "Degree-one spline legacy shadow parity");
+        checkLegacyParity(*quadratic, "Quadratic spline legacy shadow parity");
+        checkLegacyParity(*quartic, "Higher-degree spline legacy shadow parity");
+        checkLegacyParity(*cubic, "Cubic spline legacy shadow parity");
+        checkLegacyParity(*nonUniform, "Nonuniform spline legacy shadow parity");
+        checkLegacyParity(*repeatedKnots, "Repeated-knot spline legacy shadow parity");
+        checkLegacyParity(*rationalQuarterCircle,
+            "Rational spline legacy shadow parity");
+        checkLegacyParity(*closedSpline, "Closed spline legacy shadow parity");
+        checkLegacyParity(*periodicSpline, "Periodic spline legacy shadow parity");
+        checkLegacyParity(*shortSpan, "Short-span spline legacy shadow parity");
+        const SplineParityReport fallbackParity = compareSplineWithLegacy(*fitOnly);
+        check(fallbackParity.equivalent
+            && hasDiagnosticCode
+                (fallbackParity.diagnostics, DiagnosticCode::SplineFitPointFallbackUsed),
+            "Fit fallback legacy shadow parity");
+
+        verifySplineGolden(QStringLiteral("cubic_clamped.json"), cubicPath);
+        verifySplineGolden
+        (
+            QStringLiteral("rational_quarter_circle.json"),
+            compileSpline(*rationalQuarterCircle, 322)
+        );
+        verifySplineGolden(QStringLiteral("closed_periodic.json"), periodicPath);
+        verifySplineGolden(QStringLiteral("fit_fallback.json"), fitOnlyPath);
+    }
+
     void testEntityIdAllocator()
     {
         using namespace cadcam::geometry;
@@ -1179,7 +1652,11 @@ int main(int argc, char* argv[])
 {
     for (int index = 1; index < argc; ++index)
     {
-        updateGoldenFiles = QString::fromLocal8Bit(argv[index]) == QStringLiteral("--update-golden");
+        const QString argument = QString::fromLocal8Bit(argv[index]);
+        updateGoldenFiles = updateGoldenFiles
+            || argument == QStringLiteral("--update-golden");
+        updateSplineGoldenFiles = updateSplineGoldenFiles
+            || argument == QStringLiteral("--update-spline-golden");
     }
 
     testOperationResult();
@@ -1189,6 +1666,7 @@ int main(int argc, char* argv[])
     testGeometryCompilerArcAndEllipse();
     testDxfAdapterAndLegacyBridge();
     testPolylineGeometryCore();
+    testSplineGeometryCore();
     testEntityIdAllocator();
     testCircleAndEllipseNorthStart();
     testSimpleLineAndMCodeOptimization();

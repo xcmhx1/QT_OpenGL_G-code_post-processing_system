@@ -391,6 +391,9 @@ if exist "$(VCRuntimeRedistDir)\*.dll" copy /Y "$(VCRuntimeRedistDir)\*.dll" "$(
     <ClCompile Include="src\core\geometry\GeometryCompiler.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
+    <ClCompile Include="src\core\geometry\NurbsCurveEvaluator.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
     <ClCompile Include="src\infrastructure\dxf\DxfGeometryAdapter.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
@@ -516,6 +519,7 @@ if exist "$(VCRuntimeRedistDir)\*.dll" copy /Y "$(VCRuntimeRedistDir)\*.dll" "$(
     <ClInclude Include="include\core\geometry\EntityIdAllocator.h" />
     <ClInclude Include="include\core\geometry\Path3D.h" />
     <ClInclude Include="include\core\geometry\GeometryCompiler.h" />
+    <ClInclude Include="include\core\geometry\NurbsCurveEvaluator.h" />
     <ClInclude Include="include\infrastructure\dxf\DxfGeometryAdapter.h" />
     <ClInclude Include="include\compatibility\legacy\LegacyCadItemPathBridge.h" />
     <ClInclude Include="include\application\messaging\MessageCenter.h" />
