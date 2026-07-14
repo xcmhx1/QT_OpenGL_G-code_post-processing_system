@@ -95,6 +95,18 @@ QString diagnosticCodeName(DiagnosticCode code)
     case DiagnosticCode::ProcessPlanningInvariantViolation: return QStringLiteral("ProcessPlanningInvariantViolation");
     case DiagnosticCode::ProcessPlanApplyConflict: return QStringLiteral("ProcessPlanApplyConflict");
     case DiagnosticCode::ProcessPlanEntityMissing: return QStringLiteral("ProcessPlanEntityMissing");
+    case DiagnosticCode::MachineTrajectoryInputInvalid: return QStringLiteral("MachineTrajectoryInputInvalid");
+    case DiagnosticCode::MachineTrajectoryRevisionMismatch: return QStringLiteral("MachineTrajectoryRevisionMismatch");
+    case DiagnosticCode::MachineTrajectoryEntityMissing: return QStringLiteral("MachineTrajectoryEntityMissing");
+    case DiagnosticCode::MachineTrajectoryGeometryCompileFailed: return QStringLiteral("MachineTrajectoryGeometryCompileFailed");
+    case DiagnosticCode::MachineTrajectoryInvalidPath: return QStringLiteral("MachineTrajectoryInvalidPath");
+    case DiagnosticCode::RotaryKinematicsFailed: return QStringLiteral("RotaryKinematicsFailed");
+    case DiagnosticCode::RotaryCenterInvalid: return QStringLiteral("RotaryCenterInvalid");
+    case DiagnosticCode::RotaryCornerGeometryInvalid: return QStringLiteral("RotaryCornerGeometryInvalid");
+    case DiagnosticCode::MachineTrajectoryContinuityFailure: return QStringLiteral("MachineTrajectoryContinuityFailure");
+    case DiagnosticCode::MachineTrajectorySafeMoveFailed: return QStringLiteral("MachineTrajectorySafeMoveFailed");
+    case DiagnosticCode::MachineTrajectoryOvercutFailed: return QStringLiteral("MachineTrajectoryOvercutFailed");
+    case DiagnosticCode::MachineTrajectoryInvariantViolation: return QStringLiteral("MachineTrajectoryInvariantViolation");
     case DiagnosticCode::InternalInvariantViolation: return QStringLiteral("InternalInvariantViolation");
     }
 

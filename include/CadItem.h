@@ -28,26 +28,6 @@ struct RawPathPoint3D
     double z = 0.0;
 };
 
-// 机床输出控制点
-struct ControlPoint4Axis
-{
-    double x = 0.0;
-    double y = 0.0;
-    double z = 0.0;
-    double aDeg = 0.0;
-};
-
-// 方管圆角的截面圆心，用于将落在圆角圆弧上的路径点定向到该圆心。
-struct RotaryCornerToolCenter
-{
-    double y = 0.0;
-    double z = 0.0;
-    double radius = 0.0;
-    double radialTolerance = 0.0;
-    int yDirection = 0;
-    int zDirection = 0;
-};
-
 // 用户为四轴方管排序显式指定的加工边界角色。
 enum class RotaryEndCutRole
 {
@@ -73,34 +53,7 @@ public:
     // 按当前加工语义重建图元的原始三维路径点集。
     virtual void rebuildRawPathPoints3D() = 0;
 
-    // 基于原始三维路径点集解算 4 轴控制点；默认由派生类覆写实现。
-    virtual bool rebuildControlPoints4Axis
-    (
-        double axisY = 0.0,
-        double axisZ = 0.0,
-        double judgeCenterY = 0.0,
-        double judgeCenterZ = 0.0,
-        bool invertAAxisDirection = false,
-        double aAxisOffsetDegrees = 0.0,
-        bool keepContinuousAngle = true,
-        QString* errorMessage = nullptr
-    );
-
     const std::vector<RawPathPoint3D>& rawPathPoints3D() const;
-
-    const std::vector<ControlPoint4Axis>& controlPoints4Axis() const;
-    std::vector<ControlPoint4Axis>& controlPoints4AxisMutable();
-
-    // 仅对实际落在方管四分之一圆角上的点重算 A 轴，保持其余路径点不变。
-    void applyRoundedCornerToolOrientation
-    (
-        const std::vector<RotaryCornerToolCenter>& cornerCenters,
-        double axisY,
-        double axisZ,
-        bool invertAAxisDirection,
-        double aAxisOffsetDegrees,
-        bool keepContinuousAngle
-    );
 
     // 根据离散后的几何顶点推导一个加工方向向量。
     // 当前实现取首个有效边方向，并按 m_isReverse 决定是否翻转。
@@ -146,8 +99,6 @@ public:
     GeometryData m_geometry;
     // 图元按当前加工顺序离散后的原始三维点集缓存。
     std::vector<RawPathPoint3D> m_rawPathPoints3D;
-    // 基于原始路径点集解算出的 4 轴控制点缓存。
-    std::vector<ControlPoint4Axis> m_controlPoints4Axis;
     // 由几何推导出的标准化加工方向。
     QVector3D m_processDirection;
     // 当前图元的最终显示颜色缓存。
@@ -155,8 +106,4 @@ public:
 
 protected:
     void clearPathCaches();
-
-    static double normalizeAngle180(double angleDeg);
-
-    static double unwrapAngleNear(double previousDeg, double currentDeg);
 };

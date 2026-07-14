@@ -6,7 +6,7 @@
 #include "GGenerator.h"
 #include "GProfile.h"
 #include "SplineParity.h"
-#include "compatibility/legacy/LegacyFourAxisPathBuilder.h"
+#include "core/machine/RotaryKinematics.h"
 #include "compatibility/legacy/SplineEntityClone.h"
 #include "compatibility/legacy/SplineProductionPathProvider.h"
 #include "core/geometry/GeometryCompiler.h"
@@ -130,7 +130,23 @@ namespace
         check(input.open(QIODevice::ReadOnly), "open spline production golden input");
         if (input.isOpen())
         {
-            check(input.readAll() == actual, fileName.toUtf8().constData());
+            const QByteArray expected = input.readAll();
+            if (expected != actual)
+            {
+                const QList<QByteArray> expectedLines = expected.split('\n');
+                const QList<QByteArray> actualLines = actual.split('\n');
+                const int count = std::min(expectedLines.size(), actualLines.size());
+                for (int index = 0; index < count; ++index)
+                {
+                    if (expectedLines[index] == actualLines[index]) continue;
+                    std::cerr << "Golden mismatch " << fileName.toStdString()
+                        << " line " << index + 1 << "\n  expected: "
+                        << expectedLines[index].constData() << "\n  actual:   "
+                        << actualLines[index].constData() << '\n';
+                    break;
+                }
+            }
+            check(expected == actual, fileName.toUtf8().constData());
         }
     }
 
@@ -144,9 +160,40 @@ namespace
             ? GProfile::createDefaultRotaryProfile()
             : GProfile::createDefaultLaserProfile();
         GGenerator generator;
+        std::optional<cadcam::planning::ProcessPlan> plan;
+        std::optional<cadcam::machining::TubeSectionModel> section;
+        if (mode == GGenerator::GenerationMode::Mode3D)
+        {
+            plan.emplace();
+            plan->contentRevision = document.contentRevision();
+            for (const auto& item : document.m_entities)
+            {
+                if (item == nullptr || item->m_processOrder < 0) continue;
+                plan->assignments.push_back
+                    ({ item->m_entityId, item->m_processOrder, item->m_processContinuousGroupId,
+                       item->m_isReverse, item->m_hasCustomProcessStart
+                           ? std::optional<double>(item->m_processStartParameter) : std::nullopt });
+            }
+            section.emplace();
+            section->contentRevision = document.contentRevision();
+            section->geometry.centerY = 0.0;
+            section->geometry.centerZ = 0.0;
+            section->geometry.boundary =
+            {
+                { -10.0, 50.0 }, { 10.0, 50.0 },
+                { 10.0, 53.529412 }, { -10.0, 53.529412 }
+            };
+            section->corners =
+            {
+                { { 0.0, 50.0 }, 0.0, 1, 1 },
+                { { 0.0, 50.0 }, 0.0, -1, 1 }
+            };
+        }
         generator.setDocument(&document);
         generator.setProfile(&profile);
         generator.setGenerationMode(mode);
+        generator.setProcessPlan(plan.has_value() ? &*plan : nullptr);
+        generator.setTubeSectionModel(section);
         generator.setRotaryTubeCenter(0.0, 0.0, true);
         return generator.buildProgramText(context(QStringLiteral("build-spline-program")));
     }
@@ -381,24 +428,25 @@ namespace
 
     void testSharedFourAxisBuilder()
     {
-        const std::vector<RawPathPoint3D> raw
+        cadcam::geometry::Path3D path;
+        path.sourceEntityId = 99;
+        path.vertices =
         {
-            { 0.0, 0.0, 10.0 },
-            { 5.0, 10.0, 0.0 },
-            { 10.0, 0.0, -10.0 }
+            { { 0.0, 0.0, 10.0 }, 0.0 },
+            { { 5.0, 10.0, 0.0 }, 1.0 },
+            { { 10.0, 0.0, -10.0 }, 2.0 }
         };
-        LegacyFourAxisPathOptions options;
+        cadcam::machine::RotaryMachinePolicy options;
         options.keepContinuousAngle = true;
-        const OperationResult<std::vector<ControlPoint4Axis>> result =
-            LegacyFourAxisPathBuilder::build
-            (raw, options, 99, context(QStringLiteral("shared-four-axis")));
-        check(result.succeeded() && result.value->size() == raw.size(),
-            "Shared four-axis builder returns one point per raw point");
+        const auto result = cadcam::machine::RotaryKinematics::transform
+            (path, options, std::nullopt, context(QStringLiteral("shared-four-axis")));
+        check(result.succeeded() && result.value->size() == path.vertices.size(),
+            "Rotary kinematics returns one pose per path point");
         check(result.succeeded()
-            && std::abs((*result.value)[0].aDeg) <= 1.0e-9
-            && std::abs((*result.value)[1].aDeg - 90.0) <= 1.0e-9
-            && std::abs((*result.value)[2].aDeg - 180.0) <= 1.0e-9,
-            "Shared four-axis builder preserves legacy angle policy");
+            && std::abs((*result.value)[0].aDegrees) <= 1.0e-9
+            && std::abs((*result.value)[1].aDegrees - 90.0) <= 1.0e-9
+            && std::abs((*result.value)[2].aDegrees - 180.0) <= 1.0e-9,
+            "Rotary kinematics preserves angle policy");
     }
 }
 

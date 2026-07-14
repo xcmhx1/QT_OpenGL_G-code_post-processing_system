@@ -612,6 +612,29 @@ namespace cadcam::machining
             candidate.model.cornerRadii = corners.radii;
             candidate.model.cornerRadius = corners.radius;
             candidate.model.cornerConfidence = corners.confidence;
+            if (corners.count >= 3 && corners.radius > policy.numericalEpsilon)
+            {
+                std::size_t radiusIndex = 0;
+                for (const int yDirection : { -1, 1 })
+                {
+                    for (const int zDirection : { -1, 1 })
+                    {
+                        const double radius = radiusIndex < corners.radii.size()
+                            ? corners.radii[radiusIndex] : 0.0;
+                        ++radiusIndex;
+                        if (radius <= policy.numericalEpsilon) continue;
+                        const double outerY = yDirection < 0 ? minimumY : maximumY;
+                        const double outerZ = zDirection < 0 ? minimumZ : maximumZ;
+                        candidate.model.corners.push_back
+                        ({
+                            { outerY - yDirection * radius, outerZ - zDirection * radius },
+                            radius,
+                            yDirection,
+                            zDirection
+                        });
+                    }
+                }
+            }
 
             std::map<EntityId, std::size_t> sourceIndices;
             for (const TopologyPathRecord& record : input.records)

@@ -567,6 +567,12 @@ bool Gcode_postprocessing_system::exportGCode
     generator.setDocument(&m_document);
     generator.setProfile(&m_activeProfile);
     generator.setGenerationMode(generationMode);
+    generator.setProcessPlan
+    (
+        generationMode == GGenerator::GenerationMode::Mode3D && m_currentProcessPlan.has_value()
+            ? &*m_currentProcessPlan : nullptr
+    );
+    generator.setTubeSectionModel(m_rotaryTubeSectionModel.coreModel);
     generator.setRotaryTubeCenter
     (
         m_rotaryTubeSectionModel.centerY,

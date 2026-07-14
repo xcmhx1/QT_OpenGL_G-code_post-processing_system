@@ -3,7 +3,6 @@
 #include "CadSplineItem.h"
 #include "application/messaging/DebugMessageSink.h"
 #include "compatibility/legacy/LegacyCadItemPathBridge.h"
-#include "compatibility/legacy/LegacyFourAxisPathBuilder.h"
 #include "compatibility/legacy/SplineProductionPathProvider.h"
 
 namespace
@@ -111,51 +110,4 @@ void CadSplineItem::rebuildRawPathPoints3D()
             (*result.value, m_rawPathPoints3D);
     }
     publishDiagnostics(result.diagnostics);
-}
-
-bool CadSplineItem::rebuildControlPoints4Axis
-(
-    double axisY,
-    double axisZ,
-    double judgeCenterY,
-    double judgeCenterZ,
-    bool invertAAxisDirection,
-    double aAxisOffsetDegrees,
-    bool keepContinuousAngle,
-    QString* errorMessage
-)
-{
-    clearPathCaches();
-    rebuildRawPathPoints3D();
-    const LegacyFourAxisPathOptions options
-    {
-        axisY, axisZ, judgeCenterY, judgeCenterZ,
-        invertAAxisDirection, aAxisOffsetDegrees, keepContinuousAngle
-    };
-    OperationResult<std::vector<ControlPoint4Axis>> result =
-        LegacyFourAxisPathBuilder::build
-        (
-            m_rawPathPoints3D,
-            options,
-            m_entityId,
-            createOperationContext(QStringLiteral("rebuild-spline-four-axis-path"))
-        );
-    if (!result.succeeded() || !result.value.has_value())
-    {
-        result.addDiagnostic(splineItemDiagnostic
-            (*this, DiagnosticCode::SplineControlPointFailure,
-                QStringLiteral("shared four-axis path builder failed")));
-        publishDiagnostics(result.diagnostics);
-        if (errorMessage != nullptr)
-        {
-            *errorMessage = QStringLiteral("样条曲线四轴控制点生成失败。");
-        }
-        return false;
-    }
-    m_controlPoints4Axis = std::move(*result.value);
-    if (errorMessage != nullptr)
-    {
-        errorMessage->clear();
-    }
-    return true;
 }

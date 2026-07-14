@@ -11,11 +11,14 @@
 #include "GGenerator.h"
 #include "GProfile.h"
 #include "application/messaging/MessageCenter.h"
+#include "application/machine/MachineTrajectoryService.h"
 #include "compatibility/legacy/LegacyCadItemPathBridge.h"
 #include "core/diagnostics/OperationResult.h"
 #include "core/geometry/EntityIdAllocator.h"
 #include "core/geometry/GeometryCompiler.h"
 #include "core/geometry/NurbsCurveEvaluator.h"
+#include "core/machine/RotaryKinematics.h"
+#include "core/machine/RotaryTrajectoryBuilder.h"
 #include "infrastructure/dxf/DxfGeometryAdapter.h"
 #include "SplineParity.h"
 #include "SplineProductionTests.h"
@@ -35,6 +38,7 @@
 #include <cmath>
 #include <iostream>
 #include <limits>
+#include <map>
 #include <memory>
 
 namespace
@@ -73,9 +77,7 @@ namespace
     {
         auto item = std::make_unique<Item>(entity.get());
         Item* rawItem = item.get();
-        rawItem->m_entityId = static_cast<cadcam::geometry::EntityId>(document.m_entities.size()) + 1;
-        document.m_data->mBlock->ent.push_back(entity.release());
-        document.m_entities.push_back(std::move(item));
+        document.appendEntity(std::move(entity), std::move(item));
         return rawItem;
     }
 
@@ -139,10 +141,41 @@ namespace
         GGenerator::GenerationMode mode
     )
     {
+        std::optional<cadcam::planning::ProcessPlan> plan;
+        if (mode == GGenerator::GenerationMode::Mode3D && !document.m_entities.empty())
+        {
+            plan.emplace();
+            plan->contentRevision = document.contentRevision();
+            std::vector<CadItem*> ordered;
+            for (const auto& item : document.m_entities)
+                if (item != nullptr && item->m_processOrder >= 0) ordered.push_back(item.get());
+            std::sort(ordered.begin(), ordered.end(), [](const CadItem* left, const CadItem* right)
+            {
+                return left->m_processOrder < right->m_processOrder;
+            });
+            std::map<int, cadcam::planning::ProcessGroup> groups;
+            for (CadItem* item : ordered)
+            {
+                plan->assignments.push_back
+                    ({ item->m_entityId, item->m_processOrder, item->m_processContinuousGroupId,
+                       item->m_isReverse, item->m_hasCustomProcessStart
+                           ? std::optional<double>(item->m_processStartParameter) : std::nullopt });
+                if (item->m_processContinuousGroupId >= 0)
+                {
+                    auto& group = groups[item->m_processContinuousGroupId];
+                    group.groupId = item->m_processContinuousGroupId;
+                    group.kind = cadcam::planning::ProcessGroupKind::ClosedLoop;
+                    group.closed = true;
+                    group.entityIds.push_back(item->m_entityId);
+                }
+            }
+            for (auto& pair : groups) plan->groups.push_back(std::move(pair.second));
+        }
         GGenerator generator;
         generator.setDocument(&document);
         generator.setProfile(&profile);
         generator.setGenerationMode(mode);
+        generator.setProcessPlan(plan.has_value() ? &*plan : nullptr);
         generator.setRotaryTubeCenter(0.0, 0.0, true);
         return generator.buildProgramText(testContext(QStringLiteral("build-program")));
     }
@@ -1650,6 +1683,122 @@ namespace
         check(!writeFailure.succeeded(), "invalid output path fails");
         check(hasDiagnosticCode(writeFailure.diagnostics, DiagnosticCode::FileOpenFailure), "file open diagnostic code");
     }
+
+    void testMachineTrajectoryCore()
+    {
+        using namespace cadcam;
+        const auto makePath = [](geometry::EntityId id, std::initializer_list<geometry::Vector3d> points)
+        {
+            geometry::Path3D path;
+            path.sourceEntityId = id;
+            double parameter = 0.0;
+            for (const auto& point : points) path.vertices.push_back({ point, parameter++ });
+            return path;
+        };
+        machine::RotaryMachinePolicy policy;
+        const std::array<std::pair<geometry::Path3D, double>, 4> faces
+        {{
+            { makePath(1, { { 0.0, 0.0, 10.0 }, { 10.0, 5.0, 10.0 } }), 0.0 },
+            { makePath(2, { { 0.0, 10.0, 0.0 }, { 10.0, 10.0, 5.0 } }), 90.0 },
+            { makePath(3, { { 0.0, 0.0, -10.0 }, { 10.0, 5.0, -10.0 } }), 180.0 },
+            { makePath(4, { { 0.0, -10.0, 0.0 }, { 10.0, -10.0, 5.0 } }), -90.0 }
+        }};
+        for (const auto& face : faces)
+        {
+            const auto transformed = machine::RotaryKinematics::transform
+                (face.first, policy, std::nullopt, testContext(QStringLiteral("fixed-face")));
+            check(transformed.succeeded() && !transformed.value->empty()
+                && std::abs(transformed.value->front().aDegrees - face.second) <= 1.0e-9,
+                "four tube faces use fixed A angles");
+        }
+
+        geometry::Path3D spatial = makePath
+            (5, { { 0.0, 0.0, 10.0 }, { 1.0, 10.0, 0.0 }, { 2.0, 0.0, -10.0 } });
+        policy.invertAAxisDirection = true;
+        policy.aAxisOffsetDegrees = 15.0;
+        const auto spatialResult = machine::RotaryKinematics::transform
+            (spatial, policy, std::nullopt, testContext(QStringLiteral("spatial-angle")));
+        check(spatialResult.succeeded()
+            && std::abs((*spatialResult.value)[0].aDegrees - 15.0) <= 1.0e-9
+            && std::abs((*spatialResult.value)[1].aDegrees + 75.0) <= 1.0e-9
+            && std::abs((*spatialResult.value)[2].aDegrees + 165.0) <= 1.0e-9,
+            "spatial path applies invert offset and continuous unwrap");
+
+        machine::RotaryTrajectoryInput input;
+        input.contentRevision = 10;
+        input.entities =
+        {
+            { 10, 0, geometry::SourceGeometryKind::Line, 0, 7, false, true, false,
+              makePath(10, { { 0.0, 0.0, 10.0 }, { 10.0, 0.0, 10.0 } }) },
+            { 11, 1, geometry::SourceGeometryKind::Line, 1, 7, false, false, true,
+              makePath(11, { { 10.5, 0.0, 10.0 }, { 20.0, 0.0, 10.0 } }) }
+        };
+        planning::ProcessGroup continuous;
+        continuous.groupId = 7;
+        continuous.kind = planning::ProcessGroupKind::ConnectedChain;
+        continuous.entityIds = { 10, 11 };
+        input.processGroups = { continuous };
+        machine::RotaryMachinePolicy trajectoryPolicy;
+        TaskContext task;
+        task.operationContext = testContext(QStringLiteral("trajectory-groups"));
+        const auto connected = machine::RotaryTrajectoryBuilder::build(input, trajectoryPolicy, task);
+        check(connected.succeeded() && connected.value->entities[1].approachMoves.empty()
+            && !connected.value->entities[1].cuttingMoves.empty()
+            && connected.value->entities[1].cuttingMoves.front().kind
+                == machine::MachineMoveKind::CuttingConnection,
+            "same process group uses cutting connection without lift");
+
+        input.entities[1].processGroupId = 8;
+        input.entities[1].firstInGroup = true;
+        planning::ProcessGroup firstSeparate;
+        firstSeparate.groupId = 7;
+        firstSeparate.entityIds = { 10 };
+        planning::ProcessGroup secondSeparate;
+        secondSeparate.groupId = 8;
+        secondSeparate.entityIds = { 11 };
+        input.processGroups = { firstSeparate, secondSeparate };
+        const auto separate = machine::RotaryTrajectoryBuilder::build(input, trajectoryPolicy, task);
+        check(separate.succeeded() && !separate.value->entities[1].approachMoves.empty()
+            && separate.value->entities[1].approachMoves.front().kind == machine::MachineMoveKind::Rapid,
+            "different process groups use rapid safe movement");
+
+        input.entities.resize(1);
+        input.entities[0].processGroupId = 9;
+        input.entities[0].closed = true;
+        input.entities[0].lastInGroup = true;
+        input.entities[0].path = makePath
+            (10, { { 0.0, 0.0, 10.0 }, { 10.0, 0.0, 10.0 }, { 10.0, 10.0, 0.0 } });
+        planning::ProcessGroup closed;
+        closed.groupId = 9;
+        closed.kind = planning::ProcessGroupKind::ClosedLoop;
+        closed.closed = true;
+        closed.entityIds = { 10 };
+        input.processGroups = { closed };
+        const auto overcut = machine::RotaryTrajectoryBuilder::build(input, trajectoryPolicy, task);
+        check(overcut.succeeded() && !overcut.value->entities[0].overcutMoves.empty()
+            && overcut.value->entities[0].overcutMoves.back().kind == machine::MachineMoveKind::Overcut,
+            "closed process group creates overcut moves");
+
+        input.contentRevision = 0;
+        const auto invalidRevision = machine::RotaryTrajectoryBuilder::build(input, trajectoryPolicy, task);
+        check(!invalidRevision.succeeded()
+            && hasDiagnosticCode(invalidRevision.diagnostics, DiagnosticCode::MachineTrajectoryInputInvalid),
+            "invalid trajectory revision is rejected");
+
+        CadDocument revisionDocument;
+        CadLineItem* revisionLine = appendItem<DRW_Line, CadLineItem>
+            (revisionDocument, makeLine(0.0, 0.0, 10.0, 10.0, 0.0, 10.0));
+        planning::ProcessPlan stalePlan;
+        stalePlan.contentRevision = revisionDocument.contentRevision() + 1;
+        stalePlan.assignments.push_back({ revisionLine->m_entityId, 0, -1, false, std::nullopt });
+        MachineTrajectoryService service;
+        GProfileRotaryAxisConfig config;
+        const auto stale = service.buildRotaryTrajectory
+            (revisionDocument, stalePlan, std::nullopt, config, task);
+        check(!stale.succeeded()
+            && hasDiagnosticCode(stale.diagnostics, DiagnosticCode::MachineTrajectoryRevisionMismatch),
+            "stale process plan revision is rejected");
+    }
 }
 
 int main(int argc, char* argv[])
@@ -1677,6 +1826,7 @@ int main(int argc, char* argv[])
     testCircleAndEllipseNorthStart();
     testSimpleLineAndMCodeOptimization();
     testRotaryGoldenPrograms();
+    testMachineTrajectoryCore();
     testFailures();
     failureCount += runSplineProductionTests(updateSplineProductionGoldenFiles);
     failureCount += runGeometrySnapshotTests();

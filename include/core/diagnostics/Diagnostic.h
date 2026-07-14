@@ -113,6 +113,18 @@ enum class DiagnosticCode
     ProcessPlanningInvariantViolation,
     ProcessPlanApplyConflict,
     ProcessPlanEntityMissing,
+    MachineTrajectoryInputInvalid,
+    MachineTrajectoryRevisionMismatch,
+    MachineTrajectoryEntityMissing,
+    MachineTrajectoryGeometryCompileFailed,
+    MachineTrajectoryInvalidPath,
+    RotaryKinematicsFailed,
+    RotaryCenterInvalid,
+    RotaryCornerGeometryInvalid,
+    MachineTrajectoryContinuityFailure,
+    MachineTrajectorySafeMoveFailed,
+    MachineTrajectoryOvercutFailed,
+    MachineTrajectoryInvariantViolation,
     InternalInvariantViolation
 };
 

@@ -5,7 +5,6 @@
 #include "CadPolylineItem.h"
 #include "application/messaging/DebugMessageSink.h"
 #include "compatibility/legacy/LegacyCadItemPathBridge.h"
-#include "compatibility/legacy/LegacyFourAxisPathBuilder.h"
 
 #include <cmath>
 
@@ -377,47 +376,4 @@ void CadPolylineItem::rebuildRawPathPoints3D()
     {
         sink.publish(diagnostic);
     }
-}
-
-bool CadPolylineItem::rebuildControlPoints4Axis
-(
-    double axisY,
-    double axisZ,
-    double judgeCenterY,
-    double judgeCenterZ,
-    bool invertAAxisDirection,
-    double aAxisOffsetDegrees,
-    bool keepContinuousAngle,
-    QString* errorMessage
-)
-{
-    clearPathCaches();
-    rebuildRawPathPoints3D();
-    const LegacyFourAxisPathOptions options
-    {
-        axisY, axisZ, judgeCenterY, judgeCenterZ,
-        invertAAxisDirection, aAxisOffsetDegrees, keepContinuousAngle
-    };
-    const OperationResult<std::vector<ControlPoint4Axis>> result =
-        LegacyFourAxisPathBuilder::build
-        (
-            m_rawPathPoints3D,
-            options,
-            m_entityId,
-            createOperationContext(QStringLiteral("rebuild-polyline-four-axis-path"))
-        );
-    if (!result.succeeded() || !result.value.has_value())
-    {
-        if (errorMessage != nullptr)
-        {
-            *errorMessage = QStringLiteral("多段线原始路径点集为空。");
-        }
-        return false;
-    }
-    m_controlPoints4Axis = *result.value;
-    if (errorMessage != nullptr)
-    {
-        errorMessage->clear();
-    }
-    return true;
 }

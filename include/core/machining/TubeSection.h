@@ -10,6 +10,14 @@
 
 namespace cadcam::machining
 {
+    struct TubeCornerGeometry
+    {
+        geometry::Vector2d center;
+        double radius = 0.0;
+        int yDirection = 0;
+        int zDirection = 0;
+    };
+
     struct TubeSectionModel
     {
         std::uint64_t contentRevision = 0;
@@ -22,6 +30,7 @@ namespace cadcam::machining
         std::vector<double> cornerRadii;
         double cornerRadius = 0.0;
         double cornerConfidence = 0.0;
+        std::vector<TubeCornerGeometry> corners;
     };
 
     struct InternalPathClassification
