@@ -249,21 +249,11 @@ namespace
                 const QVector<QVector3D>& path = paths[component[localIndex]];
 
                 const RotaryPathTopologyRecord& topologyRecord = topology.records()[component[localIndex]];
-                const double closureGap = path.size() < 2
-                    ? std::numeric_limits<double>::max()
-                    : distance3D(path.front(), path.back());
-                double length = 0.0;
+                const bool coordinatesClosed = path.size() >= 3
+                    && distance3D(path.front(), path.back())
+                        <= RotaryPathTopologyTolerance{}.numericalJoinEpsilon;
 
-                for (int pointIndex = 1; pointIndex < path.size(); ++pointIndex)
-                {
-                    length += distance3D(path[pointIndex - 1], path[pointIndex]);
-                }
-
-                const bool approximatelyClosed = path.size() >= 3
-                    && closureGap <= tolerance
-                    && length > 4.0 * std::max(tolerance, closureGap);
-
-                if (path.size() < 2 || topologyRecord.semanticallyClosed || approximatelyClosed)
+                if (path.size() < 2 || topologyRecord.semanticallyClosed || coordinatesClosed)
                 {
                     continue;
                 }
@@ -1257,7 +1247,7 @@ namespace
         if (!loop.valid || loop.usedItems.isEmpty())
         {
             model.errorMessage = loop.errorMessage.isEmpty()
-                ? QStringLiteral("候选图元未能形成闭合或近似闭合的方管垂直截面。")
+                ? QStringLiteral("候选图元未能形成严格闭合的方管垂直截面。")
                 : loop.errorMessage;
             return model;
         }

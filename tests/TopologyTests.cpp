@@ -2,7 +2,9 @@
 
 #include "CadDocument.h"
 #include "CadItem.h"
+#include "RotaryCutBoundaryAnalyzer.h"
 #include "RotaryPathTopology.h"
+#include "RotaryTubeGeometryAnalyzer.h"
 #include "application/geometry/DocumentGeometrySnapshotBuilder.h"
 #include "application/geometry/GeometrySnapshotCompiler.h"
 #include "application/topology/GeometrySnapshotTopologyAdapter.h"
@@ -12,6 +14,7 @@
 
 #include <QCryptographicHash>
 #include <QDir>
+#include <QDirIterator>
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -19,6 +22,8 @@
 #include <QFileInfo>
 
 #include <algorithm>
+#include <array>
+#include <cmath>
 #include <iostream>
 #include <memory>
 
@@ -104,6 +109,19 @@ namespace
         return PathTopologyBuilder{}.build(input, PathTopologyTolerance{}, taskContext);
     }
 
+    OperationResult<PathTopology> buildWithTolerance
+    (
+        std::vector<TopologyPathRecord> records,
+        const PathTopologyTolerance& tolerance,
+        const TaskContext& taskContext = task(QStringLiteral("topology-tolerance-test"))
+    )
+    {
+        TopologyInput input;
+        input.contentRevision = 1U;
+        input.records = std::move(records);
+        return PathTopologyBuilder{}.build(input, tolerance, taskContext);
+    }
+
     std::vector<TopologyPathRecord> rectangle
     (EntityId firstId = 1U, double x = 0.0)
     {
@@ -166,7 +184,7 @@ namespace
         object.insert(QStringLiteral("componentPartition"), components);
         object.insert(QStringLiteral("usedEntityIds"), idsJson(loop.usedEntityIds));
         object.insert(QStringLiteral("ignoredBranchEntityIds"), idsJson(loop.ignoredBranchEntityIds));
-        object.insert(QStringLiteral("closureGap"), loop.closureGap);
+        object.insert(QStringLiteral("maximumJoinGap"), loop.maximumJoinGap);
         object.insert(QStringLiteral("orderedPathDigest"),
             QString::fromLatin1(orderedPathDigest(loop.orderedPath)));
         return object;
@@ -209,15 +227,20 @@ namespace
         const QJsonObject expected = QJsonDocument::fromJson(file.readAll()).object();
         check(topologyGolden(*topology.value, *loop.value) == expected, "topology golden matches");
 
-        std::vector<TopologyPathRecord> approximate = rectangle(10U);
-        approximate.front().points.front().z = 0.5;
-        const OperationResult<PathTopology> approximateTopology = build(std::move(approximate));
-        const OperationResult<TopologyLoopResult> approximateLoop =
-            approximateTopology.value->extractBestLoop({});
-        check(approximateLoop.value.has_value() && approximateLoop.value->approximatelyClosed
-            && approximateLoop.value->closureGap > 0.0
-            && approximateLoop.value->closureGap <= 1.0,
-            "approximately closed loop");
+        std::vector<TopologyPathRecord> discontinuous = rectangle(10U);
+        discontinuous.front().points.front().z = 0.5;
+        const OperationResult<PathTopology> discontinuousTopology =
+            build(std::move(discontinuous));
+        const OperationResult<TopologyLoopResult> discontinuousLoop =
+            discontinuousTopology.value->extractBestLoop({});
+        check(discontinuousLoop.status == OperationStatus::Failed
+            && discontinuousLoop.value.has_value()
+            && !discontinuousLoop.value->connectedLoop
+            && std::abs(discontinuousLoop.value->maximumJoinGap - 0.5) <= 1.0e-9
+            && !discontinuousLoop.diagnostics.isEmpty()
+            && discontinuousLoop.diagnostics.front().code
+                == DiagnosticCode::TopologyLoopDiscontinuous,
+            "discontinuous loop is rejected with physical gap diagnostic");
 
         std::vector<TopologyPathRecord> branched = rectangle(20U);
         branched.push_back(record(4U, 24U, { { 0, 5, 0 }, { 0, 5, -5 } }));
@@ -307,6 +330,139 @@ namespace
         check(bridgeLoop.succeeded() && bridgeLoop.value.has_value()
             && bridgeLoop.value->usedEntityIds == std::vector<EntityId>({ 70, 71, 72, 73 }),
             "seed selects one loop across a bridge");
+    }
+
+    void testStrictLoopContinuity()
+    {
+        const PathTopologyTolerance smallSearch =
+            PathTopologyTolerance::fromConnectionTolerance(0.1);
+        const PathTopologyTolerance largeSearch =
+            PathTopologyTolerance::fromConnectionTolerance(100.0);
+        check(smallSearch.numericalJoinEpsilon == 1.0e-5
+            && largeSearch.numericalJoinEpsilon == 1.0e-5,
+            "numerical join epsilon is independent of connection tolerance");
+
+        PathTopologyTolerance invalidTolerance;
+        invalidTolerance.numericalJoinEpsilon = 0.001;
+        const OperationResult<PathTopology> invalid =
+            buildWithTolerance(rectangle(400U), invalidTolerance);
+        check(invalid.status == OperationStatus::InvalidInput,
+            "millimetre scale numerical join epsilon is rejected");
+
+        std::vector<TopologyPathRecord> floatingError = rectangle(410U);
+        floatingError.front().points.front().z = 5.0e-6;
+        const OperationResult<PathTopology> floatingTopology = build(std::move(floatingError));
+        const OperationResult<TopologyLoopResult> floatingLoop =
+            floatingTopology.value->extractBestLoop({});
+        check(floatingLoop.succeeded() && floatingLoop.value.has_value()
+            && floatingLoop.value->connectedLoop
+            && floatingLoop.value->maximumJoinGap <= 1.0e-5,
+            "sub epsilon floating error remains strictly connected");
+
+        const std::array<double, 5> rejectedGaps =
+            { 2.0e-5, 0.01, 0.1, 0.5, 1.0 };
+        for (double gap : rejectedGaps)
+        {
+            std::vector<TopologyPathRecord> records = rectangle
+                (420U + static_cast<EntityId>(100.0 * gap));
+            records.front().points.front().z = gap;
+            const OperationResult<PathTopology> topology = build(std::move(records));
+            const OperationResult<TopologyLoopResult> loop =
+                topology.value->extractBestLoop({});
+            bool hasDiscontinuousDiagnostic = false;
+            bool diagnosticContextComplete = false;
+            for (const Diagnostic& diagnostic : loop.diagnostics)
+            {
+                hasDiscontinuousDiagnostic = hasDiscontinuousDiagnostic
+                    || diagnostic.code == DiagnosticCode::TopologyLoopDiscontinuous;
+                if (diagnostic.code == DiagnosticCode::TopologyLoopDiscontinuous)
+                {
+                    diagnosticContextComplete =
+                        diagnostic.context.contains(QStringLiteral("maximumJoinGap"))
+                        && diagnostic.context.contains
+                            (QStringLiteral("numericalJoinEpsilon"))
+                        && diagnostic.context.contains(QStringLiteral("entityId"))
+                        && diagnostic.context.contains(QStringLiteral("sourceIndex"))
+                        && diagnostic.context.contains(QStringLiteral("usedEntityIds"))
+                        && diagnostic.context.contains(QStringLiteral("nodeCount"))
+                        && diagnostic.context.contains(QStringLiteral("edgeCount"))
+                        && diagnostic.context.contains
+                            (QStringLiteral("connectionTolerance"));
+                }
+            }
+            check(loop.status == OperationStatus::Failed && loop.value.has_value()
+                && !loop.value->connectedLoop
+                && std::abs(loop.value->maximumJoinGap - gap) <= 1.0e-6
+                && hasDiscontinuousDiagnostic && diagnosticContextComplete,
+                "measurable engineering gap is rejected");
+        }
+
+        const OperationResult<PathTopology> endpointToMiddle = build
+        ({
+            record(0U, 500U, { { 0, 0, 0 }, { 0, 10, 0 } }),
+            record(1U, 501U, { { 0, 5, 0.01 }, { 0, 5, 5 }, { 0, 0, 0 } })
+        });
+        const OperationResult<TopologyLoopResult> endpointToMiddleLoop =
+            endpointToMiddle.value->extractBestLoop({});
+        check(endpointToMiddleLoop.status == OperationStatus::Failed
+            && endpointToMiddleLoop.value.has_value()
+            && endpointToMiddleLoop.value->maximumJoinGap >= 0.009,
+            "endpoint near path middle does not create a strict loop");
+
+        const OperationResult<PathTopology> nearIntersection = build
+        ({
+            record(0U, 510U, { { 0, 0, 0 }, { 0, 10, 0 } }),
+            record(1U, 511U, { { 0.005, 5, -5 }, { 0.005, 5, 5 } })
+        });
+        const OperationResult<TopologyLoopResult> nearIntersectionLoop =
+            nearIntersection.value->extractBestLoop({});
+        check(nearIntersection.value->directlyConnected(510U, 511U)
+            && !nearIntersectionLoop.succeeded(),
+            "near segment intersection remains only candidate adjacency");
+
+        const OperationResult<PathTopology> inclinedGap = build
+        ({
+            record(0U, 520U, { { 0, 0, 0.1 }, { 2, 10, 0 } }),
+            record(1U, 521U, { { 2, 10, 0 }, { 1, 10, 10 } }),
+            record(2U, 522U, { { 1, 10, 10 }, { -1, 0, 10 } }),
+            record(3U, 523U, { { -1, 0, 10 }, { 0, 0, 0 } })
+        });
+        const OperationResult<TopologyLoopResult> inclinedGapLoop =
+            inclinedGap.value->extractBestLoop({});
+        check(inclinedGapLoop.status == OperationStatus::Failed
+            && inclinedGapLoop.value.has_value()
+            && inclinedGapLoop.value->maximumJoinGap >= 0.099,
+            "inclined candidate with physical gap is rejected");
+
+        std::vector<TopologyPathRecord> mixedCandidates = rectangle(600U, 0.0);
+        mixedCandidates.front().points.front().z = 0.5;
+        std::vector<TopologyPathRecord> strictSmall = rectangle(610U, 20.0);
+        for (TopologyPathRecord& strictRecord : strictSmall)
+        {
+            strictRecord.sourceIndex += 4U;
+        }
+        mixedCandidates.insert
+            (mixedCandidates.end(), strictSmall.begin(), strictSmall.end());
+        mixedCandidates.push_back
+            (record(8U, 620U, { { 0, 10, 0 }, { 20, 10, 0 } }));
+        const OperationResult<PathTopology> mixedTopology = build(mixedCandidates);
+        const OperationResult<TopologyLoopResult> mixedLoop =
+            mixedTopology.value->extractBestLoop({});
+        check(mixedLoop.succeeded() && mixedLoop.value.has_value()
+            && mixedLoop.value->connectedLoop
+            && mixedLoop.value->usedEntityIds
+                == std::vector<EntityId>({ 610U, 611U, 612U, 613U }),
+            "strict smaller loop wins before discontinuous larger loop scoring");
+
+        const OperationResult<PathTopology> repeatedTopology = build(std::move(mixedCandidates));
+        const OperationResult<TopologyLoopResult> repeatedLoop =
+            repeatedTopology.value->extractBestLoop({});
+        check(repeatedLoop.value.has_value()
+            && mixedLoop.value.has_value()
+            && repeatedLoop.value->usedEntityIds == mixedLoop.value->usedEntityIds
+            && orderedPathDigest(repeatedLoop.value->orderedPath)
+                == orderedPathDigest(mixedLoop.value->orderedPath),
+            "strict loop selection is deterministic");
     }
 
     GeometrySnapshot makeAdapterSnapshot()
@@ -471,6 +627,51 @@ namespace
         spline->ncontrol = static_cast<dint32>(spline->controllist.size());
         spline->nknots = static_cast<dint32>(spline->knotslist.size());
         return spline;
+    }
+
+    QVector<CadItem*> appendDocumentSection(CadDocument& document, double joinGap)
+    {
+        return
+        {
+            document.appendEntity(makeDocumentLine(0, 0, joinGap, 0, 10, 0)),
+            document.appendEntity(makeDocumentLine(0, 10, 0, 0, 10, 10)),
+            document.appendEntity(makeDocumentLine(0, 10, 10, 0, 0, 10)),
+            document.appendEntity(makeDocumentLine(0, 0, 10, 0, 0, 0))
+        };
+    }
+
+    void testSectionAnalyzersRequireStrictLoop()
+    {
+        CadDocument exactDocument;
+        const QVector<CadItem*> exactItems = appendDocumentSection(exactDocument, 0.0);
+        const RotaryTubeSectionModel exactSection =
+            RotaryTubeGeometryAnalyzer::buildSectionModel
+                ({ exactItems.front() }, exactItems, 1.0);
+        check(exactSection.valid, "strict tube section remains valid");
+
+        CadDocument gapDocument;
+        const QVector<CadItem*> gapItems = appendDocumentSection(gapDocument, 0.1);
+        const RotaryTubeSectionModel gapSection =
+            RotaryTubeGeometryAnalyzer::buildSectionModel
+                ({ gapItems.front() }, gapItems, 1.0);
+        check(!gapSection.valid && gapSection.errorMessage.contains(QStringLiteral("0.1")),
+            "tube section rejects and reports physical join gap");
+
+        const QVector<QVector2D> sectionHull
+        {
+            { 0.0f, 0.0f }, { 10.0f, 0.0f },
+            { 10.0f, 10.0f }, { 0.0f, 10.0f }
+        };
+        const RotaryCutBoundaryAnalysis exactBoundary =
+            RotaryCutBoundaryAnalyzer::analyze(exactItems, exactItems, 1.0, sectionHull);
+        check(exactBoundary.connectedLoop,
+            "strict machining boundary reaches downstream analysis");
+        const RotaryCutBoundaryAnalysis gapBoundary =
+            RotaryCutBoundaryAnalyzer::analyze(gapItems, gapItems, 1.0, sectionHull);
+        check(!gapBoundary.connectedLoop && !gapBoundary.valid
+            && gapBoundary.maximumJoinGap >= 0.099
+            && gapBoundary.errorMessage.contains(QStringLiteral("0.1")),
+            "machining boundary stops before analysis when join gap exists");
     }
 
     void testLegacyAdapterValidationAndOrdering()
@@ -649,6 +850,40 @@ namespace
                 || defaultCircle.value->records.front().points.front().y
                     != customCircle.value->records.front().points.front().y),
             "legacy adapter preserves custom closed start and reverse semantics");
+        RotaryPathTopology circleTopology({ circleItem }, tolerance);
+        const RotaryPathLoopResult circleLoop = circleTopology.extractBestLoop({ circleItem });
+        check(circleLoop.valid && circleLoop.connectedLoop
+            && circleLoop.maximumJoinGap == 0.0,
+            "complete circle is semantically and strictly closed");
+
+        CadDocument ellipseDocument;
+        CadItem* ellipseItem = ellipseDocument.appendEntity(makeTopologyEllipse());
+        RotaryPathTopology ellipseTopology({ ellipseItem }, tolerance);
+        const RotaryPathLoopResult ellipseLoop =
+            ellipseTopology.extractBestLoop({ ellipseItem });
+        check(ellipseLoop.valid && ellipseLoop.connectedLoop
+            && ellipseLoop.maximumJoinGap == 0.0,
+            "complete ellipse is semantically and strictly closed");
+
+        CadDocument polylineDocument;
+        CadItem* polylineItem = polylineDocument.appendEntity(makeTopologyBulgePolyline());
+        RotaryPathTopology polylineTopology({ polylineItem }, tolerance);
+        const RotaryPathLoopResult polylineLoop =
+            polylineTopology.extractBestLoop({ polylineItem });
+        check(polylineLoop.valid && polylineLoop.connectedLoop
+            && polylineLoop.maximumJoinGap == 0.0,
+            "closed bulge polyline is semantically and strictly closed");
+
+        CadDocument splineDocument;
+        std::unique_ptr<DRW_Spline> closedSpline = makeTopologySpline();
+        closedSpline->flags |= 1;
+        CadItem* splineItem = splineDocument.appendEntity(std::move(closedSpline));
+        RotaryPathTopology splineTopology({ splineItem }, tolerance);
+        const RotaryPathLoopResult splineLoop =
+            splineTopology.extractBestLoop({ splineItem });
+        check(splineLoop.valid && splineLoop.connectedLoop
+            && splineLoop.maximumJoinGap == 0.0,
+            "closed spline is semantically and strictly closed");
 
         CadDocument mixedDocument;
         mixedDocument.appendEntity(makeTopologyEllipse());
@@ -685,7 +920,7 @@ namespace
             "ellipse bulge polyline and spline adapter parity");
     }
 
-    void testLegacyWrapperApproximateClosureAndSourceBoundary()
+    void testLegacyWrapperStrictClosureAndSourceBoundary()
     {
         CadDocument document;
         QVector<CadItem*> items;
@@ -695,14 +930,16 @@ namespace
         items.push_back(document.appendEntity(makeDocumentLine(0, 0, 10, 0, 0, 0)));
         RotaryPathTopology topology(items, PathTopologyTolerance{});
         const RotaryPathLoopResult loop = topology.extractSeededLoop({ items[0] });
-        bool hasApproximateDiagnostic = false;
+        bool hasDiscontinuousDiagnostic = false;
         for (const Diagnostic& diagnostic : topology.diagnostics())
         {
-            hasApproximateDiagnostic = hasApproximateDiagnostic
-                || diagnostic.code == DiagnosticCode::TopologyApproximateClosure;
+            hasDiscontinuousDiagnostic = hasDiscontinuousDiagnostic
+                || diagnostic.code == DiagnosticCode::TopologyLoopDiscontinuous;
         }
-        check(loop.valid && loop.approximatelyClosed && hasApproximateDiagnostic,
-            "legacy wrapper exposes approximate closure diagnostic");
+        check(!loop.valid && loop.maximumJoinGap >= 0.499
+            && hasDiscontinuousDiagnostic
+            && loop.errorMessage.contains(QStringLiteral("0.5")),
+            "legacy wrapper exposes strict discontinuity diagnostic");
 
         CadDocument openDocument;
         CadItem* openItem = openDocument.appendEntity
@@ -725,6 +962,38 @@ namespace
         for (const QByteArray& symbol : forbidden)
         {
             check(!sourceText.contains(symbol), "legacy topology source has no core algorithm copy");
+        }
+
+        const QByteArray forbiddenSemantics[] =
+        {
+            QByteArray("approximately") + QByteArray("Closed"),
+            QByteArray("TopologyApproximate") + QByteArray("Closure"),
+            (QString::fromUtf8("几乎") + QString::fromUtf8("闭合")).toUtf8(),
+            (QString::fromUtf8("近似") + QString::fromUtf8("闭合")).toUtf8()
+        };
+        for (const QString& root : { QStringLiteral("include"), QStringLiteral("src") })
+        {
+            QDirIterator iterator
+            (
+                root,
+                { QStringLiteral("*.h"), QStringLiteral("*.cpp") },
+                QDir::Files,
+                QDirIterator::Subdirectories
+            );
+            while (iterator.hasNext())
+            {
+                QFile source(iterator.next());
+                if (!source.open(QIODevice::ReadOnly))
+                {
+                    check(false, "strict closure source file opens");
+                    continue;
+                }
+                const QByteArray text = source.readAll();
+                for (const QByteArray& term : forbiddenSemantics)
+                {
+                    check(!text.contains(term), "legacy loose closure semantics removed");
+                }
+            }
         }
     }
 
@@ -781,11 +1050,13 @@ int runTopologyTests()
     testConnectivityAndComponents();
     testLoopsBranchesAndGolden();
     testClosedKindsInclinedAndMixedLoops();
+    testStrictLoopContinuity();
     testAdapterCancellationRevisionAndDeterminism();
+    testSectionAnalyzersRequireStrictLoop();
     testLegacyAdapterValidationAndOrdering();
     testLegacyWrapperPublicApi();
     testLegacyAdapterProcessSemanticsAndTypes();
-    testLegacyWrapperApproximateClosureAndSourceBoundary();
+    testLegacyWrapperStrictClosureAndSourceBoundary();
     testLegacyParity();
     return failures;
 }

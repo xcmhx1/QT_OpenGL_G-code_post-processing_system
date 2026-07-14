@@ -13,7 +13,7 @@ namespace cadcam::topology
     struct PathTopologyTolerance
     {
         double nodeSnap = 1.0;
-        double closure = 1.0;
+        double numericalJoinEpsilon = 1.0e-5;
         double intersection = 0.01;
         double minimumEdgeLength = 1.0e-6;
 
@@ -39,8 +39,7 @@ namespace cadcam::topology
     struct TopologyLoopResult
     {
         bool connectedLoop = false;
-        bool approximatelyClosed = false;
-        double closureGap = 0.0;
+        double maximumJoinGap = 0.0;
         int connectedComponentCount = 0;
         int openNodeCount = 0;
         int branchNodeCount = 0;

@@ -345,8 +345,7 @@ RotaryPathLoopResult RotaryPathTopology::mapLoopResult
 
     const TopologyLoopResult& core = *coreResult.value;
     result.connectedLoop = core.connectedLoop;
-    result.approximatelyClosed = core.approximatelyClosed;
-    result.closureGap = core.closureGap;
+    result.maximumJoinGap = core.maximumJoinGap;
     result.connectedComponentCount = core.connectedComponentCount;
     result.openNodeCount = core.openNodeCount;
     result.branchNodeCount = core.branchNodeCount;

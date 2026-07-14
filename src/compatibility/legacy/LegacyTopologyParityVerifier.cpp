@@ -165,8 +165,7 @@ namespace
         const TopologyLoopResult& value = *current.value;
         return legacy.valid == value.connectedLoop
             && legacy.connectedLoop == value.connectedLoop
-            && legacy.approximatelyClosed == value.approximatelyClosed
-            && std::abs(legacy.closureGap - value.closureGap) <= 1.0e-6
+            && std::abs(legacy.maximumJoinGap - value.maximumJoinGap) <= 1.0e-9
             && legacy.connectedComponentCount == value.connectedComponentCount
             && legacy.openNodeCount == value.openNodeCount
             && legacy.branchNodeCount == value.branchNodeCount
@@ -203,7 +202,9 @@ namespace
         diagnostic.context.insert(QStringLiteral("componentCount"), 0);
         diagnostic.context.insert(QStringLiteral("openNodeCount"), 0);
         diagnostic.context.insert(QStringLiteral("branchNodeCount"), 0);
-        diagnostic.context.insert(QStringLiteral("closureGap"), 0.0);
+        diagnostic.context.insert(QStringLiteral("maximumJoinGap"), 0.0);
+        diagnostic.context.insert
+            (QStringLiteral("numericalJoinEpsilon"), tolerance.numericalJoinEpsilon);
         diagnostic.context.insert(QStringLiteral("nodeSnap"), tolerance.nodeSnap);
         diagnostic.context.insert
             (QStringLiteral("intersectionTolerance"), tolerance.intersection);
@@ -290,7 +291,7 @@ OperationResult<LegacyTopologyParityReport> LegacyTopologyParityVerifier::verify
     const RotaryPathTopologyTolerance legacyTolerance
     {
         tolerance.nodeSnap,
-        tolerance.closure,
+        tolerance.numericalJoinEpsilon,
         tolerance.intersection,
         tolerance.minimumEdgeLength
     };
@@ -389,8 +390,8 @@ OperationResult<LegacyTopologyParityReport> LegacyTopologyParityVerifier::verify
     report.bestLoopEquivalent = loopEquivalent(legacyBest, currentBest);
     if (currentBest.value.has_value())
     {
-        report.closureGapDifference = std::abs
-            (legacyBest.closureGap - currentBest.value->closureGap);
+        report.maximumJoinGapDifference = std::abs
+            (legacyBest.maximumJoinGap - currentBest.value->maximumJoinGap);
         const std::vector<Vector3d> oldPath = legacyPoints(legacyBest.orderedPath);
         report.exactEquivalent = exactPathEquivalent(oldPath, currentBest.value->orderedPath);
         report.equivalentAfterCyclicRotation = cyclicPathEquivalent

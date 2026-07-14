@@ -1,5 +1,7 @@
 #include "core/topology/PathTopology.h"
 
+#include <QVariantList>
+
 #include <algorithm>
 #include <cmath>
 #include <functional>
@@ -14,6 +16,7 @@ namespace cadcam::topology
 namespace
 {
     constexpr double kEpsilon = 1.0e-9;
+    constexpr double kMaximumNumericalJoinEpsilon = 1.0e-4;
     using geometry::EntityId;
     using geometry::Vector3d;
 
@@ -97,8 +100,7 @@ namespace
     {
         std::vector<Vector3d> orderedPath;
         std::set<int> recordIndices;
-        bool approximatelyClosed = false;
-        double closureGap = 0.0;
+        double maximumJoinGap = 0.0;
         double length = 0.0;
         double projectedArea = 0.0;
         std::size_t minimumSourceIndex = std::numeric_limits<std::size_t>::max();
@@ -167,7 +169,7 @@ namespace
         int componentCount = 0,
         int openNodeCount = 0,
         int branchNodeCount = 0,
-        double closureGap = 0.0
+        double maximumJoinGap = 0.0
     )
     {
         Diagnostic diagnostic;
@@ -176,9 +178,11 @@ namespace
         diagnostic.component = QStringLiteral("PathTopologyBuilder");
         diagnostic.operation = QStringLiteral("BuildPathTopology");
         diagnostic.stage = QStringLiteral("TopologyGraph");
-        diagnostic.userMessage = code == DiagnosticCode::TopologyLoopNotFound
-            ? QStringLiteral("未找到符合条件的闭环。")
-            : QStringLiteral("拓扑构建或提取未完成。");
+        diagnostic.userMessage = code == DiagnosticCode::TopologyLoopDiscontinuous
+            ? QStringLiteral("候选路径存在未连接间隙，不能作为闭合断面。")
+            : (code == DiagnosticCode::TopologyLoopNotFound
+                ? QStringLiteral("未找到符合条件的闭环。")
+                : QStringLiteral("拓扑构建或提取未完成。"));
         diagnostic.technicalDetail = detail;
         diagnostic.correlationId = context.correlationId;
         diagnostic.context.insert(QStringLiteral("entityId"), static_cast<qulonglong>(0U));
@@ -189,7 +193,10 @@ namespace
         diagnostic.context.insert(QStringLiteral("componentCount"), componentCount);
         diagnostic.context.insert(QStringLiteral("openNodeCount"), openNodeCount);
         diagnostic.context.insert(QStringLiteral("branchNodeCount"), branchNodeCount);
-        diagnostic.context.insert(QStringLiteral("closureGap"), closureGap);
+        diagnostic.context.insert(QStringLiteral("maximumJoinGap"), maximumJoinGap);
+        diagnostic.context.insert
+            (QStringLiteral("numericalJoinEpsilon"), tolerance.numericalJoinEpsilon);
+        diagnostic.context.insert(QStringLiteral("connectionTolerance"), tolerance.nodeSnap);
         diagnostic.context.insert(QStringLiteral("nodeSnap"), tolerance.nodeSnap);
         diagnostic.context.insert(QStringLiteral("intersectionTolerance"), tolerance.intersection);
         return diagnostic;
@@ -1046,14 +1053,10 @@ namespace
         const GraphData& graph,
         const std::vector<int>& edgeSequence,
         int startNode,
-        bool approximatelyClosed,
-        double closureGap,
         const std::vector<TopologyPathRecord>& records
     )
     {
         LoopCandidate candidate;
-        candidate.approximatelyClosed = approximatelyClosed;
-        candidate.closureGap = closureGap;
         int currentNode = startNode;
         Vector3d firstPhysicalPoint;
         Vector3d previousPhysicalPoint;
@@ -1072,8 +1075,9 @@ namespace
             }
             else
             {
-                candidate.closureGap = std::max
-                    (candidate.closureGap, distance3D(previousPhysicalPoint, physicalStart));
+                candidate.maximumJoinGap = std::max
+                    (candidate.maximumJoinGap,
+                     distance3D(previousPhysicalPoint, physicalStart));
             }
             appendEdgePoints(candidate.orderedPath, edge, currentNode);
             candidate.recordIndices.insert(edge.recordIndex);
@@ -1083,14 +1087,67 @@ namespace
         }
         if (hasPhysicalPoint)
         {
-            candidate.closureGap = std::max
-                (candidate.closureGap, distance3D(previousPhysicalPoint, firstPhysicalPoint));
-            candidate.approximatelyClosed = candidate.approximatelyClosed
-                || candidate.closureGap > kEpsilon;
+            candidate.maximumJoinGap = std::max
+                (candidate.maximumJoinGap,
+                 distance3D(previousPhysicalPoint, firstPhysicalPoint));
         }
         candidate.projectedArea = projectedAreaYZ(candidate.orderedPath);
         updateStableKeys(candidate, records);
         return candidate;
+    }
+
+    Diagnostic discontinuousLoopDiagnostic
+    (
+        const OperationContext& context,
+        DiagnosticSeverity severity,
+        const PathTopologyTolerance& tolerance,
+        const LoopCandidate& candidate,
+        const std::vector<TopologyPathRecord>& records,
+        std::size_t nodeCount,
+        std::size_t edgeCount
+    )
+    {
+        Diagnostic diagnostic = topologyDiagnostic
+        (
+            context,
+            DiagnosticCode::TopologyLoopDiscontinuous,
+            severity,
+            QStringLiteral("candidate graph loop maximum physical join gap is %1 mm")
+                .arg(candidate.maximumJoinGap, 0, 'g', 12),
+            tolerance,
+            records.size(),
+            nodeCount,
+            edgeCount,
+            0,
+            0,
+            0,
+            candidate.maximumJoinGap
+        );
+        QVariantList usedEntityIds;
+        const TopologyPathRecord* firstRecord = nullptr;
+        for (int recordIndex : candidate.recordIndices)
+        {
+            const TopologyPathRecord& record = records[static_cast<std::size_t>(recordIndex)];
+            usedEntityIds.push_back(QVariant::fromValue<qulonglong>(record.entityId));
+            if (firstRecord == nullptr || record.sourceIndex < firstRecord->sourceIndex)
+            {
+                firstRecord = &record;
+            }
+        }
+        diagnostic.context.insert(QStringLiteral("usedEntityIds"), usedEntityIds);
+        diagnostic.userMessage =
+            QStringLiteral("候选路径存在未连接间隙，不能作为闭合断面。最大连接间隙：%1 mm。")
+                .arg(candidate.maximumJoinGap, 0, 'g', 12);
+        if (firstRecord != nullptr)
+        {
+            diagnostic.entityId = firstRecord->entityId;
+            diagnostic.context.insert
+                (QStringLiteral("entityId"), static_cast<qulonglong>(firstRecord->entityId));
+            diagnostic.context.insert
+                (QStringLiteral("sourceIndex"),
+                 static_cast<qulonglong>(firstRecord->sourceIndex));
+        }
+        return diagnostic;
     }
 
     std::vector<int> edgeComponent
@@ -1168,53 +1225,6 @@ namespace
             currentNode = edge.firstNode == currentNode ? edge.secondNode : edge.firstNode;
         }
         return currentNode == startNode ? ordered : std::vector<int>{};
-    }
-
-    std::vector<int> pathBetweenNodes
-    (
-        const GraphData& graph,
-        const std::vector<int>& component,
-        int startNode,
-        int endNode
-    )
-    {
-        const std::set<int> componentSet(component.begin(), component.end());
-        std::map<int, int> previousNode;
-        std::map<int, int> previousEdge;
-        std::queue<int> pending;
-        pending.push(startNode);
-        previousNode.emplace(startNode, -1);
-        while (!pending.empty() && previousNode.count(endNode) == 0U)
-        {
-            const int node = pending.front();
-            pending.pop();
-            for (int edgeIndex : graph.incidentEdges[static_cast<std::size_t>(node)])
-            {
-                if (componentSet.count(edgeIndex) == 0U)
-                {
-                    continue;
-                }
-                const GraphEdge& edge = graph.edges[static_cast<std::size_t>(edgeIndex)];
-                const int neighbor = edge.firstNode == node ? edge.secondNode : edge.firstNode;
-                if (previousNode.count(neighbor) == 0U)
-                {
-                    previousNode.emplace(neighbor, node);
-                    previousEdge.emplace(neighbor, edgeIndex);
-                    pending.push(neighbor);
-                }
-            }
-        }
-        if (previousNode.count(endNode) == 0U)
-        {
-            return {};
-        }
-        std::vector<int> reversed;
-        for (int node = endNode; node != startNode; node = previousNode.at(node))
-        {
-            reversed.push_back(previousEdge.at(node));
-        }
-        std::reverse(reversed.begin(), reversed.end());
-        return reversed;
     }
 
     bool enumerateSimpleCycles
@@ -1320,7 +1330,7 @@ PathTopologyTolerance PathTopologyTolerance::fromConnectionTolerance
     return
     {
         nodeSnap,
-        nodeSnap,
+        1.0e-5,
         std::max(1.0e-9, nodeSnap * 0.01),
         1.0e-6
     };
@@ -1494,7 +1504,7 @@ OperationResult<TopologyLoopResult> PathTopology::extractSeededLoop
                 result.value->connectedComponentCount,
                 result.value->openNodeCount,
                 result.value->branchNodeCount,
-                result.value->closureGap
+                result.value->maximumJoinGap
             );
             diagnostic.entityId = seed;
             diagnostic.context.insert
@@ -1527,6 +1537,22 @@ OperationResult<TopologyLoopResult> PathTopology::extractBestLoop
     }
     const std::set<EntityId> preferred(preferredIds.begin(), preferredIds.end());
     std::vector<LoopCandidate> candidates;
+    std::vector<LoopCandidate> discontinuousCandidates;
+    const auto considerCandidate =
+        [this, &candidates, &discontinuousCandidates](LoopCandidate candidate)
+    {
+        const bool strictlyConnected =
+            candidate.maximumJoinGap <= m_tolerance.numericalJoinEpsilon;
+        if (strictlyConnected)
+        {
+            candidates.push_back(std::move(candidate));
+        }
+        else
+        {
+            discontinuousCandidates.push_back(std::move(candidate));
+        }
+        return strictlyConnected;
+    };
     for (int recordIndex : candidateIndices)
     {
         const TopologyPathRecord& record = m_records[static_cast<std::size_t>(recordIndex)];
@@ -1538,7 +1564,22 @@ OperationResult<TopologyLoopResult> PathTopology::extractBestLoop
             candidate.length = pathLength(record.points);
             candidate.projectedArea = projectedAreaYZ(record.points);
             updateStableKeys(candidate, m_records);
-            candidates.push_back(std::move(candidate));
+            considerCandidate(std::move(candidate));
+        }
+        else if (record.points.size() >= 3U)
+        {
+            const double joinGap = distance3D(record.points.front(), record.points.back());
+            if (joinGap <= m_tolerance.nodeSnap)
+            {
+                LoopCandidate candidate;
+                candidate.orderedPath = record.points;
+                candidate.recordIndices.insert(recordIndex);
+                candidate.maximumJoinGap = joinGap;
+                candidate.length = pathLength(record.points);
+                candidate.projectedArea = projectedAreaYZ(record.points);
+                updateStableKeys(candidate, m_records);
+                considerCandidate(std::move(candidate));
+            }
         }
     }
 
@@ -1622,9 +1663,8 @@ OperationResult<TopologyLoopResult> PathTopology::extractBestLoop
             orderedCycleEdges(graph, component, startNode);
         if (!orderedEdges.empty())
         {
-            candidates.push_back(candidateFromEdgeSequence
-                (graph, orderedEdges, startNode, false, 0.0, m_records));
-            foundCoreCycle = true;
+            foundCoreCycle = considerCandidate(candidateFromEdgeSequence
+                (graph, orderedEdges, startNode, m_records)) || foundCoreCycle;
         }
     }
 
@@ -1647,67 +1687,8 @@ OperationResult<TopologyLoopResult> PathTopology::extractBestLoop
         }
         for (const auto& cycle : cycles)
         {
-            candidates.push_back(candidateFromEdgeSequence
-                (graph, cycle.second, cycle.first, false, 0.0, m_records));
-        }
-    }
-
-    std::vector<bool> allEdges(graph.edges.size(), true);
-    std::vector<bool> visitedAll(graph.edges.size(), false);
-    for (int edgeIndex = 0; edgeIndex < static_cast<int>(graph.edges.size()); ++edgeIndex)
-    {
-        if (visitedAll[static_cast<std::size_t>(edgeIndex)])
-        {
-            continue;
-        }
-        const std::vector<int> component =
-            edgeComponent(graph, edgeIndex, allEdges, visitedAll);
-        std::set<int> componentNodes;
-        for (int componentEdge : component)
-        {
-            const GraphEdge& edge = graph.edges[static_cast<std::size_t>(componentEdge)];
-            componentNodes.insert(edge.firstNode);
-            componentNodes.insert(edge.secondNode);
-        }
-        std::vector<int> openNodes;
-        for (int node : componentNodes)
-        {
-            int componentDegree = 0;
-            for (int incident : graph.incidentEdges[static_cast<std::size_t>(node)])
-            {
-                componentDegree += contains(component, incident) ? 1 : 0;
-            }
-            if (componentDegree == 1)
-            {
-                openNodes.push_back(node);
-            }
-        }
-        for (std::size_t left = 0; left < openNodes.size(); ++left)
-        {
-            for (std::size_t right = left + 1U; right < openNodes.size(); ++right)
-            {
-                const double gap = distance3D
-                (
-                    graph.nodes[static_cast<std::size_t>(openNodes[left])],
-                    graph.nodes[static_cast<std::size_t>(openNodes[right])]
-                );
-                if (gap > m_tolerance.closure)
-                {
-                    continue;
-                }
-                const std::vector<int> pathEdges = pathBetweenNodes
-                    (graph, component, openNodes[left], openNodes[right]);
-                const LoopCandidate candidate = candidateFromEdgeSequence
-                (
-                    graph, pathEdges, openNodes[left], true, gap, m_records
-                );
-                if (!pathEdges.empty() && candidate.orderedPath.size() >= 3U
-                    && candidate.length > std::max
-                        (4.0 * m_tolerance.closure, 4.0 * gap))
-                {
-                    candidates.push_back(candidate);
-                }
-            }
+            considerCandidate(candidateFromEdgeSequence
+                (graph, cycle.second, cycle.first, m_records));
         }
     }
 
@@ -1715,14 +1696,44 @@ OperationResult<TopologyLoopResult> PathTopology::extractBestLoop
     {
         result.status = OperationStatus::Failed;
         result.value = loopResult;
-        result.addDiagnostic(topologyDiagnostic
-        (
-            m_context, DiagnosticCode::TopologyLoopNotFound, DiagnosticSeverity::Error,
-            QStringLiteral("no closed or approximately closed candidate was found"),
-            m_tolerance, m_records.size(), graph.nodes.size(), graph.edges.size(),
-            loopResult.connectedComponentCount,
-            loopResult.openNodeCount, loopResult.branchNodeCount
-        ));
+        if (!discontinuousCandidates.empty())
+        {
+            const auto closest = std::min_element
+            (
+                discontinuousCandidates.cbegin(), discontinuousCandidates.cend(),
+                [](const LoopCandidate& left, const LoopCandidate& right)
+                {
+                    if (std::abs(left.maximumJoinGap - right.maximumJoinGap) > kEpsilon)
+                    {
+                        return left.maximumJoinGap < right.maximumJoinGap;
+                    }
+                    return left.minimumSourceIndex < right.minimumSourceIndex;
+                }
+            );
+            loopResult.maximumJoinGap = closest->maximumJoinGap;
+            for (int recordIndex : closest->recordIndices)
+            {
+                loopResult.usedEntityIds.push_back
+                    (m_records[static_cast<std::size_t>(recordIndex)].entityId);
+            }
+            result.value = loopResult;
+            result.addDiagnostic(discontinuousLoopDiagnostic
+            (
+                m_context, DiagnosticSeverity::Error, m_tolerance, *closest,
+                m_records, graph.nodes.size(), graph.edges.size()
+            ));
+        }
+        else
+        {
+            result.addDiagnostic(topologyDiagnostic
+            (
+                m_context, DiagnosticCode::TopologyLoopNotFound, DiagnosticSeverity::Error,
+                QStringLiteral("no strictly closed candidate was found"),
+                m_tolerance, m_records.size(), graph.nodes.size(), graph.edges.size(),
+                loopResult.connectedComponentCount,
+                loopResult.openNodeCount, loopResult.branchNodeCount
+            ));
+        }
         return result;
     }
 
@@ -1816,8 +1827,7 @@ OperationResult<TopologyLoopResult> PathTopology::extractBestLoop
 
     const LoopCandidate& best = candidates.front();
     loopResult.connectedLoop = true;
-    loopResult.approximatelyClosed = best.approximatelyClosed;
-    loopResult.closureGap = best.closureGap;
+    loopResult.maximumJoinGap = best.maximumJoinGap;
     loopResult.orderedPath = best.orderedPath;
     for (int recordIndex : best.recordIndices)
     {
@@ -1844,19 +1854,25 @@ OperationResult<TopologyLoopResult> PathTopology::extractBestLoop
             QStringLiteral("branch records were excluded from the selected loop"),
             m_tolerance, m_records.size(), graph.nodes.size(), graph.edges.size(),
             loopResult.connectedComponentCount,
-            loopResult.openNodeCount, loopResult.branchNodeCount, loopResult.closureGap
+            loopResult.openNodeCount, loopResult.branchNodeCount,
+            loopResult.maximumJoinGap
         ));
     }
-    if (loopResult.approximatelyClosed)
+    if (!discontinuousCandidates.empty())
     {
         result.status = OperationStatus::PartialSuccess;
-        result.addDiagnostic(topologyDiagnostic
+        const auto closest = std::min_element
         (
-            m_context, DiagnosticCode::TopologyApproximateClosure, DiagnosticSeverity::Warning,
-            QStringLiteral("loop uses an approximate closure"),
-            m_tolerance, m_records.size(), graph.nodes.size(), graph.edges.size(),
-            loopResult.connectedComponentCount,
-            loopResult.openNodeCount, loopResult.branchNodeCount, loopResult.closureGap
+            discontinuousCandidates.cbegin(), discontinuousCandidates.cend(),
+            [](const LoopCandidate& left, const LoopCandidate& right)
+            {
+                return left.maximumJoinGap < right.maximumJoinGap;
+            }
+        );
+        result.addDiagnostic(discontinuousLoopDiagnostic
+        (
+            m_context, DiagnosticSeverity::Warning, m_tolerance, *closest,
+            m_records, graph.nodes.size(), graph.edges.size()
         ));
     }
     result.value = std::move(loopResult);
@@ -1873,7 +1889,9 @@ OperationResult<PathTopology> PathTopologyBuilder::build
     OperationResult<PathTopology> result;
     const bool toleranceValid = input.contentRevision != 0U
         && std::isfinite(tolerance.nodeSnap) && tolerance.nodeSnap > 0.0
-        && std::isfinite(tolerance.closure) && tolerance.closure > 0.0
+        && std::isfinite(tolerance.numericalJoinEpsilon)
+        && tolerance.numericalJoinEpsilon > 0.0
+        && tolerance.numericalJoinEpsilon <= kMaximumNumericalJoinEpsilon
         && std::isfinite(tolerance.intersection) && tolerance.intersection > 0.0
         && std::isfinite(tolerance.minimumEdgeLength) && tolerance.minimumEdgeLength >= 0.0;
     if (!toleranceValid)

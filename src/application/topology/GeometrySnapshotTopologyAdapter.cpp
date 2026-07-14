@@ -48,7 +48,9 @@ namespace
         diagnostic.context.insert(QStringLiteral("componentCount"), 0);
         diagnostic.context.insert(QStringLiteral("openNodeCount"), 0);
         diagnostic.context.insert(QStringLiteral("branchNodeCount"), 0);
-        diagnostic.context.insert(QStringLiteral("closureGap"), 0.0);
+        diagnostic.context.insert(QStringLiteral("maximumJoinGap"), 0.0);
+        diagnostic.context.insert
+            (QStringLiteral("numericalJoinEpsilon"), tolerance.numericalJoinEpsilon);
         diagnostic.context.insert(QStringLiteral("nodeSnap"), tolerance.nodeSnap);
         diagnostic.context.insert
             (QStringLiteral("intersectionTolerance"), tolerance.intersection);

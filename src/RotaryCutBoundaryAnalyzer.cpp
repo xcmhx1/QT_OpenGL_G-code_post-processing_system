@@ -797,8 +797,7 @@ RotaryCutBoundaryAnalysis RotaryCutBoundaryAnalyzer::analyze
     analysis.openNodeCount = loop.openNodeCount;
     analysis.branchNodeCount = loop.branchNodeCount;
     analysis.ignoredBranchItemCount = loop.ignoredBranchItemCount;
-    analysis.approximatelyClosed = loop.approximatelyClosed;
-    analysis.closureGap = loop.closureGap;
+    analysis.maximumJoinGap = loop.maximumJoinGap;
     analysis.boundaryItems = loop.usedItems;
 
     if (!loop.valid)
@@ -1411,7 +1410,7 @@ QVector<QVector3D> RotaryCutBoundaryAnalyzer::buildBoundaryOrderTestPoints
         testPoints.push_back((path[index] + path[index + 1]) * 0.5f);
     }
 
-    if ((repeatedClosingPoint || analysis.closureGap <= duplicateTolerance)
+    if (repeatedClosingPoint
         && distance3D(path.back(), path.front()) > duplicateTolerance)
     {
         testPoints.push_back((path.back() + path.front()) * 0.5f);

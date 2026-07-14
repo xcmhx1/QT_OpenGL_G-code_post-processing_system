@@ -74,7 +74,7 @@ enum class DiagnosticCode
     TopologySeedNotFound,
     TopologyLoopNotFound,
     TopologyBranchIgnored,
-    TopologyApproximateClosure,
+    TopologyLoopDiscontinuous,
     TopologyParityMismatch,
     LegacyTopologyAdapterFailure,
     DuplicateTopologyEntityId,

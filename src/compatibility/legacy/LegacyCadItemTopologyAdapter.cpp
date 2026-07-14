@@ -50,7 +50,8 @@ namespace
         diagnostic.context.insert
             (QStringLiteral("pointCount"), static_cast<qulonglong>(pointCount));
         diagnostic.context.insert(QStringLiteral("nodeSnap"), tolerance.nodeSnap);
-        diagnostic.context.insert(QStringLiteral("closure"), tolerance.closure);
+        diagnostic.context.insert
+            (QStringLiteral("numericalJoinEpsilon"), tolerance.numericalJoinEpsilon);
         diagnostic.context.insert
             (QStringLiteral("intersectionTolerance"), tolerance.intersection);
         diagnostic.context.insert

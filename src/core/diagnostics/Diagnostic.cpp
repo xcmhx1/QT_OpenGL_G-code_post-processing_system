@@ -56,7 +56,7 @@ QString diagnosticCodeName(DiagnosticCode code)
     case DiagnosticCode::TopologySeedNotFound: return QStringLiteral("TopologySeedNotFound");
     case DiagnosticCode::TopologyLoopNotFound: return QStringLiteral("TopologyLoopNotFound");
     case DiagnosticCode::TopologyBranchIgnored: return QStringLiteral("TopologyBranchIgnored");
-    case DiagnosticCode::TopologyApproximateClosure: return QStringLiteral("TopologyApproximateClosure");
+    case DiagnosticCode::TopologyLoopDiscontinuous: return QStringLiteral("TopologyLoopDiscontinuous");
     case DiagnosticCode::TopologyParityMismatch: return QStringLiteral("TopologyParityMismatch");
     case DiagnosticCode::LegacyTopologyAdapterFailure: return QStringLiteral("LegacyTopologyAdapterFailure");
     case DiagnosticCode::DuplicateTopologyEntityId: return QStringLiteral("DuplicateTopologyEntityId");

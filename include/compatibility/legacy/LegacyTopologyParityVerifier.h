@@ -25,7 +25,7 @@ struct LegacyTopologyParityReport
     bool equivalentAfterCyclicRotation = false;
     bool equivalentAfterReverseAndRotation = false;
     double maximumPointDistance = 0.0;
-    double closureGapDifference = 0.0;
+    double maximumJoinGapDifference = 0.0;
     QVector<Diagnostic> diagnostics;
 };
 

@@ -53,8 +53,7 @@ struct RotaryCutBoundaryAnalysis
     bool connectedLoop = false;
     bool surfaceConforming = false;
     bool separating = false;
-    bool approximatelyClosed = false;
-    double closureGap = 0.0;
+    double maximumJoinGap = 0.0;
     int connectedComponentCount = 0;
     int openNodeCount = 0;
     int branchNodeCount = 0;
