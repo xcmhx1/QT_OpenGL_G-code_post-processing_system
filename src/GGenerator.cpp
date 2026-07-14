@@ -135,6 +135,11 @@ void GGenerator::setProcessPlan(const cadcam::planning::ProcessPlan* processPlan
     m_processPlan = processPlan;
 }
 
+void GGenerator::setProcessState(const cadcam::process::DocumentProcessState* processState)
+{
+    m_processState = processState;
+}
+
 void GGenerator::setTubeSectionModel
 (
     const std::optional<cadcam::machining::TubeSectionModel>& tubeSectionModel
@@ -182,7 +187,7 @@ OperationResult<QString> GGenerator::buildRotaryProgramText(const OperationConte
         ));
         return result;
     }
-    if (m_processPlan == nullptr)
+    if (m_processPlan == nullptr || m_processState == nullptr)
     {
         result.status = OperationStatus::InvalidInput;
         result.addDiagnostic(makeGeneratorDiagnostic
@@ -215,6 +220,7 @@ OperationResult<QString> GGenerator::buildRotaryProgramText(const OperationConte
     auto program = service.buildRotaryProgram
     (
         *m_document,
+        *m_processState,
         *m_processPlan,
         m_tubeSectionModel,
         m_profile->rotaryAxisConfig(),
@@ -264,7 +270,7 @@ OperationResult<QString> GGenerator::buildProgramText(const OperationContext& co
     }
     if (m_generationMode == GenerationMode::Mode3D) return buildRotaryProgramText(context);
 
-    if (m_processPlan == nullptr
+    if (m_processPlan == nullptr || m_processState == nullptr
         || m_processPlan->mode != cadcam::planning::ProcessPlanMode::Planar3Axis)
     {
         result.status = OperationStatus::Conflict;
@@ -278,7 +284,8 @@ OperationResult<QString> GGenerator::buildProgramText(const OperationContext& co
     }
 
     NcProgramService service;
-    auto program = service.buildPlanarProgram(*m_document, *m_processPlan, context);
+    auto program = service.buildPlanarProgram
+        (*m_document, *m_processState, *m_processPlan, context);
     result.mergeDiagnostics(program);
     if (!program.succeeded() || !program.value.has_value())
     {

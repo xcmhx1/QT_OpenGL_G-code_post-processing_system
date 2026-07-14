@@ -12,6 +12,8 @@
 #include "RotaryTubeGeometryAnalyzer.h"
 #include "GProfile.h"
 #include "core/planning/ProcessPlan.h"
+#include "application/process/DocumentProcessState.h"
+#include "application/process/ProcessPresentationSnapshot.h"
 
 #include <QtWidgets/QMainWindow>
 #include <QtGlobal>
@@ -183,7 +185,9 @@ private:
     AppLicense m_license;
     RotaryTubeSectionModel m_rotaryTubeSectionModel;
     GProfile m_activeProfile = GProfile::createDefaultLaserProfile();
+    cadcam::process::DocumentProcessState m_processState;
     std::optional<cadcam::planning::ProcessPlan> m_currentProcessPlan;
+    std::optional<cadcam::process::ProcessPresentationSnapshot> m_processPresentation;
     QString m_currentLayerName = QStringLiteral("0");
     QColor m_currentColor = QColor(Qt::white);
     int m_currentColorIndex = 256;

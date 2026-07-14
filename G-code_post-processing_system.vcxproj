@@ -437,6 +437,12 @@ if exist "$(VCRuntimeRedistDir)\*.dll" copy /Y "$(VCRuntimeRedistDir)\*.dll" "$(
     <ClCompile Include="src\application\planning\ProcessPlanningService.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
+    <ClCompile Include="src\application\process\DocumentProcessState.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="src\application\process\ProcessPresentationSnapshot.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
     <ClCompile Include="src\application\machine\MachineTrajectoryService.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
@@ -455,16 +461,13 @@ if exist "$(VCRuntimeRedistDir)\*.dll" copy /Y "$(VCRuntimeRedistDir)\*.dll" "$(
     <ClCompile Include="src\compatibility\legacy\LegacyCadItemTopologyAdapter.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
-    <ClCompile Include="src\compatibility\legacy\LegacyProcessPlanAdapter.cpp">
-      <PrecompiledHeader>NotUsing</PrecompiledHeader>
-    </ClCompile>
     <ClCompile Include="src\compatibility\legacy\DocumentNcMetadataAdapter.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="src\compatibility\legacy\DocumentPlanarNcInputAdapter.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
-    <ClCompile Include="src\compatibility\legacy\DocumentProcessPlanningAdapter.cpp">
+    <ClCompile Include="src\application\planning\DocumentProcessPlanningAdapter.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="src\compatibility\legacy\SplineEntityClone.cpp">
@@ -623,16 +626,17 @@ if exist "$(VCRuntimeRedistDir)\*.dll" copy /Y "$(VCRuntimeRedistDir)\*.dll" "$(
     <ClInclude Include="include\core\planning\ProcessPlanBuilder.h" />
     <ClInclude Include="include\core\planning\PlanarProcessPlanBuilder.h" />
     <ClInclude Include="include\application\planning\ProcessPlanningService.h" />
+    <ClInclude Include="include\application\process\DocumentProcessState.h" />
+    <ClInclude Include="include\application\process\ProcessPresentationSnapshot.h" />
     <ClInclude Include="include\application\machine\MachineTrajectoryService.h" />
     <ClInclude Include="include\application\nc\NcProgramService.h" />
     <ClInclude Include="include\infrastructure\nc\GCodePostProcessor.h" />
     <ClInclude Include="include\infrastructure\nc\GCodePostProcessorProfile.h" />
     <ClInclude Include="include\compatibility\legacy\LegacyTopologyParityVerifier.h" />
     <ClInclude Include="include\compatibility\legacy\LegacyCadItemTopologyAdapter.h" />
-    <ClInclude Include="include\compatibility\legacy\LegacyProcessPlanAdapter.h" />
     <ClInclude Include="include\compatibility\legacy\DocumentNcMetadataAdapter.h" />
     <ClInclude Include="include\compatibility\legacy\DocumentPlanarNcInputAdapter.h" />
-    <ClInclude Include="include\compatibility\legacy\DocumentProcessPlanningAdapter.h" />
+    <ClInclude Include="include\application\planning\DocumentProcessPlanningAdapter.h" />
     <ClInclude Include="include\application\messaging\MessageCenter.h" />
     <ClInclude Include="include\application\messaging\DebugMessageSink.h" />
     <ClInclude Include="include\application\messaging\UserInterfaceMessageSink.h" />

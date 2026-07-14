@@ -42,6 +42,11 @@ void CadEditer::cancelTransientCommand()
     m_gripPointIndex = -1;
 }
 
+void CadEditer::setProcessState(cadcam::process::DocumentProcessState* processState)
+{
+    m_processState = processState;
+}
+
 // 查询是否可以撤销
 // @return 如果撤销栈非空返回 true，否则返回 false
 bool CadEditer::canUndo() const

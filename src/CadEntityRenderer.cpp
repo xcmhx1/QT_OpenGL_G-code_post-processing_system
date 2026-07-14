@@ -100,7 +100,8 @@ void CadEntityRenderer::renderEntities
     CadSceneRenderCache& sceneRenderCache,
     EntityId selectedEntityId,
     const AppThemeColors& theme,
-    bool dimExcludedEntities
+    bool dimExcludedEntities,
+    const cadcam::process::ProcessPresentationSnapshot* presentation
 )
 {
     QOpenGLFunctions* functions = currentFunctions();
@@ -133,7 +134,8 @@ void CadEntityRenderer::renderEntities
         EntityGpuBuffer& buffer = it->second;
         // 保持实体原始显示色；选中效果改由 Viewer 的叠加层统一绘制。
         const bool isSelected = entity->m_isSelected || id == selectedEntityId;
-        const bool isDimmed = dimExcludedEntities && entity->m_excludedFromProcessing;
+        const auto* processEntry = presentation != nullptr ? presentation->find(id) : nullptr;
+        const bool isDimmed = dimExcludedEntities && processEntry != nullptr && processEntry->excluded;
         const QVector3D color = isDimmed
             ? (theme.dark ? QVector3D(0.58f, 0.48f, 0.34f) : QVector3D(0.48f, 0.39f, 0.28f))
             : resolveDisplayColor(buffer.color, theme);

@@ -21,7 +21,6 @@ CadLineItem::CadLineItem(DRW_Entity* entity, QObject* parent)
     m_data = static_cast<DRW_Line*>(m_nativeEntity);
     // 构造后立即构建几何和方向，保证图元一进入场景即可渲染。
     buildGeometryDatay();
-    buildProcessDirection();
 }
 
 void CadLineItem::buildGeometryDatay()
@@ -45,7 +44,6 @@ void CadLineItem::rebuildRawPathPoints3D()
 {
     m_rawPathPoints3D.clear();
     cadcam::geometry::PathCompileOptions options;
-    options.reverse = m_isReverse;
     const OperationResult<cadcam::geometry::Path3D> result = LegacyCadItemPathBridge::compile
     (
         *this,

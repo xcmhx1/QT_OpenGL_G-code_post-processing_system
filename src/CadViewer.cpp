@@ -159,6 +159,24 @@ void CadViewer::setEditer(CadEditer* editer)
     m_controller.setEditer(editer);
 }
 
+void CadViewer::setDocumentProcessState
+(
+    const cadcam::process::DocumentProcessState* processState
+)
+{
+    m_processState = processState;
+    update();
+}
+
+void CadViewer::setProcessPresentation
+(
+    const cadcam::process::ProcessPresentationSnapshot* presentation
+)
+{
+    m_processPresentation = presentation;
+    update();
+}
+
 void CadViewer::setDefaultDrawingProperties(const QString& layerName, const QColor& color, int colorIndex)
 {
     m_controller.setDefaultDrawingProperties(layerName, color, colorIndex);
@@ -673,7 +691,8 @@ void CadViewer::renderEntities(const QMatrix4x4& viewProjection)
         m_sceneCoordinator.renderCache(),
         m_selectedEntityId,
         m_theme,
-        m_processVisualsVisible && m_excludedEntitiesDimmed
+        m_processVisualsVisible && m_excludedEntitiesDimmed,
+        m_processPresentation
     );
 }
 
@@ -711,7 +730,7 @@ void CadViewer::renderTransientPrimitives(const QMatrix4x4& viewProjection)
     }
 
     std::vector<TransientPrimitive> processPrimitives = buildRotaryEndCutPrimitives();
-    const std::vector<TransientPrimitive> processDirectionPrimitives = buildProcessDirectionPrimitives();
+    const std::vector<TransientPrimitive> processDirectionPrimitives = buildProcessArrowPrimitives();
     const std::vector<TransientPrimitive> selectedHandlePrimitives = buildSelectedEntityHandlePrimitives();
     const std::vector<TransientPrimitive> snapHighlightPrimitives = buildSnapHighlightPrimitives();
     // 构建命令预览图元

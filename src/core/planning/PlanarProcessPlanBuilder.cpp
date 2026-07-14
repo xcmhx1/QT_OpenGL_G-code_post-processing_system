@@ -78,9 +78,10 @@ namespace cadcam::planning
                     (entity != nullptr ? entity->sourceIndex : 0U) },
                 { QStringLiteral("processOrder"), assignmentCount },
                 { QStringLiteral("entryDistance"), entryDistance },
-                { QStringLiteral("reverse"), entity != nullptr && entity->currentReversePreference },
+                { QStringLiteral("directionPreference"), entity != nullptr
+                    ? static_cast<int>(entity->directionPreference) : 0 },
                 { QStringLiteral("startParameter"), entity != nullptr
-                    ? entity->customStartParameter.value_or(0.0) : 0.0 },
+                    ? entity->startParameter.value_or(0.0) : 0.0 },
                 { QStringLiteral("candidateCount"), candidateCount },
                 { QStringLiteral("assignmentCount"), assignmentCount },
                 { QStringLiteral("excludedCount"), excludedCount }
@@ -91,7 +92,7 @@ namespace cadcam::planning
 
         std::optional<double> closedStartParameter(const PlanarPlanningEntity& entity)
         {
-            if (entity.customStartParameter.has_value()) return entity.customStartParameter;
+            if (entity.startParameter.has_value()) return entity.startParameter;
             if (entity.sourceKind == geometry::SourceGeometryKind::Circle
                 || entity.sourceKind == geometry::SourceGeometryKind::Ellipse)
             {
@@ -158,15 +159,16 @@ namespace cadcam::planning
                 ? closedEntryPosition(entity) : entity.path.vertices.front().position;
             candidate.exit = entity.path.closed
                 ? candidate.entry : entity.path.vertices.back().position;
-            candidate.reverse = entity.currentReversePreference;
-            if (!entity.path.closed && policy.allowReverse)
+            candidate.reverse = entity.directionPreference == process::DirectionPreference::Reverse;
+            if (!entity.path.closed
+                && entity.directionPreference == process::DirectionPreference::Auto
+                && policy.allowReverse)
             {
                 const double forwardDistance = distance(current, candidate.entry);
                 const double reverseDistance = distance(current, candidate.exit);
                 bool chooseReverse = reverseDistance < forwardDistance - policy.numericalEpsilon;
                 if (std::abs(reverseDistance - forwardDistance) <= policy.numericalEpsilon)
-                    chooseReverse = policy.preserveUserDirection
-                        ? entity.currentReversePreference : false;
+                    chooseReverse = false;
                 candidate.reverse = chooseReverse;
                 if (chooseReverse) std::swap(candidate.entry, candidate.exit);
             }
@@ -196,6 +198,7 @@ namespace cadcam::planning
 
         ProcessPlan plan;
         plan.contentRevision = input.contentRevision;
+        plan.processStateRevision = input.processStateRevision;
         plan.mode = ProcessPlanMode::Planar3Axis;
         plan.orderingStrategy = ProcessOrderingStrategy::NearestNext;
         std::set<geometry::EntityId> ids;

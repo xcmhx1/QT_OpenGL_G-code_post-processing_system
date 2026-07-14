@@ -19,35 +19,6 @@ CadItem::CadItem(DRW_Entity* entity, QObject* parent)
     m_color = buildColor();
 }
 
-void CadItem::buildProcessDirection()
-{
-    // 默认先清空方向，避免旧缓存污染。
-    m_processDirection = QVector3D();
-
-    // 少于两个顶点时无法定义方向，例如点图元就是这种情况。
-    if (m_geometry.vertices.size() < 2)
-    {
-        return;
-    }
-
-    // 以首个顶点为基准，寻找第一条有效边作为加工方向。
-    const QVector3D& start = m_geometry.vertices.front();
-
-    for (int i = 1; i < m_geometry.vertices.size(); ++i)
-    {
-        QVector3D direction = m_geometry.vertices.at(i) - start;
-
-        // 跳过零长度边，避免归一化无效向量。
-        if (!qFuzzyIsNull(direction.lengthSquared()))
-        {
-            direction.normalize();
-            // 反向加工时直接翻转单位方向。
-            m_processDirection = m_isReverse ? -direction : direction;
-            return;
-        }
-    }
-}
-
 QColor CadItem::buildColor()
 {
     // 没有实体数据时统一退回白色，保证渲染层可用。

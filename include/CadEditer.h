@@ -11,6 +11,7 @@
 #include <QVector3D>
 
 #include "CadProcessVisualUtils.h"
+#include "application/process/DocumentProcessState.h"
 
 class CadDocument;
 class CadItem;
@@ -24,16 +25,6 @@ class DrawStateMachine;
 class CadEditer
 {
 public:
-    struct ProcessStateUpdate
-    {
-        CadItem* item = nullptr;
-        int processOrder = -1;
-        bool isReverse = false;
-        bool hasCustomStart = false;
-        double processStartParameter = 0.0;
-        int continuousGroupId = -1;
-    };
-
     CadEditer() = default;
 
     // 析构编辑器对象
@@ -42,6 +33,7 @@ public:
     // 绑定当前编辑目标文档
     // @param document 文档对象指针
     void setDocument(CadDocument* document);
+    void setProcessState(cadcam::process::DocumentProcessState* processState);
 
     // 清空 Undo / Redo 历史
     void clearHistory();
@@ -155,22 +147,6 @@ public:
     // @return 如果修改成功返回 true，否则返回 false
     bool changeEntityLayer(CadItem* item, const QString& layerName);
 
-    // 切换指定实体的反向加工标记
-    // @param item 目标实体
-    // @return 如果切换成功返回 true，否则返回 false
-    bool toggleEntityReverse(CadItem* item);
-
-    // 设置指定实体的加工顺序
-    // @param item 目标实体
-    // @param processOrder 新的加工顺序
-    // @return 如果设置成功返回 true，否则返回 false
-    bool setEntityProcessOrder(CadItem* item, int processOrder);
-
-    // 批量更新实体的加工顺序、反向状态与闭合路径起刀缝点
-    // @param updates 目标实体的加工状态更新数组
-    // @return 如果批量更新成功返回 true，否则返回 false
-    bool applyEntityProcessStates(const std::vector<ProcessStateUpdate>& updates);
-
     // 编辑命令抽象基类：
     // 封装一次可执行且可撤销的文档修改操作。
     class EditCommand
@@ -236,6 +212,7 @@ private:
 private:
     // 当前绑定的文档对象
     CadDocument* m_document = nullptr;
+    cadcam::process::DocumentProcessState* m_processState = nullptr;
 
     // Move 命令当前锁定的目标实体
     CadItem* m_moveTarget = nullptr;

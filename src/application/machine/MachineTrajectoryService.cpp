@@ -70,6 +70,7 @@ namespace
 OperationResult<cadcam::machine::MachineTrajectory> MachineTrajectoryService::buildRotaryTrajectory
 (
     CadDocument& document,
+    const cadcam::process::DocumentProcessState& processState,
     const cadcam::planning::ProcessPlan& plan,
     const std::optional<cadcam::machining::TubeSectionModel>& tubeSection,
     const GProfileRotaryAxisConfig& config,
@@ -97,6 +98,7 @@ OperationResult<cadcam::machine::MachineTrajectory> MachineTrajectoryService::bu
     }
     if (captured.value->contentRevision != plan.contentRevision
         || plan.contentRevision != document.contentRevision()
+        || plan.processStateRevision != processState.revision()
         || (tubeSection.has_value() && tubeSection->contentRevision != 0
             && tubeSection->contentRevision != plan.contentRevision))
     {
@@ -147,6 +149,7 @@ OperationResult<cadcam::machine::MachineTrajectory> MachineTrajectoryService::bu
 
     machine::RotaryTrajectoryInput input;
     input.contentRevision = plan.contentRevision;
+    input.processStateRevision = plan.processStateRevision;
     input.processGroups = plan.groups;
     input.tubeSection = tubeSection;
     geometry::GeometryCompiler compiler;

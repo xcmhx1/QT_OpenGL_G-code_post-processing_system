@@ -5,6 +5,7 @@
 #include "core/diagnostics/OperationResult.h"
 #include "core/machining/TubeSection.h"
 #include "core/planning/ProcessPlan.h"
+#include "application/process/DocumentProcessState.h"
 
 #include <QString>
 
@@ -34,6 +35,7 @@ public:
 
     void setRotaryTubeCenter(double centerY, double centerZ, bool valid);
     void setProcessPlan(const cadcam::planning::ProcessPlan* processPlan);
+    void setProcessState(const cadcam::process::DocumentProcessState* processState);
     void setTubeSectionModel
     (
         const std::optional<cadcam::machining::TubeSectionModel>& tubeSectionModel
@@ -61,5 +63,6 @@ private:
     double m_rotaryTubeCenterZ = 0.0;
     bool m_rotaryTubeCenterValid = false;
     const cadcam::planning::ProcessPlan* m_processPlan = nullptr;
+    const cadcam::process::DocumentProcessState* m_processState = nullptr;
     std::optional<cadcam::machining::TubeSectionModel> m_tubeSectionModel;
 };

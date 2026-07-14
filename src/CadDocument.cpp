@@ -605,7 +605,6 @@ bool CadDocument::refreshEntity(CadItem* item, bool geometryContentChanged)
     }
 
     item->buildGeometryDatay();
-    item->buildProcessDirection();
     item->m_color = resolveEntityDisplayColor(*this, item);
 
     if (geometryContentChanged)

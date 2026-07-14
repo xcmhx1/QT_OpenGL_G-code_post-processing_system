@@ -43,7 +43,6 @@ CadSplineItem::CadSplineItem(DRW_Entity* entity, QObject* parent)
 {
     m_data = static_cast<DRW_Spline*>(m_nativeEntity);
     buildGeometryDatay();
-    buildProcessDirection();
 }
 
 void CadSplineItem::buildGeometryDatay()
@@ -96,7 +95,6 @@ void CadSplineItem::rebuildRawPathPoints3D()
 {
     m_rawPathPoints3D.clear();
     cadcam::geometry::PathCompileOptions options;
-    options.reverse = m_isReverse;
     const OperationResult<cadcam::geometry::Path3D> result = LegacyCadItemPathBridge::compile
     (
         *this,

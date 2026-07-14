@@ -274,7 +274,6 @@ CadPolylineItem::CadPolylineItem(DRW_Entity* entity, QObject* parent)
     // 绑定原生多段线实体，并立即完成离散缓存构建。
     m_data = static_cast<DRW_Polyline*>(m_nativeEntity);
     buildGeometryDatay();
-    buildProcessDirection();
 }
 
 void CadPolylineItem::buildGeometryDatay()
@@ -353,11 +352,6 @@ void CadPolylineItem::rebuildRawPathPoints3D()
 {
     m_rawPathPoints3D.clear();
     cadcam::geometry::PathCompileOptions options;
-    options.reverse = m_isReverse;
-    if (m_hasCustomProcessStart)
-    {
-        options.startParameter = m_processStartParameter;
-    }
     const OperationResult<cadcam::geometry::Path3D> result = LegacyCadItemPathBridge::compile
     (
         *this,

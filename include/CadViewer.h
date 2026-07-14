@@ -33,6 +33,8 @@
 #include "CadSceneCoordinator.h"
 #include "CadViewInteractionController.h"
 #include "CadController.h"
+#include "application/process/DocumentProcessState.h"
+#include "application/process/ProcessPresentationSnapshot.h"
 
 /// 前向声明
 // 图元类
@@ -70,6 +72,8 @@ public:
 
     // 设置当前编辑器
     void setEditer(CadEditer* editer);
+    void setDocumentProcessState(const cadcam::process::DocumentProcessState* processState);
+    void setProcessPresentation(const cadcam::process::ProcessPresentationSnapshot* presentation);
 
     // 设置默认绘图属性。
     void setDefaultDrawingProperties(const QString& layerName, const QColor& color, int colorIndex);
@@ -292,6 +296,7 @@ signals:
     // 绘图约束模式变化。
     void orthoEnabledChanged(bool enabled);
     void polarTrackingEnabledChanged(bool enabled);
+    void processDirectionToggleRequested(EntityId entityId);
 
 protected:
     // OpenGL 初始化，在窗口第一次显示时调用
@@ -467,7 +472,7 @@ private:
 
     // 构建加工方向箭头图元
     // @return 加工方向 overlay 图元列表
-    std::vector<TransientPrimitive> buildProcessDirectionPrimitives() const;
+    std::vector<TransientPrimitive> buildProcessArrowPrimitives() const;
 
     // 构建用户指定的方管中断切面和废面网格提示。
     std::vector<TransientPrimitive> buildRotaryEndCutPrimitives() const;
@@ -592,6 +597,8 @@ private:
 
     // 当前编辑器，供 Viewer 侧的顺序标签交互直接提交可撤销命令。
     CadEditer* m_editer = nullptr;
+    const cadcam::process::DocumentProcessState* m_processState = nullptr;
+    const cadcam::process::ProcessPresentationSnapshot* m_processPresentation = nullptr;
 
     // 当前主题颜色
     AppThemeColors m_theme = buildAppThemeColors(AppThemeMode::Light);

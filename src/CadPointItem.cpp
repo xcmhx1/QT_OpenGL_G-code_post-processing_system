@@ -18,7 +18,6 @@ CadPointItem::CadPointItem(DRW_Entity* entity, QObject* parent)
     // 绑定原生点实体，后续所有几何数据都直接从 basePoint 提取。
     m_data = static_cast<DRW_Point*>(m_nativeEntity);
     buildGeometryDatay();
-    buildProcessDirection();
 }
 
 void CadPointItem::buildGeometryDatay()

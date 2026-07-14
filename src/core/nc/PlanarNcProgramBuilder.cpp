@@ -327,7 +327,8 @@ namespace cadcam::nc
         std::uint64_t contentRevision,
         const std::vector<PlanarNcEntityInput>& entities,
         const PlanarNcBuildPolicy& policy,
-        const OperationContext& context
+        const OperationContext& context,
+        std::uint64_t processStateRevision
     )
     {
         OperationResult<NcProgram> result;
@@ -347,6 +348,7 @@ namespace cadcam::nc
 
         NcProgram program;
         program.contentRevision = contentRevision;
+        program.processStateRevision = processStateRevision;
         program.mode = NcProgramMode::Planar3Axis;
         bool skipped = false;
         for (const PlanarNcEntityInput& input : entities)

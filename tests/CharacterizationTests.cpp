@@ -12,6 +12,8 @@
 #include "GProfile.h"
 #include "application/messaging/MessageCenter.h"
 #include "application/machine/MachineTrajectoryService.h"
+#include "application/process/DocumentProcessState.h"
+#include "application/process/ProcessPresentationSnapshot.h"
 #include "compatibility/legacy/LegacyCadItemPathBridge.h"
 #include "core/diagnostics/OperationResult.h"
 #include "core/geometry/EntityIdAllocator.h"
@@ -145,43 +147,41 @@ namespace
     )
     {
         std::optional<cadcam::planning::ProcessPlan> plan;
+        cadcam::process::DocumentProcessState processState;
         if (!document.m_entities.empty())
         {
             plan.emplace();
             plan->contentRevision = document.contentRevision();
+            plan->processStateRevision = processState.revision();
             plan->mode = mode == GGenerator::GenerationMode::Mode3D
                 ? cadcam::planning::ProcessPlanMode::Rotary4Axis
                 : cadcam::planning::ProcessPlanMode::Planar3Axis;
-            std::vector<CadItem*> ordered;
-            for (const auto& item : document.m_entities)
-                if (item != nullptr && item->m_processOrder >= 0) ordered.push_back(item.get());
-            std::sort(ordered.begin(), ordered.end(), [](const CadItem* left, const CadItem* right)
+            int processOrder = 0;
+            std::vector<cadcam::geometry::EntityId> groupIds;
+            for (const auto& ownedItem : document.m_entities)
             {
-                return left->m_processOrder < right->m_processOrder;
-            });
-            std::map<int, cadcam::planning::ProcessGroup> groups;
-            for (CadItem* item : ordered)
-            {
+                CadItem* item = ownedItem.get();
+                if (item == nullptr) continue;
+                item->rebuildRawPathPoints3D();
+                const auto& points = item->rawPathPoints3D();
+                const bool closed = points.size() > 2U
+                    && std::abs(points.front().x - points.back().x) <= kTolerance
+                    && std::abs(points.front().y - points.back().y) <= kTolerance
+                    && std::abs(points.front().z - points.back().z) <= kTolerance;
+                const int groupId = mode == GGenerator::GenerationMode::Mode3D
+                    && (closed || document.m_entities.size() > 1U) ? 0 : -1;
                 plan->assignments.push_back
-                    ({ item->m_entityId, item->m_processOrder, item->m_processContinuousGroupId,
-                       item->m_isReverse, item->m_hasCustomProcessStart
-                           ? std::optional<double>(item->m_processStartParameter) : std::nullopt });
-                if (mode == GGenerator::GenerationMode::Mode3D
-                    && item->m_processContinuousGroupId >= 0)
-                {
-                    auto& group = groups[item->m_processContinuousGroupId];
-                    group.groupId = item->m_processContinuousGroupId;
-                    group.kind = cadcam::planning::ProcessGroupKind::ClosedLoop;
-                    group.closed = true;
-                    group.entityIds.push_back(item->m_entityId);
-                }
+                    ({ item->m_entityId, processOrder++, groupId, false, std::nullopt });
+                if (groupId >= 0) groupIds.push_back(item->m_entityId);
             }
-            for (auto& pair : groups) plan->groups.push_back(std::move(pair.second));
+            if (!groupIds.empty()) plan->groups.push_back
+                ({ 0, cadcam::planning::ProcessGroupKind::ClosedLoop, true, groupIds });
         }
         GGenerator generator;
         generator.setDocument(&document);
         generator.setProfile(&profile);
         generator.setGenerationMode(mode);
+        generator.setProcessState(&processState);
         generator.setProcessPlan(plan.has_value() ? &*plan : nullptr);
         generator.setRotaryTubeCenter(0.0, 0.0, true);
         return generator.buildProgramText(testContext(QStringLiteral("build-program")));
@@ -1502,10 +1502,8 @@ namespace
     {
         CadDocument document;
         CadCircleItem* circle = appendItem<DRW_Circle, CadCircleItem>(document, makeCircle());
-        circle->m_isReverse = false;
         circle->rebuildRawPathPoints3D();
         const RawPathPoint3D circleForward = circle->rawPathPoints3D().front();
-        circle->m_isReverse = true;
         circle->rebuildRawPathPoints3D();
         const RawPathPoint3D circleReverse = circle->rawPathPoints3D().front();
         check(std::abs(circle->defaultProcessStartParameter() - kHalfPi) <= kTolerance, "circle M_PI_2 start parameter");
@@ -1515,10 +1513,8 @@ namespace
             "circle forward/reverse same start");
 
         CadEllipseItem* ellipse = appendItem<DRW_Ellipse, CadEllipseItem>(document, makeEllipse());
-        ellipse->m_isReverse = false;
         ellipse->rebuildRawPathPoints3D();
         const RawPathPoint3D ellipseForward = ellipse->rawPathPoints3D().front();
-        ellipse->m_isReverse = true;
         ellipse->rebuildRawPathPoints3D();
         const RawPathPoint3D ellipseReverse = ellipse->rawPathPoints3D().front();
         check(std::abs(ellipse->defaultProcessStartParameter() - kHalfPi) <= kTolerance, "ellipse M_PI_2 start parameter");
@@ -1535,8 +1531,6 @@ namespace
             (connectedDocument, makeLine(0.0, 0.0, 0.0, 10.0, 0.0, 0.0));
         CadLineItem* second = appendItem<DRW_Line, CadLineItem>
             (connectedDocument, makeLine(10.0, 0.0, 0.0, 20.0, 0.0, 0.0));
-        first->m_processOrder = 0;
-        second->m_processOrder = 1;
         GProfile profile = GProfile::createDefaultLaserProfile();
         const OperationResult<QString> connected = buildProgram
             (connectedDocument, profile, GGenerator::GenerationMode::Mode2D);
@@ -1558,8 +1552,6 @@ namespace
             (disconnectedDocument, makeLine(0.0, 0.0, 0.0, 10.0, 0.0, 0.0));
         CadLineItem* disconnectedSecond = appendItem<DRW_Line, CadLineItem>
             (disconnectedDocument, makeLine(100.0, 0.0, 0.0, 110.0, 0.0, 0.0));
-        disconnectedFirst->m_processOrder = 0;
-        disconnectedSecond->m_processOrder = 1;
         const OperationResult<QString> disconnected = buildProgram
             (disconnectedDocument, profile, GGenerator::GenerationMode::Mode2D);
         check(disconnected.succeeded() && disconnected.value.has_value(), "disconnected line program builds");
@@ -1575,7 +1567,6 @@ namespace
         CadDocument goldenDocument;
         CadLineItem* goldenLine = appendItem<DRW_Line, CadLineItem>
             (goldenDocument, makeLine(0.0, 0.0, 0.0, 25.0, 10.0, 0.0));
-        goldenLine->m_processOrder = 0;
         const OperationResult<QString> golden = buildProgram
             (goldenDocument, profile, GGenerator::GenerationMode::Mode2D);
         if (golden.value.has_value())
@@ -1590,8 +1581,6 @@ namespace
 
         CadDocument circleDocument;
         CadCircleItem* circle = appendItem<DRW_Circle, CadCircleItem>(circleDocument, makeCircle());
-        circle->m_processOrder = 0;
-        circle->m_processContinuousGroupId = 0;
         const OperationResult<QString> circleProgram = buildProgram
             (circleDocument, rotaryProfile, GGenerator::GenerationMode::Mode3D);
         check(circleProgram.succeeded() && circleProgram.value.has_value(), "circle rotary program builds");
@@ -1602,8 +1591,6 @@ namespace
 
         CadDocument ellipseDocument;
         CadEllipseItem* ellipse = appendItem<DRW_Ellipse, CadEllipseItem>(ellipseDocument, makeEllipse());
-        ellipse->m_processOrder = 0;
-        ellipse->m_processContinuousGroupId = 0;
         const OperationResult<QString> ellipseProgram = buildProgram
             (ellipseDocument, rotaryProfile, GGenerator::GenerationMode::Mode3D);
         check(ellipseProgram.succeeded() && ellipseProgram.value.has_value(), "ellipse rotary program builds");
@@ -1632,8 +1619,6 @@ namespace
                     points[next][0], points[next][1], points[next][2]
                 )
             );
-            line->m_processOrder = index;
-            line->m_processContinuousGroupId = 0;
         }
 
         const OperationResult<QString> groupProgram = buildProgram
@@ -1673,8 +1658,6 @@ namespace
         invalidCircle->radious = 0.0;
         CadCircleItem* circle = appendItem<DRW_Circle, CadCircleItem>
             (invalidPathDocument, std::move(invalidCircle));
-        circle->m_processOrder = 0;
-        circle->m_processContinuousGroupId = 0;
         const OperationResult<QString> invalidPath = buildProgram
             (invalidPathDocument, profile, GGenerator::GenerationMode::Mode3D);
         check(!invalidPath.succeeded(), "empty path fails");
@@ -1797,12 +1780,14 @@ namespace
             (revisionDocument, makeLine(0.0, 0.0, 10.0, 10.0, 0.0, 10.0));
         planning::ProcessPlan stalePlan;
         stalePlan.contentRevision = revisionDocument.contentRevision() + 1;
+        process::DocumentProcessState revisionProcessState;
+        stalePlan.processStateRevision = revisionProcessState.revision();
         stalePlan.mode = planning::ProcessPlanMode::Rotary4Axis;
         stalePlan.assignments.push_back({ revisionLine->m_entityId, 0, -1, false, std::nullopt });
         MachineTrajectoryService service;
         GProfileRotaryAxisConfig config;
         const auto stale = service.buildRotaryTrajectory
-            (revisionDocument, stalePlan, std::nullopt, config, task);
+            (revisionDocument, revisionProcessState, stalePlan, std::nullopt, config, task);
         check(!stale.succeeded()
             && hasDiagnosticCode(stale.diagnostics, DiagnosticCode::MachineTrajectoryRevisionMismatch),
             "stale process plan revision is rejected");
@@ -1926,6 +1911,8 @@ namespace
             (staleDocument, makeLine(0.0, 0.0, 10.0, 10.0, 0.0, 10.0));
         planning::ProcessPlan stalePlan;
         stalePlan.contentRevision = staleDocument.contentRevision() + 1;
+        process::DocumentProcessState staleProcessState;
+        stalePlan.processStateRevision = staleProcessState.revision();
         stalePlan.mode = planning::ProcessPlanMode::Rotary4Axis;
         stalePlan.assignments.push_back({ staleLine->m_entityId, 0, -1, false, std::nullopt });
         GProfile staleProfile = GProfile::createDefaultRotaryProfile();
@@ -1933,6 +1920,7 @@ namespace
         staleGenerator.setDocument(&staleDocument);
         staleGenerator.setProfile(&staleProfile);
         staleGenerator.setGenerationMode(GGenerator::GenerationMode::Mode3D);
+        staleGenerator.setProcessState(&staleProcessState);
         staleGenerator.setProcessPlan(&stalePlan);
         staleGenerator.setRotaryTubeCenter(0.0, 0.0, true);
         const auto staleText = staleGenerator.buildProgramText(context);
@@ -2071,6 +2059,56 @@ namespace
             "planar rapid precedes layer color type headers");
     }
 
+    void testDocumentProcessStateAndPresentation()
+    {
+        using namespace cadcam;
+        process::DocumentProcessState state;
+        const std::uint64_t initialRevision = state.revision();
+        check(state.setDirection(1U, process::DirectionPreference::Reverse)
+            && state.revision() == initialRevision + 1U,
+            "process state direction advances revision");
+        check(!state.setDirection(1U, process::DirectionPreference::Reverse)
+            && state.revision() == initialRevision + 1U,
+            "equal process state does not advance revision");
+
+        state.beginBatch();
+        state.setStartParameter(1U, 2.5);
+        state.setBoundary(2U, planning::BoundaryRole::Break, 4);
+        state.setInternalGeometryExcluded(3U, true);
+        state.endBatch();
+        check(state.revision() == initialRevision + 2U,
+            "process state batch advances revision once");
+
+        CadDocument document;
+        CadLineItem* line = appendItem<DRW_Line, CadLineItem>
+            (document, makeLine(0.0, 0.0, 0.0, 10.0, 0.0, 0.0));
+        const std::uint64_t contentRevision = document.contentRevision();
+        state.setProcessEnabled(line->m_entityId, false);
+        check(document.contentRevision() == contentRevision,
+            "process state changes do not change geometry revision");
+
+        planning::ProcessPlan plan;
+        plan.contentRevision = contentRevision;
+        plan.processStateRevision = state.revision();
+        plan.assignments.push_back({ 20U, 1, 7, true, 0.75 });
+        plan.exclusions.push_back
+            ({ 10U, planning::ProcessExclusionReason::InternalGeometry });
+        const auto presentation = process::ProcessPresentationSnapshot::build
+            (plan, testContext(QStringLiteral("process-presentation-test")));
+        const process::ProcessPresentationEntry* assigned = presentation.value.has_value()
+            ? presentation.value->find(20U) : nullptr;
+        const process::ProcessPresentationEntry* excluded = presentation.value.has_value()
+            ? presentation.value->find(10U) : nullptr;
+        check(presentation.succeeded() && presentation.value->entries.front().entityId == 10U
+            && assigned != nullptr && assigned->processOrder == 1
+            && assigned->continuousGroupId == 7 && assigned->reverse
+            && assigned->startParameter == std::optional<double>(0.75)
+            && excluded != nullptr && excluded->excluded
+            && excluded->exclusionReason
+                == planning::ProcessExclusionReason::InternalGeometry,
+            "process presentation derives assignment and exclusion data from plan");
+    }
+
     void testPlanarProcessPlanIsNcSourceOfTruth()
     {
         using namespace cadcam;
@@ -2079,6 +2117,8 @@ namespace
             (document, makeLine(0.0, 0.0, 0.0, 10.0, 0.0, 0.0));
         planning::ProcessPlan plan;
         plan.contentRevision = document.contentRevision();
+        process::DocumentProcessState processState;
+        plan.processStateRevision = processState.revision();
         plan.mode = planning::ProcessPlanMode::Planar3Axis;
         plan.assignments.push_back({ line->m_entityId, 0, -1, false, std::nullopt });
 
@@ -2087,21 +2127,15 @@ namespace
         generator.setDocument(&document);
         generator.setProfile(&profile);
         generator.setGenerationMode(GGenerator::GenerationMode::Mode2D);
+        generator.setProcessState(&processState);
         generator.setProcessPlan(&plan);
         const OperationContext context = testContext(QStringLiteral("planar-plan-source-of-truth"));
         const auto before = generator.buildProgramText(context);
 
-        line->m_processOrder = 91;
-        line->m_processContinuousGroupId = 37;
-        line->m_isReverse = true;
-        line->m_hasCustomProcessStart = true;
-        line->m_processStartParameter = 0.75;
-        line->m_excludedFromProcessing = true;
+        processState.setDirection(line->m_entityId, process::DirectionPreference::Reverse);
         const auto after = generator.buildProgramText(context);
-        check(before.succeeded() && after.succeeded()
-            && before.value.has_value() && after.value.has_value()
-            && *before.value == *after.value,
-            "planar NC ignores legacy CadItem process fields when plan is unchanged");
+        check(before.succeeded() && after.status == OperationStatus::Conflict,
+            "planar NC rejects a plan after process state changes");
 
         planning::ProcessPlan wrongMode = plan;
         wrongMode.mode = planning::ProcessPlanMode::Rotary4Axis;
@@ -2141,6 +2175,7 @@ int main(int argc, char* argv[])
     testMachineTrajectoryCore();
     testNcProgramPipeline();
     testPlanarNcProgramPipeline();
+    testDocumentProcessStateAndPresentation();
     testPlanarProcessPlanIsNcSourceOfTruth();
     testFailures();
     failureCount += runSplineProductionTests(updateSplineProductionGoldenFiles);

@@ -382,7 +382,13 @@
     <ClCompile Include="src\application\machine\MachineTrajectoryService.cpp">
       <Filter>Source Files\Model</Filter>
     </ClCompile>
-    <ClCompile Include="src\compatibility\legacy\LegacyProcessPlanAdapter.cpp">
+    <ClCompile Include="src\application\planning\DocumentProcessPlanningAdapter.cpp">
+      <Filter>Source Files\Model</Filter>
+    </ClCompile>
+    <ClCompile Include="src\application\process\DocumentProcessState.cpp">
+      <Filter>Source Files\Model</Filter>
+    </ClCompile>
+    <ClCompile Include="src\application\process\ProcessPresentationSnapshot.cpp">
       <Filter>Source Files\Model</Filter>
     </ClCompile>
     <ClCompile Include="src\RotaryPathTopology.cpp">
@@ -639,7 +645,13 @@
     <ClInclude Include="include\application\machine\MachineTrajectoryService.h">
       <Filter>Header Files\Model</Filter>
     </ClInclude>
-    <ClInclude Include="include\compatibility\legacy\LegacyProcessPlanAdapter.h">
+    <ClInclude Include="include\application\planning\DocumentProcessPlanningAdapter.h">
+      <Filter>Header Files\Model</Filter>
+    </ClInclude>
+    <ClInclude Include="include\application\process\DocumentProcessState.h">
+      <Filter>Header Files\Model</Filter>
+    </ClInclude>
+    <ClInclude Include="include\application\process\ProcessPresentationSnapshot.h">
       <Filter>Header Files\Model</Filter>
     </ClInclude>
     <ClInclude Include="include\RotaryPathTopology.h">

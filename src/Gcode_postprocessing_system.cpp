@@ -288,8 +288,11 @@ Gcode_postprocessing_system::Gcode_postprocessing_system(QWidget* parent)
     }
 
     m_editer.setDocument(&m_document);
+    m_editer.setProcessState(&m_processState);
     ui->openGLWidget->setEditer(&m_editer);
     ui->openGLWidget->setDocument(&m_document);
+    ui->openGLWidget->setDocumentProcessState(&m_processState);
+    ui->openGLWidget->setProcessPresentation(nullptr);
     ui->openGLWidget->refreshCommandPrompt();
 
     connect(ui->openGLWidget, &CadViewer::hoveredWorldPositionChanged, m_statusPaneWidget, &CadStatusPaneWidget::setWorldPosition);
@@ -301,6 +304,19 @@ Gcode_postprocessing_system::Gcode_postprocessing_system(QWidget* parent)
         }
     };
     connect(ui->openGLWidget, &CadViewer::selectedEntityChanged, this, [updateStatusEntityType](CadItem*) { updateStatusEntityType(); });
+    connect(ui->openGLWidget, &CadViewer::processDirectionToggleRequested, this,
+        [this](EntityId entityId)
+        {
+            const auto state = m_processState.stateOrDefault(entityId);
+            const auto direction = state.overrideData.direction == cadcam::process::DirectionPreference::Reverse
+                ? cadcam::process::DirectionPreference::Forward
+                : cadcam::process::DirectionPreference::Reverse;
+            if (m_processState.setDirection(entityId, direction))
+            {
+                invalidateCurrentProcessPlan();
+                ui->openGLWidget->appendCommandMessage(QStringLiteral("已更新加工方向偏好，请重新排序。"));
+            }
+        });
     connect(&m_document, &CadDocument::sceneChanged, this, updateStatusEntityType);
     connect(m_statusPaneWidget, &CadStatusPaneWidget::basePointSnapToggled, ui->openGLWidget, &CadViewer::setBasePointSnapEnabled);
     connect(m_statusPaneWidget, &CadStatusPaneWidget::controlPointSnapToggled, ui->openGLWidget, &CadViewer::setControlPointSnapEnabled);
@@ -1540,7 +1556,8 @@ void Gcode_postprocessing_system::initializeToolPanel()
     connect(&m_document, &CadDocument::sceneChanged, this, [this]()
     {
         if (m_currentProcessPlan.has_value()
-            && m_currentProcessPlan->contentRevision != m_document.contentRevision())
+            && (m_currentProcessPlan->contentRevision != m_document.contentRevision()
+                || m_currentProcessPlan->processStateRevision != m_processState.revision()))
         {
             invalidateCurrentProcessPlan();
         }
@@ -1903,13 +1920,14 @@ void Gcode_postprocessing_system::syncMachiningSettingsState()
             continue;
         }
 
-        if (entity->m_rotaryEndCutRole == RotaryEndCutRole::Break
-            && entity->m_rotaryEndCutPairId >= 0)
+        const auto state = m_processState.stateOrDefault(entity->m_entityId);
+        if (state.overrideData.boundaryRole == cadcam::planning::BoundaryRole::Break
+            && state.overrideData.boundaryPairId >= 0)
         {
-            rotaryEndCutIds.insert(entity->m_rotaryEndCutPairId);
+            rotaryEndCutIds.insert(state.overrideData.boundaryPairId);
         }
 
-        if (entity->m_excludedAsInternalGeometry)
+        if (state.analysis.excludedAsInternalGeometry)
         {
             ++internalPathCount;
         }

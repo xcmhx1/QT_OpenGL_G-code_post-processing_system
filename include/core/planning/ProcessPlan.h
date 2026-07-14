@@ -8,6 +8,11 @@
 #include <optional>
 #include <vector>
 
+namespace cadcam::process
+{
+    enum class DirectionPreference { Auto, Forward, Reverse };
+}
+
 namespace cadcam::planning
 {
     enum class ProcessPlanMode { Planar3Axis, Rotary4Axis };
@@ -37,8 +42,8 @@ namespace cadcam::planning
         bool excludedAsInternalGeometry = false;
         BoundaryRole boundaryRole = BoundaryRole::None;
         int boundaryPairId = -1;
-        bool currentReverse = false;
-        std::optional<double> currentStartParameter;
+        process::DirectionPreference directionPreference = process::DirectionPreference::Auto;
+        std::optional<double> startParameter;
     };
 
     struct ProcessAssignment
@@ -74,6 +79,7 @@ namespace cadcam::planning
     struct ProcessPlan
     {
         std::uint64_t contentRevision = 0;
+        std::uint64_t processStateRevision = 0;
         ProcessPlanMode mode = ProcessPlanMode::Planar3Axis;
         ProcessOrderingStrategy orderingStrategy = ProcessOrderingStrategy::NearestNext;
         std::vector<ProcessAssignment> assignments;
@@ -85,6 +91,7 @@ namespace cadcam::planning
     struct ProcessPlanningInput
     {
         std::uint64_t contentRevision = 0;
+        std::uint64_t processStateRevision = 0;
         std::vector<PlanningEntity> entities;
         topology::TopologyInput topologyInput;
         const topology::PathTopology* topology = nullptr;

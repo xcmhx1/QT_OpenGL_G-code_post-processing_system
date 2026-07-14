@@ -63,6 +63,7 @@ namespace cadcam::machine
     struct MachineTrajectory
     {
         std::uint64_t contentRevision = 0;
+        std::uint64_t processStateRevision = 0;
         RotaryTrajectoryContext rotaryContext;
         std::vector<EntityTrajectory> entities;
     };
@@ -102,6 +103,7 @@ namespace cadcam::machine
     struct RotaryTrajectoryInput
     {
         std::uint64_t contentRevision = 0;
+        std::uint64_t processStateRevision = 0;
         std::vector<TrajectoryEntityInput> entities;
         std::vector<planning::ProcessGroup> processGroups;
         std::optional<machining::TubeSectionModel> tubeSection;

@@ -7,6 +7,7 @@
 #include "GProfile.h"
 #include "SplineParity.h"
 #include "core/machine/RotaryKinematics.h"
+#include "application/process/DocumentProcessState.h"
 #include "compatibility/legacy/SplineEntityClone.h"
 #include "compatibility/legacy/SplineProductionPathProvider.h"
 #include "core/geometry/GeometryCompiler.h"
@@ -161,21 +162,22 @@ namespace
             : GProfile::createDefaultLaserProfile();
         GGenerator generator;
         std::optional<cadcam::planning::ProcessPlan> plan;
+        cadcam::process::DocumentProcessState processState;
         std::optional<cadcam::machining::TubeSectionModel> section;
         if (!document.m_entities.empty())
         {
             plan.emplace();
             plan->contentRevision = document.contentRevision();
+            plan->processStateRevision = processState.revision();
             plan->mode = mode == GGenerator::GenerationMode::Mode3D
                 ? cadcam::planning::ProcessPlanMode::Rotary4Axis
                 : cadcam::planning::ProcessPlanMode::Planar3Axis;
+            int processOrder = 0;
             for (const auto& item : document.m_entities)
             {
-                if (item == nullptr || item->m_processOrder < 0) continue;
+                if (item == nullptr) continue;
                 plan->assignments.push_back
-                    ({ item->m_entityId, item->m_processOrder, item->m_processContinuousGroupId,
-                       item->m_isReverse, item->m_hasCustomProcessStart
-                           ? std::optional<double>(item->m_processStartParameter) : std::nullopt });
+                    ({ item->m_entityId, processOrder++, -1, false, std::nullopt });
             }
         }
         if (mode == GGenerator::GenerationMode::Mode3D)
@@ -198,6 +200,7 @@ namespace
         generator.setDocument(&document);
         generator.setProfile(&profile);
         generator.setGenerationMode(mode);
+        generator.setProcessState(&processState);
         generator.setProcessPlan(plan.has_value() ? &*plan : nullptr);
         generator.setTubeSectionModel(section);
         generator.setRotaryTubeCenter(0.0, 0.0, true);
@@ -228,15 +231,24 @@ namespace
             && item->m_data->weightlist == originalWeights,
             "CadSplineItem preserves flags knots and weights");
 
-        item->m_isReverse = false;
-        item->rebuildRawPathPoints3D();
-        const std::vector<RawPathPoint3D> forward = item->rawPathPoints3D();
-        item->m_isReverse = true;
-        item->rebuildRawPathPoints3D();
-        const std::vector<RawPathPoint3D> reverse = item->rawPathPoints3D();
-        check(forward.size() == reverse.size() && !forward.empty()
-            && samePoint(forward.front(), reverse.back())
-            && samePoint(forward.back(), reverse.front()),
+        cadcam::geometry::PathCompileOptions forwardOptions;
+        cadcam::geometry::PathCompileOptions reverseOptions;
+        reverseOptions.reverse = true;
+        const auto forward = SplineProductionPathProvider::build
+            (item->m_entityId, *item->m_data, {}, forwardOptions,
+                context(QStringLiteral("spline-forward")));
+        const auto reverse = SplineProductionPathProvider::build
+            (item->m_entityId, *item->m_data, {}, reverseOptions,
+                context(QStringLiteral("spline-reverse")));
+        check(forward.value.has_value() && reverse.value.has_value()
+            && forward.value->vertices.size() == reverse.value->vertices.size()
+            && !forward.value->vertices.empty()
+            && std::abs(forward.value->vertices.front().position.x - reverse.value->vertices.back().position.x) <= 1.0e-9
+            && std::abs(forward.value->vertices.front().position.y - reverse.value->vertices.back().position.y) <= 1.0e-9
+            && std::abs(forward.value->vertices.front().position.z - reverse.value->vertices.back().position.z) <= 1.0e-9
+            && std::abs(forward.value->vertices.back().position.x - reverse.value->vertices.front().position.x) <= 1.0e-9
+            && std::abs(forward.value->vertices.back().position.y - reverse.value->vertices.front().position.y) <= 1.0e-9
+            && std::abs(forward.value->vertices.back().position.z - reverse.value->vertices.front().position.z) <= 1.0e-9,
             "CadSplineItem supports forward and reverse production paths");
 
         std::unique_ptr<DRW_Spline> closedEntity = makeClosedSpline();
@@ -383,8 +395,6 @@ namespace
         CadDocument document;
         auto* item = static_cast<CadSplineItem*>(document.appendEntity(makeProductionSpline()));
         check(item != nullptr, "append spline for G-code");
-        item->m_processOrder = 0;
-        item->m_processContinuousGroupId = -1;
 
         const OperationResult<QString> threeAxis =
             buildProgram(document, GGenerator::GenerationMode::Mode2D);

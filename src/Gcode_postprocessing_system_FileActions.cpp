@@ -68,6 +68,8 @@ bool Gcode_postprocessing_system::importCadFile(const QString& filePath)
 bool Gcode_postprocessing_system::importDxfFile(const QString& filePath)
 {
     m_editer.clearHistory();
+    m_processState.clear();
+    invalidateCurrentProcessPlan();
     m_document.readDxfDocument(filePath);
     m_rotaryTubeSectionModel = RotaryTubeSectionModel();
     m_currentDocumentPath = ensureDxfSuffix(filePath);
@@ -200,6 +202,8 @@ bool Gcode_postprocessing_system::importBitmapFile(const QString& filePath)
 
     if (replaceExisting)
     {
+        m_processState.clear();
+        invalidateCurrentProcessPlan();
         m_rotaryTubeSectionModel = RotaryTubeSectionModel();
         m_currentDocumentPath.clear();
         ui->openGLWidget->clearSelection();

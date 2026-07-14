@@ -182,16 +182,15 @@ Gcode_postprocessing_system
 
 ### 5.2 CadItem
 
-`CadItem` 及其派生类同时承载：
+`CadItem` 及其派生类承载：
 
 - 原始 DXF 实体和图元类型。
 - 显示、拾取和控制点所需几何。
-- `m_processOrder`、`m_isReverse` 等加工顺序与方向状态。
-- `m_rotaryEndCutRole`、`m_rotaryEndCutPairId` 加工断面状态。
-- `m_excludedAsInternalGeometry`、`m_excludedFromProcessing` 排除状态。
 - `rawPathPoints3D` 和 `controlPoints4Axis` 四轴路径缓存。
 
 图元几何变化后，应同步失效或重建相关缓存，不能只修改屏幕预览数据。
+
+用户加工输入独立存放在 `DocumentProcessState` 中，自动排序结果由 `ProcessPlan` 保存，画布显示则读取由计划生成的 `ProcessPresentationSnapshot`。加工状态不写回 `CadItem`，避免自动排序结果污染用户设置。
 
 ### 5.3 方管截面模型
 
@@ -275,7 +274,7 @@ DXF `SPLINE` 不保留为独立内部图元，而是在导入阶段通过 `CadSp
 
 ### 6.6 排序
 
-排序统一使用 `CadItem::m_processOrder`、`m_isReverse` 和闭合路径起刀点状态。
+排序统一从 `DocumentProcessState` 读取用户方向、起点和加工约束，并将最终顺序、实际方向及连续组写入 `ProcessPlan`。
 
 - “排序（保留方向）”调整顺序，不主动覆盖用户方向。
 - “智能排序”可联合考虑顺序、方向、连续性和闭合路径起刀点。
@@ -369,7 +368,7 @@ DXF `SPLINE` 不保留为独立内部图元，而是在导入阶段通过 `CadSp
 - 禁用方管截面识别时，同时禁用并取消两个子选项。
 - 初始化同步不得触发设置写回信号。
 
-加工断面数量按唯一 `m_rotaryEndCutPairId` 统计，仅计 `Break`；内部线条按 `m_excludedAsInternalGeometry` 图元数量统计。
+加工断面数量按 `DocumentProcessState` 中唯一的断面组编号统计，仅计 `Break`；内部线条数量按分析排除状态统计。
 
 ### 8.3 输入和显示
 

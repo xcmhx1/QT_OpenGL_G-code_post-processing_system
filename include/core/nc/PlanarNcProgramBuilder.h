@@ -42,7 +42,8 @@ namespace cadcam::nc
             std::uint64_t contentRevision,
             const std::vector<PlanarNcEntityInput>& entities,
             const PlanarNcBuildPolicy& policy,
-            const OperationContext& context
+            const OperationContext& context,
+            std::uint64_t processStateRevision = 1
         );
     };
 }

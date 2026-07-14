@@ -55,10 +55,6 @@ public:
 
     const std::vector<RawPathPoint3D>& rawPathPoints3D() const;
 
-    // 根据离散后的几何顶点推导一个加工方向向量。
-    // 当前实现取首个有效边方向，并按 m_isReverse 决定是否翻转。
-    void buildProcessDirection();
-
     // 综合 true color、ACI 索引色和图层色规则得到最终显示颜色。
     QColor buildColor();
 
@@ -76,31 +72,12 @@ public:
     DRW::ETYPE m_type;
     // 兼容字段：文档生命周期内稳定的核心图元编号，未来迁出 CadItem。
     cadcam::geometry::EntityId m_entityId = 0;
-    // Compatibility projection of the current ProcessPlan. Not a planning or NC source of truth.
-    int m_processOrder = -1;
-    // Compatibility projection of the current ProcessPlan. Not a planning or NC source of truth.
-    int m_processContinuousGroupId = -1;
-    // Compatibility projection of the current ProcessPlan. Not a planning or NC source of truth.
-    bool m_isReverse = false;
-    // 标记当前图元是否显式指定了闭合路径的起刀缝点参数。
-    bool m_hasCustomProcessStart = false;
-    // 闭合路径的起刀缝点参数；圆使用弧度，完整椭圆使用参数方程角。
-    double m_processStartParameter = 0.0;
     // 记录当前图元是否处于选中状态。
     bool m_isSelected = false;
-    // 用户指定的方管加工边界；仅作为当前文档的加工排序参考，不写入 DXF。
-    int m_rotaryEndCutPairId = -1;
-    RotaryEndCutRole m_rotaryEndCutRole = RotaryEndCutRole::None;
-    // 由废面边界区间或内部线识别推导，不参与排序、加工可视化和 G 代码输出。
-    bool m_excludedFromProcessing = false;
-    // 用户执行内部线识别后保留的独立排除来源，刷新废面规则时不会丢失。
-    bool m_excludedAsInternalGeometry = false;
     // 渲染层直接消费的离散几何缓存。
     GeometryData m_geometry;
     // 图元按当前加工顺序离散后的原始三维点集缓存。
     std::vector<RawPathPoint3D> m_rawPathPoints3D;
-    // 由几何推导出的标准化加工方向。
-    QVector3D m_processDirection;
     // 当前图元的最终显示颜色缓存。
     QColor m_color;
 

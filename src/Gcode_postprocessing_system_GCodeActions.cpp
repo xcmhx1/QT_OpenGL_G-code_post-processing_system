@@ -430,6 +430,7 @@ OperationReport Gcode_postprocessing_system::prepareDocumentForGCodeExport
         : cadcam::planning::ProcessPlanMode::Planar3Axis;
     const bool hasCurrentProcessPlan = m_currentProcessPlan.has_value()
         && m_currentProcessPlan->contentRevision == m_document.contentRevision()
+        && m_currentProcessPlan->processStateRevision == m_processState.revision()
         && m_currentProcessPlan->mode == requiredPlanMode;
     const int excludedCount = hasCurrentProcessPlan
         ? static_cast<int>(m_currentProcessPlan->exclusions.size()) : 0;
@@ -563,6 +564,7 @@ bool Gcode_postprocessing_system::exportGCode
     generator.setDocument(&m_document);
     generator.setProfile(&m_activeProfile);
     generator.setGenerationMode(generationMode);
+    generator.setProcessState(&m_processState);
     generator.setProcessPlan
     (
         m_currentProcessPlan.has_value() ? &*m_currentProcessPlan : nullptr
@@ -722,10 +724,12 @@ bool Gcode_postprocessing_system::removeDuplicateEntities(bool interactive)
     {
         CadItem* item = it->get();
 
-        if (item == nullptr || item->m_excludedFromProcessing || item->m_nativeEntity == nullptr)
+        if (item == nullptr || item->m_nativeEntity == nullptr)
         {
             continue;
         }
+        const auto state = m_processState.stateOrDefault(item->m_entityId);
+        if (!state.overrideData.processEnabled || state.analysis.excludedAsInternalGeometry) continue;
 
         const QString geometryKey = duplicateGeometryKey(item);
 

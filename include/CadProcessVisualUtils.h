@@ -3,6 +3,8 @@
 #include <QVector>
 #include <QVector3D>
 
+#include "application/process/ProcessPresentationSnapshot.h"
+
 class CadItem;
 
 struct CadProcessVisualInfo
@@ -37,6 +39,10 @@ struct CadSelectionHandleInfo
 
 bool isProcessVisualizable(const CadItem* item);
 
-CadProcessVisualInfo buildProcessVisualInfo(const CadItem* item);
+CadProcessVisualInfo buildProcessVisualInfo
+(
+    const CadItem* item,
+    const cadcam::process::ProcessPresentationEntry* presentation = nullptr
+);
 
 QVector<CadSelectionHandleInfo> buildSelectionHandleInfo(const CadItem* item, float xlineHandleLength = 50.0f);

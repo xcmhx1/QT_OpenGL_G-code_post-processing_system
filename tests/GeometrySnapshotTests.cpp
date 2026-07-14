@@ -4,6 +4,7 @@
 #include "CadItem.h"
 #include "application/geometry/DocumentGeometrySnapshotBuilder.h"
 #include "application/geometry/GeometrySnapshotCompiler.h"
+#include "application/process/DocumentProcessState.h"
 #include "compatibility/legacy/GeometrySnapshotParityVerifier.h"
 
 #include <QCryptographicHash>
@@ -337,8 +338,9 @@ namespace
             "redo restoration preserves EntityId and advances revision once");
 
         const std::uint64_t beforeProcessState = document.contentRevision();
-        restored->m_isReverse = !restored->m_isReverse;
-        document.refreshEntity(restored, false);
+        cadcam::process::DocumentProcessState processState;
+        processState.setDirection(restored->m_entityId,
+            cadcam::process::DirectionPreference::Reverse);
         check(document.contentRevision() == beforeProcessState,
             "process direction state does not advance content revision");
 

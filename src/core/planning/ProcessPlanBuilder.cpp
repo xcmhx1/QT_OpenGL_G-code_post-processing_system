@@ -364,6 +364,17 @@ namespace cadcam::planning
             return points;
         }
 
+        bool directionAllowed(const PlanningEntity& entity, bool reverse, bool allowReverse)
+        {
+            switch (entity.directionPreference)
+            {
+            case process::DirectionPreference::Forward: return !reverse;
+            case process::DirectionPreference::Reverse: return reverse;
+            case process::DirectionPreference::Auto: return !reverse || allowReverse;
+            }
+            return false;
+        }
+
         std::optional<GroupTraversal> buildTraversal
         (
             const ProcessGroup& group,
@@ -394,7 +405,7 @@ namespace cadcam::planning
                     const PlanningEntity& entity = *found->second;
                     for (const bool reverse : { false, true })
                     {
-                        if (reverse && !allowReverse) continue;
+                        if (!directionAllowed(entity, reverse, allowReverse)) continue;
                         if (used.empty() && forcedStart.has_value()
                             && (forcedStart->first != entityId || forcedStart->second != reverse)) continue;
                         const std::vector<Vector3d> points = directedPoints(entity, reverse);
@@ -505,7 +516,9 @@ namespace cadcam::planning
             {
                 for (const bool reverse : { false, true })
                 {
-                    if (reverse && !policy.allowReverse) continue;
+                    const auto found = entities.find(entityId);
+                    if (found == entities.end()
+                        || !directionAllowed(*found->second, reverse, policy.allowReverse)) continue;
                     auto candidate = buildTraversal
                     (
                         group, entities, currentPosition, policy.allowReverse,
@@ -578,6 +591,7 @@ namespace cadcam::planning
 
         ProcessPlan plan;
         plan.contentRevision = input.contentRevision;
+        plan.processStateRevision = input.processStateRevision;
         plan.mode = ProcessPlanMode::Rotary4Axis;
         plan.orderingStrategy = policy.orderingStrategy;
         std::unordered_map<EntityId, const PlanningEntity*> entities;
@@ -913,8 +927,8 @@ namespace cadcam::planning
                 assignment.entityId = directed.entity->entityId;
                 assignment.processOrder = processOrder++;
                 assignment.continuousGroupId = continuousGroupId;
-                assignment.reverse = directed.entity->currentReverse ^ directed.reverseRelativeToInput;
-                assignment.startParameter = directed.entity->currentStartParameter;
+                assignment.reverse = directed.reverseRelativeToInput;
+                assignment.startParameter = directed.entity->startParameter;
                 plan.assignments.push_back(assignment);
             }
             currentPosition = selected->end;

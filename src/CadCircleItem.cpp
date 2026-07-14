@@ -25,7 +25,6 @@ CadCircleItem::CadCircleItem(DRW_Entity* entity, QObject* parent)
     // 绑定原生圆实体，并立即生成渲染所需的离散数据。
     m_data = static_cast<DRW_Circle*>(m_nativeEntity);
     buildGeometryDatay();
-    buildProcessDirection();
 }
 
 void CadCircleItem::buildGeometryDatay()
@@ -69,11 +68,6 @@ void CadCircleItem::rebuildRawPathPoints3D()
 {
     m_rawPathPoints3D.clear();
     cadcam::geometry::PathCompileOptions options;
-    options.reverse = m_isReverse;
-    if (m_hasCustomProcessStart)
-    {
-        options.startParameter = m_processStartParameter;
-    }
     const OperationResult<cadcam::geometry::Path3D> result = LegacyCadItemPathBridge::compile
     (
         *this,

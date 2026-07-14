@@ -63,6 +63,7 @@ namespace cadcam::nc
     struct NcProgram
     {
         std::uint64_t contentRevision = 0;
+        std::uint64_t processStateRevision = 0;
         NcProgramMode mode = NcProgramMode::Rotary4Axis;
         std::vector<NcComment> leadingComments;
         std::vector<NcEntityBlock> entities;

@@ -76,7 +76,7 @@ std::vector<TransientPrimitive> CadViewer::buildTransientPrimitives() const
     return CadPreviewBuilder::buildTransientPrimitives(m_controller.drawState(), selectedEntity(), selectedEntities());
 }
 
-std::vector<TransientPrimitive> CadViewer::buildProcessDirectionPrimitives() const
+std::vector<TransientPrimitive> CadViewer::buildProcessArrowPrimitives() const
 {
     if (!m_processVisualsVisible || !m_processDirectionVisible)
     {
@@ -107,7 +107,10 @@ std::vector<TransientPrimitive> CadViewer::buildProcessDirectionPrimitives() con
             continue;
         }
 
-        const CadProcessVisualInfo info = buildProcessVisualInfo(entity.get());
+        const auto* presentation = m_processPresentation != nullptr
+            ? m_processPresentation->find(entity->m_entityId) : nullptr;
+        if (presentation == nullptr || presentation->excluded) continue;
+        const CadProcessVisualInfo info = buildProcessVisualInfo(entity.get(), presentation);
 
         if (!info.valid || info.direction.lengthSquared() <= 1.0e-6f)
         {
@@ -206,15 +209,17 @@ std::vector<TransientPrimitive> CadViewer::buildRotaryEndCutPrimitives() const
 
     for (const std::unique_ptr<CadItem>& entity : scene->m_entities)
     {
-        if (entity == nullptr
-            || entity->m_rotaryEndCutRole == RotaryEndCutRole::None
-            || entity->m_rotaryEndCutPairId < 0
+        if (entity == nullptr || m_processState == nullptr
             || entity->m_geometry.vertices.size() < 2)
         {
             continue;
         }
 
-        const QVector3D color = entity->m_rotaryEndCutRole == RotaryEndCutRole::Waste
+        const auto state = m_processState->stateOrDefault(entity->m_entityId);
+        if (state.overrideData.boundaryRole == cadcam::planning::BoundaryRole::None
+            || state.overrideData.boundaryPairId < 0) continue;
+
+        const QVector3D color = state.overrideData.boundaryRole == cadcam::planning::BoundaryRole::Waste
             ? QVector3D(1.0f, 0.60f, 0.12f)
             : QVector3D(0.18f, 0.68f, 1.0f);
 

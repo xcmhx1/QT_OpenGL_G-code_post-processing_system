@@ -315,8 +315,10 @@ private:
 class DeleteEntityCommand final : public CadEditer::EditCommand
 {
 public:
-    DeleteEntityCommand(CadDocument* document, CadItem* item)
+    DeleteEntityCommand(CadDocument* document,
+        cadcam::process::DocumentProcessState* processState, CadItem* item)
         : m_document(document)
+        , m_processState(processState)
         , m_itemPtr(item)
     {
     }
@@ -328,6 +330,12 @@ public:
             return false;
         }
 
+        if (!m_savedState.has_value() && m_processState != nullptr)
+        {
+            if (const auto* state = m_processState->find(m_itemPtr->m_entityId))
+                m_savedState = *state;
+        }
+        const auto entityId = m_itemPtr->m_entityId;
         auto [entity, item] = m_document->takeEntity(m_itemPtr);
 
         if (entity == nullptr || item == nullptr)
@@ -338,6 +346,7 @@ public:
         m_entity = std::move(entity);
         m_item = std::move(item);
         m_itemPtr = m_item.get();
+        if (m_processState != nullptr) m_processState->erase(entityId);
         return true;
     }
 
@@ -349,7 +358,11 @@ public:
         }
 
         m_itemPtr = m_item.get();
-        return m_document->appendEntity(std::move(m_entity), std::move(m_item)) != nullptr;
+        CadItem* restored = m_document->appendEntity(std::move(m_entity), std::move(m_item));
+        if (restored == nullptr) return false;
+        if (m_processState != nullptr && m_savedState.has_value())
+            m_processState->setState(restored->m_entityId, *m_savedState);
+        return true;
     }
 
 private:
@@ -364,13 +377,17 @@ private:
 
     // 当前图元裸指针
     CadItem* m_itemPtr = nullptr;
+    cadcam::process::DocumentProcessState* m_processState = nullptr;
+    std::optional<cadcam::process::EntityProcessState> m_savedState;
 };
 
 class DeleteEntitiesCommand final : public CadEditer::EditCommand
 {
 public:
-    DeleteEntitiesCommand(CadDocument* document, const QVector<CadItem*>& items)
+    DeleteEntitiesCommand(CadDocument* document,
+        cadcam::process::DocumentProcessState* processState, const QVector<CadItem*>& items)
         : m_document(document)
+        , m_processState(processState)
     {
         QSet<CadItem*> deduplicated;
 
@@ -382,7 +399,14 @@ public:
             }
 
             deduplicated.insert(item);
-            m_states.push_back({ item, {}, {} });
+            ItemState state;
+            state.itemPtr = item;
+            if (m_processState != nullptr)
+            {
+                if (const auto* saved = m_processState->find(item->m_entityId))
+                    state.processState = *saved;
+            }
+            m_states.push_back(std::move(state));
         }
     }
 
@@ -393,10 +417,12 @@ public:
             return false;
         }
 
+        if (m_processState != nullptr) m_processState->beginBatch();
         for (ItemState& state : m_states)
         {
             if (state.itemPtr == nullptr)
             {
+                if (m_processState != nullptr) m_processState->endBatch();
                 return false;
             }
 
@@ -404,14 +430,16 @@ public:
 
             if (entity == nullptr || item == nullptr)
             {
+                if (m_processState != nullptr) m_processState->endBatch();
                 return false;
             }
 
             state.entity = std::move(entity);
             state.item = std::move(item);
             state.itemPtr = state.item.get();
+            if (m_processState != nullptr) m_processState->erase(state.itemPtr->m_entityId);
         }
-
+        if (m_processState != nullptr) m_processState->endBatch();
         return true;
     }
 
@@ -422,21 +450,28 @@ public:
             return false;
         }
 
+        if (m_processState != nullptr) m_processState->beginBatch();
         for (ItemState& state : m_states)
         {
             if (state.entity == nullptr || state.item == nullptr)
             {
+                if (m_processState != nullptr) m_processState->endBatch();
                 return false;
             }
 
             state.itemPtr = state.item.get();
 
-            if (m_document->appendEntity(std::move(state.entity), std::move(state.item)) == nullptr)
+            CadItem* restored = m_document->appendEntity(std::move(state.entity), std::move(state.item));
+            if (restored == nullptr)
             {
+                if (m_processState != nullptr) m_processState->endBatch();
                 return false;
             }
+            state.itemPtr = restored;
+            if (m_processState != nullptr && state.processState.has_value())
+                m_processState->setState(restored->m_entityId, *state.processState);
         }
-
+        if (m_processState != nullptr) m_processState->endBatch();
         return true;
     }
 
@@ -446,9 +481,11 @@ private:
         CadItem* itemPtr = nullptr;
         std::unique_ptr<DRW_Entity> entity;
         std::unique_ptr<CadItem> item;
+        std::optional<cadcam::process::EntityProcessState> processState;
     };
 
     CadDocument* m_document = nullptr;
+    cadcam::process::DocumentProcessState* m_processState = nullptr;
     std::vector<ItemState> m_states;
 };
 
@@ -1129,131 +1166,6 @@ private:
     QString m_newLayerName = QStringLiteral("0");
 };
 
-// 切换反向加工命令：
-// 记录实体反向状态，在执行与撤销之间来回切换。
-class ToggleReverseCommand final : public CadEditer::EditCommand
-{
-public:
-    ToggleReverseCommand(CadDocument* document, CadItem* item)
-        : m_document(document)
-        , m_item(item)
-    {
-        if (m_item != nullptr)
-        {
-            m_originalReverse = m_item->m_isReverse;
-        }
-    }
-
-    bool execute() override
-    {
-        return apply(!m_originalReverse);
-    }
-
-    bool undo() override
-    {
-        return apply(m_originalReverse);
-    }
-
-private:
-    bool apply(bool isReverse)
-    {
-        if (m_document == nullptr || m_item == nullptr || !m_document->containsEntity(m_item))
-        {
-            return false;
-        }
-
-        m_item->m_isReverse = isReverse;
-        return m_document->refreshEntity(m_item, false);
-    }
-
-private:
-    // 目标文档
-    CadDocument* m_document = nullptr;
-
-    // 目标实体
-    CadItem* m_item = nullptr;
-
-    // 切换前的反向状态
-    bool m_originalReverse = false;
-};
-
-// 批量更新加工状态命令：
-// 用于一次性提交加工顺序和反向加工状态，支持撤销与重做。
-class UpdateProcessStatesCommand final : public CadEditer::EditCommand
-{
-public:
-    struct ItemProcessState
-    {
-        CadItem* item = nullptr;
-        int oldProcessOrder = -1;
-        int newProcessOrder = -1;
-        bool oldReverse = false;
-        bool newReverse = false;
-        bool oldHasCustomStart = false;
-        bool newHasCustomStart = false;
-        double oldProcessStartParameter = 0.0;
-        double newProcessStartParameter = 0.0;
-        int oldContinuousGroupId = -1;
-        int newContinuousGroupId = -1;
-    };
-
-public:
-    UpdateProcessStatesCommand(CadDocument* document, std::vector<ItemProcessState> states)
-        : m_document(document)
-        , m_states(std::move(states))
-    {
-    }
-
-    bool execute() override
-    {
-        return apply(true);
-    }
-
-    bool undo() override
-    {
-        return apply(false);
-    }
-
-private:
-    bool apply(bool useNewState)
-    {
-        if (m_document == nullptr || m_states.empty())
-        {
-            return false;
-        }
-
-        for (const ItemProcessState& state : m_states)
-        {
-            if (state.item == nullptr || !m_document->containsEntity(state.item))
-            {
-                return false;
-            }
-        }
-
-        for (const ItemProcessState& state : m_states)
-        {
-            state.item->m_processOrder = useNewState ? state.newProcessOrder : state.oldProcessOrder;
-            state.item->m_isReverse = useNewState ? state.newReverse : state.oldReverse;
-            state.item->m_hasCustomProcessStart = useNewState ? state.newHasCustomStart : state.oldHasCustomStart;
-            state.item->m_processStartParameter = useNewState ? state.newProcessStartParameter : state.oldProcessStartParameter;
-            state.item->m_processContinuousGroupId = useNewState
-                ? state.newContinuousGroupId
-                : state.oldContinuousGroupId;
-            state.item->buildProcessDirection();
-        }
-
-        m_document->notifySceneChanged();
-        return true;
-    }
-
-private:
-    // 目标文档
-    CadDocument* m_document = nullptr;
-
-    // 变更前后状态集合
-    std::vector<ItemProcessState> m_states;
-};
-
 // 删除指定实体
 // @param item 待删除实体
 // @return 如果删除成功返回 true，否则返回 false
@@ -1282,7 +1194,8 @@ bool CadEditer::deleteEntity(CadItem* item)
         m_gripPointIndex = -1;
     }
 
-    return executeCommand(std::make_unique<DeleteEntityCommand>(m_document, item));
+    return executeCommand(std::make_unique<DeleteEntityCommand>
+        (m_document, m_processState, item));
 }
 
 bool CadEditer::deleteEntities(const QVector<CadItem*>& items)
@@ -1324,7 +1237,8 @@ bool CadEditer::deleteEntities(const QVector<CadItem*>& items)
         return false;
     }
 
-    return executeCommand(std::make_unique<DeleteEntitiesCommand>(m_document, validItems));
+    return executeCommand(std::make_unique<DeleteEntitiesCommand>
+        (m_document, m_processState, validItems));
 }
 
 bool CadEditer::copyEntity(CadItem* item, const QVector3D& delta)
@@ -1828,88 +1742,13 @@ bool CadEditer::changeEntityLayer(CadItem* item, const QString& layerName)
 // 切换指定实体的反向加工标记
 // @param item 目标实体
 // @return 如果切换成功返回 true，否则返回 false
-bool CadEditer::toggleEntityReverse(CadItem* item)
-{
-    if (m_document == nullptr || item == nullptr || !m_document->containsEntity(item))
-    {
-        return false;
-    }
-
-    return executeCommand(std::make_unique<ToggleReverseCommand>(m_document, item));
-}
-
 // 设置指定实体的加工顺序
 // @param item 目标实体
 // @param processOrder 新的加工顺序
 // @return 如果设置成功返回 true，否则返回 false
-bool CadEditer::setEntityProcessOrder(CadItem* item, int processOrder)
-{
-    if (m_document == nullptr || item == nullptr || !m_document->containsEntity(item) || processOrder < 0)
-    {
-        return false;
-    }
-
-    std::vector<UpdateProcessStatesCommand::ItemProcessState> states;
-    states.push_back
-    ({
-        item,
-        item->m_processOrder,
-        processOrder,
-        item->m_isReverse,
-        item->m_isReverse,
-        item->m_hasCustomProcessStart,
-        item->m_hasCustomProcessStart,
-        item->m_processStartParameter,
-        item->m_processStartParameter,
-        item->m_processContinuousGroupId,
-        -1
-    });
-
-    return executeCommand(std::make_unique<UpdateProcessStatesCommand>(m_document, std::move(states)));
-}
-
 // 批量更新实体的加工顺序、反向加工状态与闭合图元起刀缝点
 // @param updates 目标实体的加工状态更新数组
 // @return 如果批量更新成功返回 true，否则返回 false
-bool CadEditer::applyEntityProcessStates(const std::vector<ProcessStateUpdate>& updates)
-{
-    if (m_document == nullptr
-        || updates.empty())
-    {
-        return false;
-    }
-
-    std::vector<UpdateProcessStatesCommand::ItemProcessState> states;
-    states.reserve(updates.size());
-
-    for (const ProcessStateUpdate& update : updates)
-    {
-        CadItem* item = update.item;
-
-        if (item == nullptr || !m_document->containsEntity(item) || update.processOrder < 0)
-        {
-            return false;
-        }
-
-        states.push_back
-        ({
-            item,
-            item->m_processOrder,
-            update.processOrder,
-            item->m_isReverse,
-            update.isReverse,
-            item->m_hasCustomProcessStart,
-            update.hasCustomStart,
-            item->m_processStartParameter,
-            update.processStartParameter,
-            item->m_processContinuousGroupId,
-            update.continuousGroupId
-        });
-    }
-
-    return executeCommand(std::make_unique<UpdateProcessStatesCommand>(m_document, std::move(states)));
-}
-
 // 处理移动编辑命令
 bool CadEditer::handleMoveEditing
 (

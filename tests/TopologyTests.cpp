@@ -9,7 +9,8 @@
 #include "application/geometry/GeometrySnapshotCompiler.h"
 #include "application/topology/GeometrySnapshotTopologyAdapter.h"
 #include "compatibility/legacy/LegacyCadItemTopologyAdapter.h"
-#include "compatibility/legacy/LegacyProcessPlanAdapter.h"
+#include "application/planning/DocumentProcessPlanningAdapter.h"
+#include "application/process/DocumentProcessState.h"
 #include "compatibility/legacy/LegacyTopologyParityVerifier.h"
 #include "core/machining/TubeCutBoundary.h"
 #include "core/planning/PlanarProcessPlanBuilder.h"
@@ -42,6 +43,7 @@ namespace
     using cadcam::machining::TubeSectionGeometry;
     using cadcam::machining::TubeSectionAnalyzer;
     using cadcam::machining::TubeSectionPolicy;
+    using cadcam::process::DirectionPreference;
     using CoreTubeSectionModel = cadcam::machining::TubeSectionModel;
     using cadcam::topology::PathTopology;
     using cadcam::topology::PathTopologyBuilder;
@@ -1291,64 +1293,18 @@ namespace
             }
         ), "mixed boundary side rejects process plan");
 
-        CadDocument document;
-        CadItem* unchanged = document.appendEntity(makeDocumentLine(0, 0, 0, 1, 0, 0));
-        unchanged->m_processOrder = 27;
-        ProcessPlan stalePlan;
-        stalePlan.contentRevision = document.contentRevision() + 1U;
-        stalePlan.assignments.push_back({ unchanged->m_entityId, 0, -1, false, std::nullopt });
-        const OperationReport apply = LegacyProcessPlanAdapter{}.apply(document, stalePlan, context);
-        check(!apply.succeeded() && unchanged->m_processOrder == 27,
-            "revision conflict leaves CadItem unchanged");
-
-        ProcessPlan missingEntityPlan;
-        missingEntityPlan.contentRevision = document.contentRevision();
-        missingEntityPlan.assignments.push_back
-            ({ unchanged->m_entityId, 0, -1, false, std::nullopt });
-        missingEntityPlan.assignments.push_back
-            ({ unchanged->m_entityId + 1000U, 1, -1, false, std::nullopt });
-        const OperationReport missingEntityApply = LegacyProcessPlanAdapter{}.apply
-            (document, missingEntityPlan, context);
-        check(!missingEntityApply.succeeded() && unchanged->m_processOrder == 27,
-            "missing EntityId leaves CadItem unchanged");
-
-        CadDocument cycleDocument;
-        CadItem* cycleFirst = cycleDocument.appendEntity
-            (makeDocumentLine(0, 0, 0, 1, 0, 0));
-        CadItem* cycleSecond = cycleDocument.appendEntity
-            (makeDocumentLine(2, 0, 0, 3, 0, 0));
-        cycleFirst->m_processOrder = 41;
-        cycleSecond->m_processOrder = 42;
-        ProcessPlan cyclePlan;
-        cyclePlan.contentRevision = cycleDocument.contentRevision();
-        cyclePlan.groups.push_back
-            ({ 0, ProcessGroupKind::SingleEntity, false, { cycleFirst->m_entityId } });
-        cyclePlan.groups.push_back
-            ({ 1, ProcessGroupKind::SingleEntity, false, { cycleSecond->m_entityId } });
-        cyclePlan.assignments.push_back
-            ({ cycleFirst->m_entityId, 0, -1, false, std::nullopt });
-        cyclePlan.assignments.push_back
-            ({ cycleSecond->m_entityId, 1, -1, false, std::nullopt });
-        cyclePlan.precedenceConstraints.push_back({ 0, 1, 1 });
-        cyclePlan.precedenceConstraints.push_back({ 1, 0, 2 });
-        const OperationReport cycleApply = LegacyProcessPlanAdapter{}.apply
-            (cycleDocument, cyclePlan, context);
-        check(!cycleApply.succeeded()
-            && cycleFirst->m_processOrder == 41
-            && cycleSecond->m_processOrder == 42,
-            "precedence cycle is rejected without partial CadItem writes");
-
         CadDocument mixedDocument;
         mixedDocument.appendEntity(makeDocumentLine(0, 0, 4, 1, 0, 4));
         auto pointEntity = std::make_unique<DRW_Point>();
         pointEntity->basePoint = { 0.0, 0.0, 0.0 };
         CadItem* pointItem = mixedDocument.appendEntity(std::move(pointEntity));
         cadcam::topology::PathTopology mixedTopology;
+        cadcam::process::DocumentProcessState mixedProcessState;
         CoreTubeSectionModel mixedSection = planningTubeSection();
         mixedSection.contentRevision = mixedDocument.contentRevision();
-        const auto captured = LegacyProcessPlanAdapter{}.capture
+        const auto captured = DocumentProcessPlanningAdapter{}.captureRotary
         (
-            mixedDocument, mixedSection, policy.connectionTolerance,
+            mixedDocument, mixedProcessState, mixedSection, policy.connectionTolerance,
             mixedTopology, context
         );
         check(captured.succeeded() && captured.value.has_value()
@@ -1399,7 +1355,7 @@ namespace
             std::size_t parameter = 0U;
             for (const Vector3d& point : points)
                 value.path.vertices.push_back({ point, static_cast<double>(parameter++) });
-            value.customStartParameter = startParameter;
+            value.startParameter = startParameter;
             return value;
         };
         auto assignment = [](const ProcessPlan& plan, EntityId id)
@@ -1448,6 +1404,28 @@ namespace
             && reversed.value->assignments.size() == 1U
             && reversed.value->assignments.front().reverse,
             "planar plan chooses the closer reverse entry");
+
+        PlanarProcessPlanningInput forwardInput = reverseInput;
+        forwardInput.entities.front().directionPreference = DirectionPreference::Forward;
+        const auto forward = PlanarProcessPlanBuilder::build(forwardInput, policy, context);
+        check(forward.succeeded() && forward.value.has_value()
+            && !forward.value->assignments.front().reverse,
+            "planar forward preference only permits forward direction");
+
+        PlanarProcessPlanningInput forcedReverseInput = reverseInput;
+        forcedReverseInput.entities.front().path.vertices =
+        {
+            { { 1.0, 0.0, 0.0 }, 0.0 },
+            { { 10.0, 0.0, 0.0 }, 1.0 }
+        };
+        forcedReverseInput.entities.front().directionPreference = DirectionPreference::Reverse;
+        const auto forcedReverse = PlanarProcessPlanBuilder::build
+            (forcedReverseInput, policy, context);
+        check(forcedReverse.succeeded() && forcedReverse.value.has_value()
+            && forcedReverse.value->assignments.front().reverse,
+            "planar reverse preference only permits reverse direction");
+        check(reverseInput.entities.front().directionPreference == DirectionPreference::Auto,
+            "automatic plan result does not modify direction preference");
 
         PlanarProcessPlanningInput stableInput;
         stableInput.contentRevision = 9U;
@@ -1639,15 +1617,14 @@ namespace
             (makeDocumentLine(0, 0, 0, 10, 0, 0));
         const OperationResult<TopologyInput> forward =
             adapter.convert({ line }, tolerance, context);
-        line->m_isReverse = true;
         const OperationResult<TopologyInput> reverse =
             adapter.convert({ line }, tolerance, context);
         check(forward.value.has_value() && reverse.value.has_value()
             && forward.value->records.front().points.front().x
-                == reverse.value->records.front().points.back().x
+                == reverse.value->records.front().points.front().x
             && forward.value->records.front().points.back().x
-                == reverse.value->records.front().points.front().x,
-            "legacy adapter preserves reverse process direction");
+                == reverse.value->records.front().points.back().x,
+            "legacy topology adapter uses canonical geometry direction");
 
         CadDocument circleDocument;
         auto circle = std::make_unique<DRW_Circle>();
@@ -1657,18 +1634,13 @@ namespace
         CadItem* circleItem = circleDocument.appendEntity(std::move(circle));
         const OperationResult<TopologyInput> defaultCircle =
             adapter.convert({ circleItem }, tolerance, context);
-        circleItem->m_hasCustomProcessStart = true;
-        circleItem->m_processStartParameter = 0.0;
-        circleItem->m_isReverse = true;
         const OperationResult<TopologyInput> customCircle =
             adapter.convert({ circleItem }, tolerance, context);
         check(defaultCircle.value.has_value() && customCircle.value.has_value()
             && customCircle.value->records.front().semanticallyClosed
-            && (defaultCircle.value->records.front().points.front().x
-                    != customCircle.value->records.front().points.front().x
-                || defaultCircle.value->records.front().points.front().y
-                    != customCircle.value->records.front().points.front().y),
-            "legacy adapter preserves custom closed start and reverse semantics");
+            && defaultCircle.value->records.front().points.front().x
+                == customCircle.value->records.front().points.front().x,
+            "legacy topology adapter uses canonical closed start");
         RotaryPathTopology circleTopology({ circleItem }, tolerance);
         const RotaryPathLoopResult circleLoop = circleTopology.extractBestLoop({ circleItem });
         check(circleLoop.valid && circleLoop.connectedLoop

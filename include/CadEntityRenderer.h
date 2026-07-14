@@ -11,6 +11,7 @@
 
 #include "AppTheme.h"
 #include "CadRenderTypes.h"
+#include "application/process/ProcessPresentationSnapshot.h"
 
 class CadItem;
 class CadSceneRenderCache;
@@ -34,6 +35,7 @@ public:
         CadSceneRenderCache& sceneRenderCache,
         EntityId selectedEntityId,
         const AppThemeColors& theme,
-        bool dimExcludedEntities
+        bool dimExcludedEntities,
+        const cadcam::process::ProcessPresentationSnapshot* presentation
     );
 };

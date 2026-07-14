@@ -20,20 +20,28 @@ bool Gcode_postprocessing_system::toggleSelectedEntityReverse()
     }
 
     int updatedCount = 0;
-
+    m_processState.beginBatch();
     for (CadItem* item : selectedItems)
     {
-        if (item != nullptr && m_editer.toggleEntityReverse(item))
+        if (item != nullptr)
         {
-            ++updatedCount;
+            const auto state = m_processState.stateOrDefault(item->m_entityId);
+            const auto direction = state.overrideData.direction
+                == cadcam::process::DirectionPreference::Reverse
+                ? cadcam::process::DirectionPreference::Forward
+                : cadcam::process::DirectionPreference::Reverse;
+            if (m_processState.setDirection(item->m_entityId, direction)) ++updatedCount;
         }
     }
+    m_processState.endBatch();
 
     if (updatedCount <= 0)
     {
         QMessageBox::warning(this, QStringLiteral("反向加工"), QStringLiteral("选中图元的反向加工状态切换失败。"));
         return false;
     }
+
+    invalidateCurrentProcessPlan();
 
     ui->openGLWidget->appendCommandMessage
     (

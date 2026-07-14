@@ -25,7 +25,6 @@ CadArcItem::CadArcItem(DRW_Entity* entity, QObject* parent)
     // 绑定原生圆弧实体并在构造时完成首次离散。
     m_data = static_cast<DRW_Arc*>(m_nativeEntity);
     buildGeometryDatay();
-    buildProcessDirection();
 }
 
 void CadArcItem::buildGeometryDatay()
@@ -77,7 +76,6 @@ void CadArcItem::rebuildRawPathPoints3D()
 {
     m_rawPathPoints3D.clear();
     cadcam::geometry::PathCompileOptions options;
-    options.reverse = m_isReverse;
     const OperationResult<cadcam::geometry::Path3D> result = LegacyCadItemPathBridge::compile
     (
         *this,

@@ -1149,18 +1149,11 @@ namespace
         return -lwPolylineForwardStartTangentAt(polyline, startIndex);
     }
 
-    size_t effectiveClosedPolylineStartIndex(const CadItem* item, size_t vertexCount)
+    size_t effectiveClosedPolylineStartIndex(const CadItem*, size_t vertexCount)
     {
         if (vertexCount == 0)
         {
             return 0;
-        }
-
-        if (item != nullptr && item->m_hasCustomProcessStart)
-        {
-            const int rawIndex = static_cast<int>(std::llround(item->m_processStartParameter));
-            const int normalized = ((rawIndex % static_cast<int>(vertexCount)) + static_cast<int>(vertexCount)) % static_cast<int>(vertexCount);
-            return static_cast<size_t>(normalized);
         }
 
         return 0;
@@ -1290,7 +1283,7 @@ namespace
             const QVector3D forwardTangent = normalizeOrZero(forwardEnd - forwardStart);
             const std::initializer_list<bool> reverseOptions = strategy == SortStrategy::Smart
                 ? std::initializer_list<bool>{ false, true }
-                : std::initializer_list<bool>{ item->m_isReverse };
+                : std::initializer_list<bool>{ false };
 
             for (const bool reverse : reverseOptions)
             {
@@ -1310,7 +1303,7 @@ namespace
             const DRW_Arc* arc = static_cast<const DRW_Arc*>(item->m_nativeEntity);
             const std::initializer_list<bool> reverseOptions = strategy == SortStrategy::Smart
                 ? std::initializer_list<bool>{ false, true }
-                : std::initializer_list<bool>{ item->m_isReverse };
+                : std::initializer_list<bool>{ false };
 
             for (const bool reverse : reverseOptions)
             {
@@ -1331,7 +1324,7 @@ namespace
             const CadCircleItem* circleItem = static_cast<const CadCircleItem*>(item);
             const std::initializer_list<bool> reverseOptions = strategy == SortStrategy::Smart
                 ? std::initializer_list<bool>{ false, true }
-                : std::initializer_list<bool>{ item->m_isReverse };
+                : std::initializer_list<bool>{ false };
 
             const double startParameter = circleItem->defaultProcessStartParameter();
             for (const bool reverse : reverseOptions)
@@ -1376,7 +1369,7 @@ namespace
             {
                 const std::initializer_list<bool> reverseOptions = strategy == SortStrategy::Smart
                     ? std::initializer_list<bool>{ false, true }
-                    : std::initializer_list<bool>{ item->m_isReverse };
+                : std::initializer_list<bool>{ false };
 
                 double startParam = ellipse->staparam;
                 double endParam = ellipse->endparam;
@@ -1477,13 +1470,13 @@ namespace
                     : -forwardStartTangent;
                 const std::initializer_list<bool> reverseOptions = strategy == SortStrategy::Smart
                     ? std::initializer_list<bool>{ false, true }
-                    : std::initializer_list<bool>{ item->m_isReverse };
+                : std::initializer_list<bool>{ false };
 
                 for (const bool reverse : reverseOptions)
                 {
                     ProcessPathOption option;
                     option.reverse = reverse;
-                    option.hasCustomStart = isClosed && item->m_hasCustomProcessStart;
+                    option.hasCustomStart = false;
                     option.processStartParameter = isClosed ? static_cast<double>(seamIndex) : 0.0;
                     option.startPoint = reverse ? forwardEnd : forwardStart;
                     option.endPoint = reverse ? forwardStart : forwardEnd;
@@ -1562,13 +1555,13 @@ namespace
                     : -forwardStartTangent;
                 const std::initializer_list<bool> reverseOptions = strategy == SortStrategy::Smart
                     ? std::initializer_list<bool>{ false, true }
-                    : std::initializer_list<bool>{ item->m_isReverse };
+                : std::initializer_list<bool>{ false };
 
                 for (const bool reverse : reverseOptions)
                 {
                     ProcessPathOption option;
                     option.reverse = reverse;
-                    option.hasCustomStart = isClosed && item->m_hasCustomProcessStart;
+                    option.hasCustomStart = false;
                     option.processStartParameter = isClosed ? static_cast<double>(seamIndex) : 0.0;
                     option.startPoint = reverse ? forwardEnd : forwardStart;
                     option.endPoint = reverse ? forwardStart : forwardEnd;
@@ -1603,7 +1596,7 @@ namespace
             const QVector3D reverseEndTangent = -forwardStartTangent;
             const std::initializer_list<bool> reverseOptions = strategy == SortStrategy::Smart
                 ? std::initializer_list<bool>{ false, true }
-                : std::initializer_list<bool>{ item->m_isReverse };
+                : std::initializer_list<bool>{ false };
             for (const bool reverse : reverseOptions)
             {
                 ProcessPathOption option;
@@ -2334,7 +2327,8 @@ QVector<CadItem*> Gcode_postprocessing_system::expandedSelectedRotaryEndCut(QStr
     for (const std::unique_ptr<CadItem>& entity : m_document.m_entities)
     {
         if (entity != nullptr
-            && (!entity->m_excludedAsInternalGeometry || selectedItems.contains(entity.get())))
+            && (!m_processState.stateOrDefault(entity->m_entityId).analysis.excludedAsInternalGeometry
+                || selectedItems.contains(entity.get())))
         {
             sceneItems.push_back(entity.get());
         }
@@ -2403,7 +2397,8 @@ bool Gcode_postprocessing_system::assignSelectedRotaryEndCut()
 
     for (const CadItem* item : expandedItems)
     {
-        if (item != nullptr && item->m_rotaryEndCutRole != RotaryEndCutRole::None)
+        if (item != nullptr && m_processState.stateOrDefault(item->m_entityId)
+            .overrideData.boundaryRole != cadcam::planning::BoundaryRole::None)
         {
             QMessageBox::warning
             (
@@ -2419,16 +2414,18 @@ bool Gcode_postprocessing_system::assignSelectedRotaryEndCut()
 
     for (const std::unique_ptr<CadItem>& entity : m_document.m_entities)
     {
-        if (entity == nullptr || entity->m_rotaryEndCutRole == RotaryEndCutRole::None)
+        if (entity == nullptr)
         {
             continue;
         }
-
-        highestBoundaryId = std::max(highestBoundaryId, entity->m_rotaryEndCutPairId);
+        const auto state = m_processState.stateOrDefault(entity->m_entityId);
+        if (state.overrideData.boundaryRole != cadcam::planning::BoundaryRole::None)
+            highestBoundaryId = std::max(highestBoundaryId, state.overrideData.boundaryPairId);
     }
 
     const int boundaryId = highestBoundaryId + 1;
 
+    m_processState.beginBatch();
     for (CadItem* item : expandedItems)
     {
         if (item == nullptr)
@@ -2436,9 +2433,9 @@ bool Gcode_postprocessing_system::assignSelectedRotaryEndCut()
             continue;
         }
 
-        item->m_rotaryEndCutPairId = boundaryId;
-        item->m_rotaryEndCutRole = RotaryEndCutRole::Break;
+        m_processState.setBoundary(item->m_entityId, cadcam::planning::BoundaryRole::Break, boundaryId);
     }
+    m_processState.endBatch();
 
     const QString message = QStringLiteral("已指定加工断面 断%1，共识别 %2 个相连图元，已通过方管周向分离验证。")
         .arg(boundaryId + 1)
@@ -2465,7 +2462,8 @@ bool Gcode_postprocessing_system::assignSelectedWasteEndCut()
 
     for (const CadItem* item : expandedItems)
     {
-        if (item != nullptr && item->m_rotaryEndCutRole != RotaryEndCutRole::None)
+        if (item != nullptr && m_processState.stateOrDefault(item->m_entityId)
+            .overrideData.boundaryRole != cadcam::planning::BoundaryRole::None)
         {
             QMessageBox::warning(this, QStringLiteral("指定废面"), QStringLiteral("选中的图元已属于一个加工断面边界，请先清除原加工断面指定。"));
             return false;
@@ -2476,14 +2474,17 @@ bool Gcode_postprocessing_system::assignSelectedWasteEndCut()
 
     for (const std::unique_ptr<CadItem>& entity : m_document.m_entities)
     {
-        if (entity != nullptr && entity->m_rotaryEndCutRole != RotaryEndCutRole::None)
+        if (entity != nullptr)
         {
-            highestBoundaryId = std::max(highestBoundaryId, entity->m_rotaryEndCutPairId);
+            const auto state = m_processState.stateOrDefault(entity->m_entityId);
+            if (state.overrideData.boundaryRole != cadcam::planning::BoundaryRole::None)
+                highestBoundaryId = std::max(highestBoundaryId, state.overrideData.boundaryPairId);
         }
     }
 
     const int wasteId = highestBoundaryId + 1;
 
+    m_processState.beginBatch();
     for (CadItem* item : expandedItems)
     {
         if (item == nullptr)
@@ -2491,9 +2492,9 @@ bool Gcode_postprocessing_system::assignSelectedWasteEndCut()
             continue;
         }
 
-        item->m_rotaryEndCutPairId = wasteId;
-        item->m_rotaryEndCutRole = RotaryEndCutRole::Waste;
+        m_processState.setBoundary(item->m_entityId, cadcam::planning::BoundaryRole::Waste, wasteId);
     }
+    m_processState.endBatch();
 
     invalidateProcessOrdersAfterEndCutChange();
     const int excludedCount = refreshWasteProcessingExclusions();
@@ -2611,7 +2612,6 @@ bool Gcode_postprocessing_system::removeInternalMachiningPaths(bool interactive)
     {
         if (entity != nullptr)
         {
-            entity->m_excludedAsInternalGeometry = false;
             sceneItems.push_back(entity.get());
         }
     }
@@ -2635,20 +2635,22 @@ bool Gcode_postprocessing_system::removeInternalMachiningPaths(bool interactive)
     }
 
     int excludedInternalCount = 0;
+    m_processState.beginBatch();
+    for (const std::unique_ptr<CadItem>& entity : m_document.m_entities)
+        if (entity != nullptr) m_processState.setInternalGeometryExcluded(entity->m_entityId, false);
 
     for (CadItem* item : internalItems)
     {
-        if (item == nullptr || item->m_rotaryEndCutRole != RotaryEndCutRole::None)
+        if (item == nullptr || m_processState.stateOrDefault(item->m_entityId)
+            .overrideData.boundaryRole != cadcam::planning::BoundaryRole::None)
         {
             continue;
         }
 
-        item->m_excludedAsInternalGeometry = true;
-        item->m_excludedFromProcessing = true;
-        item->m_processOrder = -1;
-        item->m_processContinuousGroupId = -1;
+        m_processState.setInternalGeometryExcluded(item->m_entityId, true);
         ++excludedInternalCount;
     }
+    m_processState.endBatch();
 
     invalidateProcessOrdersAfterEndCutChange();
     refreshWasteProcessingExclusions();
@@ -2671,14 +2673,17 @@ bool Gcode_postprocessing_system::restoreInternalMachiningPaths(bool interactive
     Q_UNUSED(interactive);
     int restoredCount = 0;
 
+    m_processState.beginBatch();
     for (const std::unique_ptr<CadItem>& entity : m_document.m_entities)
     {
-        if (entity != nullptr && entity->m_excludedAsInternalGeometry)
+        if (entity != nullptr && m_processState.stateOrDefault(entity->m_entityId)
+            .analysis.excludedAsInternalGeometry)
         {
-            entity->m_excludedAsInternalGeometry = false;
+            m_processState.setInternalGeometryExcluded(entity->m_entityId, false);
             ++restoredCount;
         }
     }
+    m_processState.endBatch();
 
     if (restoredCount > 0) invalidateProcessOrdersAfterEndCutChange();
     refreshWasteProcessingExclusions();
@@ -2701,9 +2706,10 @@ bool Gcode_postprocessing_system::toggleSelectedRotaryEndCutAssignment()
         return false;
     }
 
-    const bool hasUnassignedItem = std::any_of(selectedItems.begin(), selectedItems.end(), [](const CadItem* item)
+    const bool hasUnassignedItem = std::any_of(selectedItems.begin(), selectedItems.end(), [this](const CadItem* item)
     {
-        return item != nullptr && item->m_rotaryEndCutRole == RotaryEndCutRole::None;
+        return item != nullptr && m_processState.stateOrDefault(item->m_entityId)
+            .overrideData.boundaryRole == cadcam::planning::BoundaryRole::None;
     });
 
     if (!hasUnassignedItem)
@@ -2724,17 +2730,21 @@ bool Gcode_postprocessing_system::toggleSelectedRotaryEndCutAssignment()
 
     for (const std::unique_ptr<CadItem>& entity : m_document.m_entities)
     {
-        if (entity != nullptr && entity->m_rotaryEndCutPairId >= nextBoundaryId)
+        if (entity != nullptr)
         {
-            nextBoundaryId = entity->m_rotaryEndCutPairId + 1;
+            const auto state = m_processState.stateOrDefault(entity->m_entityId);
+            if (state.overrideData.boundaryPairId >= nextBoundaryId)
+                nextBoundaryId = state.overrideData.boundaryPairId + 1;
         }
     }
 
+    m_processState.beginBatch();
     for (CadItem* item : boundaryItems)
     {
-        item->m_rotaryEndCutPairId = nextBoundaryId;
-        item->m_rotaryEndCutRole = RotaryEndCutRole::Break;
+        if (item != nullptr) m_processState.setBoundary
+            (item->m_entityId, cadcam::planning::BoundaryRole::Break, nextBoundaryId);
     }
+    m_processState.endBatch();
 
     invalidateProcessOrdersAfterEndCutChange();
     refreshWasteProcessingExclusions();
@@ -2754,7 +2764,8 @@ bool Gcode_postprocessing_system::recognizeAllRotaryEndCuts(bool interactive)
 
     for (const std::unique_ptr<CadItem>& entity : m_document.m_entities)
     {
-        if (entity != nullptr && !entity->m_excludedAsInternalGeometry)
+        if (entity != nullptr && !m_processState.stateOrDefault(entity->m_entityId)
+            .analysis.excludedAsInternalGeometry)
         {
             documentItems.push_back(entity.get());
             sceneItems.push_back(entity.get());
@@ -2786,9 +2797,10 @@ bool Gcode_postprocessing_system::recognizeAllRotaryEndCuts(bool interactive)
 
     for (CadItem* item : documentItems)
     {
-        if (item->m_rotaryEndCutPairId >= nextBoundaryId)
+        const auto state = m_processState.stateOrDefault(item->m_entityId);
+        if (state.overrideData.boundaryPairId >= nextBoundaryId)
         {
-            nextBoundaryId = item->m_rotaryEndCutPairId + 1;
+            nextBoundaryId = state.overrideData.boundaryPairId + 1;
         }
     }
 
@@ -2798,7 +2810,8 @@ bool Gcode_postprocessing_system::recognizeAllRotaryEndCuts(bool interactive)
     for (CadItem* seedItem : documentItems)
     {
         if (seedItem == nullptr
-            || seedItem->m_rotaryEndCutRole != RotaryEndCutRole::None
+            || m_processState.stateOrDefault(seedItem->m_entityId)
+                .overrideData.boundaryRole != cadcam::planning::BoundaryRole::None
             || attemptedBoundaryItems.contains(seedItem))
         {
             continue;
@@ -2826,9 +2839,10 @@ bool Gcode_postprocessing_system::recognizeAllRotaryEndCuts(bool interactive)
             attemptedBoundaryItems.insert(item);
         }
 
-        if (std::any_of(loop.usedItems.begin(), loop.usedItems.end(), [](const CadItem* item)
+        if (std::any_of(loop.usedItems.begin(), loop.usedItems.end(), [this](const CadItem* item)
         {
-            return item != nullptr && item->m_rotaryEndCutRole != RotaryEndCutRole::None;
+            return item != nullptr && m_processState.stateOrDefault(item->m_entityId)
+                .overrideData.boundaryRole != cadcam::planning::BoundaryRole::None;
         }))
         {
             continue;
@@ -2853,11 +2867,13 @@ bool Gcode_postprocessing_system::recognizeAllRotaryEndCuts(bool interactive)
             ? loop.usedItems
             : analysis.boundaryItems;
 
+        m_processState.beginBatch();
         for (CadItem* item : recognizedItems)
         {
-            item->m_rotaryEndCutPairId = nextBoundaryId;
-            item->m_rotaryEndCutRole = RotaryEndCutRole::Break;
+            if (item != nullptr) m_processState.setBoundary
+                (item->m_entityId, cadcam::planning::BoundaryRole::Break, nextBoundaryId);
         }
+        m_processState.endBatch();
 
         ++nextBoundaryId;
         ++recognizedCount;
@@ -2894,20 +2910,21 @@ bool Gcode_postprocessing_system::toggleSelectedInternalPathAssignment()
         return false;
     }
 
-    const bool hasOrdinaryItem = std::any_of(selectedItems.begin(), selectedItems.end(), [](const CadItem* item)
+    const bool hasOrdinaryItem = std::any_of(selectedItems.begin(), selectedItems.end(), [this](const CadItem* item)
     {
-        return item != nullptr && !item->m_excludedAsInternalGeometry;
+        return item != nullptr && !m_processState.stateOrDefault(item->m_entityId)
+            .analysis.excludedAsInternalGeometry;
     });
 
+    m_processState.beginBatch();
     for (CadItem* item : selectedItems)
     {
         if (item != nullptr)
         {
-            item->m_excludedAsInternalGeometry = hasOrdinaryItem;
-            item->m_processOrder = -1;
-            item->m_processContinuousGroupId = -1;
+            m_processState.setInternalGeometryExcluded(item->m_entityId, hasOrdinaryItem);
         }
     }
+    m_processState.endBatch();
 
     invalidateProcessOrdersAfterEndCutChange();
     refreshWasteProcessingExclusions();
@@ -2937,11 +2954,12 @@ bool Gcode_postprocessing_system::clearSelectedRotaryEndCutAssignments()
 
     for (const CadItem* item : selectedItems)
     {
-        if (item != nullptr
-            && item->m_rotaryEndCutRole != RotaryEndCutRole::None
-            && item->m_rotaryEndCutPairId >= 0)
+        if (item != nullptr)
         {
-            pairIds.insert(item->m_rotaryEndCutPairId);
+            const auto state = m_processState.stateOrDefault(item->m_entityId);
+            if (state.overrideData.boundaryRole != cadcam::planning::BoundaryRole::None
+                && state.overrideData.boundaryPairId >= 0)
+                pairIds.insert(state.overrideData.boundaryPairId);
         }
     }
 
@@ -2953,17 +2971,21 @@ bool Gcode_postprocessing_system::clearSelectedRotaryEndCutAssignments()
 
     int clearedCount = 0;
 
+    m_processState.beginBatch();
     for (const std::unique_ptr<CadItem>& entity : m_document.m_entities)
     {
-        if (entity == nullptr || !pairIds.contains(entity->m_rotaryEndCutPairId))
+        if (entity == nullptr)
         {
             continue;
         }
-
-        entity->m_rotaryEndCutPairId = -1;
-        entity->m_rotaryEndCutRole = RotaryEndCutRole::None;
-        ++clearedCount;
+        const auto state = m_processState.stateOrDefault(entity->m_entityId);
+        if (pairIds.contains(state.overrideData.boundaryPairId))
+        {
+            m_processState.setBoundary(entity->m_entityId, cadcam::planning::BoundaryRole::None, -1);
+            ++clearedCount;
+        }
     }
+    m_processState.endBatch();
 
     const QString message = QStringLiteral("已清除 %1 个加工断面边界，共 %2 个图元。")
         .arg(pairIds.size())
@@ -2980,17 +3002,18 @@ bool Gcode_postprocessing_system::clearRotaryEndCutAssignments()
 {
     int clearedCount = 0;
 
+    m_processState.beginBatch();
     for (const std::unique_ptr<CadItem>& entity : m_document.m_entities)
     {
-        if (entity == nullptr || entity->m_rotaryEndCutRole == RotaryEndCutRole::None)
+        if (entity == nullptr || m_processState.stateOrDefault(entity->m_entityId)
+            .overrideData.boundaryRole == cadcam::planning::BoundaryRole::None)
         {
             continue;
         }
-
-        entity->m_rotaryEndCutPairId = -1;
-        entity->m_rotaryEndCutRole = RotaryEndCutRole::None;
+        m_processState.setBoundary(entity->m_entityId, cadcam::planning::BoundaryRole::None, -1);
         ++clearedCount;
     }
+    m_processState.endBatch();
 
     if (clearedCount == 0)
     {
@@ -3010,26 +3033,24 @@ bool Gcode_postprocessing_system::clearRotaryEndCutAssignments()
 void Gcode_postprocessing_system::invalidateProcessOrdersAfterEndCutChange()
 {
     invalidateCurrentProcessPlan();
-    for (const std::unique_ptr<CadItem>& entity : m_document.m_entities)
-    {
-        if (entity != nullptr)
-        {
-            entity->m_processOrder = -1;
-            entity->m_processContinuousGroupId = -1;
-        }
-    }
 }
 
 void Gcode_postprocessing_system::invalidateCurrentProcessPlan()
 {
     m_currentProcessPlan.reset();
+    m_processPresentation.reset();
+    if (ui != nullptr && ui->openGLWidget != nullptr)
+    {
+        ui->openGLWidget->setProcessPresentation(nullptr);
+        ui->openGLWidget->update();
+    }
 }
 
 int Gcode_postprocessing_system::refreshWasteProcessingExclusions()
 {
     struct BoundaryGroup
     {
-        RotaryEndCutRole role = RotaryEndCutRole::None;
+        cadcam::planning::BoundaryRole role = cadcam::planning::BoundaryRole::None;
         QVector<CadItem*> items;
     };
 
@@ -3044,33 +3065,25 @@ int Gcode_postprocessing_system::refreshWasteProcessingExclusions()
             continue;
         }
 
-        const bool isBreakBoundary = entity->m_rotaryEndCutRole == RotaryEndCutRole::Break
-            && entity->m_rotaryEndCutPairId >= 0;
-        entity->m_excludedFromProcessing = entity->m_excludedAsInternalGeometry && !isBreakBoundary;
+        const auto state = m_processState.stateOrDefault(entity->m_entityId);
         sceneItems.push_back(entity.get());
 
-        if (entity->m_rotaryEndCutRole == RotaryEndCutRole::None || entity->m_rotaryEndCutPairId < 0)
+        if (state.overrideData.boundaryRole == cadcam::planning::BoundaryRole::None
+            || state.overrideData.boundaryPairId < 0)
         {
             continue;
         }
 
-        const int roleIndex = static_cast<int>(entity->m_rotaryEndCutRole);
-        const int key = entity->m_rotaryEndCutPairId * 4 + roleIndex;
+        const int roleIndex = static_cast<int>(state.overrideData.boundaryRole);
+        const int key = state.overrideData.boundaryPairId * 4 + roleIndex;
         BoundaryGroup& group = boundaryGroups[key];
-        group.role = entity->m_rotaryEndCutRole;
+        group.role = state.overrideData.boundaryRole;
         group.items.push_back(entity.get());
-
-        if (entity->m_rotaryEndCutRole == RotaryEndCutRole::Waste)
-        {
-            entity->m_excludedFromProcessing = true;
-            entity->m_processOrder = -1;
-            entity->m_processContinuousGroupId = -1;
-        }
     }
 
     struct BoundaryPosition
     {
-        RotaryEndCutRole role = RotaryEndCutRole::None;
+        cadcam::planning::BoundaryRole role = cadcam::planning::BoundaryRole::None;
         double centerX = 0.0;
         RotaryCutBoundaryAnalysis analysis;
     };
@@ -3180,13 +3193,15 @@ int Gcode_postprocessing_system::refreshWasteProcessingExclusions()
             continue;
         }
 
-        if (entity->m_rotaryEndCutRole == RotaryEndCutRole::Waste)
+        const auto state = m_processState.stateOrDefault(entity->m_entityId);
+        if (state.overrideData.boundaryRole == cadcam::planning::BoundaryRole::Waste)
         {
             ++excludedCount;
             continue;
         }
 
-        if (entity->m_rotaryEndCutRole != RotaryEndCutRole::None || boundaries.size() < 2)
+        if (state.overrideData.boundaryRole != cadcam::planning::BoundaryRole::None
+            || boundaries.size() < 2)
         {
             continue;
         }
@@ -3249,12 +3264,9 @@ int Gcode_postprocessing_system::refreshWasteProcessingExclusions()
             continue;
         }
 
-        if (boundaries[intervalIndex - 1].role == RotaryEndCutRole::Waste
-            || boundaries[intervalIndex].role == RotaryEndCutRole::Waste)
+        if (boundaries[intervalIndex - 1].role == cadcam::planning::BoundaryRole::Waste
+            || boundaries[intervalIndex].role == cadcam::planning::BoundaryRole::Waste)
         {
-            entity->m_excludedFromProcessing = true;
-            entity->m_processOrder = -1;
-            entity->m_processContinuousGroupId = -1;
             ++excludedCount;
         }
     }
@@ -3308,7 +3320,7 @@ bool Gcode_postprocessing_system::sortEntitiesWithProcessPlan2D(const QString& c
     policy.numericalEpsilon = 1.0e-5;
     const OperationContext context = createOperationContext(QStringLiteral("BuildAndApplyPlanarProcessPlan"));
     ProcessPlanningService service;
-    auto plan = service.buildPlanarPlan(m_document, policy, context);
+    auto plan = service.buildPlanarPlan(m_document, m_processState, policy, context);
     if (!plan.succeeded() || !plan.value.has_value())
     {
         QString message = QStringLiteral("无法生成三轴加工计划。");
@@ -3328,6 +3340,17 @@ bool Gcode_postprocessing_system::sortEntitiesWithProcessPlan2D(const QString& c
     }
 
     m_currentProcessPlan = std::move(*plan.value);
+    auto presentation = cadcam::process::ProcessPresentationSnapshot::build
+        (*m_currentProcessPlan, context);
+    if (!presentation.succeeded() || !presentation.value.has_value())
+    {
+        invalidateCurrentProcessPlan();
+        QMessageBox::warning(this, commandTitle, QStringLiteral("加工计划显示快照构建失败。"));
+        return false;
+    }
+    m_processPresentation = std::move(*presentation.value);
+    ui->openGLWidget->setProcessPresentation(&*m_processPresentation);
+    ui->openGLWidget->update();
     const QString message = QStringLiteral("%1完成：最近距离排序，共安排 %2 个图元，排除 %3 个图元。%4")
         .arg(commandTitle)
         .arg(m_currentProcessPlan->assignments.size())
@@ -3364,8 +3387,9 @@ bool Gcode_postprocessing_system::sortEntitiesWithProcessPlan3D(const QString& c
     {
         if (entity == nullptr) continue;
         const CadProcessVisualInfo info = buildProcessVisualInfo(entity.get());
-        const bool isBoundary = entity->m_rotaryEndCutRole != RotaryEndCutRole::None
-            && entity->m_rotaryEndCutPairId >= 0;
+        const auto state = m_processState.stateOrDefault(entity->m_entityId);
+        const bool isBoundary = state.overrideData.boundaryRole != cadcam::planning::BoundaryRole::None
+            && state.overrideData.boundaryPairId >= 0;
         if (info.valid || isBoundary) dedupCandidates.push_back(entity.get());
     }
     const SortableDedupResult dedupResult = deduplicateSortableItems(dedupCandidates);
@@ -3389,7 +3413,8 @@ bool Gcode_postprocessing_system::sortEntitiesWithProcessPlan3D(const QString& c
     const std::optional<cadcam::machining::TubeSectionModel> section =
         m_rotaryTubeSectionModel.coreModel;
     ProcessPlanningService service;
-    auto planResult = service.buildRotaryPlan(m_document, section, policy, context);
+    auto planResult = service.buildRotaryPlan
+        (m_document, m_processState, section, policy, context);
     if (!planResult.succeeded() || !planResult.value.has_value())
     {
         QString message = QStringLiteral("无法生成加工计划。");
@@ -3408,23 +3433,18 @@ bool Gcode_postprocessing_system::sortEntitiesWithProcessPlan3D(const QString& c
         return false;
     }
 
-    const OperationReport applyResult = service.apply(m_document, *planResult.value, context);
-    if (!applyResult.succeeded())
+    m_currentProcessPlan = std::move(*planResult.value);
+    auto presentation = cadcam::process::ProcessPresentationSnapshot::build
+        (*m_currentProcessPlan, context);
+    if (!presentation.succeeded() || !presentation.value.has_value())
     {
-        QString message = QStringLiteral("加工计划写入失败，文档未发生部分修改。");
-        for (const Diagnostic& diagnostic : applyResult.diagnostics)
-        {
-            if (!diagnostic.userMessage.trimmed().isEmpty())
-            {
-                message = diagnostic.userMessage;
-                break;
-            }
-        }
-        QMessageBox::warning(this, commandTitle, message);
+        invalidateCurrentProcessPlan();
+        QMessageBox::warning(this, commandTitle, QStringLiteral("加工计划显示快照构建失败。"));
         return false;
     }
-
-    m_currentProcessPlan = std::move(*planResult.value);
+    m_processPresentation = std::move(*presentation.value);
+    ui->openGLWidget->setProcessPresentation(&*m_processPresentation);
+    ui->openGLWidget->update();
     const QString strategyText = policy.orderingStrategy == cadcam::planning::ProcessOrderingStrategy::LazyRotation
         ? QStringLiteral("懒旋转加工")
         : QStringLiteral("普通最近距离排序");

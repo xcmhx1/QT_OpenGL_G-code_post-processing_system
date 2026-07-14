@@ -321,22 +321,20 @@ namespace
             || std::abs(std::abs(span) - kTwoPi) < 1.0e-10;
     }
 
-    double effectiveCircleStartParameter(const CadItem* item)
+    double effectiveCircleStartParameter(const std::optional<double>& startParameter)
     {
-        if (item != nullptr && item->m_hasCustomProcessStart)
-        {
-            return normalizeAnglePositive(item->m_processStartParameter);
-        }
+        if (startParameter.has_value()) return normalizeAnglePositive(*startParameter);
 
         return kPi * 0.5;
     }
 
-    double effectiveClosedEllipseStartParameter(const CadItem* item, const DRW_Ellipse* ellipse)
+    double effectiveClosedEllipseStartParameter
+    (
+        const std::optional<double>& startParameter,
+        const DRW_Ellipse* ellipse
+    )
     {
-        if (item != nullptr && item->m_hasCustomProcessStart)
-        {
-            return item->m_processStartParameter;
-        }
+        if (startParameter.has_value()) return *startParameter;
 
         return ellipse != nullptr ? ellipse->staparam : 0.0;
     }
@@ -913,16 +911,20 @@ namespace
         return -lwPolylineForwardEndTangentAt(polyline, startIndex);
     }
 
-    size_t effectiveClosedPolylineStartIndex(const CadItem* item, size_t vertexCount)
+    size_t effectiveClosedPolylineStartIndex
+    (
+        const std::optional<double>& startParameter,
+        size_t vertexCount
+    )
     {
         if (vertexCount == 0)
         {
             return 0;
         }
 
-        if (item != nullptr && item->m_hasCustomProcessStart)
+        if (startParameter.has_value())
         {
-            const int rawIndex = static_cast<int>(std::llround(item->m_processStartParameter));
+            const int rawIndex = static_cast<int>(std::llround(*startParameter));
             const int normalized = ((rawIndex % static_cast<int>(vertexCount)) + static_cast<int>(vertexCount)) % static_cast<int>(vertexCount);
             return static_cast<size_t>(normalized);
         }
@@ -1006,18 +1008,23 @@ bool isProcessVisualizable(const CadItem* item)
     }
 }
 
-CadProcessVisualInfo buildProcessVisualInfo(const CadItem* item)
+CadProcessVisualInfo buildProcessVisualInfo
+(
+    const CadItem* item,
+    const cadcam::process::ProcessPresentationEntry* presentation
+)
 {
     CadProcessVisualInfo info;
 
-    // Compatibility projection of the current ProcessPlan. Not a planning or NC source of truth.
-    if (item == nullptr || item->m_excludedFromProcessing)
+    if (item == nullptr || (presentation != nullptr && presentation->excluded))
     {
         return info;
     }
 
-    info.processOrder = item->m_processOrder;
-    info.isReverse = item->m_isReverse;
+    info.processOrder = presentation != nullptr ? presentation->processOrder : -1;
+    info.isReverse = presentation != nullptr && presentation->reverse;
+    const std::optional<double> startParameter = presentation != nullptr
+        ? presentation->startParameter : std::nullopt;
 
     if (!isProcessVisualizable(item) || item->m_nativeEntity == nullptr)
     {
@@ -1050,12 +1057,12 @@ CadProcessVisualInfo buildProcessVisualInfo(const CadItem* item)
     case DRW::ETYPE::CIRCLE:
     {
         const DRW_Circle* circle = static_cast<const DRW_Circle*>(item->m_nativeEntity);
-        const double startParameter = effectiveCircleStartParameter(item);
+        const double circleStartParameter = effectiveCircleStartParameter(startParameter);
         info.closedPath = true;
-        info.forwardStartPoint = circlePointAt(circle, startParameter);
+        info.forwardStartPoint = circlePointAt(circle, circleStartParameter);
         info.forwardEndPoint = info.forwardStartPoint;
         info.labelAnchor = CadOcsGeometry::center(circle);
-        info.direction = circleTangentAt(circle, startParameter, false);
+        info.direction = circleTangentAt(circle, circleStartParameter, false);
         break;
     }
     case DRW::ETYPE::ELLIPSE:
@@ -1067,7 +1074,7 @@ CadProcessVisualInfo buildProcessVisualInfo(const CadItem* item)
 
         if (info.closedPath)
         {
-            startParam = effectiveClosedEllipseStartParameter(item, ellipse);
+            startParam = effectiveClosedEllipseStartParameter(startParameter, ellipse);
             endParam = startParam;
         }
         else
@@ -1097,7 +1104,7 @@ CadProcessVisualInfo buildProcessVisualInfo(const CadItem* item)
 
         info.closedPath = (polyline->flags & 1) != 0;
         const size_t seamIndex = info.closedPath
-            ? effectiveClosedPolylineStartIndex(item, polyline->vertlist.size())
+            ? effectiveClosedPolylineStartIndex(startParameter, polyline->vertlist.size())
             : 0;
         const auto& firstVertex = polyline->vertlist.at(seamIndex);
         const auto& lastVertex = polyline->vertlist.back();
@@ -1122,7 +1129,7 @@ CadProcessVisualInfo buildProcessVisualInfo(const CadItem* item)
 
         info.closedPath = (polyline->flags & 1) != 0;
         const size_t seamIndex = info.closedPath
-            ? effectiveClosedPolylineStartIndex(item, polyline->vertlist.size())
+            ? effectiveClosedPolylineStartIndex(startParameter, polyline->vertlist.size())
             : 0;
         const auto& firstVertex = polyline->vertlist.at(seamIndex);
         const auto& lastVertex = polyline->vertlist.back();
@@ -1173,13 +1180,13 @@ CadProcessVisualInfo buildProcessVisualInfo(const CadItem* item)
             break;
         }
         case DRW::ETYPE::CIRCLE:
-            info.direction = circleTangentAt(static_cast<const DRW_Circle*>(item->m_nativeEntity), effectiveCircleStartParameter(item), true);
+            info.direction = circleTangentAt(static_cast<const DRW_Circle*>(item->m_nativeEntity), effectiveCircleStartParameter(startParameter), true);
             break;
         case DRW::ETYPE::ELLIPSE:
         {
             const DRW_Ellipse* ellipse = static_cast<const DRW_Ellipse*>(item->m_nativeEntity);
             const double parameter = info.closedPath
-                ? effectiveClosedEllipseStartParameter(item, ellipse)
+                ? effectiveClosedEllipseStartParameter(startParameter, ellipse)
                 : ellipse->endparam;
             info.direction = ellipseTangentAt(ellipse, parameter, true);
             break;
@@ -1188,7 +1195,7 @@ CadProcessVisualInfo buildProcessVisualInfo(const CadItem* item)
         {
             const DRW_Polyline* polyline = static_cast<const DRW_Polyline*>(item->m_nativeEntity);
             info.direction = info.closedPath
-                ? polylineReverseStartTangentAt(polyline, effectiveClosedPolylineStartIndex(item, polyline->vertlist.size()))
+                ? polylineReverseStartTangentAt(polyline, effectiveClosedPolylineStartIndex(startParameter, polyline->vertlist.size()))
                 : polylineReverseStartTangent(polyline);
             break;
         }
@@ -1196,7 +1203,7 @@ CadProcessVisualInfo buildProcessVisualInfo(const CadItem* item)
         {
             const DRW_LWPolyline* polyline = static_cast<const DRW_LWPolyline*>(item->m_nativeEntity);
             info.direction = info.closedPath
-                ? lwPolylineReverseStartTangentAt(polyline, effectiveClosedPolylineStartIndex(item, polyline->vertlist.size()))
+                ? lwPolylineReverseStartTangentAt(polyline, effectiveClosedPolylineStartIndex(startParameter, polyline->vertlist.size()))
                 : lwPolylineReverseStartTangent(polyline);
             break;
         }
@@ -1219,11 +1226,6 @@ CadProcessVisualInfo buildProcessVisualInfo(const CadItem* item)
     if (info.direction.lengthSquared() <= kVisualEpsilon)
     {
         info.direction = normalizeOrZero(info.endPoint - info.startPoint);
-    }
-
-    if (info.direction.lengthSquared() <= kVisualEpsilon)
-    {
-        info.direction = normalizeOrZero(item->m_processDirection);
     }
 
     info.valid = true;

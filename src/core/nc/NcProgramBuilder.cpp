@@ -168,6 +168,7 @@ OperationResult<cadcam::nc::NcProgram> cadcam::nc::NcProgramBuilder::buildRotary
 
     NcProgram program;
     program.contentRevision = trajectory.contentRevision;
+    program.processStateRevision = trajectory.processStateRevision;
     program.mode = NcProgramMode::Rotary4Axis;
     appendRotaryComments(program, trajectory.rotaryContext, tubeSection);
     program.entities.reserve(ordered.size());

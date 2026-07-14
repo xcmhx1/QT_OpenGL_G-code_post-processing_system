@@ -164,6 +164,7 @@ namespace cadcam::machine
 
         MachineTrajectory trajectory;
         trajectory.contentRevision = input.contentRevision;
+        trajectory.processStateRevision = input.processStateRevision;
         trajectory.rotaryContext.rotaryAxisY = policy.rotaryAxisY;
         trajectory.rotaryContext.rotaryAxisZ = policy.rotaryAxisZ;
         trajectory.rotaryContext.tubeCenterY = policy.tubeCenterY;

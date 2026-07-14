@@ -91,24 +91,27 @@ void CadViewer::renderRotaryEndCutLabels()
         QVector3D pointSum;
         int pointCount = 0;
         int pairId = -1;
-        RotaryEndCutRole role = RotaryEndCutRole::None;
+        cadcam::planning::BoundaryRole role = cadcam::planning::BoundaryRole::None;
     };
 
     std::map<int, CutLabelData> labels;
 
     for (const std::unique_ptr<CadItem>& entity : scene->m_entities)
     {
-        if (entity == nullptr
-            || entity->m_rotaryEndCutPairId < 0
-            || entity->m_rotaryEndCutRole == RotaryEndCutRole::None)
+        if (entity == nullptr || m_processState == nullptr)
         {
             continue;
         }
 
-        const int key = entity->m_rotaryEndCutPairId * 4 + static_cast<int>(entity->m_rotaryEndCutRole);
+        const auto state = m_processState->stateOrDefault(entity->m_entityId);
+        if (state.overrideData.boundaryPairId < 0
+            || state.overrideData.boundaryRole == cadcam::planning::BoundaryRole::None) continue;
+
+        const int key = state.overrideData.boundaryPairId * 4
+            + static_cast<int>(state.overrideData.boundaryRole);
         CutLabelData& label = labels[key];
-        label.pairId = entity->m_rotaryEndCutPairId;
-        label.role = entity->m_rotaryEndCutRole;
+        label.pairId = state.overrideData.boundaryPairId;
+        label.role = state.overrideData.boundaryRole;
 
         for (const QVector3D& point : entity->m_geometry.vertices)
         {
@@ -148,7 +151,7 @@ void CadViewer::renderRotaryEndCutLabels()
             continue;
         }
 
-        const QString roleText = label.role == RotaryEndCutRole::Waste
+        const QString roleText = label.role == cadcam::planning::BoundaryRole::Waste
             ? QStringLiteral("W")
             : QStringLiteral("断");
         const QString text = QStringLiteral("%1%2")
@@ -162,7 +165,7 @@ void CadViewer::renderRotaryEndCutLabels()
             textRect.width() + 16,
             textRect.height() + 10
         );
-        const QColor accent = label.role == RotaryEndCutRole::Waste
+        const QColor accent = label.role == cadcam::planning::BoundaryRole::Waste
             ? QColor(242, 151, 36)
             : QColor(46, 166, 242);
         const QColor fill = withMaximumAlpha(m_theme.viewerBackgroundColor, 66);
@@ -208,7 +211,9 @@ std::vector<CadViewer::ProcessOrderLabelOverlay> CadViewer::buildProcessOrderLab
             continue;
         }
 
-        const CadProcessVisualInfo info = buildProcessVisualInfo(entity.get());
+        const auto* presentation = m_processPresentation != nullptr
+            ? m_processPresentation->find(entity->m_entityId) : nullptr;
+        const CadProcessVisualInfo info = buildProcessVisualInfo(entity.get(), presentation);
 
         if (!info.valid || info.processOrder < 0)
         {
@@ -304,7 +309,7 @@ bool CadViewer::handleProcessOrderLabelClick(const QPoint& screenPos)
 {
     ProcessOrderLabelOverlay clickedLabel;
 
-    if (!hitTestProcessOrderLabel(screenPos, &clickedLabel) || clickedLabel.item == nullptr || m_editer == nullptr)
+    if (!hitTestProcessOrderLabel(screenPos, &clickedLabel) || clickedLabel.item == nullptr)
     {
         if (m_pendingProcessOrderSwapEntityId != 0)
         {
@@ -318,43 +323,8 @@ bool CadViewer::handleProcessOrderLabelClick(const QPoint& screenPos)
     const EntityId clickedId = CadViewerUtils::toEntityId(clickedLabel.item);
     setSelectedEntityId(clickedId);
 
-    if (m_pendingProcessOrderSwapEntityId == 0 || m_pendingProcessOrderSwapEntityId == clickedId)
-    {
-        m_pendingProcessOrderSwapEntityId = clickedId;
-        appendCommandMessage(QStringLiteral("已选中加工顺序 %1，点击另一个顺序框可交换两者顺序。").arg(clickedLabel.order + 1));
-        return true;
-    }
-
-    CadItem* firstItem = findEntityById(m_pendingProcessOrderSwapEntityId);
-    CadItem* secondItem = clickedLabel.item;
-
-    if (firstItem == nullptr || secondItem == nullptr)
-    {
-        m_pendingProcessOrderSwapEntityId = 0;
-        return true;
-    }
-
-    std::vector<CadEditer::ProcessStateUpdate> updates;
-    updates.push_back({ firstItem, secondItem->m_processOrder, firstItem->m_isReverse, firstItem->m_hasCustomProcessStart, firstItem->m_processStartParameter });
-    updates.push_back({ secondItem, firstItem->m_processOrder, secondItem->m_isReverse, secondItem->m_hasCustomProcessStart, secondItem->m_processStartParameter });
-
-    const bool swapped = m_editer->applyEntityProcessStates(updates);
     m_pendingProcessOrderSwapEntityId = 0;
-
-    if (swapped)
-    {
-        appendCommandMessage
-        (
-            QStringLiteral("已交换加工顺序 %1 与 %2。")
-            .arg(firstItem->m_processOrder + 1)
-            .arg(secondItem->m_processOrder + 1)
-        );
-    }
-    else
-    {
-        appendCommandMessage(QStringLiteral("交换加工顺序失败。"));
-    }
-
+    appendCommandMessage(QStringLiteral("已选中加工顺序 %1。").arg(clickedLabel.order + 1));
     return true;
 }
 
@@ -362,7 +332,7 @@ bool CadViewer::handleProcessOrderLabelDoubleClick(const QPoint& screenPos)
 {
     ProcessOrderLabelOverlay clickedLabel;
 
-    if (!hitTestProcessOrderLabel(screenPos, &clickedLabel) || clickedLabel.item == nullptr || m_editer == nullptr)
+    if (!hitTestProcessOrderLabel(screenPos, &clickedLabel) || clickedLabel.item == nullptr)
     {
         return false;
     }
@@ -371,14 +341,7 @@ bool CadViewer::handleProcessOrderLabelDoubleClick(const QPoint& screenPos)
     setSelectedEntityId(clickedId);
     m_pendingProcessOrderSwapEntityId = 0;
 
-    if (m_editer->toggleEntityReverse(clickedLabel.item))
-    {
-        appendCommandMessage(QStringLiteral("已切换图元 %1 的加工方向。").arg(clickedLabel.order + 1));
-    }
-    else
-    {
-        appendCommandMessage(QStringLiteral("切换加工方向失败。"));
-    }
+    emit processDirectionToggleRequested(clickedId);
 
     return true;
 }

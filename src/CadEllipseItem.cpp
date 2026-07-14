@@ -34,7 +34,6 @@ CadEllipseItem::CadEllipseItem(DRW_Entity* entity, QObject* parent)
     // 绑定原生椭圆实体，构造时同步生成离散几何和加工方向。
     m_data = static_cast<DRW_Ellipse*>(m_nativeEntity);
     buildGeometryDatay();
-    buildProcessDirection();
 }
 
 void CadEllipseItem::buildGeometryDatay()
@@ -93,11 +92,6 @@ void CadEllipseItem::rebuildRawPathPoints3D()
 {
     m_rawPathPoints3D.clear();
     cadcam::geometry::PathCompileOptions options;
-    options.reverse = m_isReverse;
-    if (m_hasCustomProcessStart && isFullEllipsePath(m_data))
-    {
-        options.startParameter = m_processStartParameter;
-    }
     const OperationResult<cadcam::geometry::Path3D> result = LegacyCadItemPathBridge::compile
     (
         *this,

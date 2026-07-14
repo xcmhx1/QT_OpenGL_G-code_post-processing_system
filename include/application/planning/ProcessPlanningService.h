@@ -4,6 +4,7 @@
 #include "core/diagnostics/OperationResult.h"
 #include "core/planning/ProcessPlan.h"
 #include "core/planning/PlanarProcessPlanBuilder.h"
+#include "application/process/DocumentProcessState.h"
 
 #include <optional>
 
@@ -15,6 +16,7 @@ public:
     OperationResult<cadcam::planning::ProcessPlan> buildPlanarPlan
     (
         CadDocument& document,
+        const cadcam::process::DocumentProcessState& processState,
         const cadcam::planning::PlanarProcessPlanningPolicy& policy,
         const OperationContext& context
     ) const;
@@ -22,15 +24,10 @@ public:
     OperationResult<cadcam::planning::ProcessPlan> buildRotaryPlan
     (
         CadDocument& document,
+        const cadcam::process::DocumentProcessState& processState,
         const std::optional<cadcam::machining::TubeSectionModel>& tubeSection,
         const cadcam::planning::ProcessPlanningPolicy& policy,
         const OperationContext& context
     ) const;
 
-    OperationReport apply
-    (
-        CadDocument& document,
-        const cadcam::planning::ProcessPlan& plan,
-        const OperationContext& context
-    ) const;
 };

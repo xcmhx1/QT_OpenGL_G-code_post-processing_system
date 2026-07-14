@@ -53,7 +53,6 @@ CadXlineItem::CadXlineItem(DRW_Entity* entity, QObject* parent)
 {
     m_data = static_cast<DRW_Xline*>(m_nativeEntity);
     buildGeometryDatay();
-    buildProcessDirection();
 }
 
 void CadXlineItem::buildGeometryDatay()

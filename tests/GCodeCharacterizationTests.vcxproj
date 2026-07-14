@@ -114,10 +114,11 @@
     <ClCompile Include="..\src\infrastructure\dxf\DxfGeometryAdapter.cpp" />
     <ClCompile Include="..\src\compatibility\legacy\LegacyCadItemPathBridge.cpp" />
     <ClCompile Include="..\src\compatibility\legacy\LegacyCadItemTopologyAdapter.cpp" />
-    <ClCompile Include="..\src\compatibility\legacy\LegacyProcessPlanAdapter.cpp" />
     <ClCompile Include="..\src\compatibility\legacy\DocumentNcMetadataAdapter.cpp" />
     <ClCompile Include="..\src\compatibility\legacy\DocumentPlanarNcInputAdapter.cpp" />
-    <ClCompile Include="..\src\compatibility\legacy\DocumentProcessPlanningAdapter.cpp" />
+    <ClCompile Include="..\src\application\planning\DocumentProcessPlanningAdapter.cpp" />
+    <ClCompile Include="..\src\application\process\DocumentProcessState.cpp" />
+    <ClCompile Include="..\src\application\process\ProcessPresentationSnapshot.cpp" />
     <ClCompile Include="..\src\compatibility\legacy\SplineEntityClone.cpp" />
     <ClCompile Include="..\src\compatibility\legacy\SplineProductionPathProvider.cpp" />
     <ClCompile Include="..\src\compatibility\legacy\GeometrySnapshotParityVerifier.cpp" />

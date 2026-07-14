@@ -10,6 +10,7 @@
 OperationResult<cadcam::nc::NcProgram> NcProgramService::buildPlanarProgram
 (
     CadDocument& document,
+    const cadcam::process::DocumentProcessState& processState,
     const cadcam::planning::ProcessPlan& processPlan,
     const OperationContext& context
 ) const
@@ -38,7 +39,8 @@ OperationResult<cadcam::nc::NcProgram> NcProgramService::buildPlanarProgram
     }
 
     if (capture.value->contentRevision != document.contentRevision()
-        || capture.value->contentRevision != processPlan.contentRevision)
+        || capture.value->contentRevision != processPlan.contentRevision
+        || processPlan.processStateRevision != processState.revision())
     {
         result.status = OperationStatus::Conflict;
         Diagnostic diagnostic;
@@ -55,14 +57,16 @@ OperationResult<cadcam::nc::NcProgram> NcProgramService::buildPlanarProgram
 
     cadcam::nc::PlanarNcBuildPolicy policy;
     auto program = cadcam::nc::PlanarNcProgramBuilder::build
-        (capture.value->contentRevision, capture.value->entities, policy, context);
+        (capture.value->contentRevision, capture.value->entities, policy, context,
+            processPlan.processStateRevision);
     result.mergeDiagnostics(program);
     if (!program.succeeded() || !program.value.has_value())
     {
         result.status = program.status;
         return result;
     }
-    if (document.contentRevision() != capture.value->contentRevision)
+    if (document.contentRevision() != capture.value->contentRevision
+        || processState.revision() != processPlan.processStateRevision)
     {
         result.status = OperationStatus::Conflict;
         Diagnostic diagnostic;
@@ -87,6 +91,7 @@ OperationResult<cadcam::nc::NcProgram> NcProgramService::buildPlanarProgram
 OperationResult<cadcam::nc::NcProgram> NcProgramService::buildRotaryProgram
 (
     CadDocument& document,
+    const cadcam::process::DocumentProcessState& processState,
     const cadcam::planning::ProcessPlan& processPlan,
     const std::optional<cadcam::machining::TubeSectionModel>& tubeSection,
     const GProfileRotaryAxisConfig& rotaryConfig,
@@ -101,6 +106,7 @@ OperationResult<cadcam::nc::NcProgram> NcProgramService::buildRotaryProgram
     auto trajectory = trajectoryService.buildRotaryTrajectory
     (
         document,
+        processState,
         processPlan,
         tubeSection,
         rotaryConfig,
@@ -122,7 +128,9 @@ OperationResult<cadcam::nc::NcProgram> NcProgramService::buildRotaryProgram
         return result;
     }
     if (document.contentRevision() != processPlan.contentRevision
-        || trajectory.value->contentRevision != processPlan.contentRevision)
+        || processState.revision() != processPlan.processStateRevision
+        || trajectory.value->contentRevision != processPlan.contentRevision
+        || trajectory.value->processStateRevision != processPlan.processStateRevision)
     {
         result.status = OperationStatus::Conflict;
         Diagnostic diagnostic;

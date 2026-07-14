@@ -16,13 +16,14 @@ namespace cadcam::planning
         bool visible = true;
         bool processEnabled = true;
         bool excludedAsInternalGeometry = false;
-        bool currentReversePreference = false;
-        std::optional<double> customStartParameter;
+        process::DirectionPreference directionPreference = process::DirectionPreference::Auto;
+        std::optional<double> startParameter;
     };
 
     struct PlanarProcessPlanningInput
     {
         std::uint64_t contentRevision = 0;
+        std::uint64_t processStateRevision = 0;
         std::vector<PlanarPlanningEntity> entities;
     };
 
