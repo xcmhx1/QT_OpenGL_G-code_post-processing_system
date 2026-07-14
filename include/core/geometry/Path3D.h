@@ -31,6 +31,7 @@ namespace cadcam::geometry
         double maximumAngularStep = 0.0;
         int minimumSegments = 1;
         int fullTurnSegments = 128;
+        int minimumBulgeSegments = 4;
         int maximumSegments = 65536;
         bool singlePrecisionEvaluation = false;
     };

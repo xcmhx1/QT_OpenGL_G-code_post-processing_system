@@ -12,6 +12,7 @@ namespace cadcam::geometry
         constexpr double kHalfPi = 1.57079632679489661923;
         constexpr double kTwoPi = 6.28318530717958647692;
         constexpr double kGeometryTolerance = 1.0e-12;
+        constexpr double kPolylineContinuityTolerance = 1.0e-5;
 
         double squaredLength(const Vector3d& vector)
         {
@@ -61,6 +62,147 @@ namespace cadcam::geometry
             return std::isfinite(value);
         }
 
+        bool isFinite(const Vector3d& value)
+        {
+            return isFinite(value.x) && isFinite(value.y) && isFinite(value.z);
+        }
+
+        double squaredDistance(const Vector3d& left, const Vector3d& right)
+        {
+            return squaredLength
+            ({
+                left.x - right.x,
+                left.y - right.y,
+                left.z - right.z
+            });
+        }
+
+        Vector3d arcPoint(const ArcGeometry& arc, double parameter, bool singlePrecision)
+        {
+            return addScaled
+            (
+                arc.center,
+                arc.axisU,
+                std::cos(parameter) * arc.radius,
+                arc.axisV,
+                std::sin(parameter) * arc.radius,
+                singlePrecision,
+                true
+            );
+        }
+
+        Vector3d primitiveStart(const PolylinePrimitive& primitive)
+        {
+            return std::visit
+            (
+                [](const auto& geometry)
+                {
+                    using Geometry = std::decay_t<decltype(geometry)>;
+                    if constexpr (std::is_same_v<Geometry, LineGeometry>)
+                    {
+                        return geometry.start;
+                    }
+                    else
+                    {
+                        return arcPoint(geometry, geometry.startParameter, false);
+                    }
+                },
+                primitive
+            );
+        }
+
+        Vector3d primitiveEnd(const PolylinePrimitive& primitive)
+        {
+            return std::visit
+            (
+                [](const auto& geometry)
+                {
+                    using Geometry = std::decay_t<decltype(geometry)>;
+                    if constexpr (std::is_same_v<Geometry, LineGeometry>)
+                    {
+                        return geometry.end;
+                    }
+                    else
+                    {
+                        return arcPoint(geometry, geometry.endParameter, false);
+                    }
+                },
+                primitive
+            );
+        }
+
+        bool validPolylineGeometry(const PolylineGeometry& polyline)
+        {
+            if (polyline.sourceVertexCount < 2U || polyline.segments.empty())
+            {
+                return false;
+            }
+            const std::size_t expectedSegmentCount = polyline.closed
+                ? polyline.sourceVertexCount
+                : polyline.sourceVertexCount - 1U;
+            if (polyline.segments.size() != expectedSegmentCount)
+            {
+                return false;
+            }
+
+            for (std::size_t index = 0; index < polyline.segments.size(); ++index)
+            {
+                bool primitiveValid = true;
+                std::visit
+                (
+                    [&](const auto& geometry)
+                    {
+                        using Geometry = std::decay_t<decltype(geometry)>;
+                        if constexpr (std::is_same_v<Geometry, LineGeometry>)
+                        {
+                            primitiveValid = isFinite(geometry.start)
+                                && isFinite(geometry.end)
+                                && squaredDistance(geometry.start, geometry.end)
+                                    > kGeometryTolerance * kGeometryTolerance;
+                        }
+                        else
+                        {
+                            primitiveValid = isFinite(geometry.center)
+                                && isFinite(geometry.axisU)
+                                && isFinite(geometry.axisV)
+                                && isFinite(geometry.radius)
+                                && isFinite(geometry.startParameter)
+                                && isFinite(geometry.endParameter)
+                                && geometry.radius > kGeometryTolerance
+                                && squaredLength(geometry.axisU)
+                                    > kGeometryTolerance * kGeometryTolerance
+                                && squaredLength(geometry.axisV)
+                                    > kGeometryTolerance * kGeometryTolerance
+                                && std::abs(geometry.endParameter - geometry.startParameter)
+                                    > kGeometryTolerance;
+                        }
+                    },
+                    polyline.segments[index]
+                );
+                if (!primitiveValid)
+                {
+                    return false;
+                }
+
+                if (index > 0U
+                    && squaredDistance
+                    (
+                        primitiveEnd(polyline.segments[index - 1U]),
+                        primitiveStart(polyline.segments[index])
+                    ) > kPolylineContinuityTolerance * kPolylineContinuityTolerance)
+                {
+                    return false;
+                }
+            }
+
+            return !polyline.closed
+                || squaredDistance
+                (
+                    primitiveEnd(polyline.segments.back()),
+                    primitiveStart(polyline.segments.front())
+                ) <= kPolylineContinuityTolerance * kPolylineContinuityTolerance;
+        }
+
         Diagnostic makeCompileDiagnostic
         (
             const SourceEntity& source,
@@ -101,6 +243,7 @@ namespace cadcam::geometry
                 && policy.maximumAngularStep >= 0.0
                 && policy.minimumSegments >= 1
                 && policy.fullTurnSegments >= 3
+                && policy.minimumBulgeSegments >= 1
                 && policy.maximumSegments >= policy.minimumSegments;
         }
 
@@ -237,6 +380,7 @@ namespace cadcam::geometry
                     { QStringLiteral("samplingTolerance"), policy.chordTolerance },
                     { QStringLiteral("maximumAngularStep"), policy.maximumAngularStep },
                     { QStringLiteral("minimumSegments"), policy.minimumSegments },
+                    { QStringLiteral("minimumBulgeSegments"), policy.minimumBulgeSegments },
                     { QStringLiteral("maximumSegments"), policy.maximumSegments }
                 }
             ));
@@ -246,7 +390,8 @@ namespace cadcam::geometry
         if (source.kind != SourceGeometryKind::Line
             && source.kind != SourceGeometryKind::Circle
             && source.kind != SourceGeometryKind::Arc
-            && source.kind != SourceGeometryKind::Ellipse)
+            && source.kind != SourceGeometryKind::Ellipse
+            && source.kind != SourceGeometryKind::Polyline)
         {
             result.status = OperationStatus::NotSupported;
             result.addDiagnostic(makeCompileDiagnostic
@@ -463,6 +608,140 @@ namespace cadcam::geometry
                             ),
                             parameter
                         });
+                    }
+                }
+                else if constexpr (std::is_same_v<Geometry, PolylineGeometry>)
+                {
+                    if (source.kind != SourceGeometryKind::Polyline
+                        || !validPolylineGeometry(geometry))
+                    {
+                        geometryValid = false;
+                        return;
+                    }
+
+                    const std::size_t primitiveCount = geometry.segments.size();
+                    std::size_t startVertexIndex = 0U;
+                    if (geometry.closed && options.startParameter.has_value())
+                    {
+                        const double requestedStart = *options.startParameter;
+                        if (!isFinite(requestedStart)
+                            || std::abs(requestedStart)
+                                > static_cast<double>((std::numeric_limits<long long>::max)()))
+                        {
+                            geometryValid = false;
+                            return;
+                        }
+                        const long long rawIndex = std::llround(requestedStart);
+                        const long long vertexCount = static_cast<long long>(geometry.sourceVertexCount);
+                        startVertexIndex = static_cast<std::size_t>
+                        (
+                            ((rawIndex % vertexCount) + vertexCount) % vertexCount
+                        );
+                    }
+
+                    path.closed = geometry.closed;
+                    path.vertices.clear();
+                    segmentCount = 0;
+
+                    for (std::size_t step = 0; step < primitiveCount; ++step)
+                    {
+                        const std::size_t segmentIndex = geometry.closed
+                            ? (options.reverse
+                                ? (startVertexIndex + primitiveCount - 1U - step) % primitiveCount
+                                : (startVertexIndex + step) % primitiveCount)
+                            : (options.reverse ? primitiveCount - 1U - step : step);
+                        const bool reversePrimitive = options.reverse;
+                        const PolylinePrimitive& primitive = geometry.segments[segmentIndex];
+
+                        std::visit
+                        (
+                            [&](const auto& segment)
+                            {
+                                using Segment = std::decay_t<decltype(segment)>;
+                                if constexpr (std::is_same_v<Segment, LineGeometry>)
+                                {
+                                    const Vector3d& start = reversePrimitive ? segment.end : segment.start;
+                                    const Vector3d& end = reversePrimitive ? segment.start : segment.end;
+                                    if (path.vertices.empty())
+                                    {
+                                        path.vertices.push_back
+                                        ({
+                                            start,
+                                            static_cast<double>(segmentIndex)
+                                                + (reversePrimitive ? 1.0 : 0.0)
+                                        });
+                                    }
+                                    ++segmentCount;
+                                    if (!(geometry.closed && step + 1U == primitiveCount))
+                                    {
+                                        path.vertices.push_back
+                                        ({
+                                            end,
+                                            static_cast<double>(segmentIndex)
+                                                + (reversePrimitive ? 0.0 : 1.0)
+                                        });
+                                    }
+                                }
+                                else
+                                {
+                                    const double start = reversePrimitive
+                                        ? segment.endParameter
+                                        : segment.startParameter;
+                                    const double span = reversePrimitive
+                                        ? segment.startParameter - segment.endParameter
+                                        : segment.endParameter - segment.startParameter;
+                                    const int bulgeSegments = std::max
+                                    (
+                                        policy.minimumBulgeSegments,
+                                        static_cast<int>(std::ceil
+                                        (
+                                            std::abs(span) / kTwoPi
+                                            * static_cast<double>(policy.fullTurnSegments)
+                                        ))
+                                    );
+                                    segmentCount += bulgeSegments;
+                                    if (path.vertices.empty())
+                                    {
+                                        path.vertices.push_back
+                                        ({
+                                            arcPoint(segment, start, policy.singlePrecisionEvaluation),
+                                            static_cast<double>(segmentIndex)
+                                                + (reversePrimitive ? 1.0 : 0.0)
+                                        });
+                                    }
+                                    for (int sample = 1; sample <= bulgeSegments; ++sample)
+                                    {
+                                        if (geometry.closed && step + 1U == primitiveCount
+                                            && sample == bulgeSegments)
+                                        {
+                                            continue;
+                                        }
+                                        const double traversalFraction = static_cast<double>(sample)
+                                            / static_cast<double>(bulgeSegments);
+                                        const double originalFraction = reversePrimitive
+                                            ? 1.0 - traversalFraction
+                                            : traversalFraction;
+                                        path.vertices.push_back
+                                        ({
+                                            arcPoint
+                                            (
+                                                segment,
+                                                start + span * traversalFraction,
+                                                policy.singlePrecisionEvaluation
+                                            ),
+                                            static_cast<double>(segmentIndex) + originalFraction
+                                        });
+                                    }
+                                }
+                            },
+                            primitive
+                        );
+
+                        if (segmentCount > policy.maximumSegments)
+                        {
+                            segmentCountWithinPolicy = false;
+                            return;
+                        }
                     }
                 }
             },

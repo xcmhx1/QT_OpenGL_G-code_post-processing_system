@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <variant>
+#include <vector>
 
 namespace cadcam::geometry
 {
@@ -60,12 +61,26 @@ namespace cadcam::geometry
         bool fullEllipse = false;
     };
 
+    using PolylinePrimitive = std::variant
+    <
+        LineGeometry,
+        ArcGeometry
+    >;
+
+    struct PolylineGeometry
+    {
+        std::vector<PolylinePrimitive> segments;
+        std::size_t sourceVertexCount = 0;
+        bool closed = false;
+    };
+
     using GeometryVariant = std::variant
     <
         LineGeometry,
         CircleGeometry,
         ArcGeometry,
-        EllipseGeometry
+        EllipseGeometry,
+        PolylineGeometry
     >;
 
     struct SourceEntity

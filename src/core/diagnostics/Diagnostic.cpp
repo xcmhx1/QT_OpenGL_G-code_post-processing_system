@@ -31,6 +31,10 @@ QString diagnosticCodeName(DiagnosticCode code)
     case DiagnosticCode::GeometryAdapterFailure: return QStringLiteral("GeometryAdapterFailure");
     case DiagnosticCode::GeometryCompilationFailure: return QStringLiteral("GeometryCompilationFailure");
     case DiagnosticCode::PathInvariantViolation: return QStringLiteral("PathInvariantViolation");
+    case DiagnosticCode::InvalidPolyline: return QStringLiteral("InvalidPolyline");
+    case DiagnosticCode::InvalidPolylineVertex: return QStringLiteral("InvalidPolylineVertex");
+    case DiagnosticCode::InvalidBulge: return QStringLiteral("InvalidBulge");
+    case DiagnosticCode::PolylinePlaneFailure: return QStringLiteral("PolylinePlaneFailure");
     case DiagnosticCode::InternalInvariantViolation: return QStringLiteral("InternalInvariantViolation");
     }
 

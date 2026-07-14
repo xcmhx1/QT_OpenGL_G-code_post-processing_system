@@ -3,6 +3,8 @@
 #include "pch.h"
 
 #include "CadLWPolylineItem.h"
+#include "application/messaging/DebugMessageSink.h"
+#include "compatibility/legacy/LegacyCadItemPathBridge.h"
 
 #include <cmath>
 
@@ -13,43 +15,6 @@ namespace
     constexpr double kTwoPi = 6.28318530717958647692;
     // 轻量多段线的 bulge 圆弧离散策略与普通多段线保持一致。
     constexpr int kFullCircleSegments = 128;
-
-    void appendRawPathPoint(std::vector<RawPathPoint3D>& points, const QVector3D& point)
-    {
-        if (!points.empty())
-        {
-            const RawPathPoint3D& lastPoint = points.back();
-            const double dx = point.x() - lastPoint.x;
-            const double dy = point.y() - lastPoint.y;
-            const double dz = point.z() - lastPoint.z;
-
-            if (dx * dx + dy * dy + dz * dz <= 1.0e-16)
-            {
-                return;
-            }
-        }
-
-        points.push_back({ point.x(), point.y(), point.z() });
-    }
-
-    size_t effectiveClosedPolylineStartIndex(const CadItem* item, size_t vertexCount)
-    {
-        if (vertexCount == 0)
-        {
-            return 0;
-        }
-
-        if (item != nullptr && item->m_hasCustomProcessStart)
-        {
-            const int rawIndex = static_cast<int>(std::llround(item->m_processStartParameter));
-            const int normalized =
-                ((rawIndex % static_cast<int>(vertexCount)) + static_cast<int>(vertexCount))
-                % static_cast<int>(vertexCount);
-            return static_cast<size_t>(normalized);
-        }
-
-        return 0;
-    }
 
     QVector3D resolveLWPolylineNormal(const DRW_Coord& extPoint)
     {
@@ -259,65 +224,6 @@ namespace
         }
     }
 
-    void appendBulgeRawPathPoints(std::vector<RawPathPoint3D>& points,
-        const QVector3D& origin,
-        const QVector3D& axisU,
-        const QVector3D& axisV,
-        const QVector3D& normal,
-        const QVector3D& start,
-        const QVector3D& end,
-        double bulge)
-    {
-        double su = 0.0;
-        double sv = 0.0;
-        double eu = 0.0;
-        double ev = 0.0;
-
-        projectPointToPlaneUV(origin, axisU, axisV, start, su, sv);
-        projectPointToPlaneUV(origin, axisU, axisV, end, eu, ev);
-
-        const double dx = eu - su;
-        const double dy = ev - sv;
-        const double chordLength = std::sqrt(dx * dx + dy * dy);
-
-        if (chordLength <= 1.0e-10 || std::abs(bulge) < 1.0e-8)
-        {
-            appendRawPathPoint(points, end);
-            return;
-        }
-
-        const double midpointU = (su + eu) * 0.5;
-        const double midpointV = (sv + ev) * 0.5;
-        const double centerOffset = chordLength * (1.0 / bulge - bulge) * 0.25;
-        const double centerU = midpointU - centerOffset * (dy / chordLength);
-        const double centerV = midpointV + centerOffset * (dx / chordLength);
-        const double radius = std::hypot(su - centerU, sv - centerV);
-        const double startAngle = std::atan2(sv - centerV, su - centerU);
-        const double sweepAngle = 4.0 * std::atan(bulge);
-        const int segments = std::max
-        (
-            4,
-            static_cast<int>(std::ceil(std::abs(sweepAngle) / kTwoPi * kFullCircleSegments))
-        );
-
-        const double startHeight = QVector3D::dotProduct(start - origin, normal);
-        const double endHeight = QVector3D::dotProduct(end - origin, normal);
-
-        for (int index = 1; index <= segments; ++index)
-        {
-            const double factor = static_cast<double>(index) / static_cast<double>(segments);
-            const double angle = startAngle + sweepAngle * factor;
-            const double u = centerU + radius * std::cos(angle);
-            const double v = centerV + radius * std::sin(angle);
-            const double h = startHeight + (endHeight - startHeight) * factor;
-
-            appendRawPathPoint
-            (
-                points,
-                unprojectPointFromPlaneUV(origin, axisU, axisV, normal, u, v, h)
-            );
-        }
-    }
 }
 
 
@@ -399,160 +305,29 @@ void CadLWPolylineItem::buildGeometryDatay()
 void CadLWPolylineItem::rebuildRawPathPoints3D()
 {
     m_rawPathPoints3D.clear();
-
-    if (m_data == nullptr || m_data->vertlist.empty())
+    cadcam::geometry::PathCompileOptions options;
+    options.reverse = m_isReverse;
+    if (m_hasCustomProcessStart)
     {
+        options.startParameter = m_processStartParameter;
+    }
+    const OperationResult<cadcam::geometry::Path3D> result = LegacyCadItemPathBridge::compile
+    (
+        *this,
+        LegacyCadItemPathBridge::legacySamplingPolicy(*this),
+        options,
+        createOperationContext(QStringLiteral("rebuild-lwpolyline-raw-path"))
+    );
+    if (result.succeeded() && result.value.has_value())
+    {
+        LegacyCadItemPathBridge::copyToLegacyRawPath(*result.value, m_rawPathPoints3D);
         return;
     }
 
-    const bool isClosed = (m_data->flags & 1) != 0;
-
-    const auto toVertex = [this](const std::shared_ptr<DRW_Vertex2D>& vertex)
-        {
-            return lwPolylineVertexToWcs(m_data, vertex);
-        };
-
-    QVector3D origin;
-    QVector3D axisU;
-    QVector3D axisV;
-    QVector3D normal;
-    const bool hasPlaneBasis = buildLWPolylinePlaneBasis(m_data, origin, axisU, axisV, normal);
-
-    const size_t vertexCount = m_data->vertlist.size();
-    m_rawPathPoints3D.reserve(vertexCount + 1);
-
-    if (isClosed)
+    DebugMessageSink sink;
+    for (const Diagnostic& diagnostic : result.diagnostics)
     {
-        const size_t startIndex = effectiveClosedPolylineStartIndex(this, vertexCount);
-        appendRawPathPoint(m_rawPathPoints3D, toVertex(m_data->vertlist.at(startIndex)));
-
-        if (m_isReverse)
-        {
-            for (size_t step = 0; step < vertexCount; ++step)
-            {
-                const size_t currentIndex =
-                    (startIndex + vertexCount - (step % vertexCount)) % vertexCount;
-                const size_t previousIndex =
-                    (currentIndex + vertexCount - 1) % vertexCount;
-
-                const QVector3D start = toVertex(m_data->vertlist.at(currentIndex));
-                const QVector3D end = toVertex(m_data->vertlist.at(previousIndex));
-                const double bulge = -m_data->vertlist.at(previousIndex)->bulge;
-
-                if (hasPlaneBasis)
-                {
-                    appendBulgeRawPathPoints
-                    (
-                        m_rawPathPoints3D,
-                        origin,
-                        axisU,
-                        axisV,
-                        normal,
-                        start,
-                        end,
-                        bulge
-                    );
-                }
-                else
-                {
-                    appendRawPathPoint(m_rawPathPoints3D, end);
-                }
-            }
-        }
-        else
-        {
-            for (size_t step = 0; step < vertexCount; ++step)
-            {
-                const size_t currentIndex = (startIndex + step) % vertexCount;
-                const size_t nextIndex = (currentIndex + 1) % vertexCount;
-
-                const QVector3D start = toVertex(m_data->vertlist.at(currentIndex));
-                const QVector3D end = toVertex(m_data->vertlist.at(nextIndex));
-                const double bulge = m_data->vertlist.at(currentIndex)->bulge;
-
-                if (hasPlaneBasis)
-                {
-                    appendBulgeRawPathPoints
-                    (
-                        m_rawPathPoints3D,
-                        origin,
-                        axisU,
-                        axisV,
-                        normal,
-                        start,
-                        end,
-                        bulge
-                    );
-                }
-                else
-                {
-                    appendRawPathPoint(m_rawPathPoints3D, end);
-                }
-            }
-        }
-
-        return;
-    }
-
-    if (m_isReverse)
-    {
-        appendRawPathPoint(m_rawPathPoints3D, toVertex(m_data->vertlist.back()));
-
-        for (size_t index = vertexCount - 1; index > 0; --index)
-        {
-            const QVector3D start = toVertex(m_data->vertlist.at(index));
-            const QVector3D end = toVertex(m_data->vertlist.at(index - 1));
-            const double bulge = -m_data->vertlist.at(index - 1)->bulge;
-
-            if (hasPlaneBasis)
-            {
-                appendBulgeRawPathPoints
-                (
-                    m_rawPathPoints3D,
-                    origin,
-                    axisU,
-                    axisV,
-                    normal,
-                    start,
-                    end,
-                    bulge
-                );
-            }
-            else
-            {
-                appendRawPathPoint(m_rawPathPoints3D, end);
-            }
-        }
-    }
-    else
-    {
-        appendRawPathPoint(m_rawPathPoints3D, toVertex(m_data->vertlist.front()));
-
-        for (size_t index = 0; index + 1 < vertexCount; ++index)
-        {
-            const QVector3D start = toVertex(m_data->vertlist.at(index));
-            const QVector3D end = toVertex(m_data->vertlist.at(index + 1));
-            const double bulge = m_data->vertlist.at(index)->bulge;
-
-            if (hasPlaneBasis)
-            {
-                appendBulgeRawPathPoints
-                (
-                    m_rawPathPoints3D,
-                    origin,
-                    axisU,
-                    axisV,
-                    normal,
-                    start,
-                    end,
-                    bulge
-                );
-            }
-            else
-            {
-                appendRawPathPoint(m_rawPathPoints3D, end);
-            }
-        }
+        sink.publish(diagnostic);
     }
 }
 

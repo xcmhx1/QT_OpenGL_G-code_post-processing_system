@@ -72,6 +72,8 @@
     <ClCompile Include="..\src\CadCircleItem.cpp" />
     <ClCompile Include="..\src\CadArcItem.cpp" />
     <ClCompile Include="..\src\CadEllipseItem.cpp" />
+    <ClCompile Include="..\src\CadPolylineItem.cpp" />
+    <ClCompile Include="..\src\CadLWPolylineItem.cpp" />
     <ClCompile Include="..\src\GProfile.cpp" />
     <ClCompile Include="..\src\GGenerator.cpp" />
     <ClCompile Include="..\src\core\diagnostics\Diagnostic.cpp" />

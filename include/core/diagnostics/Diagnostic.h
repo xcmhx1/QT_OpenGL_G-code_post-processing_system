@@ -49,6 +49,10 @@ enum class DiagnosticCode
     GeometryAdapterFailure,
     GeometryCompilationFailure,
     PathInvariantViolation,
+    InvalidPolyline,
+    InvalidPolylineVertex,
+    InvalidBulge,
+    PolylinePlaneFailure,
     InternalInvariantViolation
 };
 

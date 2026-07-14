@@ -28,6 +28,12 @@ cadcam::geometry::SamplingPolicy LegacyCadItemPathBridge::legacySamplingPolicy(c
         policy.minimumSegments = 16;
         policy.fullTurnSegments = 128;
         break;
+    case DRW::ETYPE::POLYLINE:
+    case DRW::ETYPE::LWPOLYLINE:
+        policy.minimumSegments = 1;
+        policy.minimumBulgeSegments = 4;
+        policy.fullTurnSegments = 128;
+        break;
     case DRW::ETYPE::LINE:
     default:
         policy.minimumSegments = 1;

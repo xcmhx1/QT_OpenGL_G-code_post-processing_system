@@ -4,7 +4,9 @@
 #include "CadEllipseItem.h"
 #include "CadItem.h"
 #include "CadLineItem.h"
+#include "CadLWPolylineItem.h"
 #include "CadOcsGeometry.h"
+#include "CadPolylineItem.h"
 #include "GGenerator.h"
 #include "GProfile.h"
 #include "application/messaging/MessageCenter.h"
@@ -20,6 +22,7 @@
 #include <QFileInfo>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <iostream>
 #include <limits>
@@ -628,6 +631,323 @@ namespace
             "DxfGeometryAdapter unsupported geometry diagnostic");
     }
 
+    void testPolylineGeometryCore()
+    {
+        using namespace cadcam::geometry;
+
+        auto makePolyline = []
+        (
+            const std::vector<std::array<double, 4>>& vertices,
+            bool closed,
+            bool threeDimensional = false
+        )
+        {
+            auto polyline = std::make_unique<DRW_Polyline>();
+            polyline->flags = (closed ? 1 : 0) | (threeDimensional ? 8 : 0);
+            polyline->basePoint = DRW_Coord(0.0, 0.0, 0.0);
+            polyline->extPoint = DRW_Coord(0.0, 0.0, 1.0);
+            for (const auto& vertex : vertices)
+            {
+                polyline->appendVertex(std::make_shared<DRW_Vertex>
+                    (vertex[0], vertex[1], vertex[2], vertex[3]));
+            }
+            return polyline;
+        };
+
+        auto makeLWPolyline = []
+        (
+            const std::vector<std::array<double, 3>>& vertices,
+            bool closed
+        )
+        {
+            auto polyline = std::make_unique<DRW_LWPolyline>();
+            polyline->flags = closed ? 1 : 0;
+            polyline->extPoint = DRW_Coord(0.0, 0.0, 1.0);
+            for (const auto& vertex : vertices)
+            {
+                polyline->addVertex(DRW_Vertex2D(vertex[0], vertex[1], vertex[2]));
+            }
+            return polyline;
+        };
+
+        auto compileEntity = []
+        (
+            const DRW_Entity& entity,
+            EntityId id,
+            const PathCompileOptions& options = PathCompileOptions{}
+        )
+        {
+            const OperationResult<SourceEntity> source = DxfGeometryAdapter::convert
+            (
+                id,
+                entity,
+                testContext(QStringLiteral("adapt-polyline"))
+            );
+            if (!source.succeeded() || !source.value.has_value())
+            {
+                OperationResult<Path3D> failed;
+                failed.status = source.status;
+                failed.mergeDiagnostics(source);
+                return failed;
+            }
+            SamplingPolicy policy;
+            policy.chordTolerance = 0.0;
+            policy.fullTurnSegments = 128;
+            policy.minimumBulgeSegments = 4;
+            GeometryCompiler compiler;
+            return compiler.compile
+            (
+                *source.value,
+                policy,
+                options,
+                testContext(QStringLiteral("compile-polyline"))
+            );
+        };
+
+        const auto openPolyline = makePolyline
+        ({ { 0.0, 0.0, 0.0, 0.0 }, { 10.0, 0.0, 0.0, 0.0 },
+            { 10.0, 5.0, 0.0, 0.0 } }, false);
+        const OperationResult<SourceEntity> openSource = DxfGeometryAdapter::convert
+        (201, *openPolyline, testContext(QStringLiteral("adapt-open-polyline")));
+        check(openSource.succeeded() && openSource.value->kind == SourceGeometryKind::Polyline,
+            "POLYLINE adapts to unified kind");
+        const PolylineGeometry& openGeometry = std::get<PolylineGeometry>(openSource.value->geometry);
+        check(openGeometry.sourceVertexCount == 3 && openGeometry.segments.size() == 2
+            && !openGeometry.closed, "Open POLYLINE geometry structure");
+        const OperationResult<Path3D> openPath = compileEntity(*openPolyline, 202);
+        check(openPath.succeeded() && !openPath.value->closed
+            && openPath.value->vertices.size() == 3,
+            "Open POLYLINE compiles without duplicate joins");
+        check(std::abs(openPath.value->vertices.front().position.x) <= kTolerance
+            && std::abs(openPath.value->vertices.back().position.y - 5.0) <= kTolerance
+            && std::abs(openPath.value->vertices[1].sourceParameter - 1.0) <= kTolerance,
+            "Open POLYLINE coordinates and source parameters");
+        PathCompileOptions openReverse;
+        openReverse.reverse = true;
+        const OperationResult<Path3D> reversedOpenPath = compileEntity
+            (*openPolyline, 223, openReverse);
+        check(reversedOpenPath.succeeded()
+            && std::abs(reversedOpenPath.value->vertices.front().position.x - 10.0) <= kTolerance
+            && std::abs(reversedOpenPath.value->vertices.front().position.y - 5.0) <= kTolerance
+            && std::abs(reversedOpenPath.value->vertices.back().position.x) <= kTolerance,
+            "Open POLYLINE reverse starts from last vertex");
+
+        const auto closedPolyline = makePolyline
+        ({ { 0.0, 0.0, 0.0, 0.0 }, { 10.0, 0.0, 0.0, 0.0 },
+            { 10.0, 10.0, 0.0, 0.0 }, { 0.0, 10.0, 0.0, 0.0 } }, true);
+        PathCompileOptions customStart;
+        customStart.startParameter = 2.0;
+        const OperationResult<Path3D> closedPath = compileEntity(*closedPolyline, 203, customStart);
+        check(closedPath.succeeded() && closedPath.value->closed
+            && closedPath.value->vertices.size() == 4,
+            "Closed POLYLINE core omits repeated start");
+        check(std::abs(closedPath.value->vertices.front().position.x - 10.0) <= kTolerance
+            && std::abs(closedPath.value->vertices.front().position.y - 10.0) <= kTolerance,
+            "Closed POLYLINE custom vertex start");
+        PathCompileOptions reverseStart = customStart;
+        reverseStart.reverse = true;
+        const OperationResult<Path3D> reverseClosedPath = compileEntity
+            (*closedPolyline, 204, reverseStart);
+        check(reverseClosedPath.succeeded()
+            && std::abs(reverseClosedPath.value->vertices.front().position.x - 10.0) <= kTolerance
+            && std::abs(reverseClosedPath.value->vertices.front().position.y - 10.0) <= kTolerance
+            && std::abs(reverseClosedPath.value->vertices[1].position.y) <= kTolerance,
+            "Closed POLYLINE reverse keeps start and reverses segment order");
+
+        const auto openLWPolyline = makeLWPolyline
+        ({ { 1.0, 2.0, 0.0 }, { 4.0, 2.0, 0.0 }, { 4.0, 6.0, 0.0 } }, false);
+        const OperationResult<Path3D> openLWPath = compileEntity(*openLWPolyline, 205);
+        check(openLWPath.succeeded() && !openLWPath.value->closed
+            && openLWPath.value->vertices.size() == 3,
+            "Open LWPOLYLINE compiles");
+        const auto closedLWPolyline = makeLWPolyline
+        ({ { 0.0, 0.0, 0.0 }, { 5.0, 0.0, 0.0 }, { 5.0, 5.0, 0.0 } }, true);
+        const OperationResult<Path3D> closedLWPath = compileEntity(*closedLWPolyline, 206);
+        check(closedLWPath.succeeded() && closedLWPath.value->closed
+            && closedLWPath.value->vertices.size() == 3,
+            "Closed LWPOLYLINE core omits repeated start");
+
+        const auto positiveBulge = makeLWPolyline
+        ({ { 0.0, 0.0, 1.0 }, { 10.0, 0.0, 0.0 } }, false);
+        const OperationResult<SourceEntity> positiveSource = DxfGeometryAdapter::convert
+        (207, *positiveBulge, testContext(QStringLiteral("adapt-positive-bulge")));
+        const PolylineGeometry& positiveGeometry =
+            std::get<PolylineGeometry>(positiveSource.value->geometry);
+        const ArcGeometry& positiveArc = std::get<ArcGeometry>(positiveGeometry.segments.front());
+        check(std::abs((positiveArc.endParameter - positiveArc.startParameter)
+            - 3.14159265358979323846) <= kTolerance,
+            "Positive bulge becomes exact positive ArcGeometry");
+        const OperationResult<Path3D> positivePath = compileEntity(*positiveBulge, 208);
+        check(positivePath.succeeded() && positivePath.value->vertices.size() == 65
+            && positivePath.value->vertices[32].position.y < -4.9,
+            "Positive bulge legacy density and direction");
+
+        const auto negativeBulge = makeLWPolyline
+        ({ { 0.0, 0.0, -1.0 }, { 10.0, 0.0, 0.0 } }, false);
+        const OperationResult<Path3D> negativePath = compileEntity(*negativeBulge, 209);
+        check(negativePath.succeeded() && negativePath.value->vertices.size() == 65
+            && negativePath.value->vertices[32].position.y > 4.9,
+            "Negative bulge keeps DXF direction");
+        PathCompileOptions reverseBulge;
+        reverseBulge.reverse = true;
+        const OperationResult<Path3D> reverseBulgePath = compileEntity
+            (*positiveBulge, 210, reverseBulge);
+        check(reverseBulgePath.succeeded()
+            && std::abs(reverseBulgePath.value->vertices.front().position.x - 10.0) <= kTolerance
+            && reverseBulgePath.value->vertices[32].position.y < -4.9
+            && reverseBulgePath.value->vertices.front().sourceParameter
+                > reverseBulgePath.value->vertices.back().sourceParameter,
+            "Bulge reverse compiles reversed arc parameters");
+
+        const auto mixedBulges = makeLWPolyline
+        ({ { 0.0, 0.0, 0.5 }, { 5.0, 0.0, -0.5 },
+            { 10.0, 0.0, 0.0 }, { 15.0, 0.0, 0.0 } }, false);
+        const OperationResult<SourceEntity> mixedSource = DxfGeometryAdapter::convert
+        (211, *mixedBulges, testContext(QStringLiteral("adapt-mixed-bulges")));
+        const PolylineGeometry& mixedGeometry = std::get<PolylineGeometry>(mixedSource.value->geometry);
+        check(mixedSource.succeeded() && mixedGeometry.segments.size() == 3
+            && std::holds_alternative<ArcGeometry>(mixedGeometry.segments[0])
+            && std::holds_alternative<ArcGeometry>(mixedGeometry.segments[1])
+            && std::holds_alternative<LineGeometry>(mixedGeometry.segments[2]),
+            "Multiple bulges and line remain ordered primitives");
+
+        auto ocsPolyline = makeLWPolyline
+        ({ { 2.0, 3.0, 0.0 }, { 6.0, 3.0, 0.0 } }, false);
+        ocsPolyline->extPoint = DRW_Coord(0.0, 1.0, 0.0);
+        ocsPolyline->elevation = 7.0;
+        const OperationResult<Path3D> ocsPath = compileEntity(*ocsPolyline, 212);
+        check(ocsPath.succeeded()
+            && std::abs(ocsPath.value->vertices.front().position.x + 2.0) <= kTolerance
+            && std::abs(ocsPath.value->vertices.front().position.y - 7.0) <= kTolerance
+            && std::abs(ocsPath.value->vertices.front().position.z - 3.0) <= kTolerance,
+            "LWPOLYLINE OCS normal and elevation convert to WCS");
+        auto ocsLegacyPolyline = makePolyline
+        ({ { 2.0, 3.0, 0.0, 0.0 }, { 6.0, 3.0, 0.0, 0.0 } }, false);
+        ocsLegacyPolyline->extPoint = DRW_Coord(0.0, 1.0, 0.0);
+        ocsLegacyPolyline->basePoint.z = 4.0;
+        const OperationResult<Path3D> ocsLegacyPath = compileEntity(*ocsLegacyPolyline, 224);
+        check(ocsLegacyPath.succeeded()
+            && std::abs(ocsLegacyPath.value->vertices.front().position.x + 2.0) <= kTolerance
+            && std::abs(ocsLegacyPath.value->vertices.front().position.y - 4.0) <= kTolerance
+            && std::abs(ocsLegacyPath.value->vertices.front().position.z - 3.0) <= kTolerance,
+            "2D POLYLINE OCS normal and elevation convert to WCS");
+
+        const auto polyline3D = makePolyline
+        ({ { 1.0, 2.0, 3.0, 1.0 }, { 4.0, 6.0, 8.0, -1.0 },
+            { 9.0, 10.0, 11.0, 0.0 } }, false, true);
+        const OperationResult<SourceEntity> source3D = DxfGeometryAdapter::convert
+        (213, *polyline3D, testContext(QStringLiteral("adapt-3d-polyline")));
+        const PolylineGeometry& geometry3D = std::get<PolylineGeometry>(source3D.value->geometry);
+        check(source3D.succeeded() && geometry3D.segments.size() == 2
+            && std::holds_alternative<LineGeometry>(geometry3D.segments[0])
+            && std::holds_alternative<LineGeometry>(geometry3D.segments[1]),
+            "3D POLYLINE ignores bulge and keeps WCS lines");
+        const OperationResult<Path3D> path3D = compileEntity(*polyline3D, 214);
+        check(path3D.succeeded() && path3D.value->vertices.size() == 3
+            && std::abs(path3D.value->vertices.front().position.z - 3.0) <= kTolerance
+            && std::abs(path3D.value->vertices.back().position.z - 11.0) <= kTolerance,
+            "3D POLYLINE WCS coordinates preserved");
+
+        DRW_Polyline emptyPolyline;
+        const OperationResult<SourceEntity> emptyResult = DxfGeometryAdapter::convert
+        (215, emptyPolyline, testContext(QStringLiteral("adapt-empty-polyline")));
+        check(!emptyResult.succeeded()
+            && hasDiagnosticCode(emptyResult.diagnostics, DiagnosticCode::InvalidPolyline),
+            "Empty POLYLINE diagnostic");
+        DRW_LWPolyline nullVertexPolyline;
+        nullVertexPolyline.vertlist.push_back(nullptr);
+        nullVertexPolyline.vertlist.push_back(std::make_shared<DRW_Vertex2D>(1.0, 0.0, 0.0));
+        const OperationResult<SourceEntity> nullVertexResult = DxfGeometryAdapter::convert
+        (216, nullVertexPolyline, testContext(QStringLiteral("adapt-null-polyline-vertex")));
+        check(!nullVertexResult.succeeded()
+            && hasDiagnosticCode(nullVertexResult.diagnostics,
+                DiagnosticCode::InvalidPolylineVertex),
+            "Null polyline vertex diagnostic");
+        const auto degeneratePolyline = makeLWPolyline
+        ({ { 1.0, 1.0, 0.0 }, { 1.0, 1.0, 0.0 } }, false);
+        const OperationResult<SourceEntity> degenerateResult = DxfGeometryAdapter::convert
+        (217, *degeneratePolyline, testContext(QStringLiteral("adapt-degenerate-polyline")));
+        check(!degenerateResult.succeeded()
+            && hasDiagnosticCode(degenerateResult.diagnostics, DiagnosticCode::InvalidPolyline),
+            "Degenerate polyline segment diagnostic");
+        auto invalidBulgePolyline = makeLWPolyline
+        ({ { 0.0, 0.0, std::numeric_limits<double>::quiet_NaN() },
+            { 1.0, 0.0, 0.0 } }, false);
+        const OperationResult<SourceEntity> invalidBulgeResult = DxfGeometryAdapter::convert
+        (219, *invalidBulgePolyline, testContext(QStringLiteral("adapt-invalid-bulge")));
+        check(!invalidBulgeResult.succeeded()
+            && hasDiagnosticCode(invalidBulgeResult.diagnostics, DiagnosticCode::InvalidBulge),
+            "Invalid bulge diagnostic");
+        auto invalidPlanePolyline = makeLWPolyline
+        ({ { 0.0, 0.0, 0.0 }, { 1.0, 0.0, 0.0 } }, false);
+        invalidPlanePolyline->extPoint.x = std::numeric_limits<double>::infinity();
+        const OperationResult<SourceEntity> invalidPlaneResult = DxfGeometryAdapter::convert
+        (220, *invalidPlanePolyline, testContext(QStringLiteral("adapt-invalid-polyline-plane")));
+        check(!invalidPlaneResult.succeeded()
+            && hasDiagnosticCode(invalidPlaneResult.diagnostics,
+                DiagnosticCode::PolylinePlaneFailure),
+            "Invalid polyline plane diagnostic");
+
+        SourceEntity invalidCorePolyline;
+        invalidCorePolyline.id = 225;
+        invalidCorePolyline.kind = SourceGeometryKind::Polyline;
+        invalidCorePolyline.geometry = PolylineGeometry
+        {
+            { LineGeometry{ { 0.0, 0.0, 0.0 }, { 1.0, 0.0, 0.0 } } },
+            3,
+            false
+        };
+        GeometryCompiler compiler;
+        SamplingPolicy policy;
+        const OperationResult<Path3D> invalidCoreResult = compiler.compile
+        (
+            invalidCorePolyline,
+            policy,
+            {},
+            testContext(QStringLiteral("compile-invalid-polyline-invariant"))
+        );
+        check(!invalidCoreResult.succeeded(),
+            "PolylineGeometry segment count invariant");
+        PathCompileOptions invalidStart;
+        invalidStart.startParameter = std::numeric_limits<double>::quiet_NaN();
+        const OperationResult<Path3D> invalidStartResult = compileEntity
+            (*closedPolyline, 226, invalidStart);
+        check(!invalidStartResult.succeeded(),
+            "Closed polyline start parameter must normalize");
+
+        CadLWPolylineItem legacyItem(closedLWPolyline.get());
+        legacyItem.m_entityId = 218;
+        legacyItem.rebuildRawPathPoints3D();
+        check(legacyItem.rawPathPoints3D().size() == closedLWPath.value->vertices.size() + 1U,
+            "Legacy LWPOLYLINE cache restores closure point");
+        bool legacyMatchesCore = true;
+        for (std::size_t index = 0; index < closedLWPath.value->vertices.size(); ++index)
+        {
+            const RawPathPoint3D& legacy = legacyItem.rawPathPoints3D()[index];
+            const Vector3d& core = closedLWPath.value->vertices[index].position;
+            legacyMatchesCore = legacyMatchesCore
+                && legacy.x == core.x && legacy.y == core.y && legacy.z == core.z;
+        }
+        check(legacyMatchesCore
+            && legacyItem.rawPathPoints3D().front().x == legacyItem.rawPathPoints3D().back().x
+            && legacyItem.rawPathPoints3D().front().y == legacyItem.rawPathPoints3D().back().y
+            && legacyItem.rawPathPoints3D().front().z == legacyItem.rawPathPoints3D().back().z,
+            "Legacy LWPOLYLINE cache matches core and closes exactly");
+
+        const OperationResult<Path3D> defaultClosedPath = compileEntity(*closedPolyline, 221);
+        CadPolylineItem legacyPolylineItem(closedPolyline.get());
+        legacyPolylineItem.m_entityId = 222;
+        legacyPolylineItem.rebuildRawPathPoints3D();
+        check(defaultClosedPath.succeeded()
+            && legacyPolylineItem.rawPathPoints3D().size()
+                == defaultClosedPath.value->vertices.size() + 1U
+            && legacyPolylineItem.rawPathPoints3D().front().x
+                == legacyPolylineItem.rawPathPoints3D().back().x
+            && legacyPolylineItem.rawPathPoints3D().front().y
+                == legacyPolylineItem.rawPathPoints3D().back().y,
+            "Legacy POLYLINE delegates and restores closure point");
+    }
+
     void testEntityIdAllocator()
     {
         using namespace cadcam::geometry;
@@ -868,6 +1188,7 @@ int main(int argc, char* argv[])
     testGeometryCompilerLineAndCircle();
     testGeometryCompilerArcAndEllipse();
     testDxfAdapterAndLegacyBridge();
+    testPolylineGeometryCore();
     testEntityIdAllocator();
     testCircleAndEllipseNorthStart();
     testSimpleLineAndMCodeOptimization();
