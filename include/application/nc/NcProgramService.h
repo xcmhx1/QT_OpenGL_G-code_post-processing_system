@@ -11,6 +11,12 @@ class CadDocument;
 class NcProgramService
 {
 public:
+    OperationResult<cadcam::nc::NcProgram> buildPlanarProgram
+    (
+        CadDocument& document,
+        const OperationContext& context
+    ) const;
+
     OperationResult<cadcam::nc::NcProgram> buildRotaryProgram
     (
         CadDocument& document,

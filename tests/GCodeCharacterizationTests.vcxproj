@@ -102,6 +102,7 @@
     <ClCompile Include="..\src\core\machine\RotaryKinematics.cpp" />
     <ClCompile Include="..\src\core\machine\RotaryTrajectoryBuilder.cpp" />
     <ClCompile Include="..\src\core\nc\NcProgramBuilder.cpp" />
+    <ClCompile Include="..\src\core\nc\PlanarNcProgramBuilder.cpp" />
     <ClCompile Include="..\src\application\machine\MachineTrajectoryService.cpp" />
     <ClCompile Include="..\src\application\nc\NcProgramService.cpp" />
     <ClCompile Include="..\src\infrastructure\nc\GCodePostProcessor.cpp" />
@@ -114,6 +115,7 @@
     <ClCompile Include="..\src\compatibility\legacy\LegacyCadItemTopologyAdapter.cpp" />
     <ClCompile Include="..\src\compatibility\legacy\LegacyProcessPlanAdapter.cpp" />
     <ClCompile Include="..\src\compatibility\legacy\DocumentNcMetadataAdapter.cpp" />
+    <ClCompile Include="..\src\compatibility\legacy\DocumentPlanarNcInputAdapter.cpp" />
     <ClCompile Include="..\src\compatibility\legacy\SplineEntityClone.cpp" />
     <ClCompile Include="..\src\compatibility\legacy\SplineProductionPathProvider.cpp" />
     <ClCompile Include="..\src\compatibility\legacy\GeometrySnapshotParityVerifier.cpp" />

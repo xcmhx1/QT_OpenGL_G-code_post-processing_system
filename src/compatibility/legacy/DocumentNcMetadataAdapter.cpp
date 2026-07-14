@@ -83,6 +83,48 @@ namespace
     }
 }
 
+OperationResult<cadcam::nc::NcEntityMetadata> DocumentNcMetadataAdapter::captureEntity
+(
+    const CadItem& item,
+    std::size_t sourceIndex,
+    int processOrder,
+    int processGroupId,
+    const OperationContext& context
+)
+{
+    OperationResult<cadcam::nc::NcEntityMetadata> result;
+    if (item.m_entityId == 0 || item.m_nativeEntity == nullptr)
+    {
+        result.status = OperationStatus::InvalidInput;
+        result.addDiagnostic(adapterDiagnostic(DiagnosticCode::NcProgramEntityMissing,
+            QStringLiteral("图元缺少稳定编号或原始实体。"), context, item.m_entityId));
+        return result;
+    }
+
+    cadcam::nc::NcEntityMetadata entry;
+    entry.entityId = item.m_entityId;
+    entry.sourceKind = sourceKind(item.m_type);
+    entry.sourceIndex = sourceIndex;
+    entry.processOrder = processOrder;
+    entry.processGroupId = processGroupId;
+    entry.entityTypeKey = entityTypeKey(item.m_type).toStdString();
+    entry.layerKey = GProfile::normalizeLayerKey
+        (QString::fromUtf8(item.m_nativeEntity->layer.c_str())).toStdString();
+    entry.colorKey = colorKey(*item.m_nativeEntity).toStdString();
+    if (entry.sourceKind == cadcam::geometry::SourceGeometryKind::Unknown
+        || entry.entityTypeKey.empty())
+    {
+        result.status = OperationStatus::NotSupported;
+        result.addDiagnostic(adapterDiagnostic(DiagnosticCode::NcProgramInputInvalid,
+            QStringLiteral("图元类型不支持 NC 输出。"), context, item.m_entityId));
+        return result;
+    }
+
+    result.status = OperationStatus::Success;
+    result.value = std::move(entry);
+    return result;
+}
+
 OperationResult<std::vector<cadcam::nc::NcEntityMetadata>> DocumentNcMetadataAdapter::capture
 (
     CadDocument& document,
@@ -150,26 +192,21 @@ OperationResult<std::vector<cadcam::nc::NcEntityMetadata>> DocumentNcMetadataAda
             return result;
         }
 
-        CadItem* item = found->second.first;
-        cadcam::nc::NcEntityMetadata entry;
-        entry.entityId = assignment.entityId;
-        entry.sourceKind = sourceKind(item->m_type);
-        entry.sourceIndex = found->second.second;
-        entry.processOrder = assignment.processOrder;
-        entry.processGroupId = assignment.continuousGroupId;
-        entry.entityTypeKey = entityTypeKey(item->m_type).toStdString();
-        entry.layerKey = GProfile::normalizeLayerKey
-            (QString::fromUtf8(item->m_nativeEntity->layer.c_str())).toStdString();
-        entry.colorKey = colorKey(*item->m_nativeEntity).toStdString();
-        if (entry.sourceKind == cadcam::geometry::SourceGeometryKind::Unknown
-            || entry.entityTypeKey.empty())
+        auto captured = captureEntity
+        (
+            *found->second.first,
+            found->second.second,
+            assignment.processOrder,
+            assignment.continuousGroupId,
+            context
+        );
+        result.mergeDiagnostics(captured);
+        if (!captured.succeeded() || !captured.value.has_value())
         {
-            result.status = OperationStatus::NotSupported;
-            result.addDiagnostic(adapterDiagnostic(DiagnosticCode::NcProgramInputInvalid,
-                QStringLiteral("加工计划包含不支持的图元类型。"), context, assignment.entityId));
+            result.status = captured.status;
             return result;
         }
-        metadata.push_back(std::move(entry));
+        metadata.push_back(std::move(*captured.value));
     }
 
     if (metadata.empty())

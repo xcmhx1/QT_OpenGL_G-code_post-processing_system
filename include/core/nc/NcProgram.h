@@ -13,6 +13,7 @@ namespace cadcam::nc
     enum class NcProgramMode { Planar3Axis, Rotary4Axis };
     enum class NcMotionKind { Rapid, Linear, CircularClockwise, CircularCounterclockwise };
     enum class NcSourceMoveKind { Rapid, Cutting, CuttingConnection, Overcut };
+    enum class NcPlane { XY, ZX, YZ };
 
     struct NcAxisWords
     {
@@ -30,6 +31,7 @@ namespace cadcam::nc
     {
         NcMotionKind kind = NcMotionKind::Linear;
         NcSourceMoveKind sourceKind = NcSourceMoveKind::Cutting;
+        NcPlane plane = NcPlane::XY;
         NcAxisWords axes;
         geometry::EntityId entityId = 0;
         int processGroupId = -1;

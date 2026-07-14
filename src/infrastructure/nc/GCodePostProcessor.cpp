@@ -87,16 +87,84 @@ namespace cadcam::infrastructure::nc
                 code = profile.linearCode;
                 break;
             case cadcam::nc::NcMotionKind::CircularClockwise:
+                code = QStringLiteral("G02");
+                break;
             case cadcam::nc::NcMotionKind::CircularCounterclockwise:
-            default:
-                return QString();
+                code = QStringLiteral("G03");
+                break;
             }
-            return QStringLiteral("%1 X%2 Y%3 Z%4 A%5")
-                .arg(code)
-                .arg(QString::number(*motion.axes.x, 'f', profile.coordinatePrecision))
-                .arg(QString::number(*motion.axes.y, 'f', profile.coordinatePrecision))
-                .arg(QString::number(*motion.axes.z, 'f', profile.coordinatePrecision))
-                .arg(QString::number(*motion.axes.a, 'f', profile.anglePrecision));
+            QStringList words { code };
+            const auto append = [&](const QChar name, const std::optional<double>& value, int precision)
+            {
+                if (value.has_value())
+                    words.push_back(name + QString::number(*value, 'f', precision));
+            };
+            append(QLatin1Char('X'), motion.axes.x, profile.coordinatePrecision);
+            append(QLatin1Char('Y'), motion.axes.y, profile.coordinatePrecision);
+            append(QLatin1Char('Z'), motion.axes.z, profile.coordinatePrecision);
+            append(QLatin1Char('A'), motion.axes.a, profile.anglePrecision);
+            append(QLatin1Char('I'), motion.axes.i, profile.coordinatePrecision);
+            append(QLatin1Char('J'), motion.axes.j, profile.coordinatePrecision);
+            append(QLatin1Char('K'), motion.axes.k, profile.coordinatePrecision);
+            append(QLatin1Char('R'), motion.axes.r, profile.coordinatePrecision);
+            return words.join(QLatin1Char(' '));
+        }
+
+        bool finiteAxes(const cadcam::nc::NcAxisWords& axes)
+        {
+            const auto valid = [](const std::optional<double>& value)
+            {
+                return !value.has_value() || std::isfinite(*value);
+            };
+            return valid(axes.x) && valid(axes.y) && valid(axes.z) && valid(axes.a)
+                && valid(axes.i) && valid(axes.j) && valid(axes.k) && valid(axes.r);
+        }
+
+        bool validMotion
+        (
+            const cadcam::nc::NcMotion& motion,
+            cadcam::nc::NcProgramMode mode,
+            bool rapid
+        )
+        {
+            if (!finiteAxes(motion.axes)) return false;
+            if (mode == cadcam::nc::NcProgramMode::Rotary4Axis)
+            {
+                return (rapid ? motion.kind == cadcam::nc::NcMotionKind::Rapid
+                              : motion.kind == cadcam::nc::NcMotionKind::Linear)
+                    && motion.axes.x.has_value() && motion.axes.y.has_value()
+                    && motion.axes.z.has_value() && motion.axes.a.has_value()
+                    && !motion.axes.i.has_value() && !motion.axes.j.has_value()
+                    && !motion.axes.k.has_value() && !motion.axes.r.has_value();
+            }
+            if (rapid)
+            {
+                return motion.kind == cadcam::nc::NcMotionKind::Rapid
+                    && motion.axes.x.has_value() && motion.axes.y.has_value()
+                    && !motion.axes.a.has_value() && !motion.axes.i.has_value()
+                    && !motion.axes.j.has_value() && !motion.axes.k.has_value()
+                    && !motion.axes.r.has_value();
+            }
+            if (motion.kind == cadcam::nc::NcMotionKind::Linear)
+                return (motion.axes.x.has_value() || motion.axes.y.has_value()
+                        || motion.axes.z.has_value())
+                    && !motion.axes.a.has_value() && !motion.axes.i.has_value()
+                    && !motion.axes.j.has_value() && !motion.axes.k.has_value()
+                    && !motion.axes.r.has_value();
+            if (motion.kind == cadcam::nc::NcMotionKind::CircularClockwise
+                || motion.kind == cadcam::nc::NcMotionKind::CircularCounterclockwise)
+            {
+                if (motion.axes.a.has_value() || motion.axes.r.has_value()) return false;
+                if (motion.plane == cadcam::nc::NcPlane::XY)
+                    return motion.axes.x.has_value() && motion.axes.y.has_value()
+                        && motion.axes.i.has_value() && motion.axes.j.has_value();
+                if (motion.plane == cadcam::nc::NcPlane::ZX)
+                    return motion.axes.x.has_value() && motion.axes.z.has_value()
+                        && motion.axes.i.has_value() && motion.axes.k.has_value();
+                return motion.axes.y.has_value() && motion.axes.z.has_value()
+                    && motion.axes.j.has_value() && motion.axes.k.has_value();
+            }
+            return false;
         }
 
         GCodeBlock toBlock(const GProfileCodeBlock& source)
@@ -130,12 +198,11 @@ namespace cadcam::infrastructure::nc
     )
     {
         OperationResult<QString> result;
-        if (program.mode != cadcam::nc::NcProgramMode::Rotary4Axis
-            || program.contentRevision == 0 || program.entities.empty())
+        if (program.contentRevision == 0 || program.entities.empty())
         {
             result.status = OperationStatus::InvalidInput;
             result.addDiagnostic(postDiagnostic(DiagnosticCode::GCodeRenderingFailed,
-                QStringLiteral("后处理器只接受有效的四轴 NC 程序。"), context));
+                QStringLiteral("后处理器只接受有效的 NC 程序。"), context));
             return result;
         }
         if (profile.coordinatePrecision < 0 || profile.coordinatePrecision > 15
@@ -181,11 +248,7 @@ namespace cadcam::infrastructure::nc
             {
                 const cadcam::nc::NcMotion& motion = entity.motions[motionIndex];
                 if (motion.sourceKind != cadcam::nc::NcSourceMoveKind::Rapid) break;
-                if (motion.kind != cadcam::nc::NcMotionKind::Rapid
-                    || !motion.axes.x.has_value() || !motion.axes.y.has_value()
-                    || !motion.axes.z.has_value() || !motion.axes.a.has_value()
-                    || !std::isfinite(*motion.axes.x) || !std::isfinite(*motion.axes.y)
-                    || !std::isfinite(*motion.axes.z) || !std::isfinite(*motion.axes.a))
+                if (!validMotion(motion, program.mode, true))
                 {
                     result.status = OperationStatus::Failed;
                     result.addDiagnostic(postDiagnostic(DiagnosticCode::NcProgramUnsupportedMotion,
@@ -210,18 +273,15 @@ namespace cadcam::infrastructure::nc
             for (; motionIndex < entity.motions.size(); ++motionIndex)
             {
                 const cadcam::nc::NcMotion& motion = entity.motions[motionIndex];
-                const bool validLinear = motion.kind == cadcam::nc::NcMotionKind::Linear
-                    && motion.sourceKind != cadcam::nc::NcSourceMoveKind::Rapid;
-                if (!validLinear || motion.entityId != entity.metadata.entityId
+                if (motion.sourceKind == cadcam::nc::NcSourceMoveKind::Rapid
+                    || !validMotion(motion, program.mode, false)
+                    || motion.entityId != entity.metadata.entityId
                     || motion.processGroupId != entity.metadata.processGroupId
-                    || !motion.axes.x.has_value() || !motion.axes.y.has_value()
-                    || !motion.axes.z.has_value() || !motion.axes.a.has_value()
-                    || !std::isfinite(*motion.axes.x) || !std::isfinite(*motion.axes.y)
-                    || !std::isfinite(*motion.axes.z) || !std::isfinite(*motion.axes.a))
+                    )
                 {
                     result.status = OperationStatus::NotSupported;
                     result.addDiagnostic(postDiagnostic(DiagnosticCode::NcProgramUnsupportedMotion,
-                        QStringLiteral("NC 程序包含不支持或无效的四轴运动。"), context,
+                        QStringLiteral("NC 程序包含不支持或无效的运动。"), context,
                         entity.metadata.entityId,
                         {
                             { QStringLiteral("motionIndex"), static_cast<qulonglong>(motionIndex) },
@@ -231,7 +291,15 @@ namespace cadcam::infrastructure::nc
                         }));
                     return result;
                 }
+                const bool circular = motion.kind == cadcam::nc::NcMotionKind::CircularClockwise
+                    || motion.kind == cadcam::nc::NcMotionKind::CircularCounterclockwise;
+                if (circular && motion.plane == cadcam::nc::NcPlane::ZX)
+                    lines.push_back(QStringLiteral("G18"));
+                else if (circular && motion.plane == cadcam::nc::NcPlane::YZ)
+                    lines.push_back(QStringLiteral("G19"));
                 lines.push_back(formatMotion(motion, profile));
+                if (circular && motion.plane != cadcam::nc::NcPlane::XY)
+                    lines.push_back(QStringLiteral("G17"));
             }
 
             appendTextBlock(lines, typeBlock.footer);
@@ -251,7 +319,7 @@ namespace cadcam::infrastructure::nc
         {
             result.status = OperationStatus::Failed;
             result.addDiagnostic(postDiagnostic(DiagnosticCode::GCodeRenderingFailed,
-                QStringLiteral("生成的四轴 G 代码为空。"), context));
+                QStringLiteral("生成的 G 代码为空。"), context));
             return result;
         }
 

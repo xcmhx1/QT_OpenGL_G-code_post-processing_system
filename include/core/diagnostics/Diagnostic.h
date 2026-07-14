@@ -136,6 +136,14 @@ enum class DiagnosticCode
     GCodeEntityBlockMissing,
     GCodeRenderingFailed,
     GCodeTextOptimizationFailed,
+    PlanarNcInputInvalid,
+    PlanarNcRevisionMismatch,
+    PlanarNcEntityMissing,
+    PlanarNcUnsupportedGeometry,
+    PlanarNcGeometryCompileFailed,
+    PlanarNcInvalidArcPlane,
+    PlanarNcInvalidMotion,
+    PlanarNcInvariantViolation,
     InternalInvariantViolation
 };
 

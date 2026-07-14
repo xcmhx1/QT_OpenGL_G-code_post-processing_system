@@ -118,6 +118,14 @@ QString diagnosticCodeName(DiagnosticCode code)
     case DiagnosticCode::GCodeEntityBlockMissing: return QStringLiteral("GCodeEntityBlockMissing");
     case DiagnosticCode::GCodeRenderingFailed: return QStringLiteral("GCodeRenderingFailed");
     case DiagnosticCode::GCodeTextOptimizationFailed: return QStringLiteral("GCodeTextOptimizationFailed");
+    case DiagnosticCode::PlanarNcInputInvalid: return QStringLiteral("PlanarNcInputInvalid");
+    case DiagnosticCode::PlanarNcRevisionMismatch: return QStringLiteral("PlanarNcRevisionMismatch");
+    case DiagnosticCode::PlanarNcEntityMissing: return QStringLiteral("PlanarNcEntityMissing");
+    case DiagnosticCode::PlanarNcUnsupportedGeometry: return QStringLiteral("PlanarNcUnsupportedGeometry");
+    case DiagnosticCode::PlanarNcGeometryCompileFailed: return QStringLiteral("PlanarNcGeometryCompileFailed");
+    case DiagnosticCode::PlanarNcInvalidArcPlane: return QStringLiteral("PlanarNcInvalidArcPlane");
+    case DiagnosticCode::PlanarNcInvalidMotion: return QStringLiteral("PlanarNcInvalidMotion");
+    case DiagnosticCode::PlanarNcInvariantViolation: return QStringLiteral("PlanarNcInvariantViolation");
     case DiagnosticCode::InternalInvariantViolation: return QStringLiteral("InternalInvariantViolation");
     }
 

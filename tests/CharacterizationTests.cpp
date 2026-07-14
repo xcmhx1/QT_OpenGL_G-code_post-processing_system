@@ -20,6 +20,7 @@
 #include "core/machine/RotaryKinematics.h"
 #include "core/machine/RotaryTrajectoryBuilder.h"
 #include "core/nc/NcProgramBuilder.h"
+#include "core/nc/PlanarNcProgramBuilder.h"
 #include "infrastructure/dxf/DxfGeometryAdapter.h"
 #include "infrastructure/nc/GCodePostProcessor.h"
 #include "SplineParity.h"
@@ -1933,6 +1934,136 @@ namespace
             && hasDiagnosticCode(staleText.diagnostics, DiagnosticCode::MachineTrajectoryRevisionMismatch),
             "revision conflict produces no partial G-code text");
     }
+
+    void testPlanarNcProgramPipeline()
+    {
+        using namespace cadcam;
+        const OperationContext context = createOperationContext(QStringLiteral("test-planar-nc"));
+        nc::PlanarNcBuildPolicy policy;
+        auto inputFor = [](geometry::SourceEntity source, int order, bool reverse = false,
+            std::optional<double> start = std::nullopt)
+        {
+            nc::PlanarNcEntityInput input;
+            input.metadata.entityId = source.id;
+            input.metadata.sourceKind = source.kind;
+            input.metadata.sourceIndex = static_cast<std::size_t>(order);
+            input.metadata.processOrder = order;
+            input.metadata.entityTypeKey = geometry::sourceGeometryKindName(source.kind);
+            input.metadata.layerKey = "0";
+            input.metadata.colorKey = "BYLAYER";
+            input.sourceEntity = std::move(source);
+            input.reverse = reverse;
+            input.startParameter = start;
+            return input;
+        };
+
+        geometry::SourceEntity lineSource;
+        lineSource.id = 1;
+        lineSource.kind = geometry::SourceGeometryKind::Line;
+        lineSource.geometry = geometry::LineGeometry{ { 1.0, 2.0, 30.0 }, { 3.0, 4.0, 40.0 } };
+        auto lineProgram = nc::PlanarNcProgramBuilder::build
+            (1, { inputFor(lineSource, 0) }, policy, context);
+        check(lineProgram.succeeded() && lineProgram.value.has_value()
+            && lineProgram.value->mode == nc::NcProgramMode::Planar3Axis
+            && lineProgram.value->entities[0].motions.size() == 2
+            && lineProgram.value->entities[0].motions[0].axes.x == 1.0
+            && lineProgram.value->entities[0].motions[0].axes.y == 2.0
+            && !lineProgram.value->entities[0].motions[0].axes.z.has_value()
+            && lineProgram.value->entities[0].motions[1].kind == nc::NcMotionKind::Linear,
+            "planar LINE emits XY rapid and linear only");
+
+        geometry::SourceEntity xyArc;
+        xyArc.id = 2;
+        xyArc.kind = geometry::SourceGeometryKind::Arc;
+        xyArc.geometry = geometry::ArcGeometry
+            { { 0.0, 0.0, 0.0 }, { 1.0, 0.0, 0.0 }, { 0.0, 1.0, 0.0 }, 10.0, 0.0, kHalfPi };
+        auto forwardArc = nc::PlanarNcProgramBuilder::build
+            (1, { inputFor(xyArc, 0) }, policy, context);
+        auto reverseArc = nc::PlanarNcProgramBuilder::build
+            (1, { inputFor(xyArc, 0, true) }, policy, context);
+        check(forwardArc.succeeded() && reverseArc.succeeded()
+            && forwardArc.value->entities[0].motions[1].kind
+                == nc::NcMotionKind::CircularCounterclockwise
+            && reverseArc.value->entities[0].motions[1].kind
+                == nc::NcMotionKind::CircularClockwise
+            && forwardArc.value->entities[0].motions[1].axes.i.has_value()
+            && forwardArc.value->entities[0].motions[1].axes.j.has_value(),
+            "XY ARC direction and IJ follow normal plus reverse");
+
+        geometry::SourceEntity zxArc = xyArc;
+        zxArc.id = 3;
+        zxArc.geometry = geometry::ArcGeometry
+            { { 0.0, 2.0, 0.0 }, { 1.0, 0.0, 0.0 }, { 0.0, 0.0, 1.0 }, 10.0, 0.0, kHalfPi };
+        geometry::SourceEntity yzArc = xyArc;
+        yzArc.id = 4;
+        yzArc.geometry = geometry::ArcGeometry
+            { { 2.0, 0.0, 0.0 }, { 0.0, 1.0, 0.0 }, { 0.0, 0.0, 1.0 }, 10.0, 0.0, kHalfPi };
+        auto planeProgram = nc::PlanarNcProgramBuilder::build
+            (1, { inputFor(zxArc, 0), inputFor(yzArc, 1) }, policy, context);
+        infrastructure::nc::GCodePostProcessorProfile postProfile;
+        postProfile.programHeader = QStringLiteral("%");
+        postProfile.programFooter = QStringLiteral("M30\n%");
+        auto planeText = infrastructure::nc::GCodePostProcessor::render
+            (*planeProgram.value, postProfile, context);
+        check(planeText.succeeded() && planeText.value->contains(QStringLiteral("G18\r\nG03"))
+            && planeText.value->contains(QStringLiteral("G19\r\nG03"))
+            && planeText.value->count(QStringLiteral("G17\r\n")) == 2,
+            "ZX and YZ arcs emit G18 G19 and restore G17");
+
+        geometry::SourceEntity circle;
+        circle.id = 5;
+        circle.kind = geometry::SourceGeometryKind::Circle;
+        circle.geometry = geometry::CircleGeometry
+            { { 5.0, 6.0, 0.0 }, { 1.0, 0.0, 0.0 }, { 0.0, 1.0, 0.0 }, 2.0 };
+        auto forwardCircle = nc::PlanarNcProgramBuilder::build
+            (1, { inputFor(circle, 0) }, policy, context);
+        auto reverseCircle = nc::PlanarNcProgramBuilder::build
+            (1, { inputFor(circle, 0, true) }, policy, context);
+        const auto& circleStart = forwardCircle.value->entities[0].motions[0].axes;
+        const auto& reverseCircleStart = reverseCircle.value->entities[0].motions[0].axes;
+        check(std::abs(*circleStart.x - 5.0) <= kTolerance
+            && std::abs(*circleStart.y - 8.0) <= kTolerance
+            && circleStart.x == reverseCircleStart.x && circleStart.y == reverseCircleStart.y
+            && forwardCircle.value->entities[0].motions[1].kind
+                != reverseCircle.value->entities[0].motions[1].kind,
+            "full circle keeps north start while reverse changes direction");
+
+        geometry::PolylineGeometry polyline;
+        polyline.sourceVertexCount = 2;
+        polyline.closed = true;
+        polyline.segments.push_back(geometry::ArcGeometry
+            { { 5.0, 0.0, 0.0 }, { 1.0, 0.0, 0.0 }, { 0.0, 1.0, 0.0 }, 5.0,
+              3.14159265358979323846, 2.0 * 3.14159265358979323846 });
+        polyline.segments.push_back(geometry::LineGeometry{ { 10.0, 0.0, 0.0 }, { 0.0, 0.0, 0.0 } });
+        geometry::SourceEntity polylineSource;
+        polylineSource.id = 6;
+        polylineSource.kind = geometry::SourceGeometryKind::Polyline;
+        polylineSource.geometry = polyline;
+        auto polylineProgram = nc::PlanarNcProgramBuilder::build
+            (1, { inputFor(polylineSource, 0, true, 1.0) }, policy, context);
+        check(polylineProgram.succeeded() && polylineProgram.value->entities[0].motions.size() == 3
+            && polylineProgram.value->entities[0].motions[1].kind
+                == nc::NcMotionKind::CircularClockwise
+            && polylineProgram.value->entities[0].motions[2].kind == nc::NcMotionKind::Linear,
+            "closed polyline preserves exact bulge arc reverse and custom start");
+
+        infrastructure::nc::GCodePostProcessorProfile blockProfile;
+        blockProfile.programHeader = QStringLiteral("%");
+        blockProfile.programFooter = QStringLiteral("M30\n%");
+        blockProfile.layerBlocks.insert(QStringLiteral("0"), { QStringLiteral("LAYER"), QString() });
+        blockProfile.colorBlocks.insert(QStringLiteral("BYLAYER"), { QStringLiteral("COLOR"), QString() });
+        blockProfile.entityTypeBlocks.insert(QStringLiteral("Line"), { QStringLiteral("TYPE"), QString() });
+        auto blockText = infrastructure::nc::GCodePostProcessor::render
+            (*lineProgram.value, blockProfile, context);
+        check(blockText.succeeded()
+            && blockText.value->indexOf(QStringLiteral("G00"))
+                < blockText.value->indexOf(QStringLiteral("LAYER"))
+            && blockText.value->indexOf(QStringLiteral("LAYER"))
+                < blockText.value->indexOf(QStringLiteral("COLOR"))
+            && blockText.value->indexOf(QStringLiteral("COLOR"))
+                < blockText.value->indexOf(QStringLiteral("TYPE")),
+            "planar rapid precedes layer color type headers");
+    }
 }
 
 int main(int argc, char* argv[])
@@ -1962,6 +2093,7 @@ int main(int argc, char* argv[])
     testRotaryGoldenPrograms();
     testMachineTrajectoryCore();
     testNcProgramPipeline();
+    testPlanarNcProgramPipeline();
     testFailures();
     failureCount += runSplineProductionTests(updateSplineProductionGoldenFiles);
     failureCount += runGeometrySnapshotTests();

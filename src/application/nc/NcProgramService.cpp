@@ -3,7 +3,70 @@
 #include "CadDocument.h"
 #include "application/machine/MachineTrajectoryService.h"
 #include "compatibility/legacy/DocumentNcMetadataAdapter.h"
+#include "compatibility/legacy/DocumentPlanarNcInputAdapter.h"
 #include "core/nc/NcProgramBuilder.h"
+#include "core/nc/PlanarNcProgramBuilder.h"
+
+OperationResult<cadcam::nc::NcProgram> NcProgramService::buildPlanarProgram
+(
+    CadDocument& document,
+    const OperationContext& context
+) const
+{
+    OperationResult<cadcam::nc::NcProgram> result;
+    auto capture = DocumentPlanarNcInputAdapter::capture(document, context);
+    result.mergeDiagnostics(capture);
+    if (!capture.succeeded() || !capture.value.has_value())
+    {
+        result.status = capture.status;
+        return result;
+    }
+
+    if (capture.value->contentRevision != document.contentRevision())
+    {
+        result.status = OperationStatus::Conflict;
+        Diagnostic diagnostic;
+        diagnostic.code = DiagnosticCode::PlanarNcRevisionMismatch;
+        diagnostic.severity = DiagnosticSeverity::Error;
+        diagnostic.component = QStringLiteral("NcProgramService");
+        diagnostic.operation = context.operationName;
+        diagnostic.stage = QStringLiteral("validate-planar-revision");
+        diagnostic.userMessage = QStringLiteral("三轴 NC 输入与当前文档版本不一致。");
+        diagnostic.correlationId = context.correlationId;
+        result.addDiagnostic(diagnostic);
+        return result;
+    }
+
+    cadcam::nc::PlanarNcBuildPolicy policy;
+    auto program = cadcam::nc::PlanarNcProgramBuilder::build
+        (capture.value->contentRevision, capture.value->entities, policy, context);
+    result.mergeDiagnostics(program);
+    if (!program.succeeded() || !program.value.has_value())
+    {
+        result.status = program.status;
+        return result;
+    }
+    if (document.contentRevision() != capture.value->contentRevision)
+    {
+        result.status = OperationStatus::Conflict;
+        Diagnostic diagnostic;
+        diagnostic.code = DiagnosticCode::PlanarNcRevisionMismatch;
+        diagnostic.severity = DiagnosticSeverity::Error;
+        diagnostic.component = QStringLiteral("NcProgramService");
+        diagnostic.operation = context.operationName;
+        diagnostic.stage = QStringLiteral("validate-planar-result");
+        diagnostic.userMessage = QStringLiteral("文档在三轴 NC 程序构建期间已变更。");
+        diagnostic.correlationId = context.correlationId;
+        result.addDiagnostic(diagnostic);
+        return result;
+    }
+
+    result.status = capture.status == OperationStatus::PartialSuccess
+        || program.status == OperationStatus::PartialSuccess
+        ? OperationStatus::PartialSuccess : OperationStatus::Success;
+    result.value = std::move(*program.value);
+    return result;
+}
 
 OperationResult<cadcam::nc::NcProgram> NcProgramService::buildRotaryProgram
 (
