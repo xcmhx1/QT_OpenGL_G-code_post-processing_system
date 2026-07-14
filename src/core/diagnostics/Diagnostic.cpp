@@ -50,6 +50,14 @@ QString diagnosticCodeName(DiagnosticCode code)
     case DiagnosticCode::SplineLegacyParityMismatch: return QStringLiteral("SplineLegacyParityMismatch");
     case DiagnosticCode::SplineDisplayPathFailure: return QStringLiteral("SplineDisplayPathFailure");
     case DiagnosticCode::SplineControlPointFailure: return QStringLiteral("SplineControlPointFailure");
+    case DiagnosticCode::TopologyInputInvalid: return QStringLiteral("TopologyInputInvalid");
+    case DiagnosticCode::TopologyPathUnavailable: return QStringLiteral("TopologyPathUnavailable");
+    case DiagnosticCode::TopologyBuildFailure: return QStringLiteral("TopologyBuildFailure");
+    case DiagnosticCode::TopologySeedNotFound: return QStringLiteral("TopologySeedNotFound");
+    case DiagnosticCode::TopologyLoopNotFound: return QStringLiteral("TopologyLoopNotFound");
+    case DiagnosticCode::TopologyBranchIgnored: return QStringLiteral("TopologyBranchIgnored");
+    case DiagnosticCode::TopologyApproximateClosure: return QStringLiteral("TopologyApproximateClosure");
+    case DiagnosticCode::TopologyParityMismatch: return QStringLiteral("TopologyParityMismatch");
     case DiagnosticCode::InternalInvariantViolation: return QStringLiteral("InternalInvariantViolation");
     }
 

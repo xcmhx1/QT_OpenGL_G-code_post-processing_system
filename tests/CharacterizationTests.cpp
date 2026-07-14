@@ -20,6 +20,7 @@
 #include "SplineParity.h"
 #include "SplineProductionTests.h"
 #include "GeometrySnapshotTests.h"
+#include "TopologyTests.h"
 #include "dx_data.h"
 
 #include <QDir>
@@ -1679,6 +1680,7 @@ int main(int argc, char* argv[])
     testFailures();
     failureCount += runSplineProductionTests(updateSplineProductionGoldenFiles);
     failureCount += runGeometrySnapshotTests();
+    failureCount += runTopologyTests();
 
     if (failureCount == 0)
     {

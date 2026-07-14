@@ -68,6 +68,14 @@ enum class DiagnosticCode
     SplineLegacyParityMismatch,
     SplineDisplayPathFailure,
     SplineControlPointFailure,
+    TopologyInputInvalid,
+    TopologyPathUnavailable,
+    TopologyBuildFailure,
+    TopologySeedNotFound,
+    TopologyLoopNotFound,
+    TopologyBranchIgnored,
+    TopologyApproximateClosure,
+    TopologyParityMismatch,
     InternalInvariantViolation
 };
 

@@ -46,7 +46,7 @@
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)' == 'Release|x64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(MSBuildProjectDirectory)\..\include;$(MSBuildProjectDirectory)\..\include\libdxfrw;$(MSBuildProjectDirectory)\..\include\libdxfrw\intern;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(MSBuildProjectDirectory)\..;$(MSBuildProjectDirectory)\..\include;$(MSBuildProjectDirectory)\..\include\libdxfrw;$(MSBuildProjectDirectory)\..\include\libdxfrw\intern;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp17</LanguageStandard>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
@@ -69,6 +69,7 @@
     <ClCompile Include="SplineParity.cpp" />
     <ClCompile Include="SplineProductionTests.cpp" />
     <ClCompile Include="GeometrySnapshotTests.cpp" />
+    <ClCompile Include="TopologyTests.cpp" />
     <ClCompile Include="..\src\CadDocument.cpp" />
     <ClCompile Include="..\src\CadItem.cpp" />
     <ClCompile Include="..\src\CadLineItem.cpp" />
@@ -94,12 +95,16 @@
     <ClCompile Include="..\src\core\geometry\NurbsCurveEvaluator.cpp" />
     <ClCompile Include="..\src\application\geometry\DocumentGeometrySnapshotBuilder.cpp" />
     <ClCompile Include="..\src\application\geometry\GeometrySnapshotCompiler.cpp" />
+    <ClCompile Include="..\src\application\topology\GeometrySnapshotTopologyAdapter.cpp" />
+    <ClCompile Include="..\src\core\topology\PathTopology.cpp" />
+    <ClCompile Include="..\src\RotaryPathTopology.cpp" />
     <ClCompile Include="..\src\infrastructure\dxf\DxfGeometryAdapter.cpp" />
     <ClCompile Include="..\src\compatibility\legacy\LegacyCadItemPathBridge.cpp" />
     <ClCompile Include="..\src\compatibility\legacy\LegacyFourAxisPathBuilder.cpp" />
     <ClCompile Include="..\src\compatibility\legacy\SplineEntityClone.cpp" />
     <ClCompile Include="..\src\compatibility\legacy\SplineProductionPathProvider.cpp" />
     <ClCompile Include="..\src\compatibility\legacy\GeometrySnapshotParityVerifier.cpp" />
+    <ClCompile Include="..\src\compatibility\legacy\LegacyTopologyParityVerifier.cpp" />
     <ClCompile Include="..\src\application\messaging\MessageCenter.cpp" />
     <ClCompile Include="..\src\application\messaging\DebugMessageSink.cpp" />
     <ClCompile Include="..\src\libdxfrw\drw_base.cpp" />
