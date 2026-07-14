@@ -3570,7 +3570,7 @@ namespace
         const QVector<CadItem*>& documentItems,
         const GProfileRotaryAxisConfig& rotaryAxisConfig,
         std::vector<CadEditer::ProcessStateUpdate>& processUpdates,
-        const QVector<QVector2D>& configuredSectionHull,
+        const RotaryTubeSectionModel& configuredSection,
         QString* failureReason
     )
     {
@@ -3795,8 +3795,8 @@ namespace
             (
                 specifiedItems,
                 boundarySceneItems,
-                kEndCutConnectionTolerance,
-                configuredSectionHull
+                configuredSection,
+                kEndCutConnectionTolerance
             );
 
             if (!analyzedBoundary.analysis.valid)
@@ -3850,14 +3850,13 @@ namespace
 
             qInfo().noquote() << QStringLiteral
             (
-                "[智能分段] 断面 ID=%1：指定=%2，重新收集=%3，%4，分析=成功，绕行=%5，覆盖率=%6%。"
+                "[智能分段] 断面 ID=%1：指定=%2，重新收集=%3，%4，分析=成功，整数绕数=%5。"
             )
                 .arg(boundaryId)
                 .arg(specifiedItems.size())
                 .arg(analyzedBoundary.analysis.boundaryItems.size())
                 .arg(describeRotaryPathItems(analyzedBoundary.analysis.boundaryItems))
-                .arg(analyzedBoundary.analysis.windingNumber, 0, 'f', 3)
-                .arg(analyzedBoundary.analysis.perimeterCoverage * 100.0, 0, 'f', 1);
+                .arg(analyzedBoundary.analysis.winding);
 
             manualBreakBoundaries.push_back(std::move(analyzedBoundary));
         }
@@ -5136,33 +5135,12 @@ QVector<CadItem*> Gcode_postprocessing_system::expandedSelectedRotaryEndCut(QStr
         return {};
     }
 
-    const RotaryTubeSectionModel candidateSection = RotaryTubeGeometryAnalyzer::buildSectionModel
-    (
-        loop.usedItems,
-        sceneItems,
-        kEndCutConnectionTolerance
-    );
-
-    if (!candidateSection.valid || candidateSection.outerBoundaryItems.isEmpty())
-    {
-        if (errorMessage != nullptr)
-        {
-            *errorMessage = candidateSection.errorMessage;
-        }
-
-        return {};
-    }
-
-    const QVector<QVector2D>& validationHull = m_rotaryTubeSectionModel.valid
-        ? m_rotaryTubeSectionModel.sectionHull
-        : candidateSection.sectionHull;
-
     const RotaryCutBoundaryAnalysis analysis = RotaryCutBoundaryAnalyzer::analyze
     (
         loop.usedItems,
         sceneItems,
-        kEndCutConnectionTolerance,
-        validationHull
+        m_rotaryTubeSectionModel,
+        kEndCutConnectionTolerance
     );
 
     if (!analysis.valid)
@@ -5625,29 +5603,12 @@ bool Gcode_postprocessing_system::recognizeAllRotaryEndCuts(bool interactive)
             continue;
         }
 
-        const RotaryTubeSectionModel candidateSection = RotaryTubeGeometryAnalyzer::buildSectionModel
-        (
-            loop.usedItems,
-            sceneItems,
-            kEndCutConnectionTolerance
-        );
-
-        if (!candidateSection.valid || candidateSection.outerBoundaryItems.isEmpty())
-        {
-            qInfo().noquote() << QStringLiteral("[自动识别加工断面] 截面解析失败：%1")
-                .arg(candidateSection.errorMessage);
-            continue;
-        }
-
-        const QVector<QVector2D>& validationHull = m_rotaryTubeSectionModel.valid
-            ? m_rotaryTubeSectionModel.sectionHull
-            : candidateSection.sectionHull;
         const RotaryCutBoundaryAnalysis analysis = RotaryCutBoundaryAnalyzer::analyze
         (
             loop.usedItems,
             sceneItems,
-            kEndCutConnectionTolerance,
-            validationHull
+            m_rotaryTubeSectionModel,
+            kEndCutConnectionTolerance
         );
 
         if (!analysis.valid)
@@ -5889,8 +5850,8 @@ int Gcode_postprocessing_system::refreshWasteProcessingExclusions()
         (
             group.items,
             sceneItems,
-            kEndCutConnectionTolerance,
-            m_rotaryTubeSectionModel.sectionHull
+            m_rotaryTubeSectionModel,
+            kEndCutConnectionTolerance
         );
 
         if (!boundary.analysis.valid || boundary.analysis.orderedPath.isEmpty())
@@ -6458,7 +6419,7 @@ bool Gcode_postprocessing_system::sortEntitiesByCurrentDirection3D()
         documentItems,
         rotaryAxisConfig,
         lazyRotaryUpdates,
-        m_rotaryTubeSectionModel.sectionHull,
+        m_rotaryTubeSectionModel,
         &segmentationFailure
     ))
     {
@@ -6685,7 +6646,7 @@ bool Gcode_postprocessing_system::smartSortEntities3D()
         documentItems,
         rotaryAxisConfig,
         lazyRotaryUpdates,
-        m_rotaryTubeSectionModel.sectionHull,
+        m_rotaryTubeSectionModel,
         &segmentationFailure
     ))
     {

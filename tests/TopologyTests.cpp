@@ -10,6 +10,7 @@
 #include "application/topology/GeometrySnapshotTopologyAdapter.h"
 #include "compatibility/legacy/LegacyCadItemTopologyAdapter.h"
 #include "compatibility/legacy/LegacyTopologyParityVerifier.h"
+#include "core/machining/TubeCutBoundary.h"
 #include "core/topology/PathTopology.h"
 
 #include <QCryptographicHash>
@@ -32,6 +33,10 @@ namespace
     using cadcam::geometry::EntityId;
     using cadcam::geometry::SourceGeometryKind;
     using cadcam::geometry::Vector3d;
+    using cadcam::machining::TubeCutAnalysis;
+    using cadcam::machining::TubeCutBoundaryClassifier;
+    using cadcam::machining::TubeCutResult;
+    using cadcam::machining::TubeSectionGeometry;
     using cadcam::topology::PathTopology;
     using cadcam::topology::PathTopologyBuilder;
     using cadcam::topology::PathTopologyTolerance;
@@ -657,21 +662,226 @@ namespace
         check(!gapSection.valid && gapSection.errorMessage.contains(QStringLiteral("0.1")),
             "tube section rejects and reports physical join gap");
 
-        const QVector<QVector2D> sectionHull
-        {
-            { 0.0f, 0.0f }, { 10.0f, 0.0f },
-            { 10.0f, 10.0f }, { 0.0f, 10.0f }
-        };
         const RotaryCutBoundaryAnalysis exactBoundary =
-            RotaryCutBoundaryAnalyzer::analyze(exactItems, exactItems, 1.0, sectionHull);
-        check(exactBoundary.connectedLoop,
-            "strict machining boundary reaches downstream analysis");
+            RotaryCutBoundaryAnalyzer::analyze(exactItems, exactItems, exactSection, 1.0);
+        check(exactBoundary.connectedLoop && exactBoundary.valid
+            && exactBoundary.result == TubeCutResult::CutsLeftAndRight,
+            "strict machining boundary reaches and passes production analysis");
         const RotaryCutBoundaryAnalysis gapBoundary =
-            RotaryCutBoundaryAnalyzer::analyze(gapItems, gapItems, 1.0, sectionHull);
+            RotaryCutBoundaryAnalyzer::analyze(gapItems, gapItems, exactSection, 1.0);
         check(!gapBoundary.connectedLoop && !gapBoundary.valid
             && gapBoundary.maximumJoinGap >= 0.099
             && gapBoundary.errorMessage.contains(QStringLiteral("0.1")),
             "machining boundary stops before analysis when join gap exists");
+    }
+
+    TubeSectionGeometry standardTubeSection()
+    {
+        TubeSectionGeometry section;
+        section.boundary =
+        {
+            { -5.0, 5.0 },
+            { 5.0, 5.0 },
+            { 5.0, -5.0 },
+            { -5.0, -5.0 }
+        };
+        section.centerY = 0.0;
+        section.centerZ = 0.0;
+        section.yLength = 10.0;
+        section.zWidth = 10.0;
+        return section;
+    }
+
+    OperationResult<TubeCutAnalysis> classifyTubeCut
+    (
+        std::initializer_list<Vector3d> points,
+        const TubeSectionGeometry& section = standardTubeSection()
+    )
+    {
+        return TubeCutBoundaryClassifier::analyze
+        (
+            std::vector<Vector3d>(points),
+            { 1U },
+            0.0,
+            section,
+            createOperationContext(QStringLiteral("tube-cut-core-test"))
+        );
+    }
+
+    bool hasDiagnostic
+    (
+        const OperationResult<TubeCutAnalysis>& result,
+        DiagnosticCode code
+    )
+    {
+        return std::any_of(result.diagnostics.cbegin(), result.diagnostics.cend(), [code](const Diagnostic& diagnostic)
+        {
+            return diagnostic.code == code;
+        });
+    }
+
+    void testTubeCutBoundaryCore()
+    {
+        const OperationResult<TubeCutAnalysis> positive = classifyTubeCut
+        ({
+            { 0.0, -5.0, 5.0 },
+            { 0.0, 5.0, 5.0 },
+            { 0.0, 5.0, -5.0 },
+            { 0.0, -5.0, -5.0 }
+        });
+        check(positive.succeeded() && positive.value.has_value()
+            && positive.value->result == TubeCutResult::CutsLeftAndRight
+            && positive.value->winding == 1
+            && std::all_of
+            (
+                positive.value->seamResults.cbegin(),
+                positive.value->seamResults.cend(),
+                [](const SeamWindingResult& seam)
+                {
+                    return seam.usable && seam.winding == 1;
+                }
+            ),
+            "tube cut positive winding separates both sides");
+
+        const OperationResult<TubeCutAnalysis> negative = classifyTubeCut
+        ({
+            { 0.0, -5.0, 5.0 },
+            { 0.0, -5.0, -5.0 },
+            { 0.0, 5.0, -5.0 },
+            { 0.0, 5.0, 5.0 }
+        });
+        check(negative.succeeded() && negative.value.has_value()
+            && negative.value->result == TubeCutResult::CutsLeftAndRight
+            && negative.value->winding == -1
+            && std::all_of
+            (
+                negative.value->seamResults.cbegin(),
+                negative.value->seamResults.cend(),
+                [](const SeamWindingResult& seam)
+                {
+                    return seam.usable && seam.winding == -1;
+                }
+            ),
+            "tube cut reverse winding separates both sides");
+
+        const OperationResult<TubeCutAnalysis> bridge = classifyTubeCut
+        ({
+            { 0.0, -5.0, 5.0 },
+            { 0.0, 5.0, 5.0 },
+            { 0.0, 5.0, -5.0 },
+            { 0.0, -5.0, -5.0 },
+            { 1.0, -5.0, 5.0 },
+            { 1.0, -5.0, -5.0 },
+            { 1.0, 5.0, -5.0 },
+            { 1.0, 5.0, 5.0 }
+        });
+        check(bridge.succeeded() && bridge.value.has_value()
+            && bridge.value->result == TubeCutResult::KeepsLeftAndRight
+            && bridge.value->winding == 0
+            && std::all_of
+            (
+                bridge.value->seamResults.cbegin(),
+                bridge.value->seamResults.cend(),
+                [](const SeamWindingResult& seam)
+                {
+                    return seam.usable && seam.winding == 0;
+                }
+            )
+            && hasDiagnostic(bridge, DiagnosticCode::CutBoundaryKeepsTubeConnected),
+            "zero winding reports a remaining material bridge");
+
+        const OperationResult<TubeCutAnalysis> seamTouch = classifyTubeCut
+        ({
+            { 0.0, -5.0, 5.0 },
+            { 0.0, 0.0, 5.0 },
+            { 0.0, 5.0, 5.0 },
+            { 0.0, 0.0, 5.0 },
+            { 0.0, 5.0, 5.0 },
+            { 0.0, 5.0, -5.0 },
+            { 0.0, -5.0, -5.0 }
+        });
+        check(seamTouch.succeeded() && seamTouch.value.has_value()
+            && seamTouch.value->winding == 1
+            && seamTouch.value->seamResults[0].positiveCrossingCount == 1
+            && seamTouch.value->seamResults[0].touchCount == 1,
+            "seam touch and return is not counted as crossing");
+
+        const OperationResult<TubeCutAnalysis> seamOverlap = classifyTubeCut
+        ({
+            { 0.0, -5.0, 5.0 },
+            { 0.0, 5.0, 5.0 },
+            { 1.0, 5.0, 5.0 },
+            { 1.0, 5.0, -5.0 },
+            { 1.0, -5.0, -5.0 }
+        });
+        check(seamOverlap.succeeded() && seamOverlap.value.has_value()
+            && seamOverlap.value->winding == 1
+            && seamOverlap.value->seamResults[0].positiveCrossingCount == 1
+            && seamOverlap.value->seamResults[0].overlapRunCount == 1,
+            "seam overlap and cross is counted once");
+
+        const OperationResult<TubeCutAnalysis> diagonal = classifyTubeCut
+        ({
+            { 0.0, -5.0, 5.0 },
+            { 0.0, 5.0, -5.0 },
+            { 0.0, 5.0, 5.0 },
+            { 0.0, -5.0, -5.0 }
+        });
+        check(!diagonal.succeeded() && diagonal.value.has_value()
+            && diagonal.value->result == TubeCutResult::Indeterminate
+            && hasDiagnostic(diagonal, DiagnosticCode::CutBoundaryProjectionMismatch),
+            "matching bounds with an interior diagonal is rejected");
+
+        TubeSectionGeometry tinySection;
+        tinySection.boundary =
+        {
+            { -0.000075, 0.000075 },
+            { 0.000075, 0.000075 },
+            { 0.000075, -0.000075 },
+            { -0.000075, -0.000075 }
+        };
+        tinySection.yLength = 0.00015;
+        tinySection.zWidth = 0.00015;
+        const OperationResult<TubeCutAnalysis> degenerateSeams = classifyTubeCut
+        ({
+            { 0.0, -0.000075, 0.000075 },
+            { 0.0, 0.000075, 0.000075 },
+            { 0.0, 0.000075, -0.000075 },
+            { 0.0, -0.000075, -0.000075 }
+        }, tinySection);
+        check(!degenerateSeams.succeeded() && degenerateSeams.value.has_value()
+            && degenerateSeams.value->result == TubeCutResult::Indeterminate
+            && hasDiagnostic(degenerateSeams, DiagnosticCode::CutBoundarySeamDegenerate),
+            "unusable seam results remain indeterminate");
+
+        std::array<SeamWindingResult, 4> disagreeingSeams;
+
+        for (SeamWindingResult& seam : disagreeingSeams)
+        {
+            seam.usable = true;
+            seam.winding = 1;
+        }
+
+        disagreeingSeams[2].winding = 0;
+        check(TubeCutBoundaryClassifier::classifyWinding(1, disagreeingSeams)
+            == TubeCutResult::Indeterminate,
+            "disagreeing seam winding results remain indeterminate");
+
+        const OperationResult<TubeCutAnalysis> multipleWinding = classifyTubeCut
+        ({
+            { 0.0, -5.0, 5.0 },
+            { 0.0, 5.0, 5.0 },
+            { 0.0, 5.0, -5.0 },
+            { 0.0, -5.0, -5.0 },
+            { 1.0, -5.0, 5.0 },
+            { 1.0, 5.0, 5.0 },
+            { 1.0, 5.0, -5.0 },
+            { 1.0, -5.0, -5.0 }
+        });
+        check(!multipleWinding.succeeded() && multipleWinding.value.has_value()
+            && multipleWinding.value->winding == 2
+            && hasDiagnostic(multipleWinding, DiagnosticCode::CutBoundaryMultipleWinding),
+            "multiple winding remains indeterminate");
     }
 
     void testLegacyAdapterValidationAndOrdering()
@@ -1053,6 +1263,7 @@ int runTopologyTests()
     testStrictLoopContinuity();
     testAdapterCancellationRevisionAndDeterminism();
     testSectionAnalyzersRequireStrictLoop();
+    testTubeCutBoundaryCore();
     testLegacyAdapterValidationAndOrdering();
     testLegacyWrapperPublicApi();
     testLegacyAdapterProcessSemanticsAndTypes();

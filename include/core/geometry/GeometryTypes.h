@@ -8,6 +8,12 @@ namespace cadcam::geometry
 {
     using EntityId = std::uint64_t;
 
+    struct Vector2d
+    {
+        double x = 0.0;
+        double y = 0.0;
+    };
+
     struct Vector3d
     {
         double x = 0.0;

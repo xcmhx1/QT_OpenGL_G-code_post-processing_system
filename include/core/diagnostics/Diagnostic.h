@@ -79,6 +79,18 @@ enum class DiagnosticCode
     LegacyTopologyAdapterFailure,
     DuplicateTopologyEntityId,
     TopologyResultMappingFailure,
+    CutBoundaryTopologyInvalid,
+    CutBoundarySectionUnavailable,
+    CutBoundarySurfaceMappingFailed,
+    CutBoundaryProjectionMismatch,
+    CutBoundaryCoverageGap,
+    CutBoundaryCenterMismatch,
+    CutBoundaryDimensionMismatch,
+    CutBoundarySeamDegenerate,
+    CutBoundarySeamDisagreement,
+    CutBoundaryWindingMismatch,
+    CutBoundaryMultipleWinding,
+    CutBoundaryKeepsTubeConnected,
     InternalInvariantViolation
 };
 

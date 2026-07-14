@@ -61,6 +61,18 @@ QString diagnosticCodeName(DiagnosticCode code)
     case DiagnosticCode::LegacyTopologyAdapterFailure: return QStringLiteral("LegacyTopologyAdapterFailure");
     case DiagnosticCode::DuplicateTopologyEntityId: return QStringLiteral("DuplicateTopologyEntityId");
     case DiagnosticCode::TopologyResultMappingFailure: return QStringLiteral("TopologyResultMappingFailure");
+    case DiagnosticCode::CutBoundaryTopologyInvalid: return QStringLiteral("CutBoundaryTopologyInvalid");
+    case DiagnosticCode::CutBoundarySectionUnavailable: return QStringLiteral("CutBoundarySectionUnavailable");
+    case DiagnosticCode::CutBoundarySurfaceMappingFailed: return QStringLiteral("CutBoundarySurfaceMappingFailed");
+    case DiagnosticCode::CutBoundaryProjectionMismatch: return QStringLiteral("CutBoundaryProjectionMismatch");
+    case DiagnosticCode::CutBoundaryCoverageGap: return QStringLiteral("CutBoundaryCoverageGap");
+    case DiagnosticCode::CutBoundaryCenterMismatch: return QStringLiteral("CutBoundaryCenterMismatch");
+    case DiagnosticCode::CutBoundaryDimensionMismatch: return QStringLiteral("CutBoundaryDimensionMismatch");
+    case DiagnosticCode::CutBoundarySeamDegenerate: return QStringLiteral("CutBoundarySeamDegenerate");
+    case DiagnosticCode::CutBoundarySeamDisagreement: return QStringLiteral("CutBoundarySeamDisagreement");
+    case DiagnosticCode::CutBoundaryWindingMismatch: return QStringLiteral("CutBoundaryWindingMismatch");
+    case DiagnosticCode::CutBoundaryMultipleWinding: return QStringLiteral("CutBoundaryMultipleWinding");
+    case DiagnosticCode::CutBoundaryKeepsTubeConnected: return QStringLiteral("CutBoundaryKeepsTubeConnected");
     case DiagnosticCode::InternalInvariantViolation: return QStringLiteral("InternalInvariantViolation");
     }
 
