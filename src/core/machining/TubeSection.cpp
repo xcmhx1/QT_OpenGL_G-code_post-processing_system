@@ -23,6 +23,7 @@ namespace cadcam::machining
         using topology::TopologyInput;
         using topology::TopologyLoopResult;
         using topology::TopologyPathRecord;
+        using topology::PathTopologyTolerance;
 
         struct SectionCandidate
         {
@@ -749,6 +750,81 @@ namespace cadcam::machining
             return false;
         }
 
+        double pointSegmentDistance3D
+        (
+            const Vector3d& point,
+            const Vector3d& start,
+            const Vector3d& end
+        )
+        {
+            const Vector3d direction
+            {
+                end.x - start.x,
+                end.y - start.y,
+                end.z - start.z
+            };
+            const double lengthSquared = direction.x * direction.x
+                + direction.y * direction.y + direction.z * direction.z;
+            if (lengthSquared <= 1.0e-18) return distance3D(point, start);
+            const double parameter = std::clamp
+            (
+                ((point.x - start.x) * direction.x
+                    + (point.y - start.y) * direction.y
+                    + (point.z - start.z) * direction.z) / lengthSquared,
+                0.0,
+                1.0
+            );
+            return distance3D
+            (
+                point,
+                {
+                    start.x + direction.x * parameter,
+                    start.y + direction.y * parameter,
+                    start.z + direction.z * parameter
+                }
+            );
+        }
+
+        bool pointOnLoop
+        (
+            const Vector3d& point,
+            const std::vector<Vector3d>& loop,
+            double epsilon
+        )
+        {
+            for (std::size_t index = 0; index < loop.size(); ++index)
+            {
+                if (pointSegmentDistance3D
+                (
+                    point,
+                    loop[index],
+                    loop[(index + 1U) % loop.size()]
+                ) <= epsilon) return true;
+            }
+            return false;
+        }
+
+        bool recordContainsNonBoundarySegment
+        (
+            const TopologyPathRecord& record,
+            const std::vector<Vector3d>& loop,
+            double epsilon
+        )
+        {
+            if (record.points.size() < 2U || loop.size() < 3U) return false;
+            for (std::size_t index = 0; index + 1U < record.points.size(); ++index)
+            {
+                const Vector3d midpoint
+                {
+                    (record.points[index].x + record.points[index + 1U].x) * 0.5,
+                    (record.points[index].y + record.points[index + 1U].y) * 0.5,
+                    (record.points[index].z + record.points[index + 1U].z) * 0.5
+                };
+                if (!pointOnLoop(midpoint, loop, epsilon)) return true;
+            }
+            return false;
+        }
+
         std::vector<EntityId> stableIds
         (
             const std::set<EntityId>& ids,
@@ -990,21 +1066,31 @@ namespace cadcam::machining
             );
         }
 
+        OperationResult<InternalPathClassification> result =
+            classifyTopologicalInteriorPaths(input, topology, context);
+        if (!result.succeeded() || !result.value.has_value()) return result;
+
         const std::set<EntityId> outerIds
             (section.outerBoundaryEntityIds.begin(), section.outerBoundaryEntityIds.end());
+        const std::set<EntityId> topologicalIds
+        (
+            result.value->topologicalInteriorEntityIds.begin(),
+            result.value->topologicalInteriorEntityIds.end()
+        );
         std::set<EntityId> physicalIds;
-        std::set<EntityId> topologicalIds;
         const auto& boundary = section.geometry.boundary;
 
         for (const TopologyPathRecord& record : input.records)
         {
-            if (outerIds.count(record.entityId) != 0U || record.points.empty()) continue;
+            if (outerIds.count(record.entityId) != 0U
+                || topologicalIds.count(record.entityId) != 0U
+                || record.points.empty()) continue;
             bool physicalInterior = false;
             for (const Vector3d& point : record.points)
             {
                 const Vector2d projected{ point.y, point.z };
                 if (pointInside(projected, boundary)
-                    && distanceToBoundary(projected, boundary) > policy.interiorDistanceTolerance)
+                    && distanceToBoundary(projected, boundary) > policy.numericalEpsilon)
                 {
                     physicalInterior = true;
                     break;
@@ -1017,64 +1103,13 @@ namespace cadcam::machining
                     { record.points[index].y, record.points[index].z },
                     { record.points[index + 1].y, record.points[index + 1].z },
                     boundary,
-                    policy.interiorDistanceTolerance,
+                    policy.numericalEpsilon,
                     policy.numericalEpsilon
                 );
             }
             if (physicalInterior) physicalIds.insert(record.entityId);
         }
-
-        const std::vector<int> componentIds = topology.componentIds();
-        std::map<int, std::vector<const TopologyPathRecord*>> components;
-        for (std::size_t index = 0; index < input.records.size() && index < componentIds.size(); ++index)
-            if (outerIds.count(input.records[index].entityId) == 0U)
-                components[componentIds[index]].push_back(&input.records[index]);
-
-        for (const auto& [componentId, records] : components)
-        {
-            Q_UNUSED(componentId);
-            bool contained = !records.empty();
-            bool hasStrictInterior = false;
-            std::vector<EntityId> ids;
-            for (const TopologyPathRecord* record : records)
-            {
-                ids.push_back(record->entityId);
-                for (const Vector3d& point : record->points)
-                {
-                    const Vector2d projected{ point.y, point.z };
-                    const double boundaryDistance = distanceToBoundary(projected, boundary);
-                    if (boundaryDistance <= policy.boundaryDistanceTolerance) continue;
-                    if (!pointInside(projected, boundary)) contained = false;
-                    else hasStrictInterior = true;
-                }
-            }
-            if (contained && hasStrictInterior)
-                topologicalIds.insert(ids.begin(), ids.end());
-            const auto loop = topology.extractBestLoop(ids);
-            if (loop.succeeded() && loop.value.has_value() && loop.value->connectedLoop)
-            {
-                bool loopContained = true;
-                bool loopStrict = false;
-                for (const Vector3d& point : loop.value->orderedPath)
-                {
-                    const Vector2d projected{ point.y, point.z };
-                    const double boundaryDistance = distanceToBoundary(projected, boundary);
-                    if (boundaryDistance <= policy.boundaryDistanceTolerance) continue;
-                    if (!pointInside(projected, boundary)) loopContained = false;
-                    else loopStrict = true;
-                }
-                if (loopContained && loopStrict)
-                    topologicalIds.insert
-                        (loop.value->usedEntityIds.begin(), loop.value->usedEntityIds.end());
-            }
-        }
-
-        InternalPathClassification classification;
-        classification.physicalInteriorEntityIds = stableIds(physicalIds, input);
-        classification.topologicalInteriorEntityIds = stableIds(topologicalIds, input);
-        OperationResult<InternalPathClassification> result;
-        result.status = OperationStatus::Success;
-        result.value = std::move(classification);
+        result.value->physicalInteriorEntityIds = stableIds(physicalIds, input);
         result.addDiagnostic(diagnostic
         (
             DiagnosticCode::None,
@@ -1093,6 +1128,107 @@ namespace cadcam::machining
                 static_cast<int>(result.value->topologicalInteriorEntityIds.size())
             )
         ));
+        return result;
+    }
+
+    OperationResult<InternalPathClassification>
+    TubeSectionAnalyzer::classifyTopologicalInteriorPaths
+    (
+        const TopologyInput& input,
+        const topology::PathTopology& topology,
+        const OperationContext& context
+    )
+    {
+        InternalPathClassification classification;
+        OperationResult<InternalPathClassification> result;
+        const std::vector<int> componentIds = topology.componentIds();
+        if (componentIds.size() != input.records.size())
+        {
+            return failure<InternalPathClassification>
+            (
+                DiagnosticCode::TubeSectionInteriorClassificationFailed,
+                QStringLiteral("内部线拓扑输入与连通分量不一致。"),
+                QStringLiteral("Topology component count does not match input records."),
+                context,
+                contextValues(input.contentRevision, 0, 0, nullptr, 0.0)
+            );
+        }
+
+        std::map<int, std::vector<EntityId>> components;
+        std::map<EntityId, const TopologyPathRecord*> recordsById;
+        for (std::size_t index = 0; index < input.records.size(); ++index)
+        {
+            components[componentIds[index]].push_back(input.records[index].entityId);
+            recordsById[input.records[index].entityId] = &input.records[index];
+        }
+
+        std::set<EntityId> topologicalIds;
+        bool hasWarning = false;
+        for (const auto& [componentId, ids] : components)
+        {
+            const OperationResult<TopologyLoopResult> loop = topology.extractBestLoop(ids);
+            if (!loop.succeeded() || !loop.value.has_value() || !loop.value->connectedLoop)
+            {
+                ++classification.skippedComponentCount;
+                QVariantMap values = contextValues
+                    (input.contentRevision, 0, static_cast<int>(ids.size()), nullptr, 0.0);
+                values.insert(QStringLiteral("componentId"), componentId);
+                values.insert(QStringLiteral("reason"), QStringLiteral("no-strict-outer-loop"));
+                result.addDiagnostic(diagnostic
+                (
+                    DiagnosticCode::None,
+                    DiagnosticSeverity::Info,
+                    QStringLiteral("开放或无严格外轮廓的图元组已跳过。"),
+                    QStringLiteral("Connected component has no strict outer loop."),
+                    context,
+                    values
+                ));
+                continue;
+            }
+
+            const std::set<EntityId> used
+                (loop.value->usedEntityIds.begin(), loop.value->usedEntityIds.end());
+            for (EntityId entityId : ids)
+            {
+                if (used.count(entityId) == 0U)
+                {
+                    topologicalIds.insert(entityId);
+                    continue;
+                }
+
+                const auto record = recordsById.find(entityId);
+                if (record != recordsById.end() && recordContainsNonBoundarySegment
+                (
+                    *record->second,
+                    loop.value->orderedPath,
+                    PathTopologyTolerance{}.numericalJoinEpsilon
+                ))
+                {
+                    hasWarning = true;
+                    QVariantMap values = contextValues
+                        (input.contentRevision, 0, static_cast<int>(ids.size()), nullptr, 0.0);
+                    values.insert(QStringLiteral("entityId"), QVariant::fromValue<qulonglong>(entityId));
+                    values.insert(QStringLiteral("componentId"), componentId);
+                    values.insert(QStringLiteral("reason"),
+                        QStringLiteral("entity-contains-boundary-and-interior-segments"));
+                    Diagnostic warning = diagnostic
+                    (
+                        DiagnosticCode::TubeSectionInteriorClassificationFailed,
+                        DiagnosticSeverity::Warning,
+                        QStringLiteral("一个图元同时包含外边界段和内部段，已保留该图元。"),
+                        QStringLiteral("EntityId spans the selected outer loop and interior branches."),
+                        context,
+                        values
+                    );
+                    warning.entityId = entityId;
+                    result.addDiagnostic(warning);
+                }
+            }
+        }
+
+        classification.topologicalInteriorEntityIds = stableIds(topologicalIds, input);
+        result.status = hasWarning ? OperationStatus::PartialSuccess : OperationStatus::Success;
+        result.value = std::move(classification);
         return result;
     }
 }

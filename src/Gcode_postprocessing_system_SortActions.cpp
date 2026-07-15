@@ -2624,47 +2624,60 @@ bool Gcode_postprocessing_system::removeInternalMachiningPaths(bool interactive)
         sceneItems,
         kEndCutConnectionTolerance
     );
-    QSet<CadItem*> internalItems;
+    QSet<CadItem*> topologicalItems;
+    QSet<CadItem*> physicalItems;
 
     for (CadItem* item : result.physicalInteriorItems)
     {
-        internalItems.insert(item);
+        if (item != nullptr && m_processState.stateOrDefault(item->m_entityId)
+            .overrideData.boundaryRole == cadcam::planning::BoundaryRole::None)
+        {
+            physicalItems.insert(item);
+        }
     }
 
     for (CadItem* item : result.topologicalInteriorItems)
     {
-        internalItems.insert(item);
+        if (item != nullptr && m_processState.stateOrDefault(item->m_entityId)
+            .overrideData.boundaryRole == cadcam::planning::BoundaryRole::None)
+        {
+            topologicalItems.insert(item);
+        }
     }
 
-    int excludedInternalCount = 0;
+    QSet<CadItem*> internalItems = topologicalItems;
+    internalItems.unite(physicalItems);
     m_processState.beginBatch();
     for (const std::unique_ptr<CadItem>& entity : m_document.m_entities)
-        if (entity != nullptr) m_processState.setInternalGeometryExcluded(entity->m_entityId, false);
-
-    for (CadItem* item : internalItems)
     {
-        if (item == nullptr || m_processState.stateOrDefault(item->m_entityId)
-            .overrideData.boundaryRole != cadcam::planning::BoundaryRole::None)
+        if (entity != nullptr)
         {
-            continue;
+            const bool shouldExclude = internalItems.contains(entity.get());
+            m_processState.setInternalGeometryExcluded(entity->m_entityId, shouldExclude);
         }
-
-        m_processState.setInternalGeometryExcluded(item->m_entityId, true);
-        ++excludedInternalCount;
     }
     m_processState.endBatch();
 
     invalidateProcessOrdersAfterEndCutChange();
     refreshWasteProcessingExclusions();
     const QString message = m_rotaryTubeSectionModel.valid
-        ? QStringLiteral("内部线条识别完成：进入方管内部 %1 个，最大外轮廓之外 %2 个，共排除 %3 个图元。")
-            .arg(result.physicalInteriorItems.size())
-            .arg(result.topologicalInteriorItems.size())
-            .arg(excludedInternalCount)
-        : QStringLiteral("方管垂直截面尚未识别，本次仅执行拓扑过滤：最大外轮廓之外 %1 个，共排除 %2 个图元。")
-            .arg(result.topologicalInteriorItems.size())
-            .arg(excludedInternalCount);
+        ? QStringLiteral("内部线条识别完成：拓扑内部 %1 个，进入方管内部 %2 个，去重后共排除 %3 个图元。")
+            .arg(topologicalItems.size())
+            .arg(physicalItems.size())
+            .arg(internalItems.size())
+        : QStringLiteral("内部线条识别完成：未识别方管截面，仅执行拓扑分析；拓扑内部 %1 个，去重后共排除 %2 个图元，跳过开放组件 %3 个。")
+            .arg(topologicalItems.size())
+            .arg(internalItems.size())
+            .arg(result.skippedComponentCount);
     ui->openGLWidget->appendCommandMessage(message);
+    for (const Diagnostic& diagnostic : result.diagnostics)
+    {
+        if (diagnostic.severity == DiagnosticSeverity::Warning
+            && !diagnostic.userMessage.isEmpty())
+        {
+            ui->openGLWidget->appendCommandMessage(diagnostic.userMessage);
+        }
+    }
     ui->openGLWidget->update();
     statusBar()->showMessage(message, 6000);
     return true;

@@ -16,6 +16,7 @@
 #include "application/process/DocumentProcessState.h"
 #include "compatibility/legacy/LegacyTopologyParityVerifier.h"
 #include "core/machining/TubeCutBoundary.h"
+#include "core/geometry/GeometryCompiler.h"
 #include "core/planning/PlanarProcessPlanBuilder.h"
 #include "core/planning/ProcessPlanBuilder.h"
 #include "core/topology/PathTopology.h"
@@ -139,6 +140,36 @@ namespace
         input.contentRevision = 1U;
         input.records = std::move(records);
         return PathTopologyBuilder{}.build(input, tolerance, taskContext);
+    }
+
+    std::optional<TopologyPathRecord> compiledRecord
+    (
+        std::size_t sourceIndex,
+        const cadcam::geometry::SourceEntity& source
+    )
+    {
+        cadcam::geometry::SamplingPolicy policy;
+        policy.chordTolerance = 0.0;
+        const OperationResult<cadcam::geometry::Path3D> path =
+            cadcam::geometry::GeometryCompiler{}.compile
+        (
+            source,
+            policy,
+            {},
+            createOperationContext(QStringLiteral("internal-path-compile"))
+        );
+        if (!path.succeeded() || !path.value.has_value()) return std::nullopt;
+
+        TopologyPathRecord result;
+        result.sourceIndex = sourceIndex;
+        result.entityId = source.id;
+        result.sourceKind = source.kind;
+        result.semanticallyClosed = path.value->closed;
+        for (const cadcam::geometry::PathVertex3D& vertex : path.value->vertices)
+            result.points.push_back(vertex.position);
+        if (result.semanticallyClosed && !result.points.empty())
+            result.points.push_back(result.points.front());
+        return result;
     }
 
     std::vector<TopologyPathRecord> rectangle
@@ -1413,10 +1444,11 @@ namespace
         const auto nestedClassification = TubeSectionAnalyzer::classifyInternalPaths
             (nestedFixture->input, nestedFixture->topology, *best.value, policy, context);
         check(nestedClassification.succeeded() && nestedClassification.value.has_value()
-            && std::find(nestedClassification.value->topologicalInteriorEntityIds.cbegin(),
-                nestedClassification.value->topologicalInteriorEntityIds.cend(), 204U)
-                != nestedClassification.value->topologicalInteriorEntityIds.cend(),
-            "contained closed loop is classified as topological interior");
+            && std::find(nestedClassification.value->physicalInteriorEntityIds.cbegin(),
+                nestedClassification.value->physicalInteriorEntityIds.cend(), 204U)
+                != nestedClassification.value->physicalInteriorEntityIds.cend()
+            && nestedClassification.value->topologicalInteriorEntityIds.empty(),
+            "disconnected contained loop is physical rather than topological interior");
         check(nestedClassification.value.has_value()
             && std::none_of(best.value->outerBoundaryEntityIds.cbegin(),
                 best.value->outerBoundaryEntityIds.cend(), [&nestedClassification](EntityId entityId)
@@ -1469,6 +1501,231 @@ namespace
             && bridgeCut.value.has_value()
             && bridgeCut.value->result == TubeCutResult::KeepsLeftAndRight,
             "recognized section geometry feeds positive negative and zero winding cuts");
+    }
+
+    void testInternalPathClassification()
+    {
+        const OperationContext context = createOperationContext
+            (QStringLiteral("internal-path-classification-test"));
+        const auto classifyTopology = [&context](std::vector<TopologyPathRecord> records)
+        {
+            TopologyInput input;
+            input.contentRevision = 1U;
+            input.records = std::move(records);
+            const OperationResult<PathTopology> topology = PathTopologyBuilder{}.build
+                (input, PathTopologyTolerance{}, task(QStringLiteral("internal-topology")));
+            if (!topology.value.has_value())
+                return OperationResult<cadcam::machining::InternalPathClassification>{};
+            return TubeSectionAnalyzer::classifyTopologicalInteriorPaths
+                (input, *topology.value, context);
+        };
+        const auto hasId = [](const std::vector<EntityId>& ids, EntityId id)
+        {
+            return std::find(ids.cbegin(), ids.cend(), id) != ids.cend();
+        };
+        const auto frame = [](EntityId firstId)
+        {
+            return rectangleRecords(0U, firstId, 0.0, -10.0, 10.0, -10.0, 10.0);
+        };
+
+        std::vector<TopologyPathRecord> sun = frame(1000U);
+        sun.push_back(record(4U, 1004U,
+            {{ 0.0, -10.0, 0.0 }, { 0.0, 10.0, 0.0 }}));
+        const auto sunResult = classifyTopology(std::move(sun));
+        check(sunResult.value.has_value()
+            && sunResult.value->topologicalInteriorEntityIds == std::vector<EntityId>{ 1004U },
+            "sun topology keeps outer rectangle and removes one middle bar");
+
+        std::vector<TopologyPathRecord> eye = frame(1100U);
+        eye.push_back(record(4U, 1104U,
+            {{ 0.0, -10.0, -3.0 }, { 0.0, 10.0, -3.0 }}));
+        eye.push_back(record(5U, 1105U,
+            {{ 0.0, -10.0, 3.0 }, { 0.0, 10.0, 3.0 }}));
+        const auto eyeResult = classifyTopology(std::move(eye));
+        check(eyeResult.value.has_value()
+            && eyeResult.value->topologicalInteriorEntityIds
+                == std::vector<EntityId>({ 1104U, 1105U }),
+            "eye topology removes both middle bars");
+
+        std::vector<TopologyPathRecord> field = frame(1200U);
+        field.push_back(record(4U, 1204U,
+            {{ 0.0, -10.0, 0.0 }, { 0.0, 10.0, 0.0 }}));
+        field.push_back(record(5U, 1205U,
+            {{ 0.0, 0.0, -10.0 }, { 0.0, 0.0, 10.0 }}));
+        const auto fieldResult = classifyTopology(std::move(field));
+        check(fieldResult.value.has_value()
+            && fieldResult.value->topologicalInteriorEntityIds
+                == std::vector<EntityId>({ 1204U, 1205U }),
+            "field topology removes crossing middle bars");
+
+        std::vector<TopologyPathRecord> disconnected = frame(1250U);
+        std::vector<TopologyPathRecord> inner = rectangleRecords
+            (4U, 1254U, 0.0, -3.0, 3.0, -3.0, 3.0);
+        disconnected.insert(disconnected.end(), inner.begin(), inner.end());
+        const auto disconnectedResult = classifyTopology(std::move(disconnected));
+        check(disconnectedResult.value.has_value()
+            && disconnectedResult.value->topologicalInteriorEntityIds.empty(),
+            "disconnected inner loop is retained without a tube section");
+
+        std::vector<TopologyPathRecord> open
+        {
+            record(0U, 1300U, {{ 0.0, -5.0, 0.0 }, { 0.0, 0.0, 5.0 }}),
+            record(1U, 1301U, {{ 0.0, 0.0, 5.0 }, { 0.0, 5.0, 0.0 }})
+        };
+        const auto openResult = classifyTopology(std::move(open));
+        check(openResult.value.has_value()
+            && openResult.value->topologicalInteriorEntityIds.empty()
+            && openResult.value->skippedComponentCount == 1,
+            "open component is skipped without excluding paths");
+
+        cadcam::geometry::PolylineGeometry bentPolyline;
+        bentPolyline.sourceVertexCount = 3U;
+        bentPolyline.segments =
+        {
+            cadcam::geometry::LineGeometry{{ 0.0, -10.0, 0.0 }, { 0.0, 0.0, 4.0 }},
+            cadcam::geometry::LineGeometry{{ 0.0, 0.0, 4.0 }, { 0.0, 10.0, 0.0 }}
+        };
+        cadcam::geometry::SourceEntity polylineSource
+            { 1404U, SourceGeometryKind::Polyline, bentPolyline };
+        const auto polylineRecord = compiledRecord(4U, polylineSource);
+        check(polylineRecord.has_value(), "bent polyline compiles through GeometryCompiler");
+        std::vector<TopologyPathRecord> bent = frame(1400U);
+        if (polylineRecord.has_value()) bent.push_back(*polylineRecord);
+        const auto bentResult = classifyTopology(std::move(bent));
+        check(bentResult.value.has_value()
+            && hasId(bentResult.value->topologicalInteriorEntityIds, 1404U),
+            "bent polyline connected to boundary is topological interior");
+
+        cadcam::geometry::SplineGeometry spline;
+        spline.degree = 1;
+        spline.controlPoints =
+        {
+            { 0.0, -10.0, 2.0 }, { 0.0, 0.0, -2.0 }, { 0.0, 10.0, 2.0 }
+        };
+        spline.weights = { 1.0, 1.0, 1.0 };
+        spline.knots = { 0.0, 0.0, 0.5, 1.0, 1.0 };
+        spline.parameterStart = 0.0;
+        spline.parameterEnd = 1.0;
+        cadcam::geometry::SourceEntity splineSource
+            { 1504U, SourceGeometryKind::Spline, spline };
+        const auto splineRecord = compiledRecord(4U, splineSource);
+        check(splineRecord.has_value(), "spline compiles through GeometryCompiler");
+        std::vector<TopologyPathRecord> splineFrame = frame(1500U);
+        if (splineRecord.has_value()) splineFrame.push_back(*splineRecord);
+        const auto splineResult = classifyTopology(std::move(splineFrame));
+        check(splineResult.value.has_value()
+            && hasId(splineResult.value->topologicalInteriorEntityIds, 1504U),
+            "spline connected to boundary is topological interior");
+
+        cadcam::geometry::ArcGeometry arc;
+        arc.center = { 0.0, 0.0, 0.0 };
+        arc.axisU = { 0.0, 1.0, 0.0 };
+        arc.axisV = { 0.0, 0.0, 1.0 };
+        arc.radius = 10.0;
+        arc.startParameter = 0.0;
+        arc.endParameter = 3.14159265358979323846;
+        cadcam::geometry::SourceEntity arcSource
+            { 1604U, SourceGeometryKind::Arc, arc };
+        const auto arcRecord = compiledRecord(4U, arcSource);
+        check(arcRecord.has_value(), "arc compiles through GeometryCompiler");
+        std::vector<TopologyPathRecord> arcFrame = frame(1600U);
+        if (arcRecord.has_value()) arcFrame.push_back(*arcRecord);
+        const auto arcResult = classifyTopology(std::move(arcFrame));
+        check(arcResult.value.has_value()
+            && hasId(arcResult.value->topologicalInteriorEntityIds, 1604U),
+            "arc connected to boundary is topological interior");
+
+        cadcam::geometry::ArcGeometry rightOuterArc;
+        rightOuterArc.center = { 0.0, 5.0, 0.0 };
+        rightOuterArc.axisU = { 0.0, -1.0, 0.0 };
+        rightOuterArc.axisV = { 0.0, 0.0, 1.0 };
+        rightOuterArc.radius = 5.0;
+        rightOuterArc.startParameter = 1.57079632679489661923;
+        rightOuterArc.endParameter = 4.71238898038468985769;
+        cadcam::geometry::ArcGeometry leftOuterArc = rightOuterArc;
+        leftOuterArc.center = { 0.0, -5.0, 0.0 };
+        leftOuterArc.startParameter = 4.71238898038468985769;
+        leftOuterArc.endParameter = 7.85398163397448309615;
+        const auto rightOuter = compiledRecord
+            (1U, { 1651U, SourceGeometryKind::Arc, rightOuterArc });
+        const auto leftOuter = compiledRecord
+            (3U, { 1653U, SourceGeometryKind::Arc, leftOuterArc });
+        std::vector<TopologyPathRecord> roundedFrame
+        {
+            record(0U, 1650U, {{ 0.0, -5.0, 5.0 }, { 0.0, 5.0, 5.0 }}),
+            record(2U, 1652U, {{ 0.0, 5.0, -5.0 }, { 0.0, -5.0, -5.0 }}),
+            record(4U, 1654U, {{ 0.0, -10.0, 0.0 }, { 0.0, 10.0, 0.0 }})
+        };
+        if (rightOuter.has_value()) roundedFrame.push_back(*rightOuter);
+        if (leftOuter.has_value()) roundedFrame.push_back(*leftOuter);
+        const auto roundedResult = classifyTopology(std::move(roundedFrame));
+        check(rightOuter.has_value() && leftOuter.has_value()
+            && roundedResult.value.has_value()
+            && hasId(roundedResult.value->topologicalInteriorEntityIds, 1654U),
+            "line and arc outer boundary retains real rounded loop");
+
+        std::vector<TopologyPathRecord> physicalRecords = frame(1700U);
+        physicalRecords.push_back(record(4U, 1704U,
+            {{ 5.0, -2.0, 0.0 }, { 5.0, 2.0, 0.0 }}));
+        physicalRecords.push_back(record(5U, 1705U,
+            {{ 8.0, -10.0, 4.0 }, { 8.0, 0.0, 0.0 }, { 8.0, 10.0, 4.0 }},
+            false, SourceGeometryKind::Polyline));
+        physicalRecords.push_back(record(6U, 1706U,
+            {{ 11.0, -12.0, 10.0 }, { 11.0, 0.0, 10.0 }, { 11.0, 12.0, 10.0 }}));
+        cadcam::geometry::ArcGeometry enteringArc = arc;
+        enteringArc.center.x = 14.0;
+        enteringArc.radius = 12.0;
+        const auto enteringArcRecord = compiledRecord
+            (7U, { 1707U, SourceGeometryKind::Arc, enteringArc });
+        if (enteringArcRecord.has_value()) physicalRecords.push_back(*enteringArcRecord);
+        const auto physicalFixture = tubeSectionFixture(std::move(physicalRecords));
+        check(physicalFixture.has_value(), "physical interior fixture builds");
+        if (physicalFixture.has_value())
+        {
+            CoreTubeSectionModel section;
+            section.contentRevision = 1U;
+            section.geometry.boundary =
+            {
+                { -10.0, 10.0 }, { 10.0, 10.0 },
+                { 10.0, -10.0 }, { -10.0, -10.0 }
+            };
+            section.outerBoundaryEntityIds = { 1700U, 1701U, 1702U, 1703U };
+            const auto physical = TubeSectionAnalyzer::classifyInternalPaths
+            (
+                physicalFixture->input,
+                physicalFixture->topology,
+                section,
+                TubeSectionPolicy{},
+                context
+            );
+            check(physical.value.has_value()
+                && hasId(physical.value->physicalInteriorEntityIds, 1704U),
+                "whole path inside tube interior is excluded");
+            check(physical.value.has_value()
+                && hasId(physical.value->physicalInteriorEntityIds, 1705U),
+                "bent path entering tube interior is excluded");
+            check(physical.value.has_value()
+                && hasId(physical.value->physicalInteriorEntityIds, 1707U),
+                "curved path partially entering tube interior is excluded");
+            check(physical.value.has_value()
+                && !hasId(physical.value->physicalInteriorEntityIds, 1706U),
+                "path only touching tube surface is retained");
+        }
+
+        cadcam::process::DocumentProcessState processState;
+        const std::uint64_t initialRevision = processState.revision();
+        processState.beginBatch();
+        processState.setInternalGeometryExcluded(1004U, true);
+        processState.setInternalGeometryExcluded(1104U, true);
+        processState.endBatch();
+        check(processState.revision() == initialRevision + 1U,
+            "internal path batch advances process revision once");
+        processState.beginBatch();
+        processState.setInternalGeometryExcluded(1004U, true);
+        processState.setInternalGeometryExcluded(1104U, true);
+        processState.endBatch();
+        check(processState.revision() == initialRevision + 1U,
+            "repeated internal path batch is revision-stable");
     }
 
     struct PlanningFixture
@@ -2617,6 +2874,7 @@ int runTopologyTests()
     testDxfSectionFixtures();
     testTubeCutBoundaryCore();
     testTubeSectionCore();
+    testInternalPathClassification();
     testMultipleBoundarySpatialPlanning();
     testProcessPlanningCore();
     testPlanarProcessPlanningCore();

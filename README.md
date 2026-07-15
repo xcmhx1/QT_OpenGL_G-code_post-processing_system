@@ -362,7 +362,9 @@ ProcessPlan
 - 工件轴线按 X 方向建模，A 轴绕 X 轴旋转。
 - `TubeSectionModel` 保存真实外边界、Y/Z 中心、Y 长、Z 宽、圆角中心和半径；真实边界不是理想凸包替代物。
 - 方管中心用于表面法向、圆角刀头方向和碰撞计算；`rotaryAxisY/rotaryAxisZ` 用于实际旋转坐标变换，两者语义不同。
-- 内部图元包括拓扑外轮廓内部线和进入方管实体内部的危险路径。
+- “去除内部线条”分两遍执行：第一遍不依赖方管截面，使用规范方向 `Path3D` 和 `PathTopology` 按连通分量保留严格闭合的最大真实外环，排除同一组件中未参与外环的内部路径；第二遍仅在方管截面有效时，逐段识别进入真实截面边界内部的危险路径。
+- LINE、ARC、CIRCLE、ELLIPSE、POLYLINE、LWPOLYLINE 和 SPLINE 均先经 `DxfGeometryAdapter` 与 `GeometryCompiler` 形成双精度 `Path3D`，内部线判断不读取显示缓存或按 DXF 类型复制算法。“日、目、田”结构保留外轮廓并排除内部横竖线；开放组件和无严格外环组件保持可加工。
+- 内部线排除只写入 `DocumentProcessState`，不删除 CAD/DXF 图元；Break/Waste 加工断面不被自动内部线状态覆盖。拓扑内部和方管实体内部结果按 EntityId 去重，并在一次批处理中更新，重复相同识别不会产生无意义的 process-state revision。
 - “断N”只标识同一加工断面的成员，不表示空间顺序或加工优先级；多个断面依据真实几何关系从 -X 到 +X 排列。
 - `Break` 是完整工艺屏障：左侧加工组全部完成后立即加工该断面，右侧加工组必须等待断面完成；区域内部才应用 `NearestNext` 或 `LazyRotation`。
 - `Waste` 与 `Break` 共用真实断面空间顺序，但只负责排除本体及相邻废弃区间；交叉、重合或无法严格区分左右的断面会拒绝规划。
@@ -485,7 +487,7 @@ x64/Release/tests/GCodeCharacterizationTests.exe
 - SPLINE NURBS、拟合点降级、生产接入和保存/重载；
 - GeometrySourceSnapshot、串行/并行确定性、取消和过期判断；
 - PathTopology、严格闭环和 topology golden；
-- TubeSection、内部图元和 TubeCutBoundary；
+- TubeSection、无截面“日/目/田”拓扑内部线、曲线/弯折路径、方管实体内部路径和 TubeCutBoundary；
 - Planar/Rotary ProcessPlan；
 - MachineTrajectory 和 A 轴运动学；
 - NcProgram 和 GCodePostProcessor；

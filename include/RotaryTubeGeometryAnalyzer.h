@@ -37,6 +37,8 @@ struct RotaryInternalPathResult
 {
     QVector<CadItem*> physicalInteriorItems;
     QVector<CadItem*> topologicalInteriorItems;
+    QVector<Diagnostic> diagnostics;
+    int skippedComponentCount = 0;
 };
 
 class RotaryTubeGeometryAnalyzer

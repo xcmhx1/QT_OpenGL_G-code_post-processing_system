@@ -37,6 +37,7 @@ namespace cadcam::machining
     {
         std::vector<geometry::EntityId> physicalInteriorEntityIds;
         std::vector<geometry::EntityId> topologicalInteriorEntityIds;
+        int skippedComponentCount = 0;
     };
 
     struct TubeSectionPolicy
@@ -75,6 +76,13 @@ namespace cadcam::machining
             const topology::PathTopology& topology,
             const TubeSectionModel& section,
             const TubeSectionPolicy& policy,
+            const OperationContext& context
+        );
+
+        static OperationResult<InternalPathClassification> classifyTopologicalInteriorPaths
+        (
+            const topology::TopologyInput& input,
+            const topology::PathTopology& topology,
             const OperationContext& context
         );
     };

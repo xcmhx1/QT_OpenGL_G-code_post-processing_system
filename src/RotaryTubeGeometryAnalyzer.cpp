@@ -3,7 +3,10 @@
 #include "RotaryTubeGeometryAnalyzer.h"
 
 #include "CadItem.h"
+#include "application/geometry/GeometrySnapshot.h"
+#include "application/topology/GeometrySnapshotTopologyAdapter.h"
 #include "compatibility/legacy/LegacyCadItemTopologyAdapter.h"
+#include "infrastructure/dxf/DxfGeometryAdapter.h"
 
 #include <QHash>
 
@@ -93,6 +96,76 @@ namespace
         {
             return prepared;
         }
+
+        prepared.valid = true;
+        prepared.input = *converted.value;
+        prepared.topology = *built.value;
+        return prepared;
+    }
+
+    PreparedTopology prepareCompiledTopology
+    (
+        const QVector<CadItem*>& sceneItems,
+        double connectionTolerance,
+        std::uint64_t contentRevision,
+        const OperationContext& context
+    )
+    {
+        PreparedTopology prepared;
+        GeometrySnapshot snapshot;
+        snapshot.contentRevision = std::max<std::uint64_t>(1U, contentRevision);
+        snapshot.entries.reserve(static_cast<std::size_t>(sceneItems.size()));
+        cadcam::geometry::GeometryCompiler compiler;
+        cadcam::geometry::SamplingPolicy policy;
+        cadcam::geometry::PathCompileOptions options;
+
+        for (qsizetype index = 0; index < sceneItems.size(); ++index)
+        {
+            CadItem* item = sceneItems[index];
+            if (item == nullptr || item->m_nativeEntity == nullptr || item->m_entityId == 0U)
+            {
+                continue;
+            }
+
+            GeometrySnapshotEntry entry;
+            entry.sourceIndex = static_cast<std::size_t>(index);
+            entry.attributes.entityId = item->m_entityId;
+            entry.attributes.originalDxfType = static_cast<int>(item->m_type);
+            const OperationResult<cadcam::geometry::SourceEntity> source =
+                DxfGeometryAdapter::convert(item->m_entityId, *item->m_nativeEntity, context);
+            entry.diagnostics += source.diagnostics;
+            if (source.value.has_value())
+            {
+                entry.sourceKind = source.value->kind;
+                OperationResult<cadcam::geometry::Path3D> path = compiler.compile
+                    (*source.value, policy, options, context);
+                entry.diagnostics += path.diagnostics;
+                entry.status = source.status == OperationStatus::PartialSuccess
+                    || path.status == OperationStatus::PartialSuccess
+                    ? OperationStatus::PartialSuccess : path.status;
+                if (path.value.has_value()) entry.path = std::move(*path.value);
+            }
+            else
+            {
+                entry.status = source.status;
+            }
+            if (entry.path.has_value()) prepared.diagnostics += entry.diagnostics;
+            snapshot.entries.push_back(std::move(entry));
+        }
+
+        const PathTopologyTolerance tolerance =
+            PathTopologyTolerance::fromConnectionTolerance(connectionTolerance);
+        const OperationResult<TopologyInput> converted =
+            GeometrySnapshotTopologyAdapter{}.convert(snapshot, {}, tolerance, context);
+        prepared.diagnostics += converted.diagnostics;
+        if (!converted.succeeded() || !converted.value.has_value()) return prepared;
+
+        TaskContext taskContext;
+        taskContext.operationContext = context;
+        const OperationResult<PathTopology> built = PathTopologyBuilder{}.build
+            (*converted.value, tolerance, taskContext);
+        prepared.diagnostics += built.diagnostics;
+        if (!built.succeeded() || !built.value.has_value()) return prepared;
 
         prepared.valid = true;
         prepared.input = *converted.value;
@@ -293,35 +366,41 @@ RotaryInternalPathResult RotaryTubeGeometryAnalyzer::findInternalPaths
 {
     RotaryInternalPathResult result;
 
-    if (!model.coreModel.has_value())
-    {
-        return result;
-    }
-
     const OperationContext context = createOperationContext
         (QStringLiteral("ClassifyTubeInternalPaths"));
-    const PreparedTopology prepared = prepareTopology
-        (sceneItems, connectionTolerance, model.coreModel->contentRevision, context);
+    const std::uint64_t contentRevision = model.coreModel.has_value()
+        ? model.coreModel->contentRevision : 1U;
+    const PreparedTopology prepared = prepareCompiledTopology
+        (sceneItems, connectionTolerance, contentRevision, context);
+    result.diagnostics = prepared.diagnostics;
 
     if (!prepared.valid)
     {
         return result;
     }
 
-    const OperationResult<InternalPathClassification> classified =
-        TubeSectionAnalyzer::classifyInternalPaths
-    (
-        prepared.input,
-        prepared.topology,
-        *model.coreModel,
-        buildPolicy(connectionTolerance),
-        context
-    );
+    const OperationResult<InternalPathClassification> classified = model.coreModel.has_value()
+        ? TubeSectionAnalyzer::classifyInternalPaths
+        (
+            prepared.input,
+            prepared.topology,
+            *model.coreModel,
+            buildPolicy(connectionTolerance),
+            context
+        )
+        : TubeSectionAnalyzer::classifyTopologicalInteriorPaths
+        (
+            prepared.input,
+            prepared.topology,
+            context
+        );
+    result.diagnostics += classified.diagnostics;
 
     if (!classified.succeeded() || !classified.value.has_value())
     {
         return result;
     }
+    result.skippedComponentCount = classified.value->skippedComponentCount;
 
     const QHash<EntityId, CadItem*> byId = itemMap(sceneItems);
 
