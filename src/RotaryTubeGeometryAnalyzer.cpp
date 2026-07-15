@@ -65,6 +65,7 @@ namespace
     (
         const QVector<CadItem*>& sceneItems,
         double connectionTolerance,
+        std::uint64_t contentRevision,
         const OperationContext& context
     )
     {
@@ -72,7 +73,7 @@ namespace
         const PathTopologyTolerance tolerance =
             PathTopologyTolerance::fromConnectionTolerance(connectionTolerance);
         LegacyCadItemTopologyAdapter adapter;
-        const OperationResult<TopologyInput> converted = adapter.convert
+        OperationResult<TopologyInput> converted = adapter.convert
             (sceneItems, tolerance, context);
         prepared.diagnostics += converted.diagnostics;
 
@@ -80,6 +81,7 @@ namespace
         {
             return prepared;
         }
+        converted.value->contentRevision = contentRevision;
 
         TaskContext taskContext;
         taskContext.operationContext = context;
@@ -202,7 +204,8 @@ RotaryTubeSectionModel RotaryTubeGeometryAnalyzer::buildSectionModel
 (
     const QVector<CadItem*>& selectedItems,
     const QVector<CadItem*>& sceneItems,
-    double connectionTolerance
+    double connectionTolerance,
+    std::uint64_t contentRevision
 )
 {
     RotaryTubeSectionModel model;
@@ -216,7 +219,7 @@ RotaryTubeSectionModel RotaryTubeGeometryAnalyzer::buildSectionModel
     }
 
     const PreparedTopology prepared = prepareTopology
-        (sceneItems, connectionTolerance, context);
+        (sceneItems, connectionTolerance, contentRevision, context);
 
     if (!prepared.valid)
     {
@@ -247,13 +250,14 @@ RotaryTubeSectionModel RotaryTubeGeometryAnalyzer::buildSectionModel
 RotaryTubeSectionModel RotaryTubeGeometryAnalyzer::findBestSectionModel
 (
     const QVector<CadItem*>& sceneItems,
-    double connectionTolerance
+    double connectionTolerance,
+    std::uint64_t contentRevision
 )
 {
     RotaryTubeSectionModel model;
     const OperationContext context = createOperationContext(QStringLiteral("FindBestTubeSection"));
     const PreparedTopology prepared = prepareTopology
-        (sceneItems, connectionTolerance, context);
+        (sceneItems, connectionTolerance, contentRevision, context);
 
     if (!prepared.valid)
     {
@@ -297,7 +301,7 @@ RotaryInternalPathResult RotaryTubeGeometryAnalyzer::findInternalPaths
     const OperationContext context = createOperationContext
         (QStringLiteral("ClassifyTubeInternalPaths"));
     const PreparedTopology prepared = prepareTopology
-        (sceneItems, connectionTolerance, context);
+        (sceneItems, connectionTolerance, model.coreModel->contentRevision, context);
 
     if (!prepared.valid)
     {

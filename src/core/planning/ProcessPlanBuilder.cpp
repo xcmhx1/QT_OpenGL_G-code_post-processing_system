@@ -307,6 +307,39 @@ namespace cadcam::planning
             double tolerance
         )
         {
+            double groupMinimumX = std::numeric_limits<double>::max();
+            double groupMaximumX = std::numeric_limits<double>::lowest();
+            for (const EntityId entityId : group.entityIds)
+            {
+                const auto found = entities.find(entityId);
+                if (found == entities.end() || found->second->path.vertices.empty())
+                {
+                    return BoundarySide::Indeterminate;
+                }
+                for (const geometry::PathVertex3D& vertex : found->second->path.vertices)
+                {
+                    groupMinimumX = std::min(groupMinimumX, vertex.position.x);
+                    groupMaximumX = std::max(groupMaximumX, vertex.position.x);
+                }
+            }
+
+            double boundaryMinimumX = std::numeric_limits<double>::max();
+            double boundaryMaximumX = std::numeric_limits<double>::lowest();
+            for (const machining::UnwrappedBoundaryPoint& point : boundary.analysis.unwrappedBoundary)
+            {
+                boundaryMinimumX = std::min(boundaryMinimumX, point.x);
+                boundaryMaximumX = std::max(boundaryMaximumX, point.x);
+            }
+            const double safeTolerance = std::max(1.0e-6, std::abs(tolerance));
+            if (groupMaximumX < boundaryMinimumX - safeTolerance)
+            {
+                return BoundarySide::Left;
+            }
+            if (groupMinimumX > boundaryMaximumX + safeTolerance)
+            {
+                return BoundarySide::Right;
+            }
+
             bool left = false;
             bool right = false;
             bool onBoundary = false;
@@ -589,6 +622,27 @@ namespace cadcam::planning
             );
         }
 
+        std::optional<machining::TubeSectionGeometry> planningSection;
+        if (input.tubeSection.has_value())
+        {
+            auto preparedSection = TubeCutBoundaryClassifier::prepareSection
+                (input.tubeSection->geometry, context);
+            if (!preparedSection.succeeded() || !preparedSection.value.has_value())
+            {
+                auto result = failure<ProcessPlan>
+                (
+                    OperationStatus::InvalidInput, context,
+                    DiagnosticCode::ProcessPlanningInputInvalid,
+                    QStringLiteral("已识别的方管截面无法用于加工计划。"),
+                    QStringLiteral("Tube section normalization failed before planning."),
+                    diagnosticValues(input, policy)
+                );
+                result.mergeDiagnostics(preparedSection.diagnostics);
+                return result;
+            }
+            planningSection = std::move(*preparedSection.value);
+        }
+
         ProcessPlan plan;
         plan.contentRevision = input.contentRevision;
         plan.processStateRevision = input.processStateRevision;
@@ -689,25 +743,36 @@ namespace cadcam::planning
                 result.mergeDiagnostics(loop.diagnostics);
                 return result;
             }
+            const double surfaceMappingTolerance = std::clamp
+                (policy.connectionTolerance * 0.01, 1.0e-4, 0.01);
             const auto analysis = TubeCutBoundaryClassifier::analyze
             (
                 loop.value->orderedPath,
                 loop.value->usedEntityIds,
                 loop.value->maximumJoinGap,
-                input.tubeSection->geometry,
-                context
+                *planningSection,
+                context,
+                surfaceMappingTolerance
             );
-            if (!analysis.succeeded() || !analysis.value.has_value()
-                || analysis.value->result == TubeCutResult::Indeterminate)
+            if (!analysis.succeeded() || !analysis.value.has_value())
             {
                 auto result = failure<ProcessPlan>
+                (
+                    OperationStatus::Failed, context, DiagnosticCode::ProcessPlanningBoundaryInvalid,
+                    QStringLiteral("加工断面重新验证失败，无法建立安全加工计划。"), QStringLiteral("TubeCutBoundaryClassifier analysis failed."),
+                    diagnosticValues(input, policy, 0U, 0U, key.first, group.groupId)
+                );
+                result.mergeDiagnostics(analysis.diagnostics);
+                return result;
+            }
+            if (analysis.value->result == TubeCutResult::Indeterminate)
+            {
+                return failure<ProcessPlan>
                 (
                     OperationStatus::Failed, context, DiagnosticCode::ProcessPlanningBoundaryInvalid,
                     QStringLiteral("加工断面判定不确定，无法建立安全加工计划。"), QStringLiteral("TubeCutBoundaryClassifier returned Indeterminate."),
                     diagnosticValues(input, policy, 0U, 0U, key.first, group.groupId)
                 );
-                result.mergeDiagnostics(analysis.diagnostics);
-                return result;
             }
             if (analysis.value->result == TubeCutResult::KeepsLeftAndRight)
             {
@@ -782,7 +847,7 @@ namespace cadcam::planning
                 const BoundarySide side = classifyGroup
                 (
                     left, entities, boundaries[static_cast<std::size_t>(rightIndex)],
-                    input.tubeSection->geometry, policy.connectionTolerance
+                    *planningSection, policy.connectionTolerance
                 );
                 if (side == BoundarySide::Left) return true;
                 if (side == BoundarySide::Right) return false;
@@ -797,9 +862,9 @@ namespace cadcam::planning
                     const BoundaryData& rightBoundary = boundaries[static_cast<std::size_t>(boundaryOrder[index + 1U])];
                     if (leftBoundary.role != BoundaryRole::Waste && rightBoundary.role != BoundaryRole::Waste) continue;
                     const BoundarySide relativeLeft = classifyGroup
-                        (group, entities, leftBoundary, input.tubeSection->geometry, policy.connectionTolerance);
+                        (group, entities, leftBoundary, *planningSection, policy.connectionTolerance);
                     const BoundarySide relativeRight = classifyGroup
-                        (group, entities, rightBoundary, input.tubeSection->geometry, policy.connectionTolerance);
+                        (group, entities, rightBoundary, *planningSection, policy.connectionTolerance);
                     if (relativeLeft == BoundarySide::Right && relativeRight == BoundarySide::Left)
                     {
                         excludedGroups.insert(group.groupId);
@@ -820,7 +885,7 @@ namespace cadcam::planning
                 if (group.groupId == boundary.groupId || excludedGroups.find(group.groupId) != excludedGroups.end()) continue;
                 const BoundarySide side = classifyGroup
                 (
-                    group, entities, boundary, input.tubeSection->geometry,
+                    group, entities, boundary, *planningSection,
                     policy.connectionTolerance
                 );
                 if (side == BoundarySide::Mixed || side == BoundarySide::Indeterminate)

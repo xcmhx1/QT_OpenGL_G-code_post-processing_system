@@ -2534,7 +2534,8 @@ bool Gcode_postprocessing_system::recognizeRotaryTubeSection(bool interactive)
         recognized = RotaryTubeGeometryAnalyzer::findBestSectionModel
         (
             sceneItems,
-            kEndCutConnectionTolerance
+            kEndCutConnectionTolerance,
+            m_document.contentRevision()
         );
 
         QString diagnostic = QStringLiteral("自动截面识别：检查候选 %1 个，有效 %2 个，圆角候选 %3 个")
@@ -2568,7 +2569,8 @@ bool Gcode_postprocessing_system::recognizeRotaryTubeSection(bool interactive)
         (
             selectedItems,
             sceneItems,
-            kEndCutConnectionTolerance
+            kEndCutConnectionTolerance,
+            m_document.contentRevision()
         );
     }
     else

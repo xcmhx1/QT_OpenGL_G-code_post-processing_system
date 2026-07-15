@@ -991,10 +991,11 @@ namespace cadcam::machining
         }
 
         analysis.surfaceMappingValid = true;
+        const double traversalEpsilon = std::max(matchEpsilon, mappingEpsilon);
         analysis.maximumProjectionCoverageGap = maximumCoverageGap
-            (mapped.spans, section.perimeter, matchEpsilon);
+            (mapped.spans, section.perimeter, traversalEpsilon);
 
-        if (analysis.maximumProjectionCoverageGap > matchEpsilon)
+        if (analysis.maximumProjectionCoverageGap > traversalEpsilon)
         {
             return fail
             (
@@ -1027,7 +1028,7 @@ namespace cadcam::machining
         const double windingValue = signedTravel / section.perimeter;
         analysis.winding = static_cast<int>(std::llround(windingValue));
 
-        if (std::abs(signedTravel - analysis.winding * section.perimeter) > matchEpsilon)
+        if (std::abs(signedTravel - analysis.winding * section.perimeter) > traversalEpsilon)
         {
             return fail
             (
@@ -1043,7 +1044,7 @@ namespace cadcam::machining
         for (int seamIndex = 0; seamIndex < 4; ++seamIndex)
         {
             analysis.seamResults[static_cast<std::size_t>(seamIndex)] = analyzeSeam
-                (mapped.spans, section, seamIndex, matchEpsilon);
+                (mapped.spans, section, seamIndex, traversalEpsilon);
         }
 
         int usableSeamCount = 0;

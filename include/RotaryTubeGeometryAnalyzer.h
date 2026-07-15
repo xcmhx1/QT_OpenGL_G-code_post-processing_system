@@ -6,6 +6,7 @@
 #include <QVector2D>
 #include <QString>
 
+#include <cstdint>
 #include <optional>
 
 class CadItem;
@@ -45,13 +46,15 @@ public:
     (
         const QVector<CadItem*>& selectedItems,
         const QVector<CadItem*>& sceneItems,
-        double connectionTolerance = 1.0
+        double connectionTolerance = 1.0,
+        std::uint64_t contentRevision = 1U
     );
 
     static RotaryTubeSectionModel findBestSectionModel
     (
         const QVector<CadItem*>& sceneItems,
-        double connectionTolerance = 1.0
+        double connectionTolerance = 1.0,
+        std::uint64_t contentRevision = 1U
     );
 
     static RotaryInternalPathResult findInternalPaths

@@ -261,8 +261,9 @@ DocumentProcessPlanningAdapter::captureRotary
         {
             geometry::PathCompileOptions options;
             options.startParameter = state.overrideData.startParameter;
-            auto path = compiler.compile(*entry.sourceEntity,
-                productionSamplingPolicy(entry.attributes.originalDxfType), options, context);
+            geometry::SamplingPolicy pathPolicy =
+                productionSamplingPolicy(entry.attributes.originalDxfType);
+            auto path = compiler.compile(*entry.sourceEntity, pathPolicy, options, context);
             if (path.succeeded() && path.value.has_value())
             {
                 entity.path = std::move(*path.value);
@@ -270,13 +271,21 @@ DocumentProcessPlanningAdapter::captureRotary
                 if (supportsProcessPath(entity.sourceKind)
                     && hasUsablePath(entity.path, topologyTolerance.minimumEdgeLength))
                 {
+                    pathPolicy.singlePrecisionEvaluation = false;
+                    auto topologyPath = compiler.compile
+                        (*entry.sourceEntity, pathPolicy, options, context);
                     topology::TopologyPathRecord record;
                     record.sourceIndex = entity.sourceIndex;
                     record.entityId = entity.entityId;
                     record.sourceKind = entity.sourceKind;
                     record.semanticallyClosed = entity.path.closed;
-                    record.points.reserve(entity.path.vertices.size());
-                    for (const auto& vertex : entity.path.vertices) record.points.push_back(vertex.position);
+                    const geometry::Path3D& sourcePath =
+                        topologyPath.succeeded() && topologyPath.value.has_value()
+                            ? *topologyPath.value
+                            : entity.path;
+                    record.points.reserve(sourcePath.vertices.size());
+                    for (const auto& vertex : sourcePath.vertices)
+                        record.points.push_back(vertex.position);
                     input.topologyInput.records.push_back(std::move(record));
                 }
             }

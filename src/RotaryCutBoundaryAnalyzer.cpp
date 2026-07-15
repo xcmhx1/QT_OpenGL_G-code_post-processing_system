@@ -216,13 +216,18 @@ RotaryCutBoundaryAnalysis RotaryCutBoundaryAnalyzer::analyze
     const TubeSectionGeometry sourceSection = sectionModel.coreModel.has_value()
         ? sectionModel.coreModel->geometry
         : TubeSectionGeometry{};
+    // Independent DXF ellipse tessellations can differ by several microns even
+    // when they represent the same rounded tube surface.
+    const double surfaceMappingTolerance = std::clamp
+        (connectionTolerance * 0.01, 1.0e-4, 0.01);
     const OperationResult<TubeCutAnalysis> coreResult = TubeCutBoundaryClassifier::analyze
     (
         orderedPath,
         entityIds,
         loop.maximumJoinGap,
         sourceSection,
-        context
+        context,
+        surfaceMappingTolerance
     );
     analysis.diagnostics = coreResult.diagnostics;
 

@@ -1,6 +1,5 @@
 #include "infrastructure/dxf/DxfGeometryAdapter.h"
 
-#include "CadEllipseGeometry.h"
 #include "CadOcsGeometry.h"
 #include "libdxfrw/drw_entities.h"
 
@@ -46,6 +45,30 @@ namespace
     double squaredLength(const Vector3d& value)
     {
         return value.x * value.x + value.y * value.y + value.z * value.z;
+    }
+
+    Vector3d crossProduct(const Vector3d& left, const Vector3d& right)
+    {
+        return
+        {
+            left.y * right.z - left.z * right.y,
+            left.z * right.x - left.x * right.z,
+            left.x * right.y - left.y * right.x
+        };
+    }
+
+    bool normalize(Vector3d& value)
+    {
+        const double lengthSquared = squaredLength(value);
+        if (!std::isfinite(lengthSquared) || lengthSquared <= 1.0e-24)
+        {
+            return false;
+        }
+        const double inverseLength = 1.0 / std::sqrt(lengthSquared);
+        value.x *= inverseLength;
+        value.y *= inverseLength;
+        value.z *= inverseLength;
+        return true;
     }
 
     bool finiteVector(const Vector3d& value)
@@ -529,14 +552,31 @@ OperationResult<cadcam::geometry::SourceEntity> DxfGeometryAdapter::convert
     case DRW::ETYPE::ELLIPSE:
     {
         const auto& ellipse = static_cast<const DRW_Ellipse&>(entity);
-        CadEllipseGeometry geometry;
+        const Vector3d center = toVector3d(ellipse.basePoint);
+        const Vector3d majorAxis = toVector3d(ellipse.secPoint);
+        Vector3d normal = toVector3d(ellipse.extPoint);
+        if (squaredLength(normal) <= 1.0e-24)
+        {
+            normal = { 0.0, 0.0, 1.0 };
+        }
+        const double majorLength = std::sqrt(squaredLength(majorAxis));
+        Vector3d minorAxis = crossProduct(normal, majorAxis);
+        const bool validMinorDirection = normalize(minorAxis);
+        if (validMinorDirection)
+        {
+            const double minorLength = majorLength * ellipse.ratio;
+            minorAxis.x *= minorLength;
+            minorAxis.y *= minorLength;
+            minorAxis.z *= minorLength;
+        }
+        const double parameterSpan = ellipse.endparam - ellipse.staparam;
+        const bool fullEllipse = std::abs(parameterSpan) <= 1.0e-6
+            || std::abs(std::abs(parameterSpan) - kTwoPi) <= 1.0e-6;
         if (!std::isfinite(ellipse.ratio) || ellipse.ratio <= 0.0 || ellipse.ratio > 1.0
-            || !CadEllipseGeometryUtils::buildEllipseGeometry(&ellipse, geometry)
-            || !finiteVector(toVector3d(geometry.center))
-            || !finiteVector(toVector3d(geometry.majorAxis))
-            || !finiteVector(toVector3d(geometry.minorAxis))
-            || squaredLength(toVector3d(geometry.majorAxis)) <= 1.0e-12
-            || squaredLength(toVector3d(geometry.minorAxis)) <= 1.0e-12)
+            || !std::isfinite(ellipse.staparam) || !std::isfinite(ellipse.endparam)
+            || !finiteVector(center) || !finiteVector(majorAxis) || !finiteVector(normal)
+            || !validMinorDirection || majorLength <= 1.0e-12
+            || squaredLength(minorAxis) <= 1.0e-12)
         {
             result.status = OperationStatus::InvalidInput;
             result.addDiagnostic(makeAdapterDiagnostic
@@ -555,17 +595,17 @@ OperationResult<cadcam::geometry::SourceEntity> DxfGeometryAdapter::convert
             return result;
         }
         source.kind = SourceGeometryKind::Ellipse;
-        const double normalizedEnd = geometry.full
-            ? geometry.startParameter + kTwoPi
-            : normalizedPositiveEnd(geometry.startParameter, geometry.endParameter);
+        const double normalizedEnd = fullEllipse
+            ? ellipse.staparam + kTwoPi
+            : normalizedPositiveEnd(ellipse.staparam, ellipse.endparam);
         source.geometry = EllipseGeometry
         {
-            toVector3d(geometry.center),
-            toVector3d(geometry.majorAxis),
-            toVector3d(geometry.minorAxis),
-            geometry.startParameter,
+            center,
+            majorAxis,
+            minorAxis,
+            ellipse.staparam,
             normalizedEnd,
-            geometry.full
+            fullEllipse
         };
         break;
     }

@@ -2,8 +2,7 @@
 
 #include "CadEllipseGeometry.h"
 #include "CadItem.h"
-
-#include <QVector3D>
+#include "compatibility/legacy/LegacyCadItemPathBridge.h"
 
 #include <cmath>
 #include <set>
@@ -102,19 +101,12 @@ namespace
         }
     }
 
-    double legacyDistance(const QVector3D& left, const QVector3D& right)
+    double topologyDistance(const Vector3d& left, const Vector3d& right)
     {
-        return static_cast<double>((left - right).length());
-    }
-
-    Vector3d toCore(const QVector3D& point)
-    {
-        return
-        {
-            static_cast<double>(point.x()),
-            static_cast<double>(point.y()),
-            static_cast<double>(point.z())
-        };
+        const double deltaX = left.x - right.x;
+        const double deltaY = left.y - right.y;
+        const double deltaZ = left.z - right.z;
+        return std::sqrt(deltaX * deltaX + deltaY * deltaY + deltaZ * deltaZ);
     }
 }
 
@@ -168,18 +160,28 @@ LegacyCadItemTopologyAdapter::convert
 
         item->rebuildRawPathPoints3D();
         const std::vector<RawPathPoint3D>& rawPath = item->rawPathPoints3D();
-        std::vector<QVector3D> cleanPath;
-        cleanPath.reserve(rawPath.size() + 1U);
-        for (const RawPathPoint3D& rawPoint : rawPath)
-        {
-            const QVector3D point
+
+        cadcam::geometry::SamplingPolicy endpointPolicy =
+            LegacyCadItemPathBridge::legacySamplingPolicy(*item);
+        endpointPolicy.singlePrecisionEvaluation = false;
+        const cadcam::geometry::PathCompileOptions endpointOptions;
+        const OperationResult<cadcam::geometry::Path3D> endpointPathResult =
+            LegacyCadItemPathBridge::compile
             (
-                static_cast<float>(rawPoint.x),
-                static_cast<float>(rawPoint.y),
-                static_cast<float>(rawPoint.z)
+                *item,
+                endpointPolicy,
+                endpointOptions,
+                context
             );
+
+        std::vector<Vector3d> cleanPath;
+        cleanPath.reserve(rawPath.size() + 1U);
+        for (std::size_t pointIndex = 0; pointIndex < rawPath.size(); ++pointIndex)
+        {
+            const RawPathPoint3D& rawPoint = rawPath[pointIndex];
+            const Vector3d point{ rawPoint.x, rawPoint.y, rawPoint.z };
             if (cleanPath.empty()
-                || legacyDistance(cleanPath.back(), point) > tolerance.minimumEdgeLength)
+                || topologyDistance(cleanPath.back(), point) > tolerance.minimumEdgeLength)
             {
                 cleanPath.push_back(point);
             }
@@ -196,21 +198,29 @@ LegacyCadItemTopologyAdapter::convert
             continue;
         }
 
+        const bool closed = semanticallyClosed(*item);
+        if (endpointPathResult.succeeded() && endpointPathResult.value.has_value()
+            && !endpointPathResult.value->vertices.empty())
+        {
+            const std::vector<cadcam::geometry::PathVertex3D>& preciseVertices =
+                endpointPathResult.value->vertices;
+            cleanPath.front() = preciseVertices.front().position;
+            cleanPath.back() = closed
+                ? preciseVertices.front().position
+                : preciseVertices.back().position;
+        }
+
         TopologyPathRecord record;
         record.sourceIndex = sourceIndex;
         record.entityId = item->m_entityId;
         record.sourceKind = sourceKind(item->m_type);
-        record.semanticallyClosed = semanticallyClosed(*item);
+        record.semanticallyClosed = closed;
         if (record.semanticallyClosed && cleanPath.size() >= 3U
-            && legacyDistance(cleanPath.front(), cleanPath.back()) > tolerance.minimumEdgeLength)
+            && topologyDistance(cleanPath.front(), cleanPath.back()) > tolerance.minimumEdgeLength)
         {
             cleanPath.push_back(cleanPath.front());
         }
-        record.points.reserve(cleanPath.size());
-        for (const QVector3D& point : cleanPath)
-        {
-            record.points.push_back(toCore(point));
-        }
+        record.points = std::move(cleanPath);
         input.records.push_back(std::move(record));
     }
 

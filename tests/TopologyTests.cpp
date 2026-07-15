@@ -2,6 +2,8 @@
 
 #include "CadDocument.h"
 #include "CadItem.h"
+#include "GGenerator.h"
+#include "GProfile.h"
 #include "RotaryCutBoundaryAnalyzer.h"
 #include "RotaryPathTopology.h"
 #include "RotaryTubeGeometryAnalyzer.h"
@@ -10,6 +12,7 @@
 #include "application/topology/GeometrySnapshotTopologyAdapter.h"
 #include "compatibility/legacy/LegacyCadItemTopologyAdapter.h"
 #include "application/planning/DocumentProcessPlanningAdapter.h"
+#include "application/planning/ProcessPlanningService.h"
 #include "application/process/DocumentProcessState.h"
 #include "compatibility/legacy/LegacyTopologyParityVerifier.h"
 #include "core/machining/TubeCutBoundary.h"
@@ -29,6 +32,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <iomanip>
 #include <iostream>
 #include <memory>
 
@@ -684,6 +688,280 @@ namespace
             "machining boundary stops before analysis when join gap exists");
     }
 
+    void testDxfSectionFixtures()
+    {
+        struct Fixture
+        {
+            QString fileName;
+            int expectedItemCount = 0;
+            std::vector<double> expectedCenterXs;
+        };
+
+        const QString repositoryRoot = QFileInfo(QString::fromUtf8(__FILE__)).absoluteDir().absolutePath()
+            + QStringLiteral("/..");
+        const QDir fixtureDirectory(QDir(repositoryRoot).filePath(QStringLiteral("testdxf")));
+        const std::array<Fixture, 4> fixtures
+        {{
+            { QStringLiteral("垂直切面.dxf"), 8, { 0.0 } },
+            { QStringLiteral("倾斜切面.dxf"), 8, { 7.2169 } },
+            { QStringLiteral("垂直&倾斜切面.dxf"), 16, { 0.0, 57.2169 } },
+            { QStringLiteral("倾斜切面2.dxf"), 16, { 7.2169, 1209.2169 } }
+        }};
+
+        auto itemCenterX = [](CadItem* item)
+        {
+            item->rebuildRawPathPoints3D();
+            const auto& points = item->rawPathPoints3D();
+            double sum = 0.0;
+            for (const RawPathPoint3D& point : points) sum += point.x;
+            return points.empty() ? 0.0 : sum / static_cast<double>(points.size());
+        };
+
+        for (const Fixture& fixture : fixtures)
+        {
+            const QString filePath = fixtureDirectory.filePath(fixture.fileName);
+            check(QFileInfo::exists(filePath), "DXF section fixture exists");
+            CadDocument document;
+            document.readDxfDocument(filePath);
+
+            QVector<CadItem*> sceneItems;
+            sceneItems.reserve(static_cast<qsizetype>(document.m_entities.size()));
+            for (const auto& item : document.m_entities) sceneItems.push_back(item.get());
+            check(sceneItems.size() == fixture.expectedItemCount,
+                "DXF section fixture imports expected entity count");
+            if (sceneItems.isEmpty()) continue;
+
+            const RotaryTubeSectionModel automaticSection =
+                RotaryTubeGeometryAnalyzer::findBestSectionModel
+                    (sceneItems, 1.0, document.contentRevision());
+            check(automaticSection.valid
+                && automaticSection.validCandidateCount
+                    == static_cast<int>(fixture.expectedCenterXs.size())
+                && automaticSection.coreModel.has_value()
+                && automaticSection.coreModel->contentRevision
+                    == document.contentRevision()
+                && std::abs(automaticSection.yLength - 25.0) <= 1.0e-3
+                && std::abs(automaticSection.zWidth - 25.0) <= 1.0e-3
+                && std::abs(automaticSection.cornerRadius - 1.0) <= 1.0e-3
+                && automaticSection.roundedCornerCount == 4,
+                "DXF fixture automatic search finds all section candidates");
+
+            cadcam::process::DocumentProcessState processState;
+            ProcessPlanningPolicy planningPolicy;
+            planningPolicy.orderingStrategy = ProcessOrderingStrategy::NearestNext;
+            const OperationContext planningContext = createOperationContext
+                (QStringLiteral("dxf-section-revision-planning-test"));
+            const auto plan = ProcessPlanningService{}.buildRotaryPlan
+            (
+                document,
+                processState,
+                automaticSection.coreModel,
+                planningPolicy,
+                planningContext
+            );
+            if (!plan.succeeded())
+            {
+                for (const Diagnostic& diagnostic : plan.diagnostics)
+                    if (!diagnostic.userMessage.isEmpty())
+                        std::cerr << "DXF fixture planning failure: "
+                            << diagnostic.userMessage.toStdString() << '\n';
+            }
+            check(plan.succeeded() && plan.value.has_value(),
+                "DXF fixture recognized section remains current for process planning");
+
+            std::vector<RotaryTubeSectionModel> recognizedSections;
+            for (double expectedCenterX : fixture.expectedCenterXs)
+            {
+                CadItem* seed = *std::min_element(sceneItems.cbegin(), sceneItems.cend(),
+                    [itemCenterX, expectedCenterX](CadItem* left, CadItem* right)
+                    {
+                        return std::abs(itemCenterX(left) - expectedCenterX)
+                            < std::abs(itemCenterX(right) - expectedCenterX);
+                    });
+                const RotaryTubeSectionModel section =
+                    RotaryTubeGeometryAnalyzer::buildSectionModel
+                        ({ seed }, sceneItems, 1.0, document.contentRevision());
+                const bool sectionMatches = section.valid
+                    && section.outerBoundaryItems.size() == 8
+                    && std::abs(section.yLength - 25.0) <= 1.0e-3
+                    && std::abs(section.zWidth - 25.0) <= 1.0e-3
+                    && std::abs(section.cornerRadius - 1.0) <= 1.0e-3
+                    && section.roundedCornerCount == 4
+                    && std::abs(section.centerX - expectedCenterX) <= 1.0e-3;
+                if (!sectionMatches)
+                {
+                    std::cerr << "DXF fixture section mismatch: "
+                        << fixture.fileName.toStdString()
+                        << " centerX=" << section.centerX
+                        << " Y=" << section.yLength
+                        << " Z=" << section.zWidth
+                        << " R=" << section.cornerRadius
+                        << " corners=" << section.roundedCornerCount
+                        << " boundaryItems=" << section.outerBoundaryItems.size()
+                        << " error=" << section.errorMessage.toStdString() << '\n';
+
+                    QVector<CadItem*> localItems;
+                    for (CadItem* item : sceneItems)
+                    {
+                        if (std::abs(itemCenterX(item) - expectedCenterX) < 100.0)
+                        {
+                            localItems.push_back(item);
+                        }
+                    }
+                    const PathTopologyTolerance topologyTolerance =
+                        PathTopologyTolerance::fromConnectionTolerance(1.0);
+                    const OperationContext topologyContext = createOperationContext
+                        (QStringLiteral("dxf-section-fixture-diagnostic"));
+                    const auto topologyInput = LegacyCadItemTopologyAdapter{}.convert
+                        (localItems, topologyTolerance, topologyContext);
+                    if (topologyInput.value.has_value())
+                    {
+                        std::cerr << std::setprecision(15);
+                        const auto& records = topologyInput.value->records;
+                        for (std::size_t recordIndex = 0; recordIndex < records.size(); ++recordIndex)
+                        {
+                            const auto& record = records[recordIndex];
+                            const Vector3d& first = record.points.front();
+                            const Vector3d& last = record.points.back();
+                            std::cerr << "  record=" << recordIndex
+                                << " type=" << static_cast<int>(localItems[static_cast<int>(recordIndex)]->m_type)
+                                << " first=(" << first.x << ',' << first.y << ',' << first.z << ')'
+                                << " last=(" << last.x << ',' << last.y << ',' << last.z << ")\n";
+                        }
+                    }
+                    const RotaryPathLoopResult loop = RotaryPathTopology
+                        (localItems, topologyTolerance).extractBestLoop(localItems, { seed });
+                    std::cerr << "  loop valid=" << loop.valid
+                        << " connected=" << loop.connectedLoop
+                        << " joinGap=" << std::setprecision(15) << loop.maximumJoinGap
+                        << " components=" << loop.connectedComponentCount
+                        << " openNodes=" << loop.openNodeCount
+                        << " error=" << loop.errorMessage.toStdString() << '\n';
+                }
+                check(sectionMatches,
+                    "DXF fixture recognizes expected square-tube section");
+
+                if (!section.valid) continue;
+                recognizedSections.push_back(section);
+                const RotaryCutBoundaryAnalysis boundary = RotaryCutBoundaryAnalyzer::analyze
+                    (section.outerBoundaryItems, sceneItems, section, 1.0);
+                if (!boundary.valid)
+                {
+                    std::cerr << "DXF fixture boundary mismatch: "
+                        << fixture.fileName.toStdString()
+                        << " centerX=" << expectedCenterX
+                        << " items=" << boundary.boundaryItems.size()
+                        << " winding=" << boundary.winding
+                        << " joinGap=" << boundary.maximumJoinGap
+                        << " error=" << boundary.errorMessage.toStdString() << '\n';
+                }
+                check(boundary.valid && boundary.connectedLoop
+                    && boundary.result == TubeCutResult::CutsLeftAndRight
+                    && boundary.boundaryItems.size() == 8,
+                    "DXF fixture recognizes expected machining boundary");
+            }
+
+            if (recognizedSections.size() > 1U)
+            {
+                for (std::size_t modelIndex = 0; modelIndex < recognizedSections.size(); ++modelIndex)
+                {
+                    for (std::size_t boundaryIndex = 0;
+                        boundaryIndex < recognizedSections.size(); ++boundaryIndex)
+                    {
+                        const RotaryCutBoundaryAnalysis crossBoundary =
+                            RotaryCutBoundaryAnalyzer::analyze
+                            (
+                                recognizedSections[boundaryIndex].outerBoundaryItems,
+                                sceneItems,
+                                recognizedSections[modelIndex],
+                                1.0
+                            );
+                        if (!crossBoundary.valid)
+                        {
+                            std::cerr << "DXF cross-section boundary mismatch: model="
+                                << modelIndex << " boundary=" << boundaryIndex
+                                << " surfaceDeviation=" << crossBoundary.maximumSurfaceDeviation
+                                << " coverageGap=" << crossBoundary.maximumProjectionCoverageGap
+                                << " error=" << crossBoundary.errorMessage.toStdString() << '\n';
+                        }
+                        check(crossBoundary.valid && crossBoundary.connectedLoop,
+                            "DXF fixture boundary is valid against either recognized section model");
+                    }
+                }
+            }
+
+            cadcam::process::DocumentProcessState boundaryProcessState;
+            boundaryProcessState.beginBatch();
+            for (std::size_t boundaryIndex = 0;
+                boundaryIndex < recognizedSections.size(); ++boundaryIndex)
+            {
+                for (CadItem* item : recognizedSections[boundaryIndex].outerBoundaryItems)
+                {
+                    boundaryProcessState.setBoundary
+                    (
+                        item->m_entityId,
+                        BoundaryRole::Break,
+                        static_cast<int>(boundaryIndex)
+                    );
+                }
+            }
+            boundaryProcessState.endBatch();
+
+            ProcessPlanningPolicy boundaryPlanningPolicy;
+            boundaryPlanningPolicy.orderingStrategy = ProcessOrderingStrategy::LazyRotation;
+            const auto boundaryPlan = ProcessPlanningService{}.buildRotaryPlan
+            (
+                document,
+                boundaryProcessState,
+                automaticSection.coreModel,
+                boundaryPlanningPolicy,
+                createOperationContext(QStringLiteral("dxf-boundary-planning-test"))
+            );
+            if (!boundaryPlan.succeeded())
+            {
+                for (const Diagnostic& diagnostic : boundaryPlan.diagnostics)
+                {
+                    std::cerr << "DXF boundary planning failure: "
+                        << fixture.fileName.toStdString() << " code="
+                        << static_cast<int>(diagnostic.code) << " message="
+                        << diagnostic.userMessage.toStdString() << " detail="
+                        << diagnostic.technicalDetail.toStdString() << " context="
+                        << QJsonDocument::fromVariant(diagnostic.context)
+                            .toJson(QJsonDocument::Compact).toStdString() << '\n';
+                }
+            }
+            check(boundaryPlan.succeeded() && boundaryPlan.value.has_value(),
+                "DXF fixture recognized boundaries build a rotary process plan");
+            if (boundaryPlan.succeeded() && boundaryPlan.value.has_value())
+            {
+                GProfile profile = GProfile::createDefaultRotaryProfile();
+                GGenerator generator;
+                generator.setDocument(&document);
+                generator.setProfile(&profile);
+                generator.setGenerationMode(GGenerator::GenerationMode::Mode3D);
+                generator.setProcessState(&boundaryProcessState);
+                generator.setProcessPlan(&*boundaryPlan.value);
+                generator.setRotaryTubeCenter
+                    (automaticSection.centerY, automaticSection.centerZ, true);
+                const auto programText = generator.buildProgramText
+                    (createOperationContext(QStringLiteral("dxf-direct-gcode-export-test")));
+                if (!programText.succeeded())
+                {
+                    for (const Diagnostic& diagnostic : programText.diagnostics)
+                    {
+                        std::cerr << "DXF G-code export failure: "
+                            << fixture.fileName.toStdString() << " code="
+                            << static_cast<int>(diagnostic.code) << " message="
+                            << diagnostic.userMessage.toStdString() << '\n';
+                    }
+                }
+                check(programText.succeeded() && programText.value.has_value()
+                    && programText.value->contains(QStringLiteral("G01")),
+                    "DXF fixture exports non-empty rotary G-code directly");
+            }
+        }
+    }
+
     TubeSectionGeometry standardTubeSection()
     {
         TubeSectionGeometry section;
@@ -1011,12 +1289,11 @@ namespace
             TubeSectionAnalyzer::buildFromSelection
                 (inclinedFixture->input, inclinedFixture->topology,
                  { 400U }, policy, context);
-        check(!inclinedResult.succeeded()
-            && std::any_of(inclinedResult.diagnostics.cbegin(), inclinedResult.diagnostics.cend(), [](const Diagnostic& value)
-            {
-                return value.code == DiagnosticCode::TubeSectionNotPerpendicular;
-            }),
-            "inclined section is rejected");
+        check(inclinedResult.succeeded() && inclinedResult.value.has_value()
+            && std::abs(inclinedResult.value->geometry.yLength - 10.0) <= 1.0e-9
+            && std::abs(inclinedResult.value->geometry.zWidth - 10.0) <= 1.0e-9
+            && inclinedResult.value->maximumPlaneDeviation >= 0.19,
+            "inclined section is recognized from its YZ projection");
 
         std::vector<TopologyPathRecord> withInternalLine = rectangleRecords
             (0U, 500U, 0.0, -5.0, 5.0, -5.0, 5.0);
@@ -1713,6 +1990,27 @@ namespace
 
     void testLegacyWrapperStrictClosureAndSourceBoundary()
     {
+        CadDocument precisionDocument;
+        constexpr double floatBoundary = 2048.0001220703125;
+        constexpr double sourceError = 1.0e-7;
+        QVector<CadItem*> precisionItems
+        {
+            precisionDocument.appendEntity(makeDocumentLine
+                (0.0, floatBoundary - sourceError, 0.0, 0.0, 2058.0, 0.0)),
+            precisionDocument.appendEntity(makeDocumentLine
+                (0.0, 2058.0, 0.0, 0.0, 2058.0, 10.0)),
+            precisionDocument.appendEntity(makeDocumentLine
+                (0.0, 2058.0, 10.0, 0.0, floatBoundary, 10.0)),
+            precisionDocument.appendEntity(makeDocumentLine
+                (0.0, floatBoundary, 10.0, 0.0, floatBoundary + sourceError, 0.0))
+        };
+        RotaryPathTopology precisionTopology(precisionItems, PathTopologyTolerance{});
+        const RotaryPathLoopResult precisionLoop =
+            precisionTopology.extractSeededLoop({ precisionItems.front() });
+        check(precisionLoop.valid && precisionLoop.connectedLoop
+            && precisionLoop.maximumJoinGap < 1.0e-6,
+            "legacy topology adapter preserves double precision at large coordinates");
+
         CadDocument document;
         QVector<CadItem*> items;
         items.push_back(document.appendEntity(makeDocumentLine(0, 0, 0.5, 0, 10, 0)));
@@ -1844,6 +2142,7 @@ int runTopologyTests()
     testStrictLoopContinuity();
     testAdapterCancellationRevisionAndDeterminism();
     testSectionAnalyzersRequireStrictLoop();
+    testDxfSectionFixtures();
     testTubeCutBoundaryCore();
     testTubeSectionCore();
     testProcessPlanningCore();

@@ -496,19 +496,6 @@ namespace cadcam::machining
                 candidate.model.maximumPlaneDeviation = std::max
                     (candidate.model.maximumPlaneDeviation,
                      std::abs(point.x - candidate.model.centerX));
-            if (candidate.model.maximumPlaneDeviation > policy.maximumPlaneDeviation)
-            {
-                return failure<SectionCandidate>
-                (
-                    DiagnosticCode::TubeSectionNotPerpendicular,
-                    QStringLiteral("候选闭环不是垂直于方管轴线的截面。"),
-                    QStringLiteral("Maximum X-plane deviation exceeds policy."),
-                    operationContext,
-                    contextValues(input.contentRevision, selectedCount, candidateCount,
-                        &candidate.model, 0.0)
-                );
-            }
-
             std::vector<Vector2d> boundary;
             boundary.reserve(path.size());
             for (const Vector3d& point : path)
@@ -875,8 +862,8 @@ namespace cadcam::machining
             return failure<TubeSectionModel>
             (
                 DiagnosticCode::TubeSectionLoopUnavailable,
-                QStringLiteral("未找到严格闭合且垂直于方管轴线的有效截面。"),
-                QStringLiteral("No valid vertical strict-loop candidate was found."),
+                QStringLiteral("未找到 YZ 投影有效的严格闭合方管截面。"),
+                QStringLiteral("No strict-loop candidate with a valid YZ projection was found."),
                 context,
                 contextValues(input.contentRevision, 0, inspectedCount, nullptr, 0.0)
             );
