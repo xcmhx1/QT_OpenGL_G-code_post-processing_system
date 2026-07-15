@@ -35,6 +35,7 @@
 #include <iomanip>
 #include <iostream>
 #include <memory>
+#include <tuple>
 
 namespace
 {
@@ -934,6 +935,100 @@ namespace
                 "DXF fixture recognized boundaries build a rotary process plan");
             if (boundaryPlan.succeeded() && boundaryPlan.value.has_value())
             {
+                struct OrderedBoundaryRange
+                {
+                    double centerX = 0.0;
+                    int firstOrder = -1;
+                    int lastOrder = -1;
+                };
+                std::vector<OrderedBoundaryRange> orderedBoundaryRanges;
+                for (const ProcessGroup& group : boundaryPlan.value->groups)
+                {
+                    if (group.kind != ProcessGroupKind::BreakBoundary) continue;
+                    OrderedBoundaryRange range;
+                    range.firstOrder = std::numeric_limits<int>::max();
+                    double centerSum = 0.0;
+                    for (const EntityId entityId : group.entityIds)
+                    {
+                        const auto item = std::find_if(sceneItems.cbegin(), sceneItems.cend(),
+                            [entityId](CadItem* candidate)
+                            { return candidate->m_entityId == entityId; });
+                        if (item != sceneItems.cend()) centerSum += itemCenterX(*item);
+                        const auto assignment = std::find_if
+                        (
+                            boundaryPlan.value->assignments.cbegin(),
+                            boundaryPlan.value->assignments.cend(),
+                            [entityId](const ProcessAssignment& value)
+                            { return value.entityId == entityId; }
+                        );
+                        if (assignment == boundaryPlan.value->assignments.cend()) continue;
+                        range.firstOrder = std::min(range.firstOrder, assignment->processOrder);
+                        range.lastOrder = std::max(range.lastOrder, assignment->processOrder);
+                    }
+                    range.centerX = centerSum / static_cast<double>(group.entityIds.size());
+                    orderedBoundaryRanges.push_back(range);
+                }
+                std::sort(orderedBoundaryRanges.begin(), orderedBoundaryRanges.end(),
+                    [](const OrderedBoundaryRange& left, const OrderedBoundaryRange& right)
+                    { return left.centerX < right.centerX; });
+                bool spatialBarrierOrder = !orderedBoundaryRanges.empty();
+                for (std::size_t index = 0; index < orderedBoundaryRanges.size(); ++index)
+                {
+                    spatialBarrierOrder = spatialBarrierOrder
+                        && orderedBoundaryRanges[index].firstOrder >= 0
+                        && orderedBoundaryRanges[index].lastOrder
+                            >= orderedBoundaryRanges[index].firstOrder;
+                    if (index > 0U)
+                        spatialBarrierOrder = spatialBarrierOrder
+                            && orderedBoundaryRanges[index - 1U].lastOrder + 1
+                                == orderedBoundaryRanges[index].firstOrder;
+                }
+                check(spatialBarrierOrder,
+                    "DXF fixture break groups follow strict spatial order without interleaving");
+
+                if (recognizedSections.size() > 1U)
+                {
+                    cadcam::process::DocumentProcessState reversedBoundaryState;
+                    reversedBoundaryState.beginBatch();
+                    for (std::size_t boundaryIndex = 0;
+                        boundaryIndex < recognizedSections.size(); ++boundaryIndex)
+                    {
+                        const int reversedPairId = static_cast<int>
+                            (recognizedSections.size() - boundaryIndex - 1U);
+                        for (CadItem* item : recognizedSections[boundaryIndex].outerBoundaryItems)
+                            reversedBoundaryState.setBoundary
+                                (item->m_entityId, BoundaryRole::Break, reversedPairId);
+                    }
+                    reversedBoundaryState.endBatch();
+                    const auto reversedBoundaryPlan = ProcessPlanningService{}.buildRotaryPlan
+                    (
+                        document,
+                        reversedBoundaryState,
+                        automaticSection.coreModel,
+                        boundaryPlanningPolicy,
+                        createOperationContext(QStringLiteral("dxf-reversed-boundary-id-planning-test"))
+                    );
+                    bool sameAssignments = reversedBoundaryPlan.succeeded()
+                        && reversedBoundaryPlan.value.has_value()
+                        && reversedBoundaryPlan.value->assignments.size()
+                            == boundaryPlan.value->assignments.size();
+                    if (sameAssignments)
+                    {
+                        for (std::size_t index = 0;
+                            index < boundaryPlan.value->assignments.size(); ++index)
+                        {
+                            const ProcessAssignment& original = boundaryPlan.value->assignments[index];
+                            const ProcessAssignment& reversed = reversedBoundaryPlan.value->assignments[index];
+                            sameAssignments = sameAssignments
+                                && original.entityId == reversed.entityId
+                                && original.reverse == reversed.reverse
+                                && original.startParameter == reversed.startParameter;
+                        }
+                    }
+                    check(sameAssignments,
+                        "DXF fixture boundary identity numbering does not change the process plan");
+                }
+
                 GProfile profile = GProfile::createDefaultRotaryProfile();
                 GGenerator generator;
                 generator.setDocument(&document);
@@ -1463,6 +1558,317 @@ namespace
         return found != plan.assignments.cend() ? found->processOrder : -1;
     }
 
+    std::pair<int, int> orderRange
+    (
+        const ProcessPlan& plan,
+        std::initializer_list<EntityId> entityIds
+    )
+    {
+        const std::set<EntityId> ids(entityIds.begin(), entityIds.end());
+        int first = std::numeric_limits<int>::max();
+        int last = -1;
+        for (const ProcessAssignment& assignment : plan.assignments)
+        {
+            if (ids.find(assignment.entityId) == ids.end()) continue;
+            first = std::min(first, assignment.processOrder);
+            last = std::max(last, assignment.processOrder);
+        }
+        return { first == std::numeric_limits<int>::max() ? -1 : first, last };
+    }
+
+    std::vector<std::tuple<EntityId, bool, std::optional<double>>> assignmentSignature
+    (
+        const ProcessPlan& plan
+    )
+    {
+        std::vector<std::tuple<EntityId, bool, std::optional<double>>> signature;
+        for (const ProcessAssignment& assignment : plan.assignments)
+            signature.emplace_back
+                (assignment.entityId, assignment.reverse, assignment.startParameter);
+        return signature;
+    }
+
+    std::vector<TopologyPathRecord> inclinedRectangleRecords
+    (
+        std::size_t sourceIndex,
+        EntityId entityId,
+        double minimumYX,
+        double maximumYX
+    )
+    {
+        return
+        {
+            record(sourceIndex, entityId,
+                {{ minimumYX, -5.0, 4.0 }, { maximumYX, 5.0, 4.0 }}),
+            record(sourceIndex + 1U, entityId + 1U,
+                {{ maximumYX, 5.0, 4.0 }, { maximumYX, 5.0, -4.0 }}),
+            record(sourceIndex + 2U, entityId + 2U,
+                {{ maximumYX, 5.0, -4.0 }, { minimumYX, -5.0, -4.0 }}),
+            record(sourceIndex + 3U, entityId + 3U,
+                {{ minimumYX, -5.0, -4.0 }, { minimumYX, -5.0, 4.0 }})
+        };
+    }
+
+    void testMultipleBoundarySpatialPlanning()
+    {
+        const OperationContext context = createOperationContext
+            (QStringLiteral("multiple-boundary-spatial-planning-test"));
+        const auto hasBoundaryClassificationFailure = [](const QVector<Diagnostic>& diagnostics)
+        {
+            return std::any_of(diagnostics.cbegin(), diagnostics.cend(),
+                [](const Diagnostic& diagnostic)
+                {
+                    return diagnostic.code
+                        == DiagnosticCode::ProcessPlanningBoundaryClassificationFailed;
+                });
+        };
+        ProcessPlanningPolicy policy;
+        policy.initialPosition = { 100.0, 0.0, 4.0 };
+
+        auto twoBoundaryFixture = []
+        (
+            int leftPairId,
+            int rightPairId
+        ) -> std::optional<PlanningFixture>
+        {
+            std::vector<TopologyPathRecord> records
+            {
+                record(0U, 2000U, {{ 0.0, 0.0, 4.0 }, { 1.0, 0.0, 4.0 }}),
+                record(1U, 2001U, {{ 40.0, 0.0, 4.0 }, { 41.0, 0.0, 4.0 }}),
+                record(2U, 2002U, {{ 100.0, 0.0, 4.0 }, { 101.0, 0.0, 4.0 }})
+            };
+            auto leftBoundary = rectangleRecords
+                (10U, 2010U, 10.0, -5.0, 5.0, -4.0, 4.0);
+            auto rightBoundary = rectangleRecords
+                (20U, 2020U, 90.0, -5.0, 5.0, -4.0, 4.0);
+            records.insert(records.end(), rightBoundary.begin(), rightBoundary.end());
+            records.insert(records.end(), leftBoundary.begin(), leftBoundary.end());
+            std::map<EntityId, std::pair<BoundaryRole, int>> roles;
+            for (EntityId id = 2010U; id < 2014U; ++id)
+                roles[id] = { BoundaryRole::Break, leftPairId };
+            for (EntityId id = 2020U; id < 2024U; ++id)
+                roles[id] = { BoundaryRole::Break, rightPairId };
+            return planningFixture(std::move(records), roles);
+        };
+
+        auto reversedIds = twoBoundaryFixture(9, 0);
+        if (!reversedIds.has_value()) return;
+        reversedIds->input.topology = &reversedIds->topology;
+        const auto nearest = ProcessPlanBuilder::build(reversedIds->input, policy, context);
+        const auto leftRange = nearest.value.has_value()
+            ? orderRange(*nearest.value, { 2010U, 2011U, 2012U, 2013U })
+            : std::pair<int, int>{ -1, -1 };
+        const auto rightRange = nearest.value.has_value()
+            ? orderRange(*nearest.value, { 2020U, 2021U, 2022U, 2023U })
+            : std::pair<int, int>{ -1, -1 };
+        check(nearest.succeeded() && nearest.value.has_value()
+            && orderOf(*nearest.value, 2000U) + 1 == leftRange.first
+            && leftRange.second + 1 == orderOf(*nearest.value, 2001U)
+            && orderOf(*nearest.value, 2001U) + 1 == rightRange.first
+            && rightRange.second + 1 == orderOf(*nearest.value, 2002U),
+            "reversed boundary ids still produce A, left break, B, right break, C");
+
+        auto swappedIds = twoBoundaryFixture(0, 9);
+        if (!swappedIds.has_value()) return;
+        swappedIds->input.topology = &swappedIds->topology;
+        const auto swapped = ProcessPlanBuilder::build(swappedIds->input, policy, context);
+        check(swapped.succeeded() && swapped.value.has_value()
+            && nearest.value.has_value()
+            && assignmentSignature(*swapped.value) == assignmentSignature(*nearest.value),
+            "swapping boundary identity numbers does not change assignments or directions");
+
+        policy.orderingStrategy = ProcessOrderingStrategy::LazyRotation;
+        const auto lazy = ProcessPlanBuilder::build(reversedIds->input, policy, context);
+        check(lazy.succeeded() && lazy.value.has_value()
+            && orderOf(*lazy.value, 2000U) + 1
+                == orderRange(*lazy.value, { 2010U, 2011U, 2012U, 2013U }).first
+            && orderRange(*lazy.value, { 2010U, 2011U, 2012U, 2013U }).second + 1
+                == orderOf(*lazy.value, 2001U),
+            "lazy rotation cannot move a right-side group across a break barrier");
+
+        auto threeBoundaryFixture = []
+        (
+            const std::array<int, 3>& pairIds
+        ) -> std::optional<PlanningFixture>
+        {
+            std::vector<TopologyPathRecord> records
+            {
+                record(0U, 2100U, {{ 0.0, 0.0, 4.0 }, { 1.0, 0.0, 4.0 }}),
+                record(1U, 2101U, {{ 30.0, 0.0, 4.0 }, { 31.0, 0.0, 4.0 }}),
+                record(2U, 2102U, {{ 70.0, 0.0, 4.0 }, { 71.0, 0.0, 4.0 }}),
+                record(3U, 2103U, {{ 110.0, 0.0, 4.0 }, { 111.0, 0.0, 4.0 }})
+            };
+            const std::array<double, 3> xs{ 10.0, 50.0, 90.0 };
+            const std::array<EntityId, 3> firstIds{ 2110U, 2120U, 2130U };
+            std::map<EntityId, std::pair<BoundaryRole, int>> roles;
+            for (std::size_t boundaryIndex = 0; boundaryIndex < xs.size(); ++boundaryIndex)
+            {
+                auto boundary = rectangleRecords
+                    (10U + boundaryIndex * 4U, firstIds[boundaryIndex], xs[boundaryIndex],
+                     -5.0, 5.0, -4.0, 4.0);
+                records.insert(records.end(), boundary.begin(), boundary.end());
+                for (EntityId id = firstIds[boundaryIndex];
+                    id < firstIds[boundaryIndex] + 4U; ++id)
+                {
+                    roles[id] = { BoundaryRole::Break, pairIds[boundaryIndex] };
+                }
+            }
+            return planningFixture(std::move(records), roles);
+        };
+
+        std::vector<std::vector<std::tuple<EntityId, bool, std::optional<double>>>> signatures;
+        for (const std::array<int, 3>& pairIds :
+            { std::array<int, 3>{ 0, 1, 2 },
+              std::array<int, 3>{ 2, 1, 0 },
+              std::array<int, 3>{ 2, 0, 1 } })
+        {
+            auto fixture = threeBoundaryFixture(pairIds);
+            if (!fixture.has_value()) return;
+            fixture->input.topology = &fixture->topology;
+            const auto plan = ProcessPlanBuilder::build(fixture->input, policy, context);
+            check(plan.succeeded() && plan.value.has_value(),
+                "three spatially ordered boundaries build a plan for any designation order");
+            if (plan.value.has_value()) signatures.push_back(assignmentSignature(*plan.value));
+        }
+        check(signatures.size() == 3U
+            && signatures[0] == signatures[1] && signatures[1] == signatures[2],
+            "three boundary designation orders produce the same process plan");
+        if (!signatures.empty())
+        {
+            auto fixture = threeBoundaryFixture({ 2, 0, 1 });
+            if (!fixture.has_value()) return;
+            fixture->input.topology = &fixture->topology;
+            const auto plan = ProcessPlanBuilder::build(fixture->input, policy, context);
+            if (plan.value.has_value())
+            {
+                const auto b0 = orderRange(*plan.value, { 2110U, 2111U, 2112U, 2113U });
+                const auto b1 = orderRange(*plan.value, { 2120U, 2121U, 2122U, 2123U });
+                const auto b2 = orderRange(*plan.value, { 2130U, 2131U, 2132U, 2133U });
+                check(orderOf(*plan.value, 2100U) + 1 == b0.first
+                    && b0.second + 1 == orderOf(*plan.value, 2101U)
+                    && orderOf(*plan.value, 2101U) + 1 == b1.first
+                    && b1.second + 1 == orderOf(*plan.value, 2102U)
+                    && orderOf(*plan.value, 2102U) + 1 == b2.first
+                    && b2.second + 1 == orderOf(*plan.value, 2103U),
+                    "three breaks form four immediate spatial process regions");
+            }
+        }
+
+        std::vector<TopologyPathRecord> emptyLeftRecords
+        {
+            record(0U, 2200U, {{ 100.0, 0.0, 4.0 }, { 101.0, 0.0, 4.0 }})
+        };
+        auto emptyLeftBoundary = rectangleRecords
+            (1U, 2210U, 10.0, -5.0, 5.0, -4.0, 4.0);
+        emptyLeftRecords.insert
+            (emptyLeftRecords.end(), emptyLeftBoundary.begin(), emptyLeftBoundary.end());
+        std::map<EntityId, std::pair<BoundaryRole, int>> emptyLeftRoles;
+        for (EntityId id = 2210U; id < 2214U; ++id)
+            emptyLeftRoles[id] = { BoundaryRole::Break, 4 };
+        auto emptyLeft = planningFixture(std::move(emptyLeftRecords), emptyLeftRoles);
+        if (!emptyLeft.has_value()) return;
+        emptyLeft->input.topology = &emptyLeft->topology;
+        const auto emptyLeftPlan = ProcessPlanBuilder::build(emptyLeft->input, policy, context);
+        check(emptyLeftPlan.succeeded() && emptyLeftPlan.value.has_value()
+            && orderRange(*emptyLeftPlan.value, { 2210U, 2211U, 2212U, 2213U }).first == 0,
+            "leftmost break with no left process group is the first group");
+
+        std::vector<TopologyPathRecord> crossing = rectangleRecords
+            (0U, 2300U, 10.0, -5.0, 5.0, -4.0, 4.0);
+        auto crossingSecond = inclinedRectangleRecords(4U, 2310U, 5.0, 15.0);
+        crossing.insert(crossing.end(), crossingSecond.begin(), crossingSecond.end());
+        std::map<EntityId, std::pair<BoundaryRole, int>> crossingRoles;
+        for (EntityId id = 2300U; id < 2304U; ++id)
+            crossingRoles[id] = { BoundaryRole::Break, 0 };
+        for (EntityId id = 2310U; id < 2314U; ++id)
+            crossingRoles[id] = { BoundaryRole::Break, 1 };
+        auto crossingFixture = planningFixture(std::move(crossing), crossingRoles);
+        if (!crossingFixture.has_value()) return;
+        crossingFixture->input.topology = &crossingFixture->topology;
+        const auto crossingPlan = ProcessPlanBuilder::build
+            (crossingFixture->input, policy, context);
+        check(!crossingPlan.succeeded()
+            && hasBoundaryClassificationFailure(crossingPlan.diagnostics),
+            "crossing break boundaries are rejected without identity fallback");
+
+        std::vector<TopologyPathRecord> overlapping = rectangleRecords
+            (0U, 2400U, 10.0, -5.0, 5.0, -4.0, 4.0);
+        auto overlappingSecond = rectangleRecords
+            (4U, 2410U, 10.0, -5.0, 5.0, -4.0, 4.0);
+        overlapping.insert(overlapping.end(), overlappingSecond.begin(), overlappingSecond.end());
+        std::map<EntityId, std::pair<BoundaryRole, int>> overlappingRoles;
+        for (EntityId id = 2400U; id < 2404U; ++id)
+            overlappingRoles[id] = { BoundaryRole::Break, 0 };
+        for (EntityId id = 2410U; id < 2414U; ++id)
+            overlappingRoles[id] = { BoundaryRole::Break, 1 };
+        auto overlappingFixture = planningFixture(std::move(overlapping), overlappingRoles);
+        if (!overlappingFixture.has_value()) return;
+        overlappingFixture->input.topology = &overlappingFixture->topology;
+        const auto overlappingPlan = ProcessPlanBuilder::build
+            (overlappingFixture->input, policy, context);
+        check(!overlappingPlan.succeeded()
+            && hasBoundaryClassificationFailure(overlappingPlan.diagnostics),
+            "overlapping break boundaries are rejected without numeric ordering fallback");
+
+        std::vector<TopologyPathRecord> wasteRecords
+        {
+            record(0U, 2500U, {{ 0.0, 0.0, 4.0 }, { 1.0, 0.0, 4.0 }}),
+            record(1U, 2501U, {{ 40.0, 0.0, 4.0 }, { 41.0, 0.0, 4.0 }}),
+            record(2U, 2502U, {{ 100.0, 0.0, 4.0 }, { 101.0, 0.0, 4.0 }})
+        };
+        auto breakForWaste = rectangleRecords
+            (10U, 2510U, 10.0, -5.0, 5.0, -4.0, 4.0);
+        auto wasteBoundary = rectangleRecords
+            (20U, 2520U, 90.0, -5.0, 5.0, -4.0, 4.0);
+        wasteRecords.insert(wasteRecords.end(), wasteBoundary.begin(), wasteBoundary.end());
+        wasteRecords.insert(wasteRecords.end(), breakForWaste.begin(), breakForWaste.end());
+        std::map<EntityId, std::pair<BoundaryRole, int>> wasteRoles;
+        for (EntityId id = 2510U; id < 2514U; ++id)
+            wasteRoles[id] = { BoundaryRole::Break, 9 };
+        for (EntityId id = 2520U; id < 2524U; ++id)
+            wasteRoles[id] = { BoundaryRole::Waste, 0 };
+        auto wasteFixture = planningFixture(std::move(wasteRecords), wasteRoles);
+        if (!wasteFixture.has_value()) return;
+        wasteFixture->input.topology = &wasteFixture->topology;
+        const auto wastePlan = ProcessPlanBuilder::build(wasteFixture->input, policy, context);
+        const auto wasteBreakRange = wastePlan.value.has_value()
+            ? orderRange(*wastePlan.value, { 2510U, 2511U, 2512U, 2513U })
+            : std::pair<int, int>{ -1, -1 };
+        const bool middleExcluded = wastePlan.value.has_value()
+            && std::any_of(wastePlan.value->exclusions.cbegin(),
+                wastePlan.value->exclusions.cend(), [](const ProcessExclusion& exclusion)
+                {
+                    return exclusion.entityId == 2501U
+                        && exclusion.reason == ProcessExclusionReason::WasteRegion;
+                });
+        check(wastePlan.succeeded() && wastePlan.value.has_value()
+            && orderOf(*wastePlan.value, 2500U) + 1 == wasteBreakRange.first
+            && wasteBreakRange.second < orderOf(*wastePlan.value, 2502U)
+            && middleExcluded,
+            "waste and break boundaries share spatial order while keeping distinct process semantics");
+
+        std::vector<TopologyPathRecord> indeterminateRecords
+        {
+            record(0U, 2600U, {{ 10.0, 0.0, 0.0 }, { 10.0, 1.0, 0.0 }})
+        };
+        auto indeterminateBoundary = rectangleRecords
+            (1U, 2610U, 10.0, -5.0, 5.0, -4.0, 4.0);
+        indeterminateRecords.insert(indeterminateRecords.end(),
+            indeterminateBoundary.begin(), indeterminateBoundary.end());
+        std::map<EntityId, std::pair<BoundaryRole, int>> indeterminateRoles;
+        for (EntityId id = 2610U; id < 2614U; ++id)
+            indeterminateRoles[id] = { BoundaryRole::Break, 0 };
+        auto indeterminateFixture = planningFixture
+            (std::move(indeterminateRecords), indeterminateRoles);
+        if (!indeterminateFixture.has_value()) return;
+        indeterminateFixture->input.topology = &indeterminateFixture->topology;
+        const auto indeterminatePlan = ProcessPlanBuilder::build
+            (indeterminateFixture->input, policy, context);
+        check(!indeterminatePlan.succeeded()
+            && hasBoundaryClassificationFailure(indeterminatePlan.diagnostics),
+            "ordinary group with indeterminate boundary side is rejected");
+    }
+
     void testProcessPlanningCore()
     {
         const OperationContext context = createOperationContext
@@ -1500,11 +1906,13 @@ namespace
         constrainedNearestPolicy.initialPosition = { 8.0, -2.0, 4.0 };
         const auto constrained = ProcessPlanBuilder::build
             (breakFixture->input, constrainedNearestPolicy, context);
+        const auto constrainedBoundary = constrained.value.has_value()
+            ? orderRange(*constrained.value, { 1110U, 1111U, 1112U, 1113U })
+            : std::pair<int, int>{ -1, -1 };
         check(constrained.succeeded() && constrained.value.has_value()
-            && orderOf(*constrained.value, 1100U) >= 0
-            && orderOf(*constrained.value, 1101U) < orderOf(*constrained.value, 1100U)
-            && orderOf(*constrained.value, 1100U) < orderOf(*constrained.value, 1110U),
-            "nearest mode may choose a right group early but keeps Left before Break");
+            && orderOf(*constrained.value, 1100U) + 1 == constrainedBoundary.first
+            && constrainedBoundary.second + 1 == orderOf(*constrained.value, 1101U),
+            "nearest mode keeps right-side work behind the break barrier");
 
         auto lazyFixture = planningFixture
         ({
@@ -1549,11 +1957,15 @@ namespace
         policy.initialPosition = { 5.0, -5.0, 4.0 };
         const auto constrainedLazy = ProcessPlanBuilder::build
             (breakFixture->input, policy, context);
+        const auto constrainedLazyBoundary = constrainedLazy.value.has_value()
+            ? orderRange(*constrainedLazy.value, { 1110U, 1111U, 1112U, 1113U })
+            : std::pair<int, int>{ -1, -1 };
         check(constrainedLazy.succeeded() && constrainedLazy.value.has_value()
-            && !constrainedLazy.value->assignments.empty()
-            && constrainedLazy.value->assignments.front().entityId == 1101U
-            && orderOf(*constrainedLazy.value, 1100U) < orderOf(*constrainedLazy.value, 1110U),
-            "first selection uses nearest eligible group while a nearer blocked boundary waits for its left predecessor");
+            && orderOf(*constrainedLazy.value, 1100U) + 1
+                == constrainedLazyBoundary.first
+            && constrainedLazyBoundary.second + 1
+                == orderOf(*constrainedLazy.value, 1101U),
+            "lazy rotation keeps right-side work behind the break barrier");
 
         auto stableFixture = planningFixture
         ({
@@ -1598,11 +2010,17 @@ namespace
         twoFixture->input.topology = &twoFixture->topology;
         policy.orderingStrategy = ProcessOrderingStrategy::NearestNext;
         const auto twoPlan = ProcessPlanBuilder::build(twoFixture->input, policy, context);
+        const auto firstBreakRange = twoPlan.value.has_value()
+            ? orderRange(*twoPlan.value, { 1310U, 1311U, 1312U, 1313U })
+            : std::pair<int, int>{ -1, -1 };
+        const auto secondBreakRange = twoPlan.value.has_value()
+            ? orderRange(*twoPlan.value, { 1320U, 1321U, 1322U, 1323U })
+            : std::pair<int, int>{ -1, -1 };
         check(twoPlan.succeeded() && twoPlan.value.has_value()
-            && orderOf(*twoPlan.value, 1300U) < orderOf(*twoPlan.value, 1310U)
-            && orderOf(*twoPlan.value, 1301U) < orderOf(*twoPlan.value, 1320U)
-            && orderOf(*twoPlan.value, 1310U) < orderOf(*twoPlan.value, 1320U),
-            "multiple break boundaries independently enforce spatial precedence");
+            && orderOf(*twoPlan.value, 1300U) + 1 == firstBreakRange.first
+            && firstBreakRange.second + 1 == orderOf(*twoPlan.value, 1301U)
+            && orderOf(*twoPlan.value, 1301U) + 1 == secondBreakRange.first,
+            "multiple break boundaries enforce immediate spatial process regions");
 
         std::vector<TopologyPathRecord> mixedRecords
         {
@@ -2199,6 +2617,7 @@ int runTopologyTests()
     testDxfSectionFixtures();
     testTubeCutBoundaryCore();
     testTubeSectionCore();
+    testMultipleBoundarySpatialPlanning();
     testProcessPlanningCore();
     testPlanarProcessPlanningCore();
     testLegacyAdapterValidationAndOrdering();

@@ -31,6 +31,22 @@ namespace cadcam::planning
             TubeCutAnalysis analysis;
         };
 
+        struct BoundaryIdentity
+        {
+            int pairId = -1;
+            BoundaryRole role = BoundaryRole::None;
+            std::vector<EntityId> entityIds;
+            std::size_t stableSourceIndex = 0;
+            EntityId stableEntityId = 0;
+        };
+
+        struct XBounds
+        {
+            bool valid = false;
+            double minimum = 0.0;
+            double maximum = 0.0;
+        };
+
         struct DirectedEntity
         {
             const PlanningEntity* entity = nullptr;
@@ -435,6 +451,98 @@ namespace cadcam::planning
             return onBoundary ? BoundarySide::OnBoundary : BoundarySide::Indeterminate;
         }
 
+        QString sideName(BoundarySide side)
+        {
+            switch (side)
+            {
+            case BoundarySide::Left: return QStringLiteral("Left");
+            case BoundarySide::OnBoundary: return QStringLiteral("OnBoundary");
+            case BoundarySide::Right: return QStringLiteral("Right");
+            case BoundarySide::Mixed: return QStringLiteral("Mixed");
+            case BoundarySide::Indeterminate: return QStringLiteral("Indeterminate");
+            }
+            return QStringLiteral("Indeterminate");
+        }
+
+        XBounds groupXBounds
+        (
+            const ProcessGroup& group,
+            const std::unordered_map<EntityId, const PlanningEntity*>& entities
+        )
+        {
+            XBounds bounds;
+            for (const EntityId entityId : group.entityIds)
+            {
+                const auto found = entities.find(entityId);
+                if (found == entities.end()) return {};
+                for (const geometry::PathVertex3D& vertex : found->second->path.vertices)
+                {
+                    if (!bounds.valid)
+                    {
+                        bounds.valid = true;
+                        bounds.minimum = bounds.maximum = vertex.position.x;
+                    }
+                    else
+                    {
+                        bounds.minimum = std::min(bounds.minimum, vertex.position.x);
+                        bounds.maximum = std::max(bounds.maximum, vertex.position.x);
+                    }
+                }
+            }
+            return bounds;
+        }
+
+        XBounds boundaryXBounds(const BoundaryData& boundary)
+        {
+            XBounds bounds;
+            for (const machining::UnwrappedBoundaryPoint& point : boundary.analysis.unwrappedBoundary)
+            {
+                if (!bounds.valid)
+                {
+                    bounds.valid = true;
+                    bounds.minimum = bounds.maximum = point.x;
+                }
+                else
+                {
+                    bounds.minimum = std::min(bounds.minimum, point.x);
+                    bounds.maximum = std::max(bounds.maximum, point.x);
+                }
+            }
+            return bounds;
+        }
+
+        QVariantMap boundaryDiagnosticValues
+        (
+            const ProcessPlanningInput& input,
+            const ProcessPlanningPolicy& policy,
+            const BoundaryData& boundary,
+            const ProcessGroup& otherGroup,
+            const std::unordered_map<EntityId, const PlanningEntity*>& entities,
+            int boundarySpatialRank,
+            BoundarySide relativeSide,
+            BoundarySide reverseRelativeSide = BoundarySide::Indeterminate
+        )
+        {
+            QVariantMap values = diagnosticValues
+                (input, policy, 0U, 0U, boundary.pairId, otherGroup.groupId);
+            const XBounds boundaryBounds = boundaryXBounds(boundary);
+            const XBounds otherBounds = groupXBounds(otherGroup, entities);
+            values.insert(QStringLiteral("boundaryGroupId"), boundary.groupId);
+            values.insert(QStringLiteral("otherGroupId"), otherGroup.groupId);
+            values.insert(QStringLiteral("boundarySpatialRank"), boundarySpatialRank);
+            values.insert(QStringLiteral("relativeSide"), sideName(relativeSide));
+            values.insert(QStringLiteral("reverseRelativeSide"), sideName(reverseRelativeSide));
+            values.insert(QStringLiteral("boundaryMinimumX"),
+                boundaryBounds.valid ? boundaryBounds.minimum : 0.0);
+            values.insert(QStringLiteral("boundaryMaximumX"),
+                boundaryBounds.valid ? boundaryBounds.maximum : 0.0);
+            values.insert(QStringLiteral("otherMinimumX"),
+                otherBounds.valid ? otherBounds.minimum : 0.0);
+            values.insert(QStringLiteral("otherMaximumX"),
+                otherBounds.valid ? otherBounds.maximum : 0.0);
+            return values;
+        }
+
         std::vector<Vector3d> directedPoints(const PlanningEntity& entity, bool reverse)
         {
             std::vector<Vector3d> points;
@@ -756,24 +864,52 @@ namespace cadcam::planning
             return l->sourceIndex != r->sourceIndex ? l->sourceIndex < r->sourceIndex : left < right;
         });
 
-        std::vector<BoundaryData> boundaries;
+        std::vector<BoundaryIdentity> boundaryIdentities;
+        boundaryIdentities.reserve(boundaryIds.size());
         for (const auto& [key, ids] : boundaryIds)
+        {
+            BoundaryIdentity identity;
+            identity.pairId = key.first;
+            identity.role = key.second;
+            identity.entityIds = ids;
+            identity.stableSourceIndex = std::numeric_limits<std::size_t>::max();
+            identity.stableEntityId = std::numeric_limits<EntityId>::max();
+            for (const EntityId entityId : ids)
+            {
+                identity.stableSourceIndex = std::min
+                    (identity.stableSourceIndex, entities.at(entityId)->sourceIndex);
+                identity.stableEntityId = std::min(identity.stableEntityId, entityId);
+            }
+            boundaryIdentities.push_back(std::move(identity));
+        }
+        std::sort(boundaryIdentities.begin(), boundaryIdentities.end(),
+            [](const BoundaryIdentity& left, const BoundaryIdentity& right)
+            {
+                if (left.stableSourceIndex != right.stableSourceIndex)
+                    return left.stableSourceIndex < right.stableSourceIndex;
+                if (left.stableEntityId != right.stableEntityId)
+                    return left.stableEntityId < right.stableEntityId;
+                return static_cast<int>(left.role) < static_cast<int>(right.role);
+            });
+
+        std::vector<BoundaryData> boundaries;
+        for (const BoundaryIdentity& identity : boundaryIdentities)
         {
             ProcessGroup group;
             group.groupId = static_cast<int>(plan.groups.size());
-            group.kind = key.second == BoundaryRole::Break
+            group.kind = identity.role == BoundaryRole::Break
                 ? ProcessGroupKind::BreakBoundary
                 : ProcessGroupKind::WasteBoundary;
             group.closed = true;
-            group.entityIds = ids;
+            group.entityIds = identity.entityIds;
             std::sort(group.entityIds.begin(), group.entityIds.end(), [&entities](EntityId left, EntityId right)
             {
                 return entities.at(left)->sourceIndex < entities.at(right)->sourceIndex;
             });
             plan.groups.push_back(group);
-            if (key.second == BoundaryRole::Waste)
+            if (identity.role == BoundaryRole::Waste)
             {
-                for (const EntityId entityId : ids)
+                for (const EntityId entityId : identity.entityIds)
                     plan.exclusions.push_back({ entityId, ProcessExclusionReason::WasteRegion });
             }
 
@@ -783,18 +919,19 @@ namespace cadcam::planning
                 (
                     OperationStatus::InvalidInput, context, DiagnosticCode::ProcessPlanningBoundaryInvalid,
                     QStringLiteral("验证加工断面前需要先识别方管截面。"), QStringLiteral("Boundary validation requires TubeSectionModel."),
-                    diagnosticValues(input, policy, 0U, 0U, key.first, group.groupId)
+                    diagnosticValues(input, policy, 0U, 0U, identity.pairId, group.groupId)
                 );
             }
-            const auto loop = input.topology->extractBestLoop(ids, ids);
+            const auto loop = input.topology->extractBestLoop
+                (identity.entityIds, identity.entityIds);
             if (!loop.succeeded() || !loop.value.has_value() || !loop.value->connectedLoop
-                || !sameEntitySet(loop.value->usedEntityIds, ids))
+                || !sameEntitySet(loop.value->usedEntityIds, identity.entityIds))
             {
                 auto result = failure<ProcessPlan>
                 (
                     OperationStatus::Failed, context, DiagnosticCode::ProcessPlanningBoundaryInvalid,
                     QStringLiteral("加工断面无法形成包含全部指定图元的严格闭环。"), QStringLiteral("Boundary strict-loop extraction failed."),
-                    diagnosticValues(input, policy, 0U, 0U, key.first, group.groupId)
+                    diagnosticValues(input, policy, 0U, 0U, identity.pairId, group.groupId)
                 );
                 result.mergeDiagnostics(loop.diagnostics);
                 return result;
@@ -816,7 +953,7 @@ namespace cadcam::planning
                 (
                     OperationStatus::Failed, context, DiagnosticCode::ProcessPlanningBoundaryInvalid,
                     QStringLiteral("加工断面重新验证失败，无法建立安全加工计划。"), QStringLiteral("TubeCutBoundaryClassifier analysis failed."),
-                    diagnosticValues(input, policy, 0U, 0U, key.first, group.groupId)
+                    diagnosticValues(input, policy, 0U, 0U, identity.pairId, group.groupId)
                 );
                 result.mergeDiagnostics(analysis.diagnostics);
                 return result;
@@ -827,7 +964,7 @@ namespace cadcam::planning
                 (
                     OperationStatus::Failed, context, DiagnosticCode::ProcessPlanningBoundaryInvalid,
                     QStringLiteral("加工断面判定不确定，无法建立安全加工计划。"), QStringLiteral("TubeCutBoundaryClassifier returned Indeterminate."),
-                    diagnosticValues(input, policy, 0U, 0U, key.first, group.groupId)
+                    diagnosticValues(input, policy, 0U, 0U, identity.pairId, group.groupId)
                 );
             }
             if (analysis.value->result == TubeCutResult::KeepsLeftAndRight)
@@ -836,10 +973,11 @@ namespace cadcam::planning
                 (
                     OperationStatus::Failed, context, DiagnosticCode::ProcessPlanningBoundaryKeepsConnected,
                     QStringLiteral("加工断面仍会保留左右材料桥，不能作为中断切面。"), QStringLiteral("Boundary winding is zero."),
-                    diagnosticValues(input, policy, 0U, 0U, key.first, group.groupId)
+                    diagnosticValues(input, policy, 0U, 0U, identity.pairId, group.groupId)
                 );
             }
-            boundaries.push_back({ group.groupId, key.first, key.second, *analysis.value });
+            boundaries.push_back
+                ({ group.groupId, identity.pairId, identity.role, *analysis.value });
         }
 
         if (!ordinaryIds.empty())
@@ -892,40 +1030,188 @@ namespace cadcam::planning
         for (const ProcessGroup& group : plan.groups)
             if (group.kind == ProcessGroupKind::WasteBoundary) excludedGroups.insert(group.groupId);
 
-        // Waste intervals are recomputed from spatial boundary order, never from stale CadItem state.
-        if (boundaries.size() >= 2U)
+        std::vector<std::vector<int>> boundarySuccessors(boundaries.size());
+        std::vector<int> boundaryIndegree(boundaries.size(), 0);
+        for (std::size_t leftIndex = 0; leftIndex < boundaries.size(); ++leftIndex)
         {
-            std::vector<int> boundaryOrder(boundaries.size());
-            for (std::size_t index = 0; index < boundaries.size(); ++index) boundaryOrder[index] = static_cast<int>(index);
-            std::stable_sort(boundaryOrder.begin(), boundaryOrder.end(), [&](int leftIndex, int rightIndex)
+            for (std::size_t rightIndex = leftIndex + 1U;
+                rightIndex < boundaries.size(); ++rightIndex)
             {
-                const ProcessGroup& left = plan.groups[boundaries[static_cast<std::size_t>(leftIndex)].groupId];
-                const BoundarySide side = classifyGroup
+                const BoundaryData& leftBoundary = boundaries[leftIndex];
+                const BoundaryData& rightBoundary = boundaries[rightIndex];
+                const ProcessGroup& leftGroup = plan.groups
+                    [static_cast<std::size_t>(leftBoundary.groupId)];
+                const ProcessGroup& rightGroup = plan.groups
+                    [static_cast<std::size_t>(rightBoundary.groupId)];
+                const BoundarySide leftRelativeToRight = classifyGroup
                 (
-                    left, entities, boundaries[static_cast<std::size_t>(rightIndex)],
+                    leftGroup, entities, rightBoundary,
                     *planningSection, policy.connectionTolerance
                 );
-                if (side == BoundarySide::Left) return true;
-                if (side == BoundarySide::Right) return false;
-                return left.groupId < plan.groups[boundaries[static_cast<std::size_t>(rightIndex)].groupId].groupId;
-            });
+                const BoundarySide rightRelativeToLeft = classifyGroup
+                (
+                    rightGroup, entities, leftBoundary,
+                    *planningSection, policy.connectionTolerance
+                );
+                const bool leftBeforeRight = leftRelativeToRight == BoundarySide::Left
+                    && rightRelativeToLeft == BoundarySide::Right;
+                const bool rightBeforeLeft = leftRelativeToRight == BoundarySide::Right
+                    && rightRelativeToLeft == BoundarySide::Left;
+                if (!leftBeforeRight && !rightBeforeLeft)
+                {
+                    const bool crossing = leftRelativeToRight == BoundarySide::Mixed
+                        || rightRelativeToLeft == BoundarySide::Mixed;
+                    const bool overlapping = leftRelativeToRight == BoundarySide::OnBoundary
+                        || rightRelativeToLeft == BoundarySide::OnBoundary;
+                    return failure<ProcessPlan>
+                    (
+                        OperationStatus::Failed, context,
+                        DiagnosticCode::ProcessPlanningBoundaryClassificationFailed,
+                        crossing
+                            ? QStringLiteral("两个加工断面相互交叉，无法确定空间顺序。")
+                            : overlapping
+                                ? QStringLiteral("两个加工断面重合，无法建立独立工艺屏障。")
+                                : QStringLiteral("两个加工断面无法严格区分左右空间关系。"),
+                        QStringLiteral("Bidirectional boundary classification is not a strict Left/Right pair."),
+                        boundaryDiagnosticValues
+                        (
+                            input, policy, rightBoundary, leftGroup, entities, -1,
+                            leftRelativeToRight, rightRelativeToLeft
+                        )
+                    );
+                }
+
+                const std::size_t predecessor = leftBeforeRight ? leftIndex : rightIndex;
+                const std::size_t successor = leftBeforeRight ? rightIndex : leftIndex;
+                boundarySuccessors[predecessor].push_back(static_cast<int>(successor));
+                ++boundaryIndegree[successor];
+            }
+        }
+
+        std::vector<int> boundaryOrder;
+        boundaryOrder.reserve(boundaries.size());
+        std::vector<bool> boundaryScheduled(boundaries.size(), false);
+        while (boundaryOrder.size() < boundaries.size())
+        {
+            std::vector<int> eligibleBoundaries;
+            for (std::size_t index = 0; index < boundaries.size(); ++index)
+                if (!boundaryScheduled[index] && boundaryIndegree[index] == 0)
+                    eligibleBoundaries.push_back(static_cast<int>(index));
+            if (eligibleBoundaries.size() != 1U)
+            {
+                return failure<ProcessPlan>
+                (
+                    OperationStatus::Failed, context,
+                    DiagnosticCode::ProcessPlanningBoundaryClassificationFailed,
+                    eligibleBoundaries.empty()
+                        ? QStringLiteral("多断面空间关系形成循环，无法生成加工计划。")
+                        : QStringLiteral("多个加工断面缺少唯一左右顺序，无法生成加工计划。"),
+                    QStringLiteral("Boundary spatial relation graph is cyclic or not uniquely ordered."),
+                    diagnosticValues(input, policy, 0U, 0U, -1, -1, -1, -1,
+                        static_cast<int>(boundaries.size()),
+                        static_cast<int>(eligibleBoundaries.size()))
+                );
+            }
+            const int selectedBoundary = eligibleBoundaries.front();
+            boundaryScheduled[static_cast<std::size_t>(selectedBoundary)] = true;
+            boundaryOrder.push_back(selectedBoundary);
+            for (const int successor : boundarySuccessors[static_cast<std::size_t>(selectedBoundary)])
+                --boundaryIndegree[static_cast<std::size_t>(successor)];
+        }
+
+        std::unordered_map<int, int> boundaryRankByGroup;
+        for (std::size_t rank = 0; rank < boundaryOrder.size(); ++rank)
+        {
+            const std::size_t boundaryIndex = static_cast<std::size_t>(boundaryOrder[rank]);
+            boundaryRankByGroup[boundaries[boundaryIndex].groupId] = static_cast<int>(rank);
+        }
+
+        std::unordered_map<int, std::vector<BoundarySide>> groupBoundarySides;
+        for (const ProcessGroup& group : plan.groups)
+        {
+            if (group.kind == ProcessGroupKind::BreakBoundary
+                || group.kind == ProcessGroupKind::WasteBoundary) continue;
+            std::vector<BoundarySide> sides(boundaries.size(), BoundarySide::Indeterminate);
+            for (std::size_t boundaryIndex = 0; boundaryIndex < boundaries.size(); ++boundaryIndex)
+            {
+                const BoundaryData& boundary = boundaries[boundaryIndex];
+                const BoundarySide side = classifyGroup
+                (
+                    group, entities, boundary, *planningSection,
+                    policy.connectionTolerance
+                );
+                if (side == BoundarySide::Mixed || side == BoundarySide::Indeterminate
+                    || side == BoundarySide::OnBoundary)
+                {
+                    return failure<ProcessPlan>
+                    (
+                        OperationStatus::Failed, context,
+                        DiagnosticCode::ProcessPlanningBoundaryClassificationFailed,
+                        side == BoundarySide::Mixed
+                            ? QStringLiteral("加工组跨越加工断面，无法建立安全加工计划。")
+                            : side == BoundarySide::OnBoundary
+                                ? QStringLiteral("普通加工组落在加工断面上，无法建立安全加工计划。")
+                                : QStringLiteral("加工组相对加工断面的侧别无法确定。"),
+                        QStringLiteral("Ordinary group classification is not strictly Left or Right."),
+                        boundaryDiagnosticValues
+                        (
+                            input, policy, boundary, group, entities,
+                            boundaryRankByGroup[boundary.groupId], side
+                        )
+                    );
+                }
+                sides[boundaryIndex] = side;
+            }
+            bool enteredLeftSide = false;
+            for (const int orderedIndex : boundaryOrder)
+            {
+                const BoundarySide side = sides[static_cast<std::size_t>(orderedIndex)];
+                if (side == BoundarySide::Left) enteredLeftSide = true;
+                else if (enteredLeftSide)
+                {
+                    const BoundaryData& boundary = boundaries
+                        [static_cast<std::size_t>(orderedIndex)];
+                    return failure<ProcessPlan>
+                    (
+                        OperationStatus::Failed, context,
+                        DiagnosticCode::ProcessPlanningBoundaryClassificationFailed,
+                        QStringLiteral("加工组相对多个断面的侧别不满足连续空间分区。"),
+                        QStringLiteral("Boundary side pattern is not monotonic Right* then Left*."),
+                        boundaryDiagnosticValues
+                        (
+                            input, policy, boundary, group, entities,
+                            boundaryRankByGroup[boundary.groupId], side
+                        )
+                    );
+                }
+            }
+            groupBoundarySides.emplace(group.groupId, std::move(sides));
+        }
+
+        // Waste intervals reuse the same strict spatial order as production barriers.
+        if (boundaries.size() >= 2U)
+        {
             for (const ProcessGroup& group : plan.groups)
             {
-                if (group.kind == ProcessGroupKind::BreakBoundary || group.kind == ProcessGroupKind::WasteBoundary) continue;
-                for (std::size_t index = 0; index + 1U < boundaryOrder.size(); ++index)
+                if (group.kind == ProcessGroupKind::BreakBoundary
+                    || group.kind == ProcessGroupKind::WasteBoundary) continue;
+                const auto sides = groupBoundarySides.find(group.groupId);
+                if (sides == groupBoundarySides.end()) continue;
+                for (std::size_t rank = 0; rank + 1U < boundaryOrder.size(); ++rank)
                 {
-                    const BoundaryData& leftBoundary = boundaries[static_cast<std::size_t>(boundaryOrder[index])];
-                    const BoundaryData& rightBoundary = boundaries[static_cast<std::size_t>(boundaryOrder[index + 1U])];
-                    if (leftBoundary.role != BoundaryRole::Waste && rightBoundary.role != BoundaryRole::Waste) continue;
-                    const BoundarySide relativeLeft = classifyGroup
-                        (group, entities, leftBoundary, *planningSection, policy.connectionTolerance);
-                    const BoundarySide relativeRight = classifyGroup
-                        (group, entities, rightBoundary, *planningSection, policy.connectionTolerance);
-                    if (relativeLeft == BoundarySide::Right && relativeRight == BoundarySide::Left)
+                    const std::size_t leftIndex = static_cast<std::size_t>(boundaryOrder[rank]);
+                    const std::size_t rightIndex = static_cast<std::size_t>(boundaryOrder[rank + 1U]);
+                    const BoundaryData& leftBoundary = boundaries[leftIndex];
+                    const BoundaryData& rightBoundary = boundaries[rightIndex];
+                    if (leftBoundary.role != BoundaryRole::Waste
+                        && rightBoundary.role != BoundaryRole::Waste) continue;
+                    if (sides->second[leftIndex] == BoundarySide::Right
+                        && sides->second[rightIndex] == BoundarySide::Left)
                     {
                         excludedGroups.insert(group.groupId);
                         for (const EntityId entityId : group.entityIds)
-                            plan.exclusions.push_back({ entityId, ProcessExclusionReason::WasteRegion });
+                            plan.exclusions.push_back
+                                ({ entityId, ProcessExclusionReason::WasteRegion });
                         break;
                     }
                 }
@@ -933,28 +1219,33 @@ namespace cadcam::planning
         }
 
         std::set<std::pair<int, int>> precedencePairs;
-        for (const BoundaryData& boundary : boundaries)
+        for (std::size_t boundaryIndex = 0; boundaryIndex < boundaries.size(); ++boundaryIndex)
         {
+            const BoundaryData& boundary = boundaries[boundaryIndex];
             if (boundary.role != BoundaryRole::Break) continue;
             for (const ProcessGroup& group : plan.groups)
             {
                 if (group.groupId == boundary.groupId || excludedGroups.find(group.groupId) != excludedGroups.end()) continue;
-                const BoundarySide side = classifyGroup
-                (
-                    group, entities, boundary, *planningSection,
-                    policy.connectionTolerance
-                );
-                if (side == BoundarySide::Mixed || side == BoundarySide::Indeterminate)
+                BoundarySide side = BoundarySide::Indeterminate;
+                if (group.kind == ProcessGroupKind::BreakBoundary
+                    || group.kind == ProcessGroupKind::WasteBoundary)
                 {
-                    return failure<ProcessPlan>
-                    (
-                        OperationStatus::Failed, context, DiagnosticCode::ProcessPlanningBoundaryClassificationFailed,
-                        QStringLiteral("加工组跨越中断切面或侧别无法确定。"), QStringLiteral("Group classified as Mixed or Indeterminate."),
-                        diagnosticValues(input, policy, 0U, 0U, boundary.pairId, group.groupId)
-                    );
+                    side = boundaryRankByGroup.at(group.groupId)
+                        < boundaryRankByGroup.at(boundary.groupId)
+                        ? BoundarySide::Left : BoundarySide::Right;
                 }
-                if (side == BoundarySide::Left && precedencePairs.insert({ group.groupId, boundary.groupId }).second)
-                    plan.precedenceConstraints.push_back({ group.groupId, boundary.groupId, boundary.pairId });
+                else
+                {
+                    const auto sides = groupBoundarySides.find(group.groupId);
+                    if (sides != groupBoundarySides.end()) side = sides->second[boundaryIndex];
+                }
+                const int predecessor = side == BoundarySide::Left
+                    ? group.groupId : boundary.groupId;
+                const int successor = side == BoundarySide::Left
+                    ? boundary.groupId : group.groupId;
+                if (precedencePairs.insert({ predecessor, successor }).second)
+                    plan.precedenceConstraints.push_back
+                        ({ predecessor, successor, boundary.pairId });
             }
         }
 
@@ -1134,9 +1425,97 @@ namespace cadcam::planning
                 return failure<ProcessPlan>
                 (
                     OperationStatus::InternalError, context, DiagnosticCode::ProcessPlanningInvariantViolation,
-                    QStringLiteral("加工计划违反中断切面前置约束。"), QStringLiteral("Left -> Break precedence was not satisfied."),
+                    QStringLiteral("加工计划违反加工断面屏障约束。"), QStringLiteral("Break boundary precedence was not satisfied."),
                     diagnosticValues(input, policy, 0U, 0U, precedence.boundaryPairId, -1,
                         precedence.predecessorGroupId, precedence.successorGroupId)
+                );
+            }
+        }
+        for (std::size_t rank = 0; rank < boundaryOrder.size(); ++rank)
+        {
+            const std::size_t boundaryIndex = static_cast<std::size_t>(boundaryOrder[rank]);
+            const BoundaryData& boundary = boundaries[boundaryIndex];
+            if (boundary.role != BoundaryRole::Break) continue;
+            const ProcessGroup& boundaryGroup = plan.groups
+                [static_cast<std::size_t>(boundary.groupId)];
+            const auto boundaryFirst = firstOrderByGroup.find(boundary.groupId);
+            const auto boundaryLast = lastOrderByGroup.find(boundary.groupId);
+            if (boundaryFirst == firstOrderByGroup.end()
+                || boundaryLast == lastOrderByGroup.end()
+                || boundaryLast->second - boundaryFirst->second + 1
+                    != static_cast<int>(boundaryGroup.entityIds.size()))
+            {
+                return failure<ProcessPlan>
+                (
+                    OperationStatus::InternalError, context,
+                    DiagnosticCode::ProcessPlanningInvariantViolation,
+                    QStringLiteral("加工断面组在最终计划中不连续。"),
+                    QStringLiteral("Break boundary assignments are missing or not contiguous."),
+                    boundaryDiagnosticValues
+                    (
+                        input, policy, boundary, boundaryGroup, entities,
+                        static_cast<int>(rank), BoundarySide::OnBoundary
+                    )
+                );
+            }
+
+            int maximumLeftLastOrder = -1;
+            for (const ProcessGroup& otherGroup : plan.groups)
+            {
+                if (otherGroup.groupId == boundary.groupId
+                    || excludedGroups.find(otherGroup.groupId) != excludedGroups.end()) continue;
+                BoundarySide side = BoundarySide::Indeterminate;
+                if (otherGroup.kind == ProcessGroupKind::BreakBoundary
+                    || otherGroup.kind == ProcessGroupKind::WasteBoundary)
+                {
+                    side = boundaryRankByGroup.at(otherGroup.groupId)
+                        < static_cast<int>(rank)
+                        ? BoundarySide::Left : BoundarySide::Right;
+                }
+                else
+                {
+                    side = groupBoundarySides.at(otherGroup.groupId)[boundaryIndex];
+                }
+                const auto otherFirst = firstOrderByGroup.find(otherGroup.groupId);
+                const auto otherLast = lastOrderByGroup.find(otherGroup.groupId);
+                const bool validSideOrder = otherFirst != firstOrderByGroup.end()
+                    && otherLast != lastOrderByGroup.end()
+                    && (side == BoundarySide::Left
+                        ? otherLast->second < boundaryFirst->second
+                        : side == BoundarySide::Right
+                            && otherFirst->second > boundaryLast->second);
+                if (!validSideOrder)
+                {
+                    return failure<ProcessPlan>
+                    (
+                        OperationStatus::InternalError, context,
+                        DiagnosticCode::ProcessPlanningInvariantViolation,
+                        QStringLiteral("最终加工计划违反断面左右工艺屏障。"),
+                        QStringLiteral("A group was scheduled on the wrong side of a Break boundary."),
+                        boundaryDiagnosticValues
+                        (
+                            input, policy, boundary, otherGroup, entities,
+                            static_cast<int>(rank), side
+                        )
+                    );
+                }
+                if (side == BoundarySide::Left)
+                    maximumLeftLastOrder = std::max
+                        (maximumLeftLastOrder, otherLast->second);
+            }
+            if (maximumLeftLastOrder + 1 != boundaryFirst->second)
+            {
+                return failure<ProcessPlan>
+                (
+                    OperationStatus::InternalError, context,
+                    DiagnosticCode::ProcessPlanningInvariantViolation,
+                    QStringLiteral("左侧加工组完成后未立即加工对应断面。"),
+                    QStringLiteral("Break boundary does not immediately follow its final left-side group."),
+                    boundaryDiagnosticValues
+                    (
+                        input, policy, boundary, boundaryGroup, entities,
+                        static_cast<int>(rank), BoundarySide::OnBoundary
+                    )
                 );
             }
         }
