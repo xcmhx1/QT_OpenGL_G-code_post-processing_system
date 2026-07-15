@@ -1791,9 +1791,173 @@ namespace
         closed.entityIds = { 10 };
         input.processGroups = { closed };
         const auto overcut = machine::RotaryTrajectoryBuilder::build(input, trajectoryPolicy, task);
-        check(overcut.succeeded() && !overcut.value->entities[0].overcutMoves.empty()
+        const auto overcutStartPoses = machine::RotaryKinematics::transform
+            (input.entities[0].path, trajectoryPolicy, std::nullopt, task.operationContext);
+        check(overcut.succeeded() && overcut.value.has_value()
+            && overcutStartPoses.succeeded() && overcutStartPoses.value.has_value()
+            && !overcut.value->entities[0].cuttingMoves.empty()
+            && std::abs(overcut.value->entities[0].cuttingMoves.back().target.x
+                - overcutStartPoses.value->front().x) <= 1.0e-9
+            && std::abs(overcut.value->entities[0].cuttingMoves.back().target.y
+                - overcutStartPoses.value->front().y) <= 1.0e-9
+            && std::abs(overcut.value->entities[0].cuttingMoves.back().target.z
+                - overcutStartPoses.value->front().z) <= 1.0e-9
+            && !overcut.value->entities[0].overcutMoves.empty()
             && overcut.value->entities[0].overcutMoves.back().kind == machine::MachineMoveKind::Overcut,
-            "closed process group creates overcut moves");
+            "closed process group returns to its start before creating overcut moves");
+
+        machine::RotaryTrajectoryInput zeroOvercutInput;
+        zeroOvercutInput.contentRevision = 11;
+        geometry::Path3D circlePath = makePath
+        (
+            20,
+            {
+                { 0.0, 0.0, 10.0 }, { 1.0, 10.0, 0.0 },
+                { 2.0, 0.0, -10.0 }, { 3.0, -10.0, 0.0 }
+            }
+        );
+        circlePath.closed = true;
+        zeroOvercutInput.entities =
+        {
+            { 20, 0, geometry::SourceGeometryKind::Circle, 0, 20, true, true, true,
+              circlePath }
+        };
+        planning::ProcessGroup zeroOvercutGroup;
+        zeroOvercutGroup.groupId = 20;
+        zeroOvercutGroup.kind = planning::ProcessGroupKind::ClosedLoop;
+        zeroOvercutGroup.closed = true;
+        zeroOvercutGroup.entityIds = { 20 };
+        zeroOvercutInput.processGroups = { zeroOvercutGroup };
+        machine::RotaryMachinePolicy zeroOvercutPolicy;
+        zeroOvercutPolicy.overcutDistance = 0.0;
+        zeroOvercutPolicy.keepContinuousAngle = true;
+        const auto zeroOvercut = machine::RotaryTrajectoryBuilder::build
+            (zeroOvercutInput, zeroOvercutPolicy, task);
+        const auto circlePoses = machine::RotaryKinematics::transform
+            (circlePath, zeroOvercutPolicy, std::nullopt, task.operationContext);
+        check(zeroOvercut.succeeded() && zeroOvercut.value.has_value()
+            && circlePoses.succeeded() && circlePoses.value.has_value()
+            && !zeroOvercut.value->entities[0].cuttingMoves.empty()
+            && zeroOvercut.value->entities[0].overcutMoves.empty(),
+            "zero overcut closed circle creates cutting closure without overcut");
+        if (zeroOvercut.value.has_value() && circlePoses.value.has_value())
+        {
+            const auto& finalPose = zeroOvercut.value->entities[0].cuttingMoves.back().target;
+            const auto& startPose = circlePoses.value->front();
+            check(std::abs(finalPose.x - startPose.x) <= 1.0e-9
+                && std::abs(finalPose.y - startPose.y) <= 1.0e-9
+                && std::abs(finalPose.z - startPose.z) <= 1.0e-9
+                && std::abs(std::remainder(finalPose.aDegrees - startPose.aDegrees, 360.0)) <= 1.0e-9,
+                "zero overcut circle returns exactly to its first machining pose");
+
+            nc::NcEntityMetadata circleMetadata;
+            circleMetadata.entityId = 20;
+            circleMetadata.sourceKind = geometry::SourceGeometryKind::Circle;
+            circleMetadata.sourceIndex = 0;
+            circleMetadata.processOrder = 0;
+            circleMetadata.processGroupId = 20;
+            circleMetadata.entityTypeKey = "CIRCLE";
+            const auto circleProgram = nc::NcProgramBuilder::buildRotary
+                (*zeroOvercut.value, { circleMetadata }, task.operationContext);
+            bool hasOvercutMotion = false;
+            if (circleProgram.value.has_value())
+                for (const auto& block : circleProgram.value->entities)
+                    for (const auto& motion : block.motions)
+                        hasOvercutMotion = hasOvercutMotion
+                            || motion.sourceKind == nc::NcSourceMoveKind::Overcut;
+            const auto* finalMotion = circleProgram.value.has_value()
+                && !circleProgram.value->entities.empty()
+                && !circleProgram.value->entities.back().motions.empty()
+                ? &circleProgram.value->entities.back().motions.back()
+                : nullptr;
+            check(circleProgram.succeeded() && finalMotion != nullptr
+                && finalMotion->kind == nc::NcMotionKind::Linear
+                && finalMotion->axes.x.has_value() && finalMotion->axes.y.has_value()
+                && finalMotion->axes.z.has_value() && finalMotion->axes.a.has_value()
+                && std::abs(*finalMotion->axes.x - startPose.x) <= 1.0e-9
+                && std::abs(*finalMotion->axes.y - startPose.y) <= 1.0e-9
+                && std::abs(*finalMotion->axes.z - startPose.z) <= 1.0e-9
+                && std::abs(std::remainder(*finalMotion->axes.a - startPose.aDegrees, 360.0)) <= 1.0e-9
+                && !hasOvercutMotion,
+                "NC program preserves zero-overcut closure without an overcut motion");
+        }
+
+        machine::RotaryTrajectoryInput multiClosedInput;
+        multiClosedInput.contentRevision = 12;
+        multiClosedInput.entities =
+        {
+            { 30, 0, geometry::SourceGeometryKind::Line, 0, 30, false, true, false,
+              makePath(30, { { 0.0, 0.0, 10.0 }, { 10.0, 0.0, 10.0 } }) },
+            { 31, 1, geometry::SourceGeometryKind::Line, 1, 30, false, false, true,
+              makePath(31, { { 10.5, 0.0, 10.0 }, { 0.0, 10.0, 0.0 } }) }
+        };
+        planning::ProcessGroup multiClosedGroup;
+        multiClosedGroup.groupId = 30;
+        multiClosedGroup.kind = planning::ProcessGroupKind::ClosedLoop;
+        multiClosedGroup.closed = true;
+        multiClosedGroup.entityIds = { 30, 31 };
+        multiClosedInput.processGroups = { multiClosedGroup };
+        const auto multiClosed = machine::RotaryTrajectoryBuilder::build
+            (multiClosedInput, zeroOvercutPolicy, task);
+        const auto multiStartPoses = machine::RotaryKinematics::transform
+            (multiClosedInput.entities.front().path, zeroOvercutPolicy,
+             std::nullopt, task.operationContext);
+        check(multiClosed.succeeded() && multiClosed.value.has_value()
+            && multiStartPoses.succeeded() && multiStartPoses.value.has_value()
+            && multiClosed.value->entities[1].approachMoves.empty()
+            && !multiClosed.value->entities[1].cuttingMoves.empty()
+            && multiClosed.value->entities[1].cuttingMoves.front().kind
+                == machine::MachineMoveKind::CuttingConnection
+            && std::abs(multiClosed.value->entities[1].cuttingMoves.back().target.x
+                - multiStartPoses.value->front().x) <= 1.0e-9
+            && std::abs(multiClosed.value->entities[1].cuttingMoves.back().target.y
+                - multiStartPoses.value->front().y) <= 1.0e-9
+            && std::abs(multiClosed.value->entities[1].cuttingMoves.back().target.z
+                - multiStartPoses.value->front().z) <= 1.0e-9,
+            "multi-entity zero-overcut group closes on the last entity after cutting connections");
+
+        machine::RotaryTrajectoryInput nextGroupInput = zeroOvercutInput;
+        nextGroupInput.contentRevision = 13;
+        nextGroupInput.entities[0].lastInGroup = true;
+        nextGroupInput.entities.push_back
+        ({ 21, 1, geometry::SourceGeometryKind::Line, 1, 21, false, true, true,
+           makePath(21, { { 20.0, 0.0, 10.0 }, { 21.0, 0.0, 10.0 } }) });
+        planning::ProcessGroup nextGroup;
+        nextGroup.groupId = 21;
+        nextGroup.entityIds = { 21 };
+        nextGroupInput.processGroups.push_back(nextGroup);
+        machine::RotaryMachinePolicy nextGroupPolicy;
+        nextGroupPolicy.overcutDistance = 2.0;
+        const auto nextGroupTrajectory = machine::RotaryTrajectoryBuilder::build
+            (nextGroupInput, nextGroupPolicy, task);
+        check(nextGroupTrajectory.succeeded() && nextGroupTrajectory.value.has_value()
+            && !nextGroupTrajectory.value->entities[0].overcutMoves.empty()
+            && !nextGroupTrajectory.value->entities[1].approachMoves.empty()
+            && std::abs(nextGroupTrajectory.value->entities[1].approachMoves.front().target.x
+                - nextGroupTrajectory.value->entities[0].overcutMoves.back().target.x) <= 1.0e-9
+            && std::abs(nextGroupTrajectory.value->entities[1].approachMoves.front().target.y
+                - nextGroupTrajectory.value->entities[0].overcutMoves.back().target.y) <= 1.0e-9
+            && std::abs(nextGroupTrajectory.value->entities[1].approachMoves.front().target.aDegrees
+                - nextGroupTrajectory.value->entities[0].overcutMoves.back().target.aDegrees) <= 1.0e-9,
+            "next group safe departure starts from the actual overcut endpoint");
+
+        machine::RotaryTrajectoryInput openInput;
+        openInput.contentRevision = 14;
+        openInput.entities =
+        {
+            { 40, 0, geometry::SourceGeometryKind::Line, 0, 40, false, true, true,
+              makePath(40, { { 0.0, 0.0, 10.0 }, { 5.0, 0.0, 10.0 } }) }
+        };
+        planning::ProcessGroup openGroup;
+        openGroup.groupId = 40;
+        openGroup.entityIds = { 40 };
+        openInput.processGroups = { openGroup };
+        const auto openTrajectory = machine::RotaryTrajectoryBuilder::build
+            (openInput, zeroOvercutPolicy, task);
+        check(openTrajectory.succeeded() && openTrajectory.value.has_value()
+            && openTrajectory.value->entities[0].cuttingMoves.size() == 1U
+            && openTrajectory.value->entities[0].overcutMoves.empty(),
+            "open path is not closed when overcut is zero");
 
         input.contentRevision = 0;
         const auto invalidRevision = machine::RotaryTrajectoryBuilder::build(input, trajectoryPolicy, task);

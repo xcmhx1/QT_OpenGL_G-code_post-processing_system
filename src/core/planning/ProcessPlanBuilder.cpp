@@ -76,6 +76,19 @@ namespace cadcam::planning
                 : QStringLiteral("NearestNext");
         }
 
+        QString groupKindName(ProcessGroupKind kind)
+        {
+            switch (kind)
+            {
+            case ProcessGroupKind::SingleEntity: return QStringLiteral("SingleEntity");
+            case ProcessGroupKind::ConnectedChain: return QStringLiteral("ConnectedChain");
+            case ProcessGroupKind::ClosedLoop: return QStringLiteral("ClosedLoop");
+            case ProcessGroupKind::BreakBoundary: return QStringLiteral("BreakBoundary");
+            case ProcessGroupKind::WasteBoundary: return QStringLiteral("WasteBoundary");
+            }
+            return QStringLiteral("Unknown");
+        }
+
         QVariantMap diagnosticValues
         (
             const ProcessPlanningInput& input,
@@ -92,7 +105,11 @@ namespace cadcam::planning
             int assignmentCount = 0,
             int excludedCount = 0,
             int processOrder = -1,
-            int continuousGroupId = -1
+            int continuousGroupId = -1,
+            bool initialSelection = false,
+            const GroupTraversal* selected = nullptr,
+            ProcessGroupKind selectedGroupKind = ProcessGroupKind::SingleEntity,
+            int blockedNearestBoundaryGroupId = -1
         )
         {
             QVariantMap values;
@@ -111,6 +128,20 @@ namespace cadcam::planning
             values.insert(QStringLiteral("excludedCount"), excludedCount);
             values.insert(QStringLiteral("processOrder"), processOrder);
             values.insert(QStringLiteral("continuousGroupId"), continuousGroupId);
+            values.insert(QStringLiteral("initialSelection"), initialSelection);
+            values.insert(QStringLiteral("initialPositionX"), policy.initialPosition.x);
+            values.insert(QStringLiteral("initialPositionY"), policy.initialPosition.y);
+            values.insert(QStringLiteral("initialPositionZ"), policy.initialPosition.z);
+            values.insert(QStringLiteral("selectedGroupId"), selected != nullptr ? selected->groupId : -1);
+            values.insert(QStringLiteral("selectedGroupKind"), selected != nullptr
+                ? groupKindName(selectedGroupKind) : QString());
+            values.insert(QStringLiteral("selectedMovementDistance"), selected != nullptr
+                ? selected->movementDistance : -1.0);
+            values.insert(QStringLiteral("selectedRotationCost"), selected != nullptr
+                ? selected->rotationCost : -1.0);
+            values.insert(QStringLiteral("selectedSurfaceCost"), selected != nullptr
+                ? selected->surfaceCost : -1);
+            values.insert(QStringLiteral("blockedNearestBoundaryGroupId"), blockedNearestBoundaryGroupId);
             return values;
         }
 
@@ -565,7 +596,8 @@ namespace cadcam::planning
             const std::unordered_map<EntityId, const PlanningEntity*>& entities,
             const Vector3d& currentPosition,
             const ProcessPlanningPolicy& policy,
-            const std::optional<machining::TubeSectionModel>& section
+            const std::optional<machining::TubeSectionModel>& section,
+            ProcessOrderingStrategy selectionStrategy
         )
         {
             std::optional<GroupTraversal> best;
@@ -583,7 +615,7 @@ namespace cadcam::planning
                     );
                     if (!candidate.has_value()) continue;
                     scoreTraversal(*candidate, currentPosition, section);
-                    if (!best.has_value() || traversalLess(*candidate, *best, policy.orderingStrategy))
+                    if (!best.has_value() || traversalLess(*candidate, *best, selectionStrategy))
                         best = std::move(candidate);
                 }
             }
@@ -971,15 +1003,20 @@ namespace cadcam::planning
                     diagnosticValues(input, policy, 0U, 0U, -1, -1, -1, -1,
                         static_cast<int>(schedulable.size() - scheduled.size()), 0,
                         static_cast<int>(plan.groups.size()), static_cast<int>(plan.assignments.size()),
-                        static_cast<int>(plan.exclusions.size()))
+                        static_cast<int>(plan.exclusions.size()), -1, -1, scheduled.empty())
                 );
             }
 
             std::optional<GroupTraversal> selected;
+            const bool initialSelection = scheduled.empty();
+            const ProcessOrderingStrategy selectionStrategy = initialSelection
+                ? ProcessOrderingStrategy::NearestNext
+                : policy.orderingStrategy;
             for (const int groupId : eligible)
             {
                 const ProcessGroup& group = plan.groups[static_cast<std::size_t>(groupId)];
-                auto candidate = bestTraversal(group, entities, currentPosition, policy, input.tubeSection);
+                auto candidate = bestTraversal
+                    (group, entities, currentPosition, policy, input.tubeSection, selectionStrategy);
                 if (!candidate.has_value())
                 {
                     return failure<ProcessPlan>
@@ -989,10 +1026,14 @@ namespace cadcam::planning
                         diagnosticValues(input, policy, 0U, 0U, -1, groupId, -1, -1,
                             static_cast<int>(schedulable.size() - scheduled.size()), static_cast<int>(eligible.size()),
                             static_cast<int>(plan.groups.size()), static_cast<int>(plan.assignments.size()),
-                            static_cast<int>(plan.exclusions.size()))
+                            static_cast<int>(plan.exclusions.size()), -1, -1, initialSelection,
+                            selected.has_value() ? &*selected : nullptr,
+                            selected.has_value()
+                                ? plan.groups[static_cast<std::size_t>(selected->groupId)].kind
+                                : group.kind)
                     );
                 }
-                if (!selected.has_value() || traversalLess(*candidate, *selected, policy.orderingStrategy))
+                if (!selected.has_value() || traversalLess(*candidate, *selected, selectionStrategy))
                     selected = std::move(candidate);
             }
             if (!selected.has_value())
@@ -1001,7 +1042,11 @@ namespace cadcam::planning
                 (
                     OperationStatus::Failed, context, DiagnosticCode::ProcessPlanningOrderingFailed,
                     QStringLiteral("无法从可调度加工组中选择下一组。"), QStringLiteral("eligibleGroups produced no candidate."),
-                    diagnosticValues(input, policy)
+                    diagnosticValues(input, policy, 0U, 0U, -1, -1, -1, -1,
+                        static_cast<int>(schedulable.size() - scheduled.size()),
+                        static_cast<int>(eligible.size()), static_cast<int>(plan.groups.size()),
+                        static_cast<int>(plan.assignments.size()), static_cast<int>(plan.exclusions.size()),
+                        -1, -1, initialSelection)
                 );
             }
 

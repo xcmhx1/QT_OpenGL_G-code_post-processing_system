@@ -368,8 +368,8 @@ ProcessPlan
 - 闭环必须由 `Path3D.closed` 或所有物理连接点在 `numericalJoinEpsilon` 内真实重合成立；工程间隙不接受“近似闭合”。
 - 加工断面按真实闭环的 YZ 投影映射到方管外边界，生成 `SurfaceSpan` 和 seam 周向统计。
 - 有向周向行程得到整数 winding；`winding=0` 表示仍保留左右材料桥，不能标记为有效切断断面。
-- `NearestNext` 优先空间距离；`LazyRotation` 在满足断面前置约束和连续组原子性的前提下考虑 A 轴旋转代价。
-- 同一连续组可生成 `CuttingConnection`，组间使用安全移动；闭合组按配置生成过切，默认 `overcutDistance=2.0 mm`。
+- 首个加工组从满足硬前置约束的候选中，按到四轴初始位置 `(0, 0, 500)` 的真实入口移动距离选择；`LazyRotation` 从第二个加工组开始考虑 A 轴旋转代价。
+- 同一连续组可生成 `CuttingConnection`，组间使用安全移动；闭合组始终精确回到组起点，`overcutDistance=0` 只关闭额外过切，默认过切距离为 `2.0 mm`。
 - A 轴角度连续解包，避免相邻点产生无意义的正负 360 度跳变。
 
 ## 13. 诊断和结果

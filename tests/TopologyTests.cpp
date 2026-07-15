@@ -1508,23 +1508,78 @@ namespace
 
         auto lazyFixture = planningFixture
         ({
-            record(0U, 1200U, {{ 1.0, -1.0, -4.0 }, { 2.0, -1.0, -4.0 }}),
-            record(1U, 1201U, {{ 10.0, 1.0, 4.0 }, { 11.0, 1.0, 4.0 }})
+            record(0U, 1200U, {{ 0.0, 1.0, 4.0 }, { 1.0, 1.0, 4.0 }}),
+            record(1U, 1201U, {{ 100.0, 0.0, 4.0 }, { 101.0, 0.0, 4.0 }}),
+            record(2U, 1202U, {{ 2.0, 0.0, -4.0 }, { 3.0, 0.0, -4.0 }})
         });
         if (!lazyFixture.has_value()) return;
         lazyFixture->input.topology = &lazyFixture->topology;
+        policy.initialPosition = { 0.0, 0.0, 500.0 };
         policy.orderingStrategy = ProcessOrderingStrategy::LazyRotation;
         const auto lazy = ProcessPlanBuilder::build(lazyFixture->input, policy, context);
         check(lazy.succeeded() && lazy.value.has_value()
-            && orderOf(*lazy.value, 1201U) < orderOf(*lazy.value, 1200U),
-            "lazy strategy prioritizes lower rotation cost");
+            && lazy.value->orderingStrategy == ProcessOrderingStrategy::LazyRotation
+            && orderOf(*lazy.value, 1200U) == 0
+            && orderOf(*lazy.value, 1201U) == 1,
+            "first rotary group uses initial distance and later groups restore lazy rotation");
+
+        std::vector<TopologyPathRecord> eligibleBreakRecords
+        {
+            record(0U, 1220U, {{ 100.0, 0.0, 4.0 }, { 101.0, 0.0, 4.0 }})
+        };
+        auto eligibleBoundary = rectangleRecords(1U, 1230U, 0.0, -5.0, 5.0, -4.0, 4.0);
+        eligibleBreakRecords.insert
+            (eligibleBreakRecords.end(), eligibleBoundary.begin(), eligibleBoundary.end());
+        std::map<EntityId, std::pair<BoundaryRole, int>> eligibleBreakRoles;
+        for (EntityId id = 1230U; id < 1234U; ++id)
+            eligibleBreakRoles[id] = { BoundaryRole::Break, 12 };
+        auto eligibleBreakFixture = planningFixture
+            (std::move(eligibleBreakRecords), eligibleBreakRoles);
+        if (!eligibleBreakFixture.has_value()) return;
+        eligibleBreakFixture->input.topology = &eligibleBreakFixture->topology;
+        const auto eligibleBreak = ProcessPlanBuilder::build
+            (eligibleBreakFixture->input, policy, context);
+        check(eligibleBreak.succeeded() && eligibleBreak.value.has_value()
+            && !eligibleBreak.value->assignments.empty()
+            && eligibleBreak.value->assignments.front().entityId >= 1230U
+            && eligibleBreak.value->assignments.front().entityId < 1234U,
+            "eligible nearest break boundary may be the first process group");
 
         breakFixture->input.topology = &breakFixture->topology;
+        policy.initialPosition = { 5.0, -5.0, 4.0 };
         const auto constrainedLazy = ProcessPlanBuilder::build
             (breakFixture->input, policy, context);
         check(constrainedLazy.succeeded() && constrainedLazy.value.has_value()
+            && !constrainedLazy.value->assignments.empty()
+            && constrainedLazy.value->assignments.front().entityId == 1101U
             && orderOf(*constrainedLazy.value, 1100U) < orderOf(*constrainedLazy.value, 1110U),
-            "break precedence blocks lazy strategy from selecting boundary early");
+            "first selection uses nearest eligible group while a nearer blocked boundary waits for its left predecessor");
+
+        auto stableFixture = planningFixture
+        ({
+            record(5U, 1251U, {{ -10.0, 0.0, 500.0 }, { -11.0, 0.0, 500.0 }}),
+            record(3U, 1252U, {{ 10.0, 0.0, 500.0 }, { 11.0, 0.0, 500.0 }})
+        });
+        if (!stableFixture.has_value()) return;
+        stableFixture->input.topology = &stableFixture->topology;
+        policy.initialPosition = { 0.0, 0.0, 500.0 };
+        const auto stable = ProcessPlanBuilder::build(stableFixture->input, policy, context);
+        check(stable.succeeded() && stable.value.has_value()
+            && orderOf(*stable.value, 1252U) == 0,
+            "equal first movement distance uses stable source index");
+
+        auto stableEntityFixture = planningFixture
+        ({
+            record(7U, 1261U, {{ -10.0, 0.0, 500.0 }, { -11.0, 0.0, 500.0 }}),
+            record(7U, 1260U, {{ 10.0, 0.0, 500.0 }, { 11.0, 0.0, 500.0 }})
+        });
+        if (!stableEntityFixture.has_value()) return;
+        stableEntityFixture->input.topology = &stableEntityFixture->topology;
+        const auto stableEntity = ProcessPlanBuilder::build
+            (stableEntityFixture->input, policy, context);
+        check(stableEntity.succeeded() && stableEntity.value.has_value()
+            && orderOf(*stableEntity.value, 1260U) == 0,
+            "equal first distance and source index use stable entity id");
 
         std::vector<TopologyPathRecord> twoBreaks
         {
