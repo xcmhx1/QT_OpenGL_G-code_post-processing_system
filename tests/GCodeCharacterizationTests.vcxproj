@@ -70,6 +70,7 @@
     <ClCompile Include="SplineProductionTests.cpp" />
     <ClCompile Include="GeometrySnapshotTests.cpp" />
     <ClCompile Include="TopologyTests.cpp" />
+    <ClCompile Include="TranslationInvarianceTests.cpp" />
     <ClCompile Include="..\src\CadDocument.cpp" />
     <ClCompile Include="..\src\CadItem.cpp" />
     <ClCompile Include="..\src\CadLineItem.cpp" />
@@ -92,6 +93,7 @@
     <ClCompile Include="..\src\core\geometry\GeometryTypes.cpp" />
     <ClCompile Include="..\src\core\geometry\Path3D.cpp" />
     <ClCompile Include="..\src\core\geometry\GeometryCompiler.cpp" />
+    <ClCompile Include="..\src\core\geometry\LocalCoordinateFrame.cpp" />
     <ClCompile Include="..\src\core\geometry\NurbsCurveEvaluator.cpp" />
     <ClCompile Include="..\src\application\geometry\DocumentGeometrySnapshotBuilder.cpp" />
     <ClCompile Include="..\src\application\geometry\GeometrySnapshotCompiler.cpp" />

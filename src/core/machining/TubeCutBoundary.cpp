@@ -1,6 +1,7 @@
 #include "pch.h"
 
 #include "core/machining/TubeCutBoundary.h"
+#include "core/geometry/LocalCoordinateFrame.h"
 
 #include <QVariantList>
 
@@ -70,11 +71,15 @@ namespace cadcam::machining
         std::vector<double> cumulativeLengths(const std::vector<Vector2d>& boundary)
         {
             std::vector<double> cumulative(boundary.size() + 1, 0.0);
+            double correction = 0.0;
 
             for (std::size_t index = 0; index < boundary.size(); ++index)
             {
-                cumulative[index + 1] = cumulative[index]
-                    + distance2D(boundary[index], boundary[(index + 1) % boundary.size()]);
+                const double segment = distance2D
+                    (boundary[index], boundary[(index + 1) % boundary.size()]);
+                const double adjusted = segment - correction;
+                cumulative[index + 1] = cumulative[index] + adjusted;
+                correction = (cumulative[index + 1] - cumulative[index]) - adjusted;
             }
 
             return cumulative;
@@ -722,7 +727,14 @@ namespace cadcam::machining
             return result;
         }
 
+        const geometry::LocalFrame2d localFrame{ geometry::stableBoundsCenter(boundary) };
+        for (Vector2d& point : boundary)
+        {
+            point = localFrame.toLocal(point);
+        }
+
         double signedArea = 0.0;
+        double areaCorrection = 0.0;
         double minimumY = std::numeric_limits<double>::max();
         double maximumY = std::numeric_limits<double>::lowest();
         double minimumZ = std::numeric_limits<double>::max();
@@ -732,7 +744,11 @@ namespace cadcam::machining
         {
             const Vector2d& point = boundary[index];
             const Vector2d& next = boundary[(index + 1) % boundary.size()];
-            signedArea += point.x * next.y - next.x * point.y;
+            const double term = point.x * next.y - next.x * point.y;
+            const double adjusted = term - areaCorrection;
+            const double nextArea = signedArea + adjusted;
+            areaCorrection = (nextArea - signedArea) - adjusted;
+            signedArea = nextArea;
             minimumY = std::min(minimumY, point.x);
             maximumY = std::max(maximumY, point.x);
             minimumZ = std::min(minimumZ, point.y);
@@ -824,6 +840,11 @@ namespace cadcam::machining
             ));
         }
 
+        for (Vector2d& point : section.boundary)
+        {
+            point = localFrame.toWorld(point);
+        }
+
         section.perimeter = perimeter;
         section.seamPositions = seamPositions;
         section.centerY = source.centerY;
@@ -874,11 +895,11 @@ namespace cadcam::machining
             );
         }
 
-        const TubeSectionGeometry& section = *preparedSection.value;
+        TubeSectionGeometry section = *preparedSection.value;
         const double mappingEpsilon = std::max(surfaceMappingEpsilon, 1.0e-9);
         const double matchEpsilon = std::max(sectionMatchEpsilon, 1.0e-9);
-        analysis.orderedPath.reserve(orderedPath.size());
-
+        std::vector<Vector3d> finitePath;
+        finitePath.reserve(orderedPath.size());
         for (const Vector3d& point : orderedPath)
         {
             if (!finite(point))
@@ -890,9 +911,53 @@ namespace cadcam::machining
                     QStringLiteral("加工断面闭环包含无效坐标。"),
                     QStringLiteral("Non-finite ordered path point."),
                     context,
-                    section
+                    sourceSection
                 );
             }
+            finitePath.push_back(point);
+        }
+        const double referenceX = finitePath.empty() ? 0.0
+            : geometry::stableBoundsCenter(finitePath).x;
+        const geometry::LocalFrame3d localFrame
+            { { referenceX, section.centerY, section.centerZ } };
+        for (Vector2d& point : section.boundary)
+        {
+            point.x -= localFrame.origin.y;
+            point.y -= localFrame.origin.z;
+        }
+        section.centerY = 0.0;
+        section.centerZ = 0.0;
+        const auto restoreWorld = [&localFrame](TubeCutAnalysis& value)
+        {
+            for (Vector3d& point : value.orderedPath)
+            {
+                point = localFrame.toWorld(point);
+            }
+            for (UnwrappedBoundaryPoint& point : value.unwrappedBoundary)
+            {
+                point.x += localFrame.origin.x;
+            }
+            value.projectedCenterY += localFrame.origin.y;
+            value.projectedCenterZ += localFrame.origin.z;
+        };
+        const auto failLocal =
+            [&restoreWorld, &context, &sourceSection]
+            (
+                TubeCutAnalysis value,
+                DiagnosticCode code,
+                const QString& userMessage,
+                const QString& technicalDetail
+            )
+            {
+                restoreWorld(value);
+                return fail(std::move(value), code, userMessage, technicalDetail,
+                    context, sourceSection);
+            };
+        analysis.orderedPath.reserve(orderedPath.size());
+
+        for (const Vector3d& worldPoint : finitePath)
+        {
+            const Vector3d point = localFrame.toLocal(worldPoint);
 
             if (analysis.orderedPath.empty()
                 || distance3D(analysis.orderedPath.back(), point) > matchEpsilon)
@@ -909,14 +974,12 @@ namespace cadcam::machining
 
         if (analysis.orderedPath.size() < 3)
         {
-            return fail
+            return failLocal
             (
                 std::move(analysis),
                 DiagnosticCode::CutBoundaryTopologyInvalid,
                 QStringLiteral("加工断面闭环点数不足。"),
-                QStringLiteral("Strict topology loop has fewer than three points."),
-                context,
-                section
+                QStringLiteral("Strict topology loop has fewer than three points.")
             );
         }
 
@@ -935,34 +998,30 @@ namespace cadcam::machining
 
         analysis.projectedYLength = maximumY - minimumY;
         analysis.projectedZWidth = maximumZ - minimumZ;
-        analysis.projectedCenterY = (minimumY + maximumY) * 0.5;
-        analysis.projectedCenterZ = (minimumZ + maximumZ) * 0.5;
+        analysis.projectedCenterY = minimumY + (maximumY - minimumY) * 0.5;
+        analysis.projectedCenterZ = minimumZ + (maximumZ - minimumZ) * 0.5;
 
         if (std::abs(analysis.projectedYLength - section.yLength) > matchEpsilon
             || std::abs(analysis.projectedZWidth - section.zWidth) > matchEpsilon)
         {
-            return fail
+            return failLocal
             (
                 std::move(analysis),
                 DiagnosticCode::CutBoundaryDimensionMismatch,
                 QStringLiteral("候选曲线的 YZ 投影尺寸与方管外截面不一致。"),
-                QStringLiteral("Projected section dimensions differ from the recognized tube section."),
-                context,
-                section
+                QStringLiteral("Projected section dimensions differ from the recognized tube section.")
             );
         }
 
         if (std::abs(analysis.projectedCenterY - section.centerY) > matchEpsilon
             || std::abs(analysis.projectedCenterZ - section.centerZ) > matchEpsilon)
         {
-            return fail
+            return failLocal
             (
                 std::move(analysis),
                 DiagnosticCode::CutBoundaryCenterMismatch,
                 QStringLiteral("候选曲线的 YZ 投影中心与方管外截面中心不一致。"),
-                QStringLiteral("Projected section center differs from the recognized tube section."),
-                context,
-                section
+                QStringLiteral("Projected section center differs from the recognized tube section.")
             );
         }
 
@@ -973,7 +1032,7 @@ namespace cadcam::machining
         if (!mapped.valid)
         {
             const bool pointOffSurface = mapped.failure == MappedPath::Failure::PointOffSurface;
-            return fail
+            return failLocal
             (
                 std::move(analysis),
                 pointOffSurface
@@ -984,9 +1043,7 @@ namespace cadcam::machining
                     : QStringLiteral("候选曲线的 YZ 投影没有沿方管真实外截面连续运行。"),
                 pointOffSurface
                     ? QStringLiteral("At least one projected point is outside the section boundary tolerance.")
-                    : QStringLiteral("At least one projected path segment is not a section-boundary interval."),
-                context,
-                section
+                    : QStringLiteral("At least one projected path segment is not a section-boundary interval.")
             );
         }
 
@@ -997,19 +1054,18 @@ namespace cadcam::machining
 
         if (analysis.maximumProjectionCoverageGap > traversalEpsilon)
         {
-            return fail
+            return failLocal
             (
                 std::move(analysis),
                 DiagnosticCode::CutBoundaryCoverageGap,
                 QStringLiteral("候选曲线没有覆盖完整的方管外截面投影。"),
-                QStringLiteral("Merged section intervals contain an uncovered gap."),
-                context,
-                section
+                QStringLiteral("Merged section intervals contain an uncovered gap.")
             );
         }
 
         analysis.projectionMatchesSection = true;
         double signedTravel = 0.0;
+        double signedTravelCorrection = 0.0;
         const double initialPerimeterPosition = mapped.spans.front().sectionParameterStart;
 
         for (const SurfaceSpan& span : mapped.spans)
@@ -1020,7 +1076,11 @@ namespace cadcam::machining
                     ({ span.xStart, initialPerimeterPosition });
             }
 
-            signedTravel += span.sectionParameterEnd - span.sectionParameterStart;
+            const double travel = span.sectionParameterEnd - span.sectionParameterStart;
+            const double adjustedTravel = travel - signedTravelCorrection;
+            const double nextTravel = signedTravel + adjustedTravel;
+            signedTravelCorrection = (nextTravel - signedTravel) - adjustedTravel;
+            signedTravel = nextTravel;
             analysis.unwrappedBoundary.push_back
                 ({ span.xEnd, initialPerimeterPosition + signedTravel });
         }
@@ -1030,14 +1090,12 @@ namespace cadcam::machining
 
         if (std::abs(signedTravel - analysis.winding * section.perimeter) > traversalEpsilon)
         {
-            return fail
+            return failLocal
             (
                 std::move(analysis),
                 DiagnosticCode::CutBoundaryWindingMismatch,
                 QStringLiteral("候选曲线的周向行程无法形成稳定整数绕数。"),
-                QStringLiteral("Unwrapped perimeter travel has a non-numerical winding remainder."),
-                context,
-                section
+                QStringLiteral("Unwrapped perimeter travel has a non-numerical winding remainder.")
             );
         }
 
@@ -1060,47 +1118,42 @@ namespace cadcam::machining
 
             if (seam.winding != analysis.winding)
             {
-                return fail
+                return failLocal
                 (
                     std::move(analysis),
                     DiagnosticCode::CutBoundarySeamDisagreement,
                     QStringLiteral("四条接缝的有向穿越结果与全局绕数不一致。"),
-                    QStringLiteral("A usable seam winding differs from global winding."),
-                    context,
-                    section
+                    QStringLiteral("A usable seam winding differs from global winding.")
                 );
             }
         }
 
         if (usableSeamCount < 2)
         {
-            return fail
+            return failLocal
             (
                 std::move(analysis),
                 DiagnosticCode::CutBoundarySeamDegenerate,
                 QStringLiteral("可用接缝不足，无法确定候选曲线是否切断方管。"),
-                QStringLiteral("Fewer than two seams have unambiguous events."),
-                context,
-                section
+                QStringLiteral("Fewer than two seams have unambiguous events.")
             );
         }
 
         if (std::abs(analysis.winding) > 1)
         {
-            return fail
+            return failLocal
             (
                 std::move(analysis),
                 DiagnosticCode::CutBoundaryMultipleWinding,
                 QStringLiteral("候选曲线绕方管多圈，无法作为单一加工断面。"),
-                QStringLiteral("Absolute integer winding exceeds one."),
-                context,
-                section
+                QStringLiteral("Absolute integer winding exceeds one.")
             );
         }
 
         analysis.result = classifyWinding(analysis.winding, analysis.seamResults);
         OperationResult<TubeCutAnalysis> result;
         result.status = OperationStatus::Success;
+        restoreWorld(analysis);
 
         if (analysis.result == TubeCutResult::KeepsLeftAndRight)
         {
@@ -1112,7 +1165,7 @@ namespace cadcam::machining
                 QStringLiteral("Complete projection with zero signed seam winding."),
                 context,
                 analysis,
-                section
+                sourceSection
             ));
         }
         result.value = std::move(analysis);

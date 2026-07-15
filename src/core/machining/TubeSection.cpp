@@ -1,6 +1,7 @@
 #include "pch.h"
 
 #include "core/machining/TubeSection.h"
+#include "core/geometry/LocalCoordinateFrame.h"
 
 #include <QVariantList>
 
@@ -15,6 +16,8 @@ namespace cadcam::machining
     namespace
     {
         using geometry::EntityId;
+        using geometry::LocalFrame2d;
+        using geometry::LocalFrame3d;
         using geometry::Vector2d;
         using geometry::Vector3d;
         using topology::TopologyInput;
@@ -60,13 +63,20 @@ namespace cadcam::machining
 
         double signedArea(const std::vector<Vector2d>& boundary)
         {
+            if (boundary.empty()) return 0.0;
+            const LocalFrame2d frame{ geometry::stableBoundsCenter(boundary) };
             double area = 0.0;
+            double correction = 0.0;
 
             for (std::size_t index = 0; index < boundary.size(); ++index)
             {
-                const Vector2d& start = boundary[index];
-                const Vector2d& end = boundary[(index + 1) % boundary.size()];
-                area += start.x * end.y - end.x * start.y;
+                const Vector2d start = frame.toLocal(boundary[index]);
+                const Vector2d end = frame.toLocal(boundary[(index + 1) % boundary.size()]);
+                const double term = start.x * end.y - end.x * start.y;
+                const double adjusted = term - correction;
+                const double next = area + adjusted;
+                correction = (next - area) - adjusted;
+                area = next;
             }
 
             return area * 0.5;
@@ -129,20 +139,22 @@ namespace cadcam::machining
 
         bool pointInside(const Vector2d& point, const std::vector<Vector2d>& boundary)
         {
+            const LocalFrame2d frame{ geometry::stableBoundsCenter(boundary) };
+            const Vector2d localPoint = frame.toLocal(point);
             bool inside = false;
 
             for (std::size_t current = 0, previous = boundary.size() - 1;
                 current < boundary.size(); previous = current++)
             {
-                const Vector2d& first = boundary[previous];
-                const Vector2d& second = boundary[current];
-                const bool crosses = (first.y > point.y) != (second.y > point.y);
+                const Vector2d first = frame.toLocal(boundary[previous]);
+                const Vector2d second = frame.toLocal(boundary[current]);
+                const bool crosses = (first.y > localPoint.y) != (second.y > localPoint.y);
 
                 if (crosses)
                 {
                     const double intersectionX = (second.x - first.x)
-                        * (point.y - first.y) / (second.y - first.y) + first.x;
-                    inside = inside != (point.x < intersectionX);
+                        * (localPoint.y - first.y) / (second.y - first.y) + first.x;
+                    inside = inside != (localPoint.x < intersectionX);
                 }
             }
 
@@ -484,6 +496,12 @@ namespace cadcam::machining
                 );
             }
 
+            const LocalFrame3d localFrame{ geometry::stableBoundsCenter(path) };
+            for (Vector3d& point : path)
+            {
+                point = localFrame.toLocal(point);
+            }
+
             double minimumX = path.front().x;
             double maximumX = minimumX;
             for (const Vector3d& point : path)
@@ -491,11 +509,12 @@ namespace cadcam::machining
                 minimumX = std::min(minimumX, point.x);
                 maximumX = std::max(maximumX, point.x);
             }
-            candidate.model.centerX = (minimumX + maximumX) * 0.5;
+            const double localCenterX = minimumX + (maximumX - minimumX) * 0.5;
+            candidate.model.centerX = localFrame.origin.x + localCenterX;
             for (const Vector3d& point : path)
                 candidate.model.maximumPlaneDeviation = std::max
                     (candidate.model.maximumPlaneDeviation,
-                     std::abs(point.x - candidate.model.centerX));
+                     std::abs(point.x - localCenterX));
             std::vector<Vector2d> boundary;
             boundary.reserve(path.size());
             for (const Vector3d& point : path)
@@ -560,6 +579,10 @@ namespace cadcam::machining
             std::rotate(boundary.begin(), stable, boundary.end());
             std::rotate(path.begin(), path.begin() + stableIndex, path.end());
             candidate.model.orderedBoundary3D = path;
+            for (Vector3d& point : candidate.model.orderedBoundary3D)
+            {
+                point = localFrame.toWorld(point);
+            }
 
             double minimumY = boundary.front().x;
             double maximumY = minimumY;
@@ -575,8 +598,8 @@ namespace cadcam::machining
 
             TubeSectionGeometry geometry;
             geometry.boundary = std::move(boundary);
-            geometry.centerY = (minimumY + maximumY) * 0.5;
-            geometry.centerZ = (minimumZ + maximumZ) * 0.5;
+            geometry.centerY = minimumY + (maximumY - minimumY) * 0.5;
+            geometry.centerZ = minimumZ + (maximumZ - minimumZ) * 0.5;
             geometry.yLength = maximumY - minimumY;
             geometry.zWidth = maximumZ - minimumZ;
             const auto prepared = TubeCutBoundaryClassifier::prepareSection
@@ -593,8 +616,15 @@ namespace cadcam::machining
                         &candidate.model, candidate.area)
                 );
             }
+            const CornerAnalysis corners = analyzeCorners(prepared.value->boundary, policy);
             candidate.model.geometry = *prepared.value;
-            const CornerAnalysis corners = analyzeCorners(candidate.model.geometry.boundary, policy);
+            for (Vector2d& point : candidate.model.geometry.boundary)
+            {
+                point.x += localFrame.origin.y;
+                point.y += localFrame.origin.z;
+            }
+            candidate.model.geometry.centerY += localFrame.origin.y;
+            candidate.model.geometry.centerZ += localFrame.origin.z;
             candidate.model.roundedCornerCount = corners.count;
             candidate.model.cornerRadii = corners.radii;
             candidate.model.cornerRadius = corners.radius;
@@ -610,8 +640,10 @@ namespace cadcam::machining
                             ? corners.radii[radiusIndex] : 0.0;
                         ++radiusIndex;
                         if (radius <= policy.numericalEpsilon) continue;
-                        const double outerY = yDirection < 0 ? minimumY : maximumY;
-                        const double outerZ = zDirection < 0 ? minimumZ : maximumZ;
+                        const double outerY = (yDirection < 0 ? minimumY : maximumY)
+                            + localFrame.origin.y;
+                        const double outerZ = (zDirection < 0 ? minimumZ : maximumZ)
+                            + localFrame.origin.z;
                         candidate.model.corners.push_back
                         ({
                             { outerY - yDirection * radius, outerZ - zDirection * radius },
@@ -659,7 +691,9 @@ namespace cadcam::machining
             {
                 const Vector2d& point = innerBoundary[index];
                 const Vector2d& next = innerBoundary[(index + 1) % innerBoundary.size()];
-                const Vector2d middle{ (point.x + next.x) * 0.5, (point.y + next.y) * 0.5 };
+                const Vector2d middle
+                    { point.x + (next.x - point.x) * 0.5,
+                      point.y + (next.y - point.y) * 0.5 };
                 for (const Vector2d& sample : { point, middle })
                 {
                     const double boundaryDistance = distanceToBoundary(sample, outerBoundary);

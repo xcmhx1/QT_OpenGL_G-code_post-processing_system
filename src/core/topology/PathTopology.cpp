@@ -1,4 +1,5 @@
 #include "core/topology/PathTopology.h"
+#include "core/geometry/LocalCoordinateFrame.h"
 
 #include <QVariantList>
 
@@ -18,7 +19,25 @@ namespace
     constexpr double kEpsilon = 1.0e-9;
     constexpr double kMaximumNumericalJoinEpsilon = 1.0e-4;
     using geometry::EntityId;
+    using geometry::LocalFrame3d;
     using geometry::Vector3d;
+
+    class CompensatedSum
+    {
+    public:
+        void add(double value)
+        {
+            const double next = m_sum + value;
+            m_correction += std::abs(m_sum) >= std::abs(value)
+                ? (m_sum - next) + value
+                : (value - next) + m_sum;
+            m_sum = next;
+        }
+        double value() const { return m_sum + m_correction; }
+    private:
+        double m_sum = 0.0;
+        double m_correction = 0.0;
+    };
 
     Vector3d add(const Vector3d& left, const Vector3d& right)
     {
@@ -48,12 +67,12 @@ namespace
 
     double pathLength(const std::vector<Vector3d>& path)
     {
-        double length = 0.0;
+        CompensatedSum length;
         for (std::size_t index = 1; index < path.size(); ++index)
         {
-            length += distance3D(path[index - 1U], path[index]);
+            length.add(distance3D(path[index - 1U], path[index]));
         }
-        return length;
+        return length.value();
     }
 
     bool contains(const std::vector<int>& values, int value)
@@ -80,9 +99,10 @@ namespace
     struct TopologyPlaneFit
     {
         bool valid = false;
-        double a = 0.0;
-        double b = 0.0;
-        double c = 0.0;
+        Vector3d origin;
+        double slopeY = 0.0;
+        double slopeZ = 0.0;
+        Vector3d normal;
         double maximumDeviation = 0.0;
     };
 
@@ -94,6 +114,7 @@ namespace
         std::vector<GraphEdge> edges;
         std::vector<std::vector<int>> incidentEdges;
         TopologyPlaneFit planeFit;
+        LocalFrame3d localFrame;
     };
 
     struct LoopCandidate
@@ -105,6 +126,7 @@ namespace
         double projectedArea = 0.0;
         std::size_t minimumSourceIndex = std::numeric_limits<std::size_t>::max();
         EntityId minimumEntityId = std::numeric_limits<EntityId>::max();
+        bool localCoordinates = false;
     };
 
     class DisjointSet
@@ -210,61 +232,61 @@ namespace
     )
     {
         TopologyPlaneFit fit;
-        double count = 0.0;
-        double meanX = 0.0;
-        double meanY = 0.0;
-        double meanZ = 0.0;
+        std::size_t count = 0U;
+        CompensatedSum sumX;
+        CompensatedSum sumY;
+        CompensatedSum sumZ;
         for (int recordIndex : candidateIndices)
         {
             for (const Vector3d& point : records[static_cast<std::size_t>(recordIndex)].points)
             {
-                count += 1.0;
-                meanX += point.x;
-                meanY += point.y;
-                meanZ += point.z;
+                ++count;
+                sumX.add(point.x);
+                sumY.add(point.y);
+                sumZ.add(point.z);
             }
         }
-        if (count < 3.0)
+        if (count < 3U)
         {
             return fit;
         }
-        meanX /= count;
-        meanY /= count;
-        meanZ /= count;
-        double yy = 0.0;
-        double yz = 0.0;
-        double zz = 0.0;
-        double xy = 0.0;
-        double xz = 0.0;
+        const double divisor = static_cast<double>(count);
+        fit.origin = { sumX.value() / divisor, sumY.value() / divisor,
+            sumZ.value() / divisor };
+        CompensatedSum yy;
+        CompensatedSum yz;
+        CompensatedSum zz;
+        CompensatedSum xy;
+        CompensatedSum xz;
         for (int recordIndex : candidateIndices)
         {
             for (const Vector3d& point : records[static_cast<std::size_t>(recordIndex)].points)
             {
-                const double dx = point.x - meanX;
-                const double dy = point.y - meanY;
-                const double dz = point.z - meanZ;
-                yy += dy * dy;
-                yz += dy * dz;
-                zz += dz * dz;
-                xy += dx * dy;
-                xz += dx * dz;
+                const double dx = point.x - fit.origin.x;
+                const double dy = point.y - fit.origin.y;
+                const double dz = point.z - fit.origin.z;
+                yy.add(dy * dy);
+                yz.add(dy * dz);
+                zz.add(dz * dz);
+                xy.add(dx * dy);
+                xz.add(dx * dz);
             }
         }
-        const double determinant = yy * zz - yz * yz;
+        const double determinant = yy.value() * zz.value() - yz.value() * yz.value();
         if (std::abs(determinant) <= kEpsilon)
         {
             return fit;
         }
-        fit.a = (xy * zz - xz * yz) / determinant;
-        fit.b = (xz * yy - xy * yz) / determinant;
-        fit.c = meanX - fit.a * meanY - fit.b * meanZ;
-        const double normalLength = std::sqrt(1.0 + fit.a * fit.a + fit.b * fit.b);
+        fit.slopeY = (xy.value() * zz.value() - xz.value() * yz.value()) / determinant;
+        fit.slopeZ = (xz.value() * yy.value() - xy.value() * yz.value()) / determinant;
+        fit.normal = { 1.0, -fit.slopeY, -fit.slopeZ };
+        const double normalLength = std::sqrt(dot(fit.normal, fit.normal));
         for (int recordIndex : candidateIndices)
         {
             for (const Vector3d& point : records[static_cast<std::size_t>(recordIndex)].points)
             {
-                const double deviation = std::abs
-                    (point.x - fit.a * point.y - fit.b * point.z - fit.c) / normalLength;
+                const double deviation = std::abs(dot(subtract(point, fit.origin), fit.normal))
+                    / normalLength;
                 fit.maximumDeviation = std::max(fit.maximumDeviation, deviation);
             }
         }
@@ -278,10 +300,9 @@ namespace
         {
             return point;
         }
-        const Vector3d normal{ 1.0, -fit.a, -fit.b };
-        const double factor =
-            (point.x - fit.a * point.y - fit.b * point.z - fit.c) / dot(normal, normal);
-        return subtract(point, multiply(normal, factor));
+        const Vector3d relative = subtract(point, fit.origin);
+        const double factor = dot(relative, fit.normal) / dot(fit.normal, fit.normal);
+        return subtract(point, multiply(fit.normal, factor));
     }
 
     double pointSegmentDistance
@@ -624,9 +645,24 @@ namespace
         GraphData& graph
     )
     {
+        std::vector<Vector3d> candidatePoints;
+        for (int recordIndex : candidateIndices)
+        {
+            const auto& points = records[static_cast<std::size_t>(recordIndex)].points;
+            candidatePoints.insert(candidatePoints.end(), points.begin(), points.end());
+        }
+        graph.localFrame.origin = geometry::stableBoundsCenter(candidatePoints);
+        std::vector<TopologyPathRecord> localRecords = records;
+        for (int recordIndex : candidateIndices)
+        {
+            for (Vector3d& point : localRecords[static_cast<std::size_t>(recordIndex)].points)
+            {
+                point = graph.localFrame.toLocal(point);
+            }
+        }
         graph.planeFit = fitTopologyPlane
         (
-            records,
+            localRecords,
             candidateIndices,
             std::max(0.05, tolerance.nodeSnap * 0.25)
         );
@@ -638,7 +674,7 @@ namespace
 
         for (int recordIndex : candidateIndices)
         {
-            const TopologyPathRecord& record = records[static_cast<std::size_t>(recordIndex)];
+            const TopologyPathRecord& record = localRecords[static_cast<std::size_t>(recordIndex)];
             if (record.points.size() >= 2U && !record.semanticallyClosed)
             {
                 addMarker(graph.markers, recordIndex, 0.0, topologyPoint(record.points.front()));
@@ -659,13 +695,13 @@ namespace
                 return false;
             }
             const int leftIndex = candidateIndices[leftLocal];
-            const TopologyPathRecord& leftRecord = records[static_cast<std::size_t>(leftIndex)];
+            const TopologyPathRecord& leftRecord = localRecords[static_cast<std::size_t>(leftIndex)];
             const std::vector<Vector3d>& leftPath = leftRecord.points;
             for (std::size_t rightLocal = leftLocal + 1U;
                 rightLocal < candidateIndices.size(); ++rightLocal)
             {
                 const int rightIndex = candidateIndices[rightLocal];
-                const TopologyPathRecord& rightRecord = records[static_cast<std::size_t>(rightIndex)];
+                const TopologyPathRecord& rightRecord = localRecords[static_cast<std::size_t>(rightIndex)];
                 const std::vector<Vector3d>& rightPath = rightRecord.points;
                 if (leftPath.size() < 2U || rightPath.size() < 2U)
                 {
@@ -754,7 +790,7 @@ namespace
         for (Marker& marker : graph.markers)
         {
             const std::vector<Vector3d>& path =
-                records[static_cast<std::size_t>(marker.recordIndex)].points;
+                localRecords[static_cast<std::size_t>(marker.recordIndex)].points;
             if (path.size() < 2U)
             {
                 continue;
@@ -782,7 +818,7 @@ namespace
 
         for (int recordIndex : candidateIndices)
         {
-            const TopologyPathRecord& record = records[static_cast<std::size_t>(recordIndex)];
+            const TopologyPathRecord& record = localRecords[static_cast<std::size_t>(recordIndex)];
             if (!record.semanticallyClosed || record.points.size() < 3U)
             {
                 continue;
@@ -882,14 +918,20 @@ namespace
         }
         for (std::size_t nodeIndex = 0; nodeIndex < graph.nodes.size(); ++nodeIndex)
         {
-            Vector3d average;
+            CompensatedSum x;
+            CompensatedSum y;
+            CompensatedSum z;
             for (int markerIndex : markersByNode[nodeIndex])
             {
-                average = add
-                    (average, graph.markers[static_cast<std::size_t>(markerIndex)].point);
+                const Vector3d& point =
+                    graph.markers[static_cast<std::size_t>(markerIndex)].point;
+                x.add(point.x);
+                y.add(point.y);
+                z.add(point.z);
             }
-            graph.nodes[nodeIndex] = multiply
-                (average, 1.0 / static_cast<double>(markersByNode[nodeIndex].size()));
+            const double inverse = 1.0 / static_cast<double>(markersByNode[nodeIndex].size());
+            graph.nodes[nodeIndex] =
+                { x.value() * inverse, y.value() * inverse, z.value() * inverse };
         }
 
         for (int recordIndex : candidateIndices)
@@ -905,7 +947,7 @@ namespace
                         < graph.markers[static_cast<std::size_t>(right)].position;
                 }
             );
-            const TopologyPathRecord& record = records[static_cast<std::size_t>(recordIndex)];
+            const TopologyPathRecord& record = localRecords[static_cast<std::size_t>(recordIndex)];
             const int chunkCount = record.semanticallyClosed && markerIndices.size() >= 2U
                 ? static_cast<int>(markerIndices.size())
                 : std::max(0, static_cast<int>(markerIndices.size()) - 1);
@@ -1023,14 +1065,18 @@ namespace
 
     double projectedAreaYZ(const std::vector<Vector3d>& path)
     {
-        double area = 0.0;
-        for (std::size_t index = 0; index < path.size(); ++index)
+        if (path.empty()) return 0.0;
+        std::vector<Vector3d> localPath = path;
+        const LocalFrame3d frame{ geometry::stableBoundsCenter(path) };
+        for (Vector3d& point : localPath) point = frame.toLocal(point);
+        CompensatedSum area;
+        for (std::size_t index = 0; index < localPath.size(); ++index)
         {
-            const Vector3d& start = path[index];
-            const Vector3d& end = path[(index + 1U) % path.size()];
-            area += start.y * end.z - end.y * start.z;
+            const Vector3d& start = localPath[index];
+            const Vector3d& end = localPath[(index + 1U) % localPath.size()];
+            area.add(start.y * end.z - end.y * start.z);
         }
-        return std::abs(area) * 0.5;
+        return std::abs(area.value()) * 0.5;
     }
 
     void updateStableKeys
@@ -1057,6 +1103,7 @@ namespace
     )
     {
         LoopCandidate candidate;
+        candidate.localCoordinates = true;
         int currentNode = startNode;
         Vector3d firstPhysicalPoint;
         Vector3d previousPhysicalPoint;
@@ -1829,6 +1876,13 @@ OperationResult<TopologyLoopResult> PathTopology::extractBestLoop
     loopResult.connectedLoop = true;
     loopResult.maximumJoinGap = best.maximumJoinGap;
     loopResult.orderedPath = best.orderedPath;
+    if (best.localCoordinates)
+    {
+        for (Vector3d& point : loopResult.orderedPath)
+        {
+            point = graph.localFrame.toWorld(point);
+        }
+    }
     for (int recordIndex : best.recordIndices)
     {
         loopResult.usedEntityIds.push_back
@@ -1954,6 +2008,20 @@ OperationResult<PathTopology> PathTopologyBuilder::build
     }
 
     topology.m_adjacency.resize(topology.m_records.size());
+    std::vector<Vector3d> topologyPoints;
+    for (const TopologyPathRecord& record : topology.m_records)
+    {
+        topologyPoints.insert(topologyPoints.end(), record.points.begin(), record.points.end());
+    }
+    const LocalFrame3d topologyFrame{ geometry::stableBoundsCenter(topologyPoints) };
+    std::vector<TopologyPathRecord> localRecords = topology.m_records;
+    for (TopologyPathRecord& record : localRecords)
+    {
+        for (Vector3d& point : record.points)
+        {
+            point = topologyFrame.toLocal(point);
+        }
+    }
     taskContext.reportProgress(0U, topology.m_records.size());
     for (std::size_t left = 0; left < topology.m_records.size(); ++left)
     {
@@ -1973,7 +2041,7 @@ OperationResult<PathTopology> PathTopologyBuilder::build
         }
         for (std::size_t right = left + 1U; right < topology.m_records.size(); ++right)
         {
-            if (pathsConnected(topology.m_records[left], topology.m_records[right], tolerance))
+            if (pathsConnected(localRecords[left], localRecords[right], tolerance))
             {
                 topology.m_adjacency[left].push_back(static_cast<int>(right));
                 topology.m_adjacency[right].push_back(static_cast<int>(left));

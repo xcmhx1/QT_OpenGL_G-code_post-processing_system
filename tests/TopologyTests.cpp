@@ -1963,7 +1963,6 @@ namespace
         GeometrySnapshotCompiler compiler;
         cadcam::geometry::SamplingPolicy compatibilityPolicy;
         compatibilityPolicy.chordTolerance = 0.0;
-        compatibilityPolicy.singlePrecisionEvaluation = true;
         const OperationResult<GeometrySnapshot> snapshot = compiler.compile
         (
             *source.value,

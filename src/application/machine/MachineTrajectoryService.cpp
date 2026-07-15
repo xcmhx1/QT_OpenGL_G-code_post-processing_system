@@ -17,7 +17,6 @@ namespace
     {
         cadcam::geometry::SamplingPolicy policy;
         policy.chordTolerance = 0.0;
-        policy.singlePrecisionEvaluation = true;
         switch (static_cast<DRW::ETYPE>(dxfType))
         {
         case DRW::ETYPE::CIRCLE:

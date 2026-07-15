@@ -179,23 +179,31 @@ namespace cadcam::planning
         )
         {
             SectionProjection best;
+            const Vector2d localPoint
+                { point.x - section.centerY, point.y - section.centerZ };
             for (std::size_t index = 0; index < section.boundary.size(); ++index)
             {
-                const Vector2d& start = section.boundary[index];
-                const Vector2d& end = section.boundary[(index + 1U) % section.boundary.size()];
+                const Vector2d start
+                    { section.boundary[index].x - section.centerY,
+                      section.boundary[index].y - section.centerZ };
+                const Vector2d& worldEnd = section.boundary[(index + 1U) % section.boundary.size()];
+                const Vector2d end
+                    { worldEnd.x - section.centerY, worldEnd.y - section.centerZ };
                 const double dy = end.x - start.x;
                 const double dz = end.y - start.y;
                 const double lengthSquared = dy * dy + dz * dz;
                 if (lengthSquared <= kCalculationEpsilon) continue;
                 const double factor = std::clamp
                 (
-                    ((point.x - start.x) * dy + (point.y - start.y) * dz) / lengthSquared,
+                    ((localPoint.x - start.x) * dy + (localPoint.y - start.y) * dz)
+                        / lengthSquared,
                     0.0,
                     1.0
                 );
                 const double projectedY = start.x + dy * factor;
                 const double projectedZ = start.y + dz * factor;
-                const double candidateDistance = std::hypot(point.x - projectedY, point.y - projectedZ);
+                const double candidateDistance = std::hypot
+                    (localPoint.x - projectedY, localPoint.y - projectedZ);
                 if (candidateDistance < best.distance)
                 {
                     best.valid = true;
@@ -228,6 +236,16 @@ namespace cadcam::planning
             }
 
             const double perimeter = section.perimeter;
+            double minimumBoundaryX = boundary.unwrappedBoundary.front().x;
+            double maximumBoundaryX = minimumBoundaryX;
+            for (const machining::UnwrappedBoundaryPoint& sample : boundary.unwrappedBoundary)
+            {
+                minimumBoundaryX = std::min(minimumBoundaryX, sample.x);
+                maximumBoundaryX = std::max(maximumBoundaryX, sample.x);
+            }
+            const double referenceX = minimumBoundaryX
+                + (maximumBoundaryX - minimumBoundaryX) * 0.5;
+            const double localPointX = point.x - referenceX;
             double queryPosition = projection.perimeterPosition;
             double minimumPosition = boundary.unwrappedBoundary.front().perimeterPosition;
             double maximumPosition = minimumPosition;
@@ -248,31 +266,36 @@ namespace cadcam::planning
                 {
                     const auto& first = boundary.unwrappedBoundary[index];
                     const auto& second = boundary.unwrappedBoundary[index + 1U];
+                    const double firstX = first.x - referenceX;
+                    const double secondX = second.x - referenceX;
                     const double firstS = first.perimeterPosition + shift;
                     const double secondS = second.perimeterPosition + shift;
-                    const double edgeX = second.x - first.x;
+                    const double edgeX = secondX - firstX;
                     const double edgeS = secondS - firstS;
                     const double lengthSquared = edgeX * edgeX + edgeS * edgeS;
                     if (lengthSquared > kCalculationEpsilon)
                     {
                         const double factor = std::clamp
                         (
-                            ((point.x - first.x) * edgeX + (queryPosition - firstS) * edgeS) / lengthSquared,
+                            ((localPointX - firstX) * edgeX
+                                + (queryPosition - firstS) * edgeS) / lengthSquared,
                             0.0,
                             1.0
                         );
-                        const double nearestX = first.x + edgeX * factor;
+                        const double nearestX = firstX + edgeX * factor;
                         const double nearestS = firstS + edgeS * factor;
                         onBoundary = onBoundary
-                            || std::hypot(point.x - nearestX, queryPosition - nearestS) <= safeTolerance;
+                            || std::hypot(localPointX - nearestX,
+                                queryPosition - nearestS) <= safeTolerance;
                     }
                     const bool crosses = (firstS <= queryPosition && queryPosition < secondS)
                         || (secondS <= queryPosition && queryPosition < firstS);
                     if (!crosses || std::abs(edgeS) <= kCalculationEpsilon) continue;
                     const double factor = (queryPosition - firstS) / edgeS;
-                    const double intersectionX = first.x + edgeX * factor;
+                    const double intersectionX = firstX + edgeX * factor;
                     intersections.push_back(intersectionX);
-                    onBoundary = onBoundary || std::abs(intersectionX - point.x) <= safeTolerance;
+                    onBoundary = onBoundary
+                        || std::abs(intersectionX - localPointX) <= safeTolerance;
                 }
             }
             if (onBoundary) return BoundarySide::OnBoundary;
@@ -293,7 +316,8 @@ namespace cadcam::planning
             const int crossings = static_cast<int>(std::count_if
             (
                 unique.cbegin(), unique.cend(),
-                [&point, safeTolerance](double x) { return x < point.x - safeTolerance; }
+                [localPointX, safeTolerance](double x)
+                { return x < localPointX - safeTolerance; }
             ));
             return crossings % 2 == 0 ? BoundarySide::Left : BoundarySide::Right;
         }
@@ -362,9 +386,9 @@ namespace cadcam::planning
                         const Vector3d& second = vertices[index + 1U].position;
                         const Vector3d midpoint
                         {
-                            (first.x + second.x) * 0.5,
-                            (first.y + second.y) * 0.5,
-                            (first.z + second.z) * 0.5
+                            first.x + (second.x - first.x) * 0.5,
+                            first.y + (second.y - first.y) * 0.5,
+                            first.z + (second.z - first.z) * 0.5
                         };
                         const BoundarySide middleSide = classifyPoint(midpoint, boundary.analysis, section, tolerance);
                         if (middleSide == BoundarySide::Indeterminate) return middleSide;

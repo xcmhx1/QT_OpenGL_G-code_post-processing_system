@@ -45,7 +45,6 @@ namespace cadcam::geometry
         int fullTurnSegments = 128;
         int minimumBulgeSegments = 4;
         int maximumSegments = 65536;
-        bool singlePrecisionEvaluation = false;
         SplineSamplingPolicy spline;
     };
 

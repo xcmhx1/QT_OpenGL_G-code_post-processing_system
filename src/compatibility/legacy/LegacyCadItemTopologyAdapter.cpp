@@ -163,7 +163,6 @@ LegacyCadItemTopologyAdapter::convert
 
         cadcam::geometry::SamplingPolicy endpointPolicy =
             LegacyCadItemPathBridge::legacySamplingPolicy(*item);
-        endpointPolicy.singlePrecisionEvaluation = false;
         const cadcam::geometry::PathCompileOptions endpointOptions;
         const OperationResult<cadcam::geometry::Path3D> endpointPathResult =
             LegacyCadItemPathBridge::compile

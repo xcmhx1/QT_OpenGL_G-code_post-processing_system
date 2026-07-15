@@ -1,4 +1,5 @@
 #include "core/geometry/NurbsCurveEvaluator.h"
+#include "core/geometry/LocalCoordinateFrame.h"
 
 #include <algorithm>
 #include <cmath>
@@ -174,6 +175,7 @@ namespace cadcam::geometry
             }
         }
 
+        const LocalFrame3d frame{ stableBoundsCenter(spline.controlPoints) };
         std::vector<HomogeneousPoint> working
             (static_cast<std::size_t>(spline.degree) + 1U);
         for (int index = 0; index <= spline.degree; ++index)
@@ -183,7 +185,7 @@ namespace cadcam::geometry
             const double weight = controlIndex < spline.weights.size()
                 ? spline.weights[controlIndex]
                 : 1.0;
-            const Vector3d& control = spline.controlPoints[controlIndex];
+            const Vector3d control = frame.toLocal(spline.controlPoints[controlIndex]);
             working[static_cast<std::size_t>(index)] =
             {
                 control.x * weight,
@@ -222,12 +224,13 @@ namespace cadcam::geometry
                 QStringLiteral("homogeneous result has an invalid weight"));
         }
 
-        Vector3d point
+        const Vector3d localPoint
         {
             evaluated.x / evaluated.w,
             evaluated.y / evaluated.w,
             evaluated.z / evaluated.w
         };
+        const Vector3d point = frame.toWorld(localPoint);
         if (!finiteVector(point))
         {
             return fail(spline, context, DiagnosticCode::SplineEvaluationFailure,

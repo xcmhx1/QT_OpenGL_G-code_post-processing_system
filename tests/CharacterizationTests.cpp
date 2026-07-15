@@ -29,6 +29,7 @@
 #include "SplineProductionTests.h"
 #include "GeometrySnapshotTests.h"
 #include "TopologyTests.h"
+#include "TranslationInvarianceTests.h"
 #include "dx_data.h"
 
 #include <QDir>
@@ -308,7 +309,32 @@ namespace
 
         const QByteArray expected = input.readAll();
         const QByteArray checkName = fileName.toUtf8();
-        check(actual == expected, checkName.constData());
+        const QJsonObject expectedRoot = QJsonDocument::fromJson(expected).object();
+        bool equivalent = root.value(QStringLiteral("status"))
+                == expectedRoot.value(QStringLiteral("status"))
+            && root.value(QStringLiteral("pointCount"))
+                == expectedRoot.value(QStringLiteral("pointCount"))
+            && root.value(QStringLiteral("closed"))
+                == expectedRoot.value(QStringLiteral("closed"))
+            && root.value(QStringLiteral("parameters"))
+                == expectedRoot.value(QStringLiteral("parameters"))
+            && root.value(QStringLiteral("diagnostics"))
+                == expectedRoot.value(QStringLiteral("diagnostics"));
+        const QJsonArray actualPoints = root.value(QStringLiteral("points")).toArray();
+        const QJsonArray expectedPoints = expectedRoot.value(QStringLiteral("points")).toArray();
+        equivalent = equivalent && actualPoints.size() == expectedPoints.size();
+        for (int pointIndex = 0; equivalent && pointIndex < actualPoints.size(); ++pointIndex)
+        {
+            const QJsonArray actualPoint = actualPoints[pointIndex].toArray();
+            const QJsonArray expectedPoint = expectedPoints[pointIndex].toArray();
+            equivalent = actualPoint.size() == expectedPoint.size();
+            for (int coordinate = 0; equivalent && coordinate < actualPoint.size(); ++coordinate)
+            {
+                equivalent = std::abs(actualPoint[coordinate].toDouble()
+                    - expectedPoint[coordinate].toDouble()) <= 1.0e-14;
+            }
+        }
+        check(equivalent, checkName.constData());
     }
 
     void testOperationResult()
@@ -2181,6 +2207,7 @@ int main(int argc, char* argv[])
     failureCount += runSplineProductionTests(updateSplineProductionGoldenFiles);
     failureCount += runGeometrySnapshotTests();
     failureCount += runTopologyTests();
+    failureCount += runTranslationInvarianceTests();
 
     if (failureCount == 0)
     {

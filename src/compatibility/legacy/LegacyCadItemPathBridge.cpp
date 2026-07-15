@@ -12,7 +12,6 @@ cadcam::geometry::SamplingPolicy LegacyCadItemPathBridge::legacySamplingPolicy(c
 {
     cadcam::geometry::SamplingPolicy policy;
     policy.chordTolerance = 0.0;
-    policy.singlePrecisionEvaluation = true;
 
     switch (item.m_type)
     {

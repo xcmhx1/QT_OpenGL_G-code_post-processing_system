@@ -177,7 +177,6 @@ namespace
 
         SamplingPolicy legacyPolicy;
         legacyPolicy.chordTolerance = 0.0;
-        legacyPolicy.singlePrecisionEvaluation = true;
         legacyPolicy.minimumSegments = 1;
         legacyPolicy.minimumBulgeSegments = 4;
         legacyPolicy.fullTurnSegments = 128;

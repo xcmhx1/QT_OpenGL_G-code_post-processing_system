@@ -26,7 +26,6 @@ namespace cadcam::nc
             samplingPolicy.chordTolerance = 0.0;
             samplingPolicy.fullTurnSegments = 128;
             samplingPolicy.minimumSegments = 16;
-            samplingPolicy.singlePrecisionEvaluation = true;
         }
 
         geometry::SamplingPolicy samplingPolicy;

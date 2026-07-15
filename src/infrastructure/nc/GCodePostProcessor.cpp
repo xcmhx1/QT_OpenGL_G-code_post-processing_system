@@ -74,7 +74,8 @@ namespace cadcam::infrastructure::nc
         QString formatMotion
         (
             const cadcam::nc::NcMotion& motion,
-            const GCodePostProcessorProfile& profile
+            const GCodePostProcessorProfile& profile,
+            bool preserveLegacyOutputQuantization
         )
         {
             QString code;
@@ -97,7 +98,11 @@ namespace cadcam::infrastructure::nc
             const auto append = [&](const QChar name, const std::optional<double>& value, int precision)
             {
                 if (value.has_value())
-                    words.push_back(name + QString::number(*value, 'f', precision));
+                {
+                    const double outputValue = preserveLegacyOutputQuantization
+                        ? static_cast<double>(static_cast<float>(*value)) : *value;
+                    words.push_back(name + QString::number(outputValue, 'f', precision));
+                }
             };
             append(QLatin1Char('X'), motion.axes.x, profile.coordinatePrecision);
             append(QLatin1Char('Y'), motion.axes.y, profile.coordinatePrecision);
@@ -227,6 +232,11 @@ namespace cadcam::infrastructure::nc
         for (std::size_t entityIndex = 0; entityIndex < program.entities.size(); ++entityIndex)
         {
             const cadcam::nc::NcEntityBlock& entity = program.entities[entityIndex];
+            const bool preserveLegacyOutputQuantization =
+                program.mode == cadcam::nc::NcProgramMode::Planar3Axis
+                || entity.metadata.sourceKind == geometry::SourceGeometryKind::Circle
+                || entity.metadata.sourceKind == geometry::SourceGeometryKind::Ellipse
+                || entity.metadata.sourceKind == geometry::SourceGeometryKind::Arc;
             if (entity.metadata.entityId == 0
                 || entity.metadata.processOrder != static_cast<int>(entityIndex)
                 || entity.motions.empty())
@@ -256,7 +266,8 @@ namespace cadcam::infrastructure::nc
                         { { QStringLiteral("motionIndex"), static_cast<qulonglong>(motionIndex) } }));
                     return result;
                 }
-                lines.push_back(formatMotion(motion, profile));
+                lines.push_back(formatMotion
+                    (motion, profile, preserveLegacyOutputQuantization));
             }
             if (motionIndex == entity.motions.size()) continue;
 
@@ -297,7 +308,8 @@ namespace cadcam::infrastructure::nc
                     lines.push_back(QStringLiteral("G18"));
                 else if (circular && motion.plane == cadcam::nc::NcPlane::YZ)
                     lines.push_back(QStringLiteral("G19"));
-                lines.push_back(formatMotion(motion, profile));
+                lines.push_back(formatMotion
+                    (motion, profile, preserveLegacyOutputQuantization));
                 if (circular && motion.plane != cadcam::nc::NcPlane::XY)
                     lines.push_back(QStringLiteral("G17"));
             }

@@ -48,13 +48,8 @@ namespace cadcam::nc
 
         void quantizeAxes(NcAxisWords& axes, bool quantize)
         {
-            if (!quantize) return;
-            auto apply = [](std::optional<double>& value)
-            {
-                if (value.has_value()) *value = static_cast<double>(static_cast<float>(*value));
-            };
-            apply(axes.x); apply(axes.y); apply(axes.z); apply(axes.a);
-            apply(axes.i); apply(axes.j); apply(axes.k); apply(axes.r);
+            Q_UNUSED(axes);
+            Q_UNUSED(quantize);
         }
 
         geometry::Vector3d cross

@@ -1,4 +1,5 @@
 #include "core/geometry/GeometryCompiler.h"
+#include "core/geometry/LocalCoordinateFrame.h"
 #include "core/geometry/NurbsCurveEvaluator.h"
 
 #include <algorithm>
@@ -26,35 +27,20 @@ namespace cadcam::geometry
             const Vector3d& axisU,
             double scaleU,
             const Vector3d& axisV,
-            double scaleV,
-            bool singlePrecisionEvaluation,
-            bool offsetFirst
+            double scaleV
         )
         {
-            if (singlePrecisionEvaluation)
+            const Vector3d localOffset
             {
-                const auto evaluate =
-                    [offsetFirst](double originValue, double axisUValue, double u, double axisVValue, double v)
-                    {
-                        const float scaledU = static_cast<float>(axisUValue) * static_cast<float>(u);
-                        const float scaledV = static_cast<float>(axisVValue) * static_cast<float>(v);
-                        return offsetFirst
-                            ? static_cast<double>(static_cast<float>(originValue) + (scaledU + scaledV))
-                            : static_cast<double>((static_cast<float>(originValue) + scaledU) + scaledV);
-                    };
-                return
-                {
-                    evaluate(origin.x, axisU.x, scaleU, axisV.x, scaleV),
-                    evaluate(origin.y, axisU.y, scaleU, axisV.y, scaleV),
-                    evaluate(origin.z, axisU.z, scaleU, axisV.z, scaleV)
-                };
-            }
-
+                axisU.x * scaleU + axisV.x * scaleV,
+                axisU.y * scaleU + axisV.y * scaleV,
+                axisU.z * scaleU + axisV.z * scaleV
+            };
             return
             {
-                origin.x + axisU.x * scaleU + axisV.x * scaleV,
-                origin.y + axisU.y * scaleU + axisV.y * scaleV,
-                origin.z + axisU.z * scaleU + axisV.z * scaleV
+                origin.x + localOffset.x,
+                origin.y + localOffset.y,
+                origin.z + localOffset.z
             };
         }
 
@@ -78,7 +64,7 @@ namespace cadcam::geometry
             });
         }
 
-        Vector3d arcPoint(const ArcGeometry& arc, double parameter, bool singlePrecision)
+        Vector3d arcPoint(const ArcGeometry& arc, double parameter)
         {
             return addScaled
             (
@@ -86,9 +72,7 @@ namespace cadcam::geometry
                 arc.axisU,
                 std::cos(parameter) * arc.radius,
                 arc.axisV,
-                std::sin(parameter) * arc.radius,
-                singlePrecision,
-                true
+                std::sin(parameter) * arc.radius
             );
         }
 
@@ -105,7 +89,7 @@ namespace cadcam::geometry
                     }
                     else
                     {
-                        return arcPoint(geometry, geometry.startParameter, false);
+                        return arcPoint(geometry, geometry.startParameter);
                     }
                 },
                 primitive
@@ -125,7 +109,7 @@ namespace cadcam::geometry
                     }
                     else
                     {
-                        return arcPoint(geometry, geometry.endParameter, false);
+                        return arcPoint(geometry, geometry.endParameter);
                     }
                 },
                 primitive
@@ -509,6 +493,12 @@ namespace cadcam::geometry
                 return result;
             }
 
+            const LocalFrame3d frame{ stableBoundsCenter(fitPoints) };
+            for (Vector3d& point : fitPoints)
+            {
+                point = frame.toLocal(point);
+            }
+
             Path3D path;
             path.sourceEntityId = source.id;
             path.sourceKind = SourceGeometryKind::Spline;
@@ -577,6 +567,10 @@ namespace cadcam::geometry
             if (options.reverse)
             {
                 std::reverse(path.vertices.begin(), path.vertices.end());
+            }
+            for (PathVertex3D& vertex : path.vertices)
+            {
+                vertex.position = frame.toWorld(vertex.position);
             }
 
             OperationReport validation = validatePath3D(path, context);
@@ -1070,9 +1064,7 @@ namespace cadcam::geometry
                                 geometry.axisU,
                                 std::cos(parameter) * geometry.radius,
                                 geometry.axisV,
-                                std::sin(parameter) * geometry.radius,
-                                policy.singlePrecisionEvaluation,
-                                true
+                                std::sin(parameter) * geometry.radius
                             ),
                             parameter
                         });
@@ -1124,9 +1116,7 @@ namespace cadcam::geometry
                                 geometry.axisU,
                                 std::cos(parameter) * geometry.radius,
                                 geometry.axisV,
-                                std::sin(parameter) * geometry.radius,
-                                policy.singlePrecisionEvaluation,
-                                true
+                                std::sin(parameter) * geometry.radius
                             ),
                             parameter
                         });
@@ -1189,9 +1179,7 @@ namespace cadcam::geometry
                                 geometry.majorAxis,
                                 std::cos(parameter),
                                 geometry.minorAxis,
-                                std::sin(parameter),
-                                policy.singlePrecisionEvaluation,
-                                false
+                                std::sin(parameter)
                             ),
                             parameter
                         });
@@ -1291,7 +1279,7 @@ namespace cadcam::geometry
                                     {
                                         path.vertices.push_back
                                         ({
-                                            arcPoint(segment, start, policy.singlePrecisionEvaluation),
+                                            arcPoint(segment, start),
                                             static_cast<double>(segmentIndex)
                                                 + (reversePrimitive ? 1.0 : 0.0)
                                         });
@@ -1313,8 +1301,7 @@ namespace cadcam::geometry
                                             arcPoint
                                             (
                                                 segment,
-                                                start + span * traversalFraction,
-                                                policy.singlePrecisionEvaluation
+                                                start + span * traversalFraction
                                             ),
                                             static_cast<double>(segmentIndex) + originalFraction
                                         });
