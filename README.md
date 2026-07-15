@@ -1,553 +1,540 @@
-# G-code Post Processing System
+# G-code Post-processing System
 
-面向 Windows 的轻量 CAD/CAM 桌面程序，主要用于 DXF/DWG 图纸查看与编辑、加工顺序组织，以及二维和特定方管场景的 G 代码导出。
+本文档是当前项目的事实入口，供使用者、测试人员和开发者共同使用，负责记录：
 
-本文档同时承担以下职责：
+- 当前支持的功能；
+- 当前明确限制；
+- 实际生产数据流；
+- 模块所有权；
+- 构建和测试方法；
+- 修改功能时的入口；
+- 当前技术债务和后续产品化方向。
 
-- 为使用者说明当前可用功能和明确限制。
-- 为开发者提供模块入口、数据流和扩展步骤。
-- 为长期维护提供构建、验证和提交检查清单。
+当本文档与源码冲突时，以源码和可重复测试结果为准，并应立即修正文档。README 不是开发日志、提交记录汇总、理想架构提案或论文正文。
 
-项目行为发生变化时，应同步更新本文档。阶段性开发记录不应继续堆叠在“功能列表”中，而应更新对应的数据流、模块职责或限制说明。
+## 1. 项目简介
 
-## 1. 项目边界
+本项目是运行于 Windows 的桌面 CAD/CAM 程序，使用 Qt Widgets 构建界面，使用 OpenGL 完成 CAD 场景显示与交互。程序覆盖 DXF/DWG 读取、常用 CAD 绘制与编辑、加工状态管理、加工计划、机床轨迹和 G-code 输出。
 
-### 1.1 当前定位
+当前提供两条加工链：
 
-项目当前包含三条主要能力链：
+- `Planar3Axis`：面向平面三轴 G-code 输出。
+- `Rotary4Axis`：面向特定方管工件、绕 X 轴旋转并以 A 轴展开的四轴 G-code 导出链。
 
-1. CAD 链：导入 DXF/DWG 或位图，构建内部图元，完成显示、选择、绘制和修改。
-2. 二维后处理链：排序二维加工图元，并按配置输出 G 代码。
-3. 方管四轴链：针对绕 `X` 轴回转、`A` 轴展开的特定方管/回转类工件生成四轴 G 代码。
+本项目不是通用三维实体 CAD，不是通用四轴或五轴 CAM，也不提供通用多轴后处理。任何生成结果在实际加工前都必须经过仿真、空跑和人工复核。
 
-`Mode3D` 只能描述为“绕 X 轴回转、A 轴展开的四轴 G 代码导出链”。它不是通用 3D CAD/CAM、通用四轴后处理器或五轴系统。
+## 2. 当前功能
 
-### 1.2 主要已实现能力
+### 2.1 文件与配置
 
-- 导入 `.dxf`、`.dwg`、`.bmp`、`.png`、`.jpg`、`.jpeg`。
-- 显示和编辑点、直线、构造线、圆、圆弧、椭圆、多段线、轻量多段线。
-- 将导入的样条曲线离散转换为多段线，复用多段线显示和加工链。
-- 使用闭合多段线创建矩形和多边形。
-- 支持绘制、选择、对象捕捉、控制点编辑、Undo/Redo 和常用修改命令。
-- 支持二维排序、智能排序、加工方向和加工顺序控制。
-- 支持方管垂直截面、加工断面和内部线条的识别与人工修正。
-- 支持二维 G 代码和特定方管场景的四轴 G 代码输出。
-- 支持文件级、图层、颜色和图元类型 G 代码规则配置。
-- 支持浅色、深色和自定义外观。
-- 支持应用标题/图标定制、Lite/Pro 本机授权和可部署目录生成。
+- 读取 DXF 和 DWG；写出格式为 DXF。
+- 普通 DXF 保存保留当前文档中的原始实体；安全 DXF 导出使用临时副本和较旧 DXF 版本提高兼容性，不修改活动文档。
+- 导入位图并进行阈值、边缘、形态学、轮廓提取和矢量化。
+- 管理 G-code 配置文件目录、当前配置和导出目录。
+- 支持品牌配置、Lite/Pro 功能边界、机器码和 `license.dat` 授权流程，发布说明见 [COMMERCIAL_RELEASE.md](./COMMERCIAL_RELEASE.md)。
 
-### 1.3 明确不支持或仍有限制的内容
+### 2.2 CAD 图元能力
 
-- 不支持通用三维实体建模、曲面建模或装配。
-- 四轴链只适用于当前方管/回转工件模型，复杂机床运动学需要另行验证。
-- `Point`、`Xline` 等辅助图元不生成加工轨迹。
-- 椭圆加工使用离散路径，不依赖专用椭圆插补指令。
-- 修剪、延伸、合并、圆角和倒角属于基础实现，不等价于完整 AutoCAD 几何内核。
-- 自动截面、加工断面和内部线条识别依赖图纸拓扑质量与容差；实际生产前必须核对识别结果和 NC 文件。
-- 当前仓库没有覆盖全部几何边界场景的自动化回归测试，复杂图纸仍需人工验证。
+下表描述当前生产代码的能力边界。“通用编辑”指选择、移动、旋转、缩放、复制和删除等操作，不代表存在完整的参数化编辑器。
 
-## 2. 快速开始
+| 图元 | 导入/显示 | 创建与编辑 | DXF 保存 | 加工 |
+| --- | --- | --- | --- | --- |
+| `POINT` | 支持 | 支持通用编辑 | 支持 | 不生成加工路径 |
+| `LINE` | 支持 | 支持创建、控制点和通用编辑 | 支持 | 支持三轴和四轴 |
+| `XLINE` | 支持 | 支持创建、基点/方向控制点和通用编辑 | 支持 | 辅助图元，不加工 |
+| `ARC` | 支持 | 支持创建、控制点和通用编辑 | 支持 | 支持三轴和四轴 |
+| `CIRCLE` | 支持 | 支持创建、控制点和通用编辑 | 支持 | 支持三轴和四轴 |
+| `ELLIPSE` | 支持 | 支持创建、控制点和通用编辑 | 支持 | 通过离散路径参与加工 |
+| `POLYLINE` | 支持 | 支持顶点和通用编辑 | 支持；安全模式可能转为兼容实体 | 支持，bulge 保留为精确圆弧段进入核心 |
+| `LWPOLYLINE` | 支持 | 支持创建、顶点和通用编辑 | 支持 | 支持，bulge 保留为精确圆弧段进入核心 |
+| `SPLINE` | 支持并保留原始控制点、节点和权重 | 支持通用变换、复制和删除；未提供完整样条控制点编辑 | 普通保存保留 SPLINE；安全导出副本可离散 | 通过 NURBS 求值和采样后的 `Path3D` 加工 |
 
-### 2.1 环境要求
+矩形和多边形创建最终生成多段线。多边形支持 3 至 1024 边、内切/外切选项，并保存最近使用的边数。
 
-- Windows 10/11 x64。
-- Visual Studio 18 Insiders，对应项目工具集 `v145`。
-- Qt `6.9.3_msvc2022_64`，包含 Core、Gui、Widgets、OpenGL、OpenGLWidgets。
-- OpenCV 4.11，工程默认使用 `opencv_world4110`。
-- 支持 OpenGL 4.5 Core Profile 的显卡和驱动。
+### 2.3 编辑与交互
 
-工程文件中的 `OpenCVRoot` 当前默认为：
+- 单选、框选、向右包含选择和向左碰选。
+- 端点、中点、圆心/中心、交点、控制点和网格捕捉。
+- 光标旁动态输入，正交和极轴状态反馈。
+- 控制点编辑、图层、颜色和实体属性。
+- 移动、旋转、缩放、镜像、偏移、矩形/环形阵列、修剪/延伸、合并、圆角/直角和删除。
+- 批量命令按一次用户操作进入 Undo/Redo。
+- 平移、滚轮缩放、轨道观察、标准视角和右上角三维视图方块。
+- 浅色、深色和自定义外观；加工箭头、加工序号、加工断面、排除图元和网格显示开关。
 
-```text
-D:\develop\opencv
-```
+### 2.4 加工功能
 
-如果本机路径不同，应通过项目属性或工程宏调整，不要在多个源文件中写入依赖路径。
+- 三轴和四轴分别建立 `ProcessPlan`。
+- 用户可设置加工启用状态、加工方向和闭合图元起点。
+- `NearestNext` 最近距离排序。
+- 方管四轴 `LazyRotation` 懒旋转排序。
+- 连续链和严格闭环作为连续加工组处理。
+- `Break` 加工断面前置约束和 `Waste` 废弃区间排除。
+- 方管垂直截面、真实外边界、圆角、内部图元和加工断面识别。
+- 四轴安全移动、同组 `CuttingConnection`、A 轴连续解包和闭环过切。
+- 文件、图层、颜色和实体类型 G-code 配置块；默认配置主要通过颜色规则区分工艺。
 
-### 2.2 Release 构建
+## 3. 明确限制
+
+- 四轴链只适用于绕 X 轴回转、A 轴展开的特定方管/回转类场景，不能描述为通用 3D CAD/CAM、通用四轴或五轴系统。
+- 当前仅建立 A 轴旋转链，不提供 B/C 轴、刀具姿态优化或通用机床运动学配置。
+- 三轴仅对 XY、ZX、YZ 主平面圆弧输出对应圆弧插补；非主平面圆弧和圆通过离散线段输出。
+- 完整圆的原生三轴圆弧输出限于 XY 平面；其他朝向使用统一离散路径。
+- `ELLIPSE` 和 `SPLINE` 在加工输出中按采样路径生成线性运动，不输出机床原生椭圆或 NURBS 指令。
+- `SPLINE` 使用精确 NURBS 数据时执行自适应采样；精确数据非法而拟合点可用时允许带 Warning 的兼容降级。当前没有完整样条控制点编辑器。
+- `POINT`、`XLINE` 等辅助图元不生成加工轨迹。
+- DWG 当前用于读取；程序不写出 DWG。DXF 安全导出会在临时副本中转换部分实体以换取兼容性。
+- 自动方管截面和加工断面要求真实边界严格闭合、投影可映射且图纸拓扑有效；不会用毫米级容差自动补齐工程间隙。
+- 当前后处理是项目配置驱动的 G/M 代码文本输出，没有覆盖或认证所有控制器方言。
+- 位图矢量化、复杂修改命令、自动识别、排序和真实机床结果仍需要按实际图纸进行人工功能验收。
+- 大文件性能、长时间操作的主线程响应和不同 Windows/显卡环境仍缺少完整量化基线。
+
+## 4. 快速开始
+
+### 4.1 开发环境
+
+| 项目 | 当前工程配置 |
+| --- | --- |
+| 操作系统 | Windows x64；工程目标为 Windows 10 SDK |
+| IDE/编译器 | Visual Studio 18 Insiders，`PlatformToolset=v145` |
+| C++ | C++17 |
+| Qt | Qt 6.9.3，MSVC 2022 x64，模块为 Core/Gui/Widgets/OpenGL/OpenGLWidgets |
+| OpenCV | OpenCV 4.11.0，工程默认 `OpenCVRoot=D:\develop\opencv` |
+| 图形 | 支持 OpenGL 的 Windows 图形环境；部署包含 Qt OpenGL 组件和软件 OpenGL 回退库 |
+| 构建模式 | 仅维护 `Release|x64` 验证要求 |
+
+如果 OpenCV 不在默认目录，应在 MSBuild 属性或本机工程设置中覆盖 `OpenCVRoot`，不要提交个人路径变更。
+
+### 4.2 构建
 
 在仓库根目录执行：
 
 ```powershell
-& 'D:\Program Files\Microsoft Visual Studio\18\Insiders\MSBuild\Current\Bin\MSBuild.exe' `
-  .\G-code_post-processing_system.vcxproj `
+& "D:\Program Files\Microsoft Visual Studio\18\Insiders\MSBuild\Current\Bin\MSBuild.exe" `
+  ".\G-code_post-processing_system.slnx" `
   /m /p:Configuration=Release /p:Platform=x64
 ```
 
-正常输出目录为：
+输出目录：
 
 ```text
-x64\Release\
+x64/Release/
 ```
 
-Release 后处理会调用 `windeployqt`，并复制 OpenCV 与 MSVC 运行库。若程序提示缺少 `Qt6Widgets.dll`、`Qt6Gui.dll` 等文件，应检查构建后处理是否执行成功，而不是只复制单独的 EXE。
+Release 后生成事件会复制 OpenCV 和 MSVC 运行库，并执行 Qt 6.9.3 的 `windeployqt --release`。构建时可能出现找不到可选 `dxcompiler.dll`/`dxil.dll` 的部署警告；当前 OpenGL Widgets 主链可以构建，但发布前仍应在目标机器验证图形后端。
 
-### 2.3 最小启动检查
+## 5. 用户操作流程
 
-1. 启动 `G-code_post-processing_system.exe`。
-2. 确认主窗口、顶部页签和右侧“加工设置”Dock 正常显示。
-3. 导入一个简单 DXF，执行缩放适配并选择图元。
-4. 关闭并重新启动，确认 Dock 位置、可见状态和主题被恢复。
-
-## 3. 仓库结构
+### 5.1 三轴流程
 
 ```text
-.
-├─ include/                         C++ 头文件
-│  ├─ CadItem.h                     图元基类与加工状态
-│  ├─ CadDocument.h                 文档和实体所有权
-│  ├─ CadController.h               输入状态与命令控制
-│  ├─ CadEditer.h                   绘制、修改和命令历史
-│  ├─ CadViewer.h                   OpenGL 视图与交互信号
-│  ├─ GGenerator.h                  G 代码生成器
-│  ├─ GProfile.h                    后处理配置模型
-│  ├─ RotaryTubeGeometryAnalyzer.h  方管截面和内部线条分析
-│  ├─ RotaryCutBoundaryAnalyzer.h   加工断面周向校验
-│  ├─ CadToolPanelWidget.h          顶部命令区
-│  └─ MachiningSettingsWidget.h     右侧加工设置与状态面板
-├─ src/                             C++ 实现
-│  ├─ Gcode_postprocessing_system*.cpp 主窗口及文件/编辑/排序/G代码动作
-│  ├─ CadController*.cpp            鼠标、键盘和动态输入
-│  ├─ CadEditer*.cpp                绘制、修改和几何构造
-│  ├─ CadViewer*.cpp                渲染、拾取、覆盖层和视图导航
-│  ├─ Cad*Item.cpp                  各图元实现
-│  ├─ GGenerator.cpp                二维/四轴输出组织
-│  ├─ GProfile.cpp                  配置读写与默认值
-│  └─ libdxfrw/                     第三方 DXF/DWG 库源码
-├─ technical_file/G-M_Code.md       G/M 代码参考
-├─ docxs/                           论文、实习和答辩材料，不参与程序构建
-├─ tools/                           许可证生成工具
-├─ Gcode_postprocessing_system.ui   主窗口 Qt Designer 文件
-├─ Gcode_postprocessing_system.qrc  Qt 资源
-├─ G-code_post-processing_system.vcxproj
-├─ COMMERCIAL_RELEASE.md            商业构建、打包和授权流程
-├─ AGENTS.md                        代码协作约束
-└─ README.md                        项目维护基准
+导入图纸
+→ 检查和编辑图元
+→ 设置加工启用状态、方向或起点
+→ 生成 Planar3Axis ProcessPlan
+→ 查看加工顺序和方向
+→ 选择 G-code 配置
+→ PlanarNcProgramBuilder 生成 NcProgram
+→ GCodePostProcessor 后处理
+→ 导出 NC 文件
+→ 仿真、空跑和人工复核
 ```
 
-`src/libdxfrw/`、`include/libdxfrw/` 和 `src/dx_iface.cpp` 来源于第三方库。除非问题明确位于库适配层，否则不要直接修改；修改前应验证 DXF 导入、导出和重新导入闭环。
-
-## 4. 总体架构
-
-### 4.1 分层职责
+### 5.2 方管四轴流程
 
 ```text
-QMainWindow / CadToolPanelWidget / MachiningSettingsWidget
-                         │ 用户动作与状态展示
-                         ▼
-Gcode_postprocessing_system
-                         │ 业务编排、设置持久化、文件动作
-              ┌──────────┼───────────┐
-              ▼          ▼           ▼
-        CadController  CadEditer  几何分析器
-              │          │           │
-              └──────┬───┴───────────┘
-                     ▼
-                CadDocument
-                     │
-                     ▼
-             CadItem 派生图元
-                │         │
-                ▼         ▼
-             CadViewer  GGenerator + GProfile
+导入图纸
+→ 识别方管垂直截面
+→ 识别或指定内部图元
+→ 识别或指定 Break/Waste 加工断面
+→ 选择 NearestNext 或 LazyRotation
+→ 生成 Rotary4Axis ProcessPlan
+→ 检查方向、顺序、连续组和排除项
+→ MachineTrajectoryService 生成 MachineTrajectory
+→ NcProgramBuilder 生成 NcProgram
+→ GCodePostProcessor 后处理
+→ 导出 NC 文件
+→ 仿真、空跑和人工复核
 ```
 
-依赖方向原则：
+几何或加工状态变化会使旧计划失效。三轴计划不能用于四轴导出，四轴计划不能用于三轴导出；没有版本一致且模式匹配的 `ProcessPlan` 时必须拒绝导出。当前生产链不存在从 `CadItem` 旧排序字段继续导出的 fallback。
 
-- UI 控件只发出用户意图或显示状态，不直接修改 `CadDocument`。
-- 主窗口负责连接信号、读取设置和编排业务函数。
-- `CadController` 管理输入状态机，不负责文件和后处理配置。
-- `CadEditer` 负责几何修改和 Undo/Redo 提交。
-- `CadViewer` 负责显示、拾取和交互反馈，不承载加工排序业务。
-- 几何分析器只接收图元和容差并返回结果，不弹出界面对话框。
-- `GGenerator` 消费文档、排序状态和 `GProfile`，不修改原始 CAD 几何。
-
-### 4.2 主窗口拆分
-
-`Gcode_postprocessing_system` 按业务拆分为：
-
-- `Gcode_postprocessing_system.cpp`：初始化、菜单、设置、顶部面板、Dock 和状态同步。
-- `Gcode_postprocessing_system_FileActions.cpp`：文件导入、DXF 保存和导入后处理。
-- `Gcode_postprocessing_system_EditActions.cpp`：主窗口编辑动作转发。
-- `Gcode_postprocessing_system_SortActions.cpp`：排序、方管截面、加工断面、内部线条和排除状态。
-- `Gcode_postprocessing_system_GCodeActions.cpp`：G 代码生成前检查、路径选择和文件输出。
-
-新增主窗口功能时，应放入对应职责文件，避免重新把所有实现堆回主文件。
-
-## 5. 核心数据模型
-
-### 5.1 CadDocument
-
-`CadDocument` 持有 `std::unique_ptr<CadItem>` 实体集合、图层信息和场景变更信号。任何会改变显示或加工状态的操作，都应确保最终触发必要的界面刷新。
-
-### 5.2 CadItem
-
-`CadItem` 及其派生类承载：
-
-- 原始 DXF 实体和图元类型。
-- 显示、拾取和控制点所需几何。
-- `rawPathPoints3D` 和 `controlPoints4Axis` 四轴路径缓存。
-
-图元几何变化后，应同步失效或重建相关缓存，不能只修改屏幕预览数据。
-
-用户加工输入独立存放在 `DocumentProcessState` 中，自动排序结果由 `ProcessPlan` 保存，画布显示则读取由计划生成的 `ProcessPresentationSnapshot`。加工状态不写回 `CadItem`，避免自动排序结果污染用户设置。
-
-### 5.3 方管截面模型
-
-`RotaryTubeSectionModel` 保存真实外轮廓图元、YZ 边界、长宽、圆角信息和自动搜索诊断。最终模型必须引用实际 `outerBoundaryItems`，不能构造脱离文档图元的虚拟截面。
-
-手动识别使用：
-
-```cpp
-RotaryTubeGeometryAnalyzer::buildSectionModel(selectedItems, sceneItems, tolerance);
-```
-
-导入后自动识别使用：
-
-```cpp
-RotaryTubeGeometryAnalyzer::findBestSectionModel(sceneItems, tolerance);
-```
-
-自动入口一次构建全部路径，按 X 位置、连接关系、圆角可靠性和多截面尺寸一致性选择候选；它不依赖当前选择集。
-
-## 6. 关键业务流程
-
-### 6.1 DXF/DWG 导入
-
-入口：`Gcode_postprocessing_system::importDxfFile()`。
-
-固定数据流：
+## 6. 当前生产架构
 
 ```text
-读取文件
-→ 自动去重（可选）
-→ 自动识别方管垂直截面（可选）
-→ 自动识别全部加工断面（可选）
-→ 自动清理内部线条（可选）
-→ 刷新加工排除状态
-→ 同步顶部面板和右侧加工设置
+DXF / DWG / CAD 编辑
+            ↓
+CadDocument + CadItem
+            ↓ 文档线程捕获
+DocumentGeometrySnapshotBuilder
+            ↓
+GeometrySourceSnapshot / SourceEntity
+            ↓
+GeometryCompiler
+            ↓
+Path3D（批量编译时可形成 GeometrySnapshot）
+            ↓
+PathTopology
+            ↓
+TubeSection / InternalGeometry / TubeCutBoundary
+            ↓
+DocumentProcessState + ProcessPlanningService
+            ↓
+ProcessPlan
+            ↓
+┌────────────────────────────────────────────┐
+│ Planar3Axis                                │
+│ DocumentPlanarNcInputAdapter               │
+│ → PlanarNcProgramBuilder → NcProgram       │
+├────────────────────────────────────────────┤
+│ Rotary4Axis                                │
+│ MachineTrajectoryService                   │
+│ → MachineTrajectory                        │
+│ → NcProgramBuilder → NcProgram             │
+└────────────────────────────────────────────┘
+            ↓
+GCodePostProcessor
+            ↓
+QString 程序文本
+            ↓
+GGenerator 文件选择、校验和写入
+            ↓
+NC 文件
 ```
 
-约束：
+生产规划当前在文档线程捕获不可变值对象，并由相应服务同步编排。`GeometrySnapshotCompiler` 已支持独立串行/并行批量编译，但当前规划、轨迹和 NC 生产入口没有整体切换为后台任务。
 
-- 自动加工断面和自动内部线条依赖有效方管截面。
-- 加工断面识别必须早于内部线条清理。
-- 自动失败只写命令栏和状态栏，不阻塞文件导入。
-- “没有重复图元”是正常去重结果。
-- 导入新文件时必须清空旧截面模型和选择集。
-- 手动和自动处理应复用相同业务函数，不能维护两套规则。
+## 7. 核心数据模型
 
-### 6.2 样条曲线导入
+### 7.1 CadDocument / CadItem
 
-DXF `SPLINE` 不保留为独立内部图元，而是在导入阶段通过 `CadSplineConverter` 转换为多段线。转换必须保留起点和终点；采样精度应与实际加工精度匹配，不能单纯追求高密度点列。
+`CadDocument` 拥有原始 `dx_data`、稳定顺序的 `CadItem` 集合、图层和 `EntityId`，并通过 `contentRevision` 表达 CAD 内容版本。`CadItem` 保留原始 DXF 实体指针，负责显示、拾取、控制点和编辑所需状态。
 
-### 6.3 位图导入
+`rawPathPoints3D` 仍存在，但只用于尚未移除的兼容边界和部分旧 UI 分析调用，不是新的几何、规划或 NC 事实来源。`CadItem` 不拥有加工顺序、实际 reverse、连续组、Break/Waste、内部排除或四轴机床轨迹。
 
-`CadBitmapImportDialog` 管理参数和预览，`CadBitmapVectorizer` 负责预处理、轮廓提取和规则图元拟合。当前支持阈值、自适应阈值、Canny、形态学操作、轮廓层级、规则图元优先和折线输出。
+### 7.2 SourceEntity
 
-位图导入完成后生成普通 `CadItem`，后续显示、编辑和加工流程不应依赖位图对话框。
+`SourceEntity` 是从 DXF/CAD 捕获的精确几何值对象，使用稳定 `EntityId` 和 `SourceGeometryKind` 描述 Point、Line、Arc、Circle、Ellipse、Polyline 和 Spline 等几何。它不保存 `CadItem*`、`DRW_Entity*` 或 GUI 对象，是 CAD 精确事实进入核心计算的边界。
 
-### 6.4 绘制与修改
+### 7.3 Path3D
+
+`Path3D` 是统一计算路径，坐标为世界坐标 `double`，包含 `EntityId`、来源类型、顶点和 `sourceParameter`。`closed` 独立表达语义闭合，核心闭合路径不重复保存首点。
+
+`Path3D` 是拓扑、规划和轨迹的重要输入，但它是采样后的计算表示，不替代 `SourceEntity` 中的精确圆弧、椭圆或 NURBS 事实。
+
+### 7.4 DocumentProcessState
+
+`DocumentProcessState` 保存用户和分析层的加工输入：
+
+- 加工启用状态；
+- 用户方向意图；
+- 用户起点；
+- `Break`/`Waste` 及断面组编号；
+- 内部图元分析排除状态；
+- 独立的 `processStateRevision`。
+
+自动计划结果不得写回这些用户意图。
+
+### 7.5 ProcessPlan
+
+`ProcessPlan` 保存一次规划的不可变结果：
+
+- `Planar3Axis` 或 `Rotary4Axis` 模式；
+- 文档版本和 process-state 版本；
+- `assignments` 中的 `processOrder`、实际 `reverse`、实际 `startParameter` 和连续组编号；
+- 连续链、闭环和加工断面组；
+- 排除项；
+- 加工断面前置约束；
+- `NearestNext` 或 `LazyRotation` 策略。
+
+### 7.6 ProcessPresentationSnapshot
+
+`ProcessPresentationSnapshot` 由 `ProcessPlan` 构建，只向 Viewer/显示层提供加工序号、方向、起点、连续组和排除状态。它不参与规划、机床轨迹或 NC 生成。
+
+### 7.7 MachineTrajectory
+
+`MachineTrajectory` 保存四轴机床运动事实：
+
+- 世界机床姿态和 XYZ/A；
+- `Rapid`、`Cutting`、`CuttingConnection`、`Overcut`；
+- 每个实体的轨迹、顺序和组；
+- 方管中心、旋转轴中心、安全 Z 和碰撞半径上下文；
+- 文档版本和 process-state 版本。
+
+它不保存 `CadItem`、DRW、GUI 对象或完整 G-code 字符串。
+
+### 7.8 NcProgram
+
+`NcProgram` 是与文本方言分离的 NC 语义模型，保存程序模式、注释、实体元数据块，以及 Rapid/Linear/Circular 运动。轴字为可选的 X/Y/Z/A/I/J/K/R，并保留 `EntityId`、`processOrder` 和 group 元数据。
+
+它不保存 `GProfile` 指针或最终 `QString` 程序。
+
+## 8. 模块所有权
+
+| 模块 | 所有数据/契约 | 负责 | 不负责 |
+| --- | --- | --- | --- |
+| `core/geometry` | `SourceEntity`、`Path3D`、LocalFrame | 精确几何、NURBS、采样、局部坐标 | 文档、UI、排序 |
+| `core/topology` | `TopologyInput`、`TopologyLoopResult` | 连通、交点、严格闭环、环提取 | 方管工艺、G-code |
+| `core/machining` | `TubeSectionModel`、`TubeCutAnalysis` | 方管截面、内部图元、加工断面判定 | 排序、文本输出 |
+| `core/planning` | `ProcessPlan` | 顺序、方向、分组、排除和前置约束 | 机床移动 |
+| `core/machine` | `MachineTrajectory` | A 轴运动学、安全移动、连续连接和过切 | G-code 文本格式 |
+| `core/nc` | `NcProgram` | 三轴/四轴 NC 语义 | `GProfile` 和文件写入 |
+| `application` | snapshot、process state、services | 文档捕获、版本校验和业务编排 | 核心几何算法 |
+| `infrastructure` | DXF adapter、G-code postprocessor | 外部格式适配和文本方言 | 加工工艺决策 |
+| `compatibility` | legacy adapters | 尚未移除的 CadItem/DRW 边界兼容 | 新功能所有权 |
+| UI/CAD | `CadItem`、Viewer、Controller、窗口 | 编辑、显示和用户操作 | 计划、机床轨迹和 NC 事实 |
+
+`RotaryTubeGeometryAnalyzer` 和 `RotaryCutBoundaryAnalyzer` 当前是 Qt/CadItem 兼容入口；最终截面和加工断面算法分别归 `TubeSectionAnalyzer` 与 `TubeCutBoundaryClassifier` 所有。
+
+## 9. 数值稳定性
+
+当前实现遵循以下原则：
+
+- 世界坐标只用于保存、显示、跨模块值对象和最终输出。
+- 几何解算尽量在确定性的局部坐标系中执行。
+- Geometry Core 使用 `double`，不让 `QVector3D` 或 float 显示缓存进入核心计算。
+- `LocalFrame2d`、`LocalFrame3d` 和 `PlaneFrame3d` 负责局部/世界坐标转换。
+- 包围盒中心使用稳定形式计算，长度、面积、均值和协方差等累计量使用补偿求和。
+- ARC、bulge、NURBS 齐次求值、拓扑平面拟合、相交、节点、截面和加工断面均在局部坐标中处理。
+- 最终 `Path3D`、`MachineTrajectory` 和 `NcProgram` 恢复为世界坐标。
+- 远离原点的图元不通过放宽闭环或工艺容差解决。
+- 平移不变性回归覆盖到约 `1e9` 数量级世界坐标。
+
+禁止以提高输出小数位代替数值算法修复，禁止根据世界坐标绝对值扩大闭环容差，禁止重新把显示缓存作为加工事实。
+
+## 10. G-code 生产链
+
+### 10.1 三轴
 
 ```text
-顶部按钮/动态命令/快捷键
-→ CadViewer 输入事件
-→ CadController 状态机
-→ CadEditer 构造或修改实体
-→ 批量命令提交 Undo/Redo
-→ CadDocument 场景变化
-→ Viewer 与状态面板刷新
+ProcessPlan
+→ NcProgramService
+→ DocumentPlanarNcInputAdapter
+→ PlanarNcProgramBuilder
+→ NcProgram
+→ GCodePostProcessor
+→ QString
+→ GGenerator 写入文件
 ```
 
-修改类命令应保持一次用户操作对应一次 Undo/Redo 记录。实时预览使用 transient 数据，确认前不得污染文档实体。
-
-### 6.5 方管截面、加工断面和内部线条
-
-- 方管截面：在 YZ 投影中识别方管垂直截面尺寸和圆角。
-- 加工断面：连续或近似连续、通过方管周向分离校验的真实轮廓；标记为 `RotaryEndCutRole::Break`。
-- 废弃面：保留现有 `RotaryEndCutRole::Waste` 语义，用于加工排除区间。
-- 内部线条：拓扑外轮廓内部或进入方管内部的无效加工图元；已标记加工断面的图元不得再次被内部线条清理排除。
-
-自动加工断面识别复用 `recognizeAllRotaryEndCuts()` 和 `RotaryCutBoundaryAnalyzer::analyze()`。单个候选失败不得中止全部搜索，已有加工断面或废弃面标记的图元不得重复分配。
-
-画布右键菜单提供截面识别、加工断面指定/恢复、全部断面识别/恢复、内部线条指定/恢复及清空状态。菜单只由 `CadViewer` 发出请求，业务仍由主窗口执行。
-
-### 6.6 排序
-
-排序统一从 `DocumentProcessState` 读取用户方向、起点和加工约束，并将最终顺序、实际方向及连续组写入 `ProcessPlan`。
-
-- “排序（保留方向）”调整顺序，不主动覆盖用户方向。
-- “智能排序”可联合考虑顺序、方向、连续性和闭合路径起刀点。
-- 四轴方管排序会考虑加工断面分段、连续路径免抬刀、面组和 A 轴旋转代价。
-- 排序属于启发式算法，不保证数学意义上的全局最优。
-
-任何会改变图元集合、加工断面、内部线条或方向的操作，都应使失效的加工顺序重新计算。
-
-### 6.7 G 代码生成
+### 10.2 四轴
 
 ```text
-用户选择导出
-→ 解析 3轴/4轴模式
-→ 检查或自动补齐排序
-→ GGenerator 读取有序图元
-→ 应用 GProfile 规则
-→ 写入 CRLF 文本文件
-→ 记录成功导出目录
+ProcessPlan
+→ NcProgramService
+→ MachineTrajectoryService
+→ MachineTrajectory
+→ NcProgramBuilder
+→ NcProgram
+→ GCodePostProcessor
+→ QString
+→ GGenerator 写入文件
 ```
 
-当前加工几何支持 `Line`、`Arc`、`Circle`、`Ellipse`、`Polyline`、`LWPolyline`。辅助图元不会产生加工轨迹。
+`GGenerator` 负责导出模式和版本校验、调用 `NcProgramService`、选择路径以及 UTF-8 文件写入。它不再按具体 `CadItem` 类型生成几何，不计算 A 轴、安全高度、连续连接或过切，也不负责 M05/M03 文本优化。
 
-规则包裹顺序为：
+`GCodePostProcessor` 负责文件/图层/颜色/类型代码块、运动轴字、精度、圆弧平面代码、相邻纯 M05/M03 优化和 CRLF 文本。三轴和四轴都必须使用版本一致、模式匹配的 `ProcessPlan`；失败时不得返回可写入的部分 NC 文本。
+
+## 11. 三轴几何映射
+
+- `LINE` 输出 Rapid 起点和 Linear 终点。
+- XY、ZX、YZ 主平面 `ARC` 分别使用 G17/G18/G19 和 G02/G03；非主平面圆弧离散为线性路径。
+- 完整 XY `CIRCLE` 使用圆弧运动；其他平面或任意空间朝向的圆离散为线性路径。
+- 2D `POLYLINE`/`LWPOLYLINE` bulge 在 DXF 适配层转换为精确 `ArcGeometry`，当前三轴 XY 映射可输出 G02/G03；3D POLYLINE 按直线段处理。
+- `ELLIPSE` 和 `SPLINE` 由 `GeometryCompiler` 离散为 `Path3D` 后输出 Linear 运动。
+- 完整圆和完整椭圆的默认加工起点为图元局部北极 `M_PI_2`；规划选择正反方向但不改变该默认起点。
+- 部分圆弧、部分椭圆和开放路径保留原始首尾语义；闭合多段线的 `startParameter` 表示原始顶点索引。
+- `reverse` 和 `startParameter` 来自 `ProcessPlan`，不会通过修改原始 DXF 几何实现。
+
+## 12. 方管四轴工艺
+
+- 工件轴线按 X 方向建模，A 轴绕 X 轴旋转。
+- `TubeSectionModel` 保存真实外边界、Y/Z 中心、Y 长、Z 宽、圆角中心和半径；真实边界不是理想凸包替代物。
+- 方管中心用于表面法向、圆角刀头方向和碰撞计算；`rotaryAxisY/rotaryAxisZ` 用于实际旋转坐标变换，两者语义不同。
+- 内部图元包括拓扑外轮廓内部线和进入方管实体内部的危险路径。
+- `Break` 表示切断材料的加工断面，并建立“其前侧加工组必须先完成”的 precedence constraints。
+- `Waste` 表示废弃断面及相邻废弃区间，相关实体进入排除项。
+- 闭环必须由 `Path3D.closed` 或所有物理连接点在 `numericalJoinEpsilon` 内真实重合成立；工程间隙不接受“近似闭合”。
+- 加工断面按真实闭环的 YZ 投影映射到方管外边界，生成 `SurfaceSpan` 和 seam 周向统计。
+- 有向周向行程得到整数 winding；`winding=0` 表示仍保留左右材料桥，不能标记为有效切断断面。
+- `NearestNext` 优先空间距离；`LazyRotation` 在满足断面前置约束和连续组原子性的前提下考虑 A 轴旋转代价。
+- 同一连续组可生成 `CuttingConnection`，组间使用安全移动；闭合组按配置生成过切，默认 `overcutDistance=2.0 mm`。
+- A 轴角度连续解包，避免相邻点产生无意义的正负 360 度跳变。
+
+## 13. 诊断和结果
+
+核心和应用服务使用：
+
+- `OperationStatus`：Success、PartialSuccess、Cancelled、InvalidInput、NotSupported、Conflict、Failed、InternalError。
+- `OperationResult<T>`：状态、可选值和结构化诊断。
+- `OperationReport`：不返回业务值的结果。
+- `Diagnostic`、`DiagnosticCode`、`DiagnosticSeverity`：稳定错误代码、严重级别、用户消息、技术细节和上下文。
+- `OperationContext` 和 `correlationId`：关联一次完整操作的数据流。
+
+Result 是控制和数据契约，Diagnostic 是结构化失败或警告。`PartialSuccess` 表示结果可用但包含明确降级或局部失败；`Conflict` 用于文档版本、process-state 版本或计划模式不一致。
+
+`MessageCenter` 将诊断分发到调试和 UI sink。核心模块不得弹出 `QMessageBox`，业务代码不得解析日志文本决定流程。
+
+## 14. 版本和状态失效
+
+系统使用两个独立版本：
+
+- `CadDocument::contentRevision()`：导入、清空、新增、删除、复制、Undo/Redo、移动、旋转、缩放、镜像、图层/颜色和原始几何修改时推进；批量修改只推进一次。
+- `DocumentProcessState::revision()`：加工启用、用户方向、用户起点、Break/Waste、断面组和内部图元分析状态变化时推进。
+
+选择、高亮、加工序号显示、方向箭头、网格、主题、视角和 `ProcessPresentationSnapshot` 不应推进这两个版本。自动计划结果不写回用户输入，因此也不应自行推进 process-state revision。
+
+应用 `ProcessPlan`、生成 `MachineTrajectory` 或 `NcProgram` 前，必须同时比较 `contentRevision`、`processStateRevision` 和计划模式。不一致时返回 `Conflict` 并拒绝导出，而不是清空 `CadItem` 字段或自动补齐旧排序后继续。
+
+## 15. 并发和线程边界
+
+- `DocumentGeometrySnapshotBuilder::capture()` 必须在 `CadDocument` 所在线程读取 `CadDocument`、`CadItem` 和 DRW 实体，并生成不持有这些指针的 `GeometrySourceSnapshot`。
+- `GeometrySnapshotCompiler` 支持 Serial 和 Parallel 两种批量编译模式；worker 只读取 `SourceEntity` 值对象，不访问 QObject、DRW 或 GUI。
+- 并行结果按 `sourceIndex` 确定性合并，Diagnostic 保持图元内部顺序；相同输入重复运行应得到相同结果。
+- `CancellationToken` 在图元任务边界检查取消，取消后等待已运行任务结束并保留已完成 entry；进度通过值对象回调返回。
+- 快照应用前使用 `matchesRevision()` 检查版本，过期结果不得覆盖当前文档。
+- 当前生产规划、拓扑、轨迹和 NC 编排仍主要是同步调用；`GeometrySnapshotCompiler` 的并行能力没有把整条生产链自动变成后台任务，长操作仍可能阻塞主线程。
+
+## 16. 仓库目录
 
 ```text
-文件头
-  图层头
-    颜色头
-      图元类型头
-        图元加工路径
-      图元类型尾
-    颜色尾
-  图层尾
-文件尾
+include/core/             纯计算数据模型与算法公共接口
+src/core/                 几何、拓扑、加工、规划、机床和 NC 核心实现
+include/application/      文档快照、加工状态、消息和服务接口
+src/application/          版本校验、捕获和业务编排实现
+include/infrastructure/   DXF 与 G-code 外部格式适配接口
+src/infrastructure/       DXF 值对象适配和后处理文本实现
+include/compatibility/    CadItem/DRW 旧边界兼容接口
+src/compatibility/        尚未移除的兼容适配实现
+include/                  主窗口、CAD、Viewer、配置及第三方头文件
+src/                      UI、CAD 编辑、渲染、文件动作及第三方实现
+include/libdxfrw/         第三方 libdxfrw 头文件
+src/libdxfrw/             第三方 libdxfrw/libdwgr 源码
+tests/                    无 GUI characterization tests 与黄金数据
+technical_file/           G/M 代码等工程参考资料
+tools/                    授权生成工具
+docxs/                    论文、实习和答辩材料，不参与程序构建
 ```
 
-默认配置更偏向按颜色区分工艺。修改规则顺序前必须同时检查三轴和四轴输出。
+`src/dx_iface.cpp`、`include/dx_iface.h` 及 libdxfrw 默认视为第三方边界。除非问题明确位于该层，否则不要修改；修改后必须验证导入、普通保存、安全导出和重新导入闭环。
 
-## 7. 四轴方管链
+## 17. 开发入口表
 
-### 7.1 坐标和职责
-
-- 工件中心线按 X 轴建模。
-- A 轴表示绕 X 轴旋转。
-- 各 `CadItem` 派生类负责从原始几何生成 `rawPathPoints3D` 和 `controlPoints4Axis`。
-- `GGenerator` 负责跨图元连续性、安全高度、规则包裹和 NC 文本输出。
-
-### 7.2 刀头方向
-
-- 路径映射在方管直边时，按对应表面法向加工。
-- 路径映射在圆角区域时，刀头方向指向对应四分之一圆角圆心。
-- A 轴方向变化应沿真实加工路径渐变，不能在交界点原地快速调头。
-
-### 7.3 安全约束
-
-- 统一安全高度基于全图最大离 X 轴距离和配置的额外距离。
-- 连续路径允许免抬刀，但必须同时满足空间连接、方向连续和加工排除约束。
-- 右侧加工设置中的截面、加工断面和内部线条状态应在导出前核对。
-- 实际机床运行前必须进行空跑或仿真验证。
-
-## 8. 用户界面
-
-### 8.1 顶部页签
-
-- `默认`：绘图、修改、图层和特性。
-- `机加工`：只放高频命令，不放持久设置和状态。
-- `显示`：加工方向箭头、加工序号、加工断面、排除图元和背景网格等显示选项。
-
-机加工命令区：
-
-- 导入导出：文件导入、G 代码导出。
-- 排序：排序（保留方向）、智能排序。
-- 几何处理：去重、识别方管截面、识别加工断面、清理内部线条。
-- 配置：当前配置、配置选择、G 代码模式、G 代码配置、加工设置。
-
-`CadToolPanelWidget` 只发出命令信号和维护配置选择，不应直接访问文档。
-
-### 8.2 加工设置 Dock
-
-`MachiningSettingsWidget` 由主窗口包装在 `machiningSettingsDock` 中，默认停靠右侧，支持左右停靠、浮动、关闭和从“视图 -> 加工设置”重新打开。
-
-内容包括：
-
-- 自动处理：导入后自动去重、自动识别方管截面、自动识别加工断面、自动清理内部线条。
-- 导出设置：使用默认导出目录、使用 DXF 文件名。
-- 方管识别状态：Y 长、Z 宽、圆角半径、圆角数量、加工断面数量和内部线条数量。
-
-依赖规则：
-
-- 启用自动加工断面或自动内部线条时，自动启用方管截面识别。
-- 禁用方管截面识别时，同时禁用并取消两个子选项。
-- 初始化同步不得触发设置写回信号。
-
-加工断面数量按 `DocumentProcessState` 中唯一的断面组编号统计，仅计 `Break`；内部线条数量按分析排除状态统计。
-
-### 8.3 输入和显示
-
-- 绘图和修改参数优先使用光标旁动态输入面板。
-- 状态栏捕捉支持基点、控制点、端点、中点、圆心/中心、交点和网格。
-- 视图支持平移、滚轮缩放、轨道观察、标准视角和右上角视图方块。
-- 框选采用向右包含、向左碰选语义。
-- 选中图元显示控制点，重叠控制点支持候选切换。
-
-## 9. 持久化设置
-
-设置使用：
-
-```cpp
-QSettings("GCodePostProcessingSystem", "GCodePostProcessingSystem")
-```
-
-关键设置键：
-
-| 设置键 | 默认值 | 含义 |
-| --- | --- | --- |
-| `dxf/autoDeduplicateOnImport` | `false` | 导入后自动去重 |
-| `dxf/autoRecognizeRotaryTubeSectionOnImport` | `false` | 导入后自动识别方管截面 |
-| `dxf/autoRecognizeRotaryEndCutsOnImport` | `false` | 截面成功后自动识别加工断面 |
-| `dxf/autoRemoveInternalPathsOnImport` | `false` | 截面成功后自动清理内部线条 |
-| `gcode/useDefaultExportPath` | `true` | 导出时复用上次目录 |
-| `gcode/useDxfFileNameOnExport` | `false` | 使用当前 DXF 文件名 |
-| `gcode/outputMode` | `auto` | 自动、3轴或4轴模式 |
-| `ui/snapModeMask` | 默认掩码 | 对象捕捉组合 |
-| `ui/mainWindowGeometry` | 空 | 主窗口位置和尺寸 |
-| `ui/mainWindowState` | 空 | Dock 停靠、浮动和可见状态 |
-
-不要修改已有设置键的语义。新增依赖选项时，应同时实现加载、保存、初始化无信号同步和用户操作即时写入。
-
-## 10. 常用维护入口
-
-| 需求 | 首要检查文件 |
+| 修改内容 | 首先查看 |
 | --- | --- |
-| 文件导入/保存 | `src/Gcode_postprocessing_system_FileActions.cpp`、`CadDocument`、`dx_iface` |
-| 导入后自动处理 | `runDxfImportPostProcessing()` |
-| 主窗口菜单和设置 | `src/Gcode_postprocessing_system.cpp` |
-| 顶部命令区 | `CadToolPanelWidget` |
-| 右侧加工设置 | `MachiningSettingsWidget`、`syncMachiningSettingsState()` |
-| 鼠标/键盘命令 | `CadController_*`、`CadViewer_EventHandling.cpp` |
-| 图元创建和修改 | `CadEditer_*`、对应 `Cad*Item` |
-| 渲染和拾取 | `CadViewer_*`、`CadEntityRenderer`、`CadEntityPicker` |
-| 截面和内部线条 | `RotaryTubeGeometryAnalyzer` |
-| 加工断面校验 | `RotaryCutBoundaryAnalyzer`、`Gcode_postprocessing_system_SortActions.cpp` |
-| 排序与连续性 | `Gcode_postprocessing_system_SortActions.cpp` |
-| G 代码输出 | `GGenerator`、`GProfile`、`Gcode_postprocessing_system_GCodeActions.cpp` |
-| 位图矢量化 | `CadBitmapImportDialog`、`CadBitmapVectorizer` |
-| 商业授权/品牌 | `AppLicense`、`AppBranding`、`COMMERCIAL_RELEASE.md` |
+| DXF 适配 | `include/infrastructure/dxf/`、`src/infrastructure/dxf/` |
+| 精确几何和采样 | `include/core/geometry/`、`src/core/geometry/` |
+| 闭环和连通 | `include/core/topology/`、`src/core/topology/` |
+| 方管截面 | `TubeSectionAnalyzer`、`core/machining/TubeSection` |
+| 加工断面 | `TubeCutBoundaryClassifier`、`core/machining/TubeCutBoundary` |
+| 三轴排序 | `PlanarProcessPlanBuilder` |
+| 四轴排序 | `ProcessPlanBuilder` |
+| 用户加工状态 | `DocumentProcessState` |
+| 计划显示 | `ProcessPresentationSnapshot` |
+| 四轴机床轨迹 | `core/machine`、`MachineTrajectoryService` |
+| 三轴 NC | `DocumentPlanarNcInputAdapter`、`PlanarNcProgramBuilder` |
+| 四轴 NC | `NcProgramBuilder`、`NcProgramService` |
+| G-code 文本 | `GCodePostProcessor` |
+| 文件导出 | `GGenerator`、`Gcode_postprocessing_system_GCodeActions.cpp` |
+| CAD 编辑 | `CadEditer_*`、`CadController_*` |
+| OpenGL 显示 | `CadViewer_*`、渲染和拾取文件 |
+| 诊断 | `include/core/diagnostics/`、`src/core/diagnostics/` |
+| 配置 | `GProfile`、`GProfileDialog` |
+| 授权和部署 | `COMMERCIAL_RELEASE.md` |
 
-## 11. 扩展指南
+## 18. 新功能开发规则
 
-### 11.1 增加图元类型
+1. 先找到数据事实所有者，再沿真实数据流修改。
+2. 优先扩展已有职责模块，不在 UI、Viewer 或主窗口复制核心算法。
+3. 单一调用方的辅助函数优先放在 `.cpp` 私有区。
+4. 不为一个静态函数新增公共类。
+5. 不新增只做转发且没有不变量的 Service、Facade、Manager 或 Utils。
+6. 只有存在独立契约、独立不变量和两个以上生产调用方时，才考虑公共模块。
+7. UI 不拥有几何、规划、机床轨迹或 NC 事实。
+8. Core 不依赖 `CadItem`、DRW 或 `QWidget`。
+9. 不通过放宽容差掩盖几何或数值错误。
+10. 新生产实现不保留旧算法运行时 fallback；明确的 compatibility 边界必须返回诊断。
+11. 行为修改必须增加最小回归测试。
+12. G-code 行为变化必须说明黄金文件变化原因，不能只更新预期结果让测试通过。
 
-1. 确认 libdxfrw 的 `DRW::ETYPE` 和原始数据结构。
-2. 新增或复用 `CadItem` 派生类，实现显示路径、拾取和控制点。
-3. 在文档导入工厂中创建图元，检查 OCS/WCS 变换和 extrusion。
-4. 按需求接入绘制、编辑、复制和 DXF 导出。
-5. 只有需要加工时才实现二维/四轴路径；辅助图元应明确跳过 G 代码。
-6. 更新 `.vcxproj` 和 `.vcxproj.filters`。
-7. 验证导入、显示、保存、重新导入和 G 代码结果。
+具体执行约束见 [AGENTS.md](./AGENTS.md)。
 
-### 11.2 增加命令
+## 19. 测试
 
-1. 在 `CadToolPanelWidget` 或动态命令表中增加入口。
-2. 由主窗口连接到现有业务函数，或启动 `CadController` 状态机。
-3. 参数输入使用动态输入面板，不新增阻塞式参数对话框。
-4. 预览写入 transient 状态，确认后通过 `CadEditer` 提交。
-5. 多图元操作必须按一次命令进入 Undo/Redo。
+当前 `tests/GCodeCharacterizationTests.vcxproj` 构建单一无 GUI 测试程序：
 
-### 11.3 增加导入后处理步骤
+```text
+x64/Release/tests/GCodeCharacterizationTests.exe
+```
 
-1. 先明确前置状态和输出状态。
-2. 在 `runDxfImportPostProcessing()` 中安排固定顺序。
-3. 自动和手动入口复用同一业务函数，并用 `interactive` 控制提示方式。
-4. 自动失败不得阻塞导入。
-5. 最后统一刷新排除状态和界面，避免每一步重复重绘。
+测试入口覆盖：
 
-### 11.4 增加设置
+- Geometry Core、Path3D 和多段线 bulge；
+- SPLINE NURBS、拟合点降级、生产接入和保存/重载；
+- GeometrySourceSnapshot、串行/并行确定性、取消和过期判断；
+- PathTopology、严格闭环和 topology golden；
+- TubeSection、内部图元和 TubeCutBoundary；
+- Planar/Rotary ProcessPlan；
+- MachineTrajectory 和 A 轴运动学；
+- NcProgram 和 GCodePostProcessor；
+- 三轴、四轴、连续组、过切和 SPLINE G-code golden；
+- `TranslationInvarianceTests`，覆盖到约 `1e9` 世界坐标平移。
 
-1. 在主窗口集中实现 `load...()` / `save...()`。
-2. 在设置控件中只维护控件依赖和变化信号。
-3. 使用 `m_updatingUi` 或等价机制避免初始化写回。
-4. 设置变化后调用统一状态同步函数。
-5. 在本文档设置表中记录键、默认值和迁移策略。
-
-### 11.5 修改后处理规则
-
-1. 同时检查 `GProfile` 默认值、配置读写和对话框。
-2. 核对规则包裹顺序和颜色/图层/类型键生成。
-3. 分别导出三轴和四轴样例。
-4. 检查 CRLF、抬刀、安全高度、连续路径和文件头尾。
-5. 不得在导出阶段永久修改文档几何。
-
-## 12. 验证清单
-
-### 12.1 每次代码修改
-
-- 检查 `git diff --check`。
-- 使用 Release x64 构建，确认无编译或链接错误。
-- 启动构建目录中的 EXE，确认主窗口未立即退出。
-- 检查修改动作的输入、状态变化和最终显示/文件结果，而不是只检查局部函数。
-- 确认没有覆盖工作区中无关的用户修改。
-
-### 12.2 CAD 回归
-
-- 导入包含直线、圆弧、圆、椭圆、多段线、构造线和样条曲线的 DXF。
-- 验证垂直平面、负坐标和 extrusion 不会造成显示翻转或黑屏。
-- 保存为 DXF 后重新导入，检查图元数量和类型。
-- 验证批量删除、移动、旋转、缩放及一次性 Undo/Redo。
-- 验证对象捕捉、控制点编辑和框选。
-
-### 12.3 方管加工回归
-
-- 导入多个相同尺寸截面与干扰闭合轮廓的图纸。
-- 检查自动截面诊断中的候选数、尺寸、圆角数和中心 X。
-- 验证直角、三可靠圆角、四圆角候选优先级。
-- 验证加工断面只在周向校验成功后标记。
-- 验证加工断面不会被内部线条清理排除。
-- 验证清空、指定、恢复后右侧统计立即更新。
-- 验证自动选项父子依赖和重启持久化。
-
-### 12.4 G 代码回归
-
-- 三轴和四轴各导出一个包含多种图元和颜色规则的样例。
-- 检查加工顺序、方向、起刀点、规则头尾和 CRLF。
-- 检查连续相接图元是否避免无用抬刀。
-- 检查方管圆角区域刀头方向是否指向圆角圆心。
-- 对生产文件进行仿真、空跑和人工复核。
-
-### 12.5 UI 回归
-
-- 在 Windows 100%、125%、150% 缩放下检查顶部按钮和下拉框。
-- 检查浅色、深色和自定义主题。
-- 检查加工设置 Dock 左右停靠、浮动、关闭、菜单恢复和重启恢复。
-- 检查窗口宽度或高度不足时没有控件重叠，Dock 内容可垂直滚动。
-
-## 13. 发布与商业配置
-
-发布流程、机器码、`license.dat`、品牌配置和构建目录打包见 [COMMERCIAL_RELEASE.md](./COMMERCIAL_RELEASE.md)。
-
-发布前至少确认：
-
-- 使用 Release x64 构建目录，不从中间对象目录取 EXE。
-- Qt、OpenCV 和 MSVC 运行库已部署。
-- `branding.json`、应用图标和 Lite/Pro 功能边界符合交付要求。
-- 在目标机器或接近目标配置的旧机器上进行启动和基础导出测试。
-- 不把开发侧许可证生成脚本和私钥材料交付给客户。
-
-## 14. 协作和 Git 约束
-
-开发前先阅读 [AGENTS.md](./AGENTS.md)。核心原则：
-
-- 先沿真实数据流定位触发、状态、处理和最终结果。
-- 使用最少代码解决明确问题，不做无关重构。
-- 只修改任务需要的文件，不清理用户的无关改动。
-- 手动和自动入口复用业务函数，避免规则分叉。
-- 不把文档、几何、排序或 G 代码业务写入 Viewer/UI 控件。
-- 对第三方 libdxfrw 改动保持谨慎。
-- 功能修改和大规模文档修改建议分开提交。
-
-推荐提交前执行：
+运行：
 
 ```powershell
-git status --short
-git diff --check
-git diff --stat
+$env:PATH="D:\Qt\6.9.3\msvc2022_64\bin;$env:PATH"
+& ".\x64\Release\tests\GCodeCharacterizationTests.exe"
 ```
 
-提交信息应说明用户可见结果或核心数据流变化，避免使用“更新代码”等无意义描述。
+当前没有形成覆盖典型客户 DXF 的完整自动化端到端 fixture 集；`testdxf/` 中的样例主要用于人工和专项排查，不能宣称为完整功能测试框架。
 
-## 15. 相关文档
+## 20. 验证清单
 
-- [G/M 代码参考](./technical_file/G-M_Code.md)
-- [商业发布与授权](./COMMERCIAL_RELEASE.md)
-- [协作规则](./AGENTS.md)
-- `docxs/PROJECT.md`：论文写作事实基准，不替代本维护文档。
+### 20.1 文档和构建
 
-当 README、代码和实际程序行为冲突时，应以源码和可重复验证结果为准，并立即修正文档。
+- `git diff --check`。
+- README 中引用的路径真实存在。
+- README 中引用的主要类型可在仓库中搜索。
+- 构建命令与 `.slnx` 和 `.vcxproj` 一致。
+- 完成 `Release|x64` 构建。
+
+### 20.2 核心回归
+
+- 全部无 GUI tests。
+- `TranslationInvarianceTests`。
+- 三轴和四轴 G-code golden。
+- SPLINE golden。
+- topology golden。
+- 若修改数值、闭环、截面、规划或轨迹，运行对应专项测试。
+
+### 20.3 人工功能验收
+
+- DXF/DWG 导入、DXF 保存和重新导入。
+- 方管截面、内部线条和多个加工断面。
+- 三轴计划、四轴计划、方向、连续组和排除状态显示。
+- G-code 配置、导出、仿真和空跑。
+- 绘制、修改、批量 Undo/Redo 和控制点。
+- UI 缩放、主题、Dock、动态输入和视图导航。
+- 大文件加载、渲染、命中测试和长操作响应。
+
+## 21. 当前技术债务
+
+- `compatibility/legacy` 及 `rawPathPoints3D` 仍服务少量旧 CadItem/Qt 边界，需要按调用点逐步收敛，但不能在无回归保护时直接删除。
+- 典型客户 DXF 的自动化端到端 fixture 数量不足，当前测试以值对象、构造夹具和黄金输出为主。
+- UI、复杂 CAD 修改、自动识别和真实机床工作流仍需要持续的用户系统功能验收。
+- 大文件加载、几何编译、拓扑、规划、渲染和拾取尚未建立完整性能基线。
+- 部分长时间生产操作仍同步执行，可能阻塞主线程。
+- libdxfrw 构建警告和 `dxcompiler`/`dxil` 可选部署提示尚未完全消除。
+- README 必须随生产边界变化同步维护，避免旧架构描述再次进入事实入口。
+
+## 22. 后续方向
+
+1. 建立典型 DXF 端到端 fixture。
+2. 完成用户系统功能验收并记录可重复步骤。
+3. 优先修复可复现 Bug，不启动无明确收益的大规模重构。
+4. 优化命令反馈、错误诊断和实际加工工作流。
+5. 建立大文件和长路径性能基线。
+6. 减少主线程卡顿，按明确边界引入后台任务。
+7. 优化大文件渲染和命中测试。
+8. 完善 Release 打包、依赖、授权和目标机器检查。
