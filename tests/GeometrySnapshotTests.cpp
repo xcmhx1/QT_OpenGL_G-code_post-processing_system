@@ -1,7 +1,7 @@
 #include "GeometrySnapshotTests.h"
 
-#include "CadDocument.h"
-#include "CadItem.h"
+#include "cad/document/CadDocument.h"
+#include "cad/items/CadItem.h"
 #include "application/geometry/DocumentGeometrySnapshotBuilder.h"
 #include "application/geometry/GeometrySnapshotCompiler.h"
 #include "application/process/DocumentProcessState.h"

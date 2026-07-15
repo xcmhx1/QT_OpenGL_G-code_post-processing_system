@@ -1,7 +1,7 @@
 #include "compatibility/legacy/LegacyCadItemTopologyAdapter.h"
 
-#include "CadEllipseGeometry.h"
-#include "CadItem.h"
+#include "cad/geometry/CadEllipseGeometry.h"
+#include "cad/items/CadItem.h"
 #include "compatibility/legacy/LegacyCadItemPathBridge.h"
 
 #include <cmath>

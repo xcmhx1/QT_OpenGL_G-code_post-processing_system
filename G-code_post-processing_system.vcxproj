@@ -140,251 +140,251 @@ if exist "$(VCRuntimeRedistDir)\*.dll" copy /Y "$(VCRuntimeRedistDir)\*.dll" "$(
     <None Include="tools\Generate-License.ps1" />
   </ItemGroup>
   <ItemGroup>
-    <QtMoc Include="include\Gcode_postprocessing_system.h" />
-    <QtMoc Include="include\CadToolPanelWidget.h" />
-    <QtMoc Include="include\MachiningSettingsWidget.h" />
-    <QtMoc Include="include\CadStatusPaneWidget.h" />
+    <QtMoc Include="include\desktop\Gcode_postprocessing_system.h" />
+    <QtMoc Include="include\ui\widgets\CadToolPanelWidget.h" />
+    <QtMoc Include="include\ui\widgets\MachiningSettingsWidget.h" />
+    <QtMoc Include="include\ui\widgets\CadStatusPaneWidget.h" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="src\AppBranding.cpp">
+    <ClCompile Include="src\desktop\AppBranding.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderFile>platform/pch.h</PrecompiledHeaderFile>
     </ClCompile>
-    <ClCompile Include="src\AppLicense.cpp">
+    <ClCompile Include="src\desktop\AppLicense.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderFile>platform/pch.h</PrecompiledHeaderFile>
     </ClCompile>
-    <ClCompile Include="src\CadItem.cpp" />
-    <ClCompile Include="src\pch.cpp">
+    <ClCompile Include="src\cad\items\CadItem.cpp" />
+    <ClCompile Include="src\platform\pch.cpp">
       <PrecompiledHeader>Create</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderFile>platform/pch.h</PrecompiledHeaderFile>
     </ClCompile>
-    <ClCompile Include="src\CadArcItem.cpp">
+    <ClCompile Include="src\cad\items\CadArcItem.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderFile>platform/pch.h</PrecompiledHeaderFile>
     </ClCompile>
-    <ClCompile Include="src\CadSplineConverter.cpp">
+    <ClCompile Include="src\compatibility\legacy\CadSplineConverter.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderFile>platform/pch.h</PrecompiledHeaderFile>
     </ClCompile>
-    <ClCompile Include="src\RotaryCutBoundaryAnalyzer.cpp">
+    <ClCompile Include="src\application\machining\RotaryCutBoundaryAnalyzer.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderFile>platform/pch.h</PrecompiledHeaderFile>
     </ClCompile>
-    <ClCompile Include="src\RotaryPathTopology.cpp">
+    <ClCompile Include="src\application\machining\RotaryPathTopology.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderFile>platform/pch.h</PrecompiledHeaderFile>
     </ClCompile>
-    <ClCompile Include="src\RotaryTubeGeometryAnalyzer.cpp">
+    <ClCompile Include="src\application\machining\RotaryTubeGeometryAnalyzer.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderFile>platform/pch.h</PrecompiledHeaderFile>
     </ClCompile>
-    <ClCompile Include="src\CadCircleItem.cpp">
+    <ClCompile Include="src\cad\items\CadCircleItem.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderFile>platform/pch.h</PrecompiledHeaderFile>
     </ClCompile>
-    <ClCompile Include="src\CadEllipseItem.cpp">
+    <ClCompile Include="src\cad\items\CadEllipseItem.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderFile>platform/pch.h</PrecompiledHeaderFile>
     </ClCompile>
-    <ClCompile Include="src\CadLineItem.cpp">
+    <ClCompile Include="src\cad\items\CadLineItem.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderFile>platform/pch.h</PrecompiledHeaderFile>
     </ClCompile>
-    <ClCompile Include="src\CadXlineItem.cpp">
+    <ClCompile Include="src\cad\items\CadXlineItem.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderFile>platform/pch.h</PrecompiledHeaderFile>
     </ClCompile>
-    <ClCompile Include="src\CadLWPolylineItem.cpp">
+    <ClCompile Include="src\cad\items\CadLWPolylineItem.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderFile>platform/pch.h</PrecompiledHeaderFile>
     </ClCompile>
-    <ClCompile Include="src\CadPointItem.cpp">
+    <ClCompile Include="src\cad\items\CadPointItem.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderFile>platform/pch.h</PrecompiledHeaderFile>
     </ClCompile>
-    <ClCompile Include="src\CadProcessVisualUtils.cpp">
+    <ClCompile Include="src\cad\view\rendering\CadProcessVisualUtils.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderFile>platform/pch.h</PrecompiledHeaderFile>
     </ClCompile>
-    <ClCompile Include="src\CadPolylineItem.cpp">
+    <ClCompile Include="src\cad\items\CadPolylineItem.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderFile>platform/pch.h</PrecompiledHeaderFile>
     </ClCompile>
-    <ClCompile Include="src\CadSplineItem.cpp">
+    <ClCompile Include="src\cad\items\CadSplineItem.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderFile>platform/pch.h</PrecompiledHeaderFile>
     </ClCompile>
-    <ClCompile Include="src\CadCommandLineWidget.cpp">
+    <ClCompile Include="src\ui\widgets\CadCommandLineWidget.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderFile>platform/pch.h</PrecompiledHeaderFile>
     </ClCompile>
-    <ClCompile Include="src\CadAppearanceSettingsDialog.cpp">
+    <ClCompile Include="src\ui\dialogs\CadAppearanceSettingsDialog.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderFile>platform/pch.h</PrecompiledHeaderFile>
     </ClCompile>
-    <ClCompile Include="src\CadHelpDialog.cpp">
+    <ClCompile Include="src\ui\dialogs\CadHelpDialog.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderFile>platform/pch.h</PrecompiledHeaderFile>
     </ClCompile>
-    <ClCompile Include="src\GProfileDialog.cpp">
+    <ClCompile Include="src\ui\dialogs\GProfileDialog.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderFile>platform/pch.h</PrecompiledHeaderFile>
     </ClCompile>
-    <ClCompile Include="src\GProfileManagerDialog.cpp">
+    <ClCompile Include="src\ui\dialogs\GProfileManagerDialog.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderFile>platform/pch.h</PrecompiledHeaderFile>
     </ClCompile>
-    <ClCompile Include="src\GProfilePathStore.cpp">
+    <ClCompile Include="src\infrastructure\config\GProfilePathStore.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderFile>platform/pch.h</PrecompiledHeaderFile>
     </ClCompile>
-    <ClCompile Include="src\CadBitmapImportDialog.cpp">
+    <ClCompile Include="src\ui\dialogs\CadBitmapImportDialog.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderFile>platform/pch.h</PrecompiledHeaderFile>
     </ClCompile>
-    <ClCompile Include="src\CadBitmapVectorizer.cpp">
+    <ClCompile Include="src\infrastructure\image\CadBitmapVectorizer.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderFile>platform/pch.h</PrecompiledHeaderFile>
     </ClCompile>
-    <ClCompile Include="src\CadStatusPaneWidget.cpp">
+    <ClCompile Include="src\ui\widgets\CadStatusPaneWidget.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderFile>platform/pch.h</PrecompiledHeaderFile>
     </ClCompile>
-    <ClCompile Include="src\CadToolPanelWidget.cpp">
+    <ClCompile Include="src\ui\widgets\CadToolPanelWidget.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderFile>platform/pch.h</PrecompiledHeaderFile>
     </ClCompile>
-    <ClCompile Include="src\CadEditer.cpp">
+    <ClCompile Include="src\cad\editing\CadEditer.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderFile>platform/pch.h</PrecompiledHeaderFile>
     </ClCompile>
-    <ClCompile Include="src\CadEditer_CommandActions.cpp">
+    <ClCompile Include="src\cad\editing\CadEditer_CommandActions.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderFile>platform/pch.h</PrecompiledHeaderFile>
     </ClCompile>
-    <ClCompile Include="src\CadEditer_DrawHandlers.cpp">
+    <ClCompile Include="src\cad\editing\CadEditer_DrawHandlers.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderFile>platform/pch.h</PrecompiledHeaderFile>
     </ClCompile>
-    <ClCompile Include="src\CadEditer_EntityTransformHelpers.cpp">
+    <ClCompile Include="src\cad\editing\CadEditer_EntityTransformHelpers.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderFile>platform/pch.h</PrecompiledHeaderFile>
     </ClCompile>
-    <ClCompile Include="src\CadEditer_EntityFactories.cpp">
+    <ClCompile Include="src\cad\editing\CadEditer_EntityFactories.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderFile>platform/pch.h</PrecompiledHeaderFile>
     </ClCompile>
-    <ClCompile Include="src\CadEditer_ModifyBuilders.cpp">
+    <ClCompile Include="src\cad\editing\CadEditer_ModifyBuilders.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderFile>platform/pch.h</PrecompiledHeaderFile>
     </ClCompile>
-    <ClCompile Include="src\CadEditer_GeometryHelpers.cpp">
+    <ClCompile Include="src\cad\editing\CadEditer_GeometryHelpers.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderFile>platform/pch.h</PrecompiledHeaderFile>
     </ClCompile>
-    <ClCompile Include="src\CadEditer_GeometryMath.cpp">
+    <ClCompile Include="src\cad\editing\CadEditer_GeometryMath.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderFile>platform/pch.h</PrecompiledHeaderFile>
     </ClCompile>
-    <ClCompile Include="src\CadCamera.cpp" />
-    <ClCompile Include="src\CadCameraMath.cpp" />
-    <ClCompile Include="src\CadCameraUtils.cpp" />
-    <ClCompile Include="src\CadCrosshairBuilder.cpp" />
-    <ClCompile Include="src\CadEntityPicker.cpp" />
-    <ClCompile Include="src\CadEntityRenderer.cpp" />
-    <ClCompile Include="src\CadGraphicsCoordinator.cpp" />
-    <ClCompile Include="src\CadOverlayRenderer.cpp" />
-    <ClCompile Include="src\CadPreviewBuilder.cpp" />
-    <ClCompile Include="src\CadReferenceRenderer.cpp" />
-    <ClCompile Include="src\CadSceneCoordinator.cpp" />
-    <ClCompile Include="src\CadSceneContext.cpp" />
-    <ClCompile Include="src\CadSceneRenderCache.cpp" />
-    <ClCompile Include="src\CadShaderManager.cpp" />
-    <ClCompile Include="src\CadViewInteractionController.cpp" />
-    <ClCompile Include="src\CadViewTransform.cpp" />
-    <ClCompile Include="src\CadViewer.cpp" />
-    <ClCompile Include="src\CadViewer_EventHandling.cpp">
+    <ClCompile Include="src\cad\view\transform\CadCamera.cpp" />
+    <ClCompile Include="src\cad\view\transform\CadCameraMath.cpp" />
+    <ClCompile Include="src\cad\view\transform\CadCameraUtils.cpp" />
+    <ClCompile Include="src\cad\view\interaction\CadCrosshairBuilder.cpp" />
+    <ClCompile Include="src\cad\view\interaction\CadEntityPicker.cpp" />
+    <ClCompile Include="src\cad\view\rendering\CadEntityRenderer.cpp" />
+    <ClCompile Include="src\cad\view\scene\CadGraphicsCoordinator.cpp" />
+    <ClCompile Include="src\cad\view\rendering\CadOverlayRenderer.cpp" />
+    <ClCompile Include="src\cad\view\rendering\CadPreviewBuilder.cpp" />
+    <ClCompile Include="src\cad\view\rendering\CadReferenceRenderer.cpp" />
+    <ClCompile Include="src\cad\view\scene\CadSceneCoordinator.cpp" />
+    <ClCompile Include="src\cad\view\scene\CadSceneContext.cpp" />
+    <ClCompile Include="src\cad\view\scene\CadSceneRenderCache.cpp" />
+    <ClCompile Include="src\cad\view\rendering\CadShaderManager.cpp" />
+    <ClCompile Include="src\cad\view\interaction\CadViewInteractionController.cpp" />
+    <ClCompile Include="src\cad\view\transform\CadViewTransform.cpp" />
+    <ClCompile Include="src\cad\view\CadViewer.cpp" />
+    <ClCompile Include="src\cad\view\CadViewer_EventHandling.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderFile>platform/pch.h</PrecompiledHeaderFile>
     </ClCompile>
-    <ClCompile Include="src\CadViewer_ProcessOrderLabels.cpp">
+    <ClCompile Include="src\cad\view\CadViewer_ProcessOrderLabels.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderFile>platform/pch.h</PrecompiledHeaderFile>
     </ClCompile>
-    <ClCompile Include="src\CadViewer_SelectionState.cpp">
+    <ClCompile Include="src\cad\view\CadViewer_SelectionState.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderFile>platform/pch.h</PrecompiledHeaderFile>
     </ClCompile>
-    <ClCompile Include="src\CadViewer_SelectionPreview.cpp">
+    <ClCompile Include="src\cad\view\CadViewer_SelectionPreview.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderFile>platform/pch.h</PrecompiledHeaderFile>
     </ClCompile>
-    <ClCompile Include="src\CadViewer_ViewNavigation.cpp">
+    <ClCompile Include="src\cad\view\CadViewer_ViewNavigation.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderFile>platform/pch.h</PrecompiledHeaderFile>
     </ClCompile>
-    <ClCompile Include="src\MachiningSettingsWidget.cpp">
+    <ClCompile Include="src\ui\widgets\MachiningSettingsWidget.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderFile>platform/pch.h</PrecompiledHeaderFile>
     </ClCompile>
-    <ClCompile Include="src\CadViewer_ViewCube.cpp">
+    <ClCompile Include="src\cad\view\CadViewer_ViewCube.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderFile>platform/pch.h</PrecompiledHeaderFile>
     </ClCompile>
-    <ClCompile Include="src\CadViewer_TransientPrimitives.cpp">
+    <ClCompile Include="src\cad\view\CadViewer_TransientPrimitives.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderFile>platform/pch.h</PrecompiledHeaderFile>
     </ClCompile>
-    <ClCompile Include="src\CadViewer_InteractionOverlays.cpp">
+    <ClCompile Include="src\cad\view\CadViewer_InteractionOverlays.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderFile>platform/pch.h</PrecompiledHeaderFile>
     </ClCompile>
-    <ClCompile Include="src\CadViewer_Snapping.cpp">
+    <ClCompile Include="src\cad\view\CadViewer_Snapping.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderFile>platform/pch.h</PrecompiledHeaderFile>
     </ClCompile>
-    <ClCompile Include="src\CadViewerUtils.cpp" />
-    <ClCompile Include="src\CadOpenGLState.cpp" />
-    <ClCompile Include="src\CadController.cpp">
+    <ClCompile Include="src\cad\view\CadViewerUtils.cpp" />
+    <ClCompile Include="src\cad\view\rendering\CadOpenGLState.cpp" />
+    <ClCompile Include="src\cad\view\interaction\CadController.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderFile>platform/pch.h</PrecompiledHeaderFile>
     </ClCompile>
-    <ClCompile Include="src\CadController_KeyHandling.cpp">
+    <ClCompile Include="src\cad\view\interaction\CadController_KeyHandling.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderFile>platform/pch.h</PrecompiledHeaderFile>
     </ClCompile>
-    <ClCompile Include="src\CadController_MouseHandling.cpp">
+    <ClCompile Include="src\cad\view\interaction\CadController_MouseHandling.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderFile>platform/pch.h</PrecompiledHeaderFile>
     </ClCompile>
-    <ClCompile Include="src\CadController_DynamicInput.cpp">
+    <ClCompile Include="src\cad\view\interaction\CadController_DynamicInput.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderFile>platform/pch.h</PrecompiledHeaderFile>
     </ClCompile>
-    <ClCompile Include="src\DrawStateMachine.cpp">
+    <ClCompile Include="src\cad\editing\DrawStateMachine.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderFile>platform/pch.h</PrecompiledHeaderFile>
     </ClCompile>
-    <ClCompile Include="src\CadDocument.cpp">
+    <ClCompile Include="src\cad\document\CadDocument.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderFile>platform/pch.h</PrecompiledHeaderFile>
     </ClCompile>
-    <ClCompile Include="src\GProfile.cpp">
+    <ClCompile Include="src\infrastructure\config\GProfile.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderFile>platform/pch.h</PrecompiledHeaderFile>
     </ClCompile>
-    <ClCompile Include="src\GGenerator.cpp">
+    <ClCompile Include="src\application\export\GGenerator.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderFile>platform/pch.h</PrecompiledHeaderFile>
     </ClCompile>
     <ClCompile Include="src\core\diagnostics\Diagnostic.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderFile>platform/pch.h</PrecompiledHeaderFile>
     </ClCompile>
     <ClCompile Include="src\core\diagnostics\OperationContext.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderFile>platform/pch.h</PrecompiledHeaderFile>
     </ClCompile>
     <ClCompile Include="src\core\geometry\GeometryTypes.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
@@ -487,36 +487,36 @@ if exist "$(VCRuntimeRedistDir)\*.dll" copy /Y "$(VCRuntimeRedistDir)\*.dll" "$(
     </ClCompile>
     <ClCompile Include="src\application\messaging\MessageCenter.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderFile>platform/pch.h</PrecompiledHeaderFile>
     </ClCompile>
     <ClCompile Include="src\application\messaging\DebugMessageSink.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderFile>platform/pch.h</PrecompiledHeaderFile>
     </ClCompile>
     <ClCompile Include="src\application\messaging\UserInterfaceMessageSink.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderFile>platform/pch.h</PrecompiledHeaderFile>
     </ClCompile>
-    <ClCompile Include="src\dx_iface.cpp" />
-    <ClCompile Include="src\Gcode_postprocessing_system_FileActions.cpp">
+    <ClCompile Include="src\infrastructure\dxf\legacy\dx_iface.cpp" />
+    <ClCompile Include="src\desktop\Gcode_postprocessing_system_FileActions.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderFile>platform/pch.h</PrecompiledHeaderFile>
     </ClCompile>
-    <ClCompile Include="src\Gcode_postprocessing_system_SortActions.cpp">
+    <ClCompile Include="src\desktop\Gcode_postprocessing_system_SortActions.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderFile>platform/pch.h</PrecompiledHeaderFile>
     </ClCompile>
-    <ClCompile Include="src\Gcode_postprocessing_system_GCodeActions.cpp">
+    <ClCompile Include="src\desktop\Gcode_postprocessing_system_GCodeActions.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderFile>platform/pch.h</PrecompiledHeaderFile>
     </ClCompile>
-    <ClCompile Include="src\Gcode_postprocessing_system_EditActions.cpp">
+    <ClCompile Include="src\desktop\Gcode_postprocessing_system_EditActions.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderFile>platform/pch.h</PrecompiledHeaderFile>
     </ClCompile>
-    <ClCompile Include="src\Gcode_postprocessing_system.cpp">
+    <ClCompile Include="src\desktop\Gcode_postprocessing_system.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderFile>platform/pch.h</PrecompiledHeaderFile>
     </ClCompile>
     <ClCompile Include="src\libdxfrw\drw_base.cpp" />
     <ClCompile Include="src\libdxfrw\drw_classes.cpp" />
@@ -538,66 +538,67 @@ if exist "$(VCRuntimeRedistDir)\*.dll" copy /Y "$(VCRuntimeRedistDir)\*.dll" "$(
     <ClCompile Include="src\libdxfrw\intern\rscodec.cpp" />
     <ClCompile Include="src\libdxfrw\libdwgr.cpp" />
     <ClCompile Include="src\libdxfrw\libdxfrw.cpp" />
-    <ClCompile Include="src\main.cpp">
+    <ClCompile Include="src\desktop\main.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderFile>platform/pch.h</PrecompiledHeaderFile>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <QtMoc Include="include\CadViewer.h" />
-    <ClInclude Include="include\CadArcItem.h" />
-    <ClInclude Include="include\CadOcsGeometry.h" />
-    <ClInclude Include="include\CadSplineConverter.h" />
-    <ClInclude Include="include\RotaryCutBoundaryAnalyzer.h" />
-    <ClInclude Include="include\RotaryPathTopology.h" />
-    <ClInclude Include="include\RotaryTubeGeometryAnalyzer.h" />
-    <ClInclude Include="include\AppBranding.h" />
-    <ClInclude Include="include\AppLicense.h" />
-    <ClInclude Include="include\AppTheme.h" />
-    <ClInclude Include="include\CadAppearanceSettingsDialog.h" />
-    <ClInclude Include="include\CadHelpDialog.h" />
-    <ClInclude Include="include\CadCamera.h" />
-    <ClInclude Include="include\CadCameraMath.h" />
-    <ClInclude Include="include\CadCameraUtils.h" />
-    <ClInclude Include="include\CadCircleItem.h" />
-    <ClInclude Include="include\CadCommandLineWidget.h" />
-    <ClInclude Include="include\CadCrosshairBuilder.h" />
-    <ClInclude Include="include\CadBitmapImportDialog.h" />
-    <ClInclude Include="include\GProfileDialog.h" />
-    <ClInclude Include="include\GProfileManagerDialog.h" />
-    <ClInclude Include="include\GProfilePathStore.h" />
-    <ClInclude Include="include\CadBitmapVectorizer.h" />
-    <ClInclude Include="include\CadEditer.h" />
-    <ClInclude Include="include\CadEntityPicker.h" />
-    <ClInclude Include="include\CadEntityRenderer.h" />
-    <ClInclude Include="include\CadGraphicsCoordinator.h" />
-    <ClInclude Include="include\CadInteractionConstants.h" />
-    <ClInclude Include="include\CadEllipseItem.h" />
-    <ClInclude Include="include\CadEllipseGeometry.h" />
-    <QtMoc Include="include\CadItem.h" />
-    <ClInclude Include="include\CadLineItem.h" />
-    <ClInclude Include="include\CadXlineItem.h" />
-    <ClInclude Include="include\CadLWPolylineItem.h" />
-    <ClInclude Include="include\CadOverlayRenderer.h" />
-    <ClInclude Include="include\CadPointItem.h" />
-    <ClInclude Include="include\CadProcessVisualUtils.h" />
-    <ClInclude Include="include\CadPreviewBuilder.h" />
-    <ClInclude Include="include\CadPolylineItem.h" />
-    <ClInclude Include="include\CadSplineItem.h" />
-    <ClInclude Include="include\CadRenderTypes.h" />
-    <ClInclude Include="include\CadReferenceRenderer.h" />
-    <ClInclude Include="include\CadOpenGLState.h" />
-    <ClInclude Include="include\CadSceneCoordinator.h" />
-    <ClInclude Include="include\CadSceneContext.h" />
-    <ClInclude Include="include\CadSceneRenderCache.h" />
-    <ClInclude Include="include\CadShaderManager.h" />
-    <ClInclude Include="include\CadViewInteractionController.h" />
-    <ClInclude Include="include\CadViewTransform.h" />
-    <ClInclude Include="include\CadViewerUtils.h" />
-    <QtMoc Include="include\CadDocument.h" />
-    <ClInclude Include="include\CadController.h" />
-    <ClInclude Include="include\DrawStateMachine.h" />
-    <ClInclude Include="include\GGenerator.h" />
+    <QtMoc Include="include\cad\view\CadViewer.h" />
+    <ClInclude Include="include\cad\items\CadArcItem.h" />
+    <ClInclude Include="include\cad\geometry\CadOcsGeometry.h" />
+    <ClInclude Include="include\compatibility\legacy\CadSplineConverter.h" />
+    <ClInclude Include="include\application\machining\RotaryCutBoundaryAnalyzer.h" />
+    <ClInclude Include="include\application\machining\RotaryPathTopology.h" />
+    <ClInclude Include="include\application\machining\RotaryTubeGeometryAnalyzer.h" />
+    <ClInclude Include="include\desktop\AppBranding.h" />
+    <ClInclude Include="include\desktop\AppLicense.h" />
+    <ClInclude Include="include\desktop\AppTheme.h" />
+    <ClInclude Include="include\ui\dialogs\CadAppearanceSettingsDialog.h" />
+    <ClInclude Include="include\ui\dialogs\CadHelpDialog.h" />
+    <ClInclude Include="include\cad\view\transform\CadCamera.h" />
+    <ClInclude Include="include\cad\view\transform\CadCameraMath.h" />
+    <ClInclude Include="include\cad\view\transform\CadCameraUtils.h" />
+    <ClInclude Include="include\cad\items\CadCircleItem.h" />
+    <ClInclude Include="include\ui\widgets\CadCommandLineWidget.h" />
+    <ClInclude Include="include\cad\view\interaction\CadCrosshairBuilder.h" />
+    <ClInclude Include="include\ui\dialogs\CadBitmapImportDialog.h" />
+    <ClInclude Include="include\ui\dialogs\GProfileDialog.h" />
+    <ClInclude Include="include\ui\dialogs\GProfileManagerDialog.h" />
+    <ClInclude Include="include\infrastructure\config\GProfilePathStore.h" />
+    <ClInclude Include="include\infrastructure\image\CadBitmapVectorizer.h" />
+    <ClInclude Include="include\cad\editing\CadEditer.h" />
+    <ClInclude Include="include\cad\editing\CadEditerWorkflowInternal.h" />
+    <ClInclude Include="include\cad\view\interaction\CadEntityPicker.h" />
+    <ClInclude Include="include\cad\view\rendering\CadEntityRenderer.h" />
+    <ClInclude Include="include\cad\view\scene\CadGraphicsCoordinator.h" />
+    <ClInclude Include="include\cad\view\interaction\CadInteractionConstants.h" />
+    <ClInclude Include="include\cad\items\CadEllipseItem.h" />
+    <ClInclude Include="include\cad\geometry\CadEllipseGeometry.h" />
+    <QtMoc Include="include\cad\items\CadItem.h" />
+    <ClInclude Include="include\cad\items\CadLineItem.h" />
+    <ClInclude Include="include\cad\items\CadXlineItem.h" />
+    <ClInclude Include="include\cad\items\CadLWPolylineItem.h" />
+    <ClInclude Include="include\cad\view\rendering\CadOverlayRenderer.h" />
+    <ClInclude Include="include\cad\items\CadPointItem.h" />
+    <ClInclude Include="include\cad\view\rendering\CadProcessVisualUtils.h" />
+    <ClInclude Include="include\cad\view\rendering\CadPreviewBuilder.h" />
+    <ClInclude Include="include\cad\items\CadPolylineItem.h" />
+    <ClInclude Include="include\cad\items\CadSplineItem.h" />
+    <ClInclude Include="include\cad\view\rendering\CadRenderTypes.h" />
+    <ClInclude Include="include\cad\view\rendering\CadReferenceRenderer.h" />
+    <ClInclude Include="include\cad\view\rendering\CadOpenGLState.h" />
+    <ClInclude Include="include\cad\view\scene\CadSceneCoordinator.h" />
+    <ClInclude Include="include\cad\view\scene\CadSceneContext.h" />
+    <ClInclude Include="include\cad\view\scene\CadSceneRenderCache.h" />
+    <ClInclude Include="include\cad\view\rendering\CadShaderManager.h" />
+    <ClInclude Include="include\cad\view\interaction\CadViewInteractionController.h" />
+    <ClInclude Include="include\cad\view\transform\CadViewTransform.h" />
+    <ClInclude Include="include\cad\view\CadViewerUtils.h" />
+    <QtMoc Include="include\cad\document\CadDocument.h" />
+    <ClInclude Include="include\cad\view\interaction\CadController.h" />
+    <ClInclude Include="include\cad\editing\DrawStateMachine.h" />
+    <ClInclude Include="include\application\export\GGenerator.h" />
     <ClInclude Include="include\core\diagnostics\Diagnostic.h" />
     <ClInclude Include="include\core\diagnostics\OperationContext.h" />
     <ClInclude Include="include\core\diagnostics\OperationResult.h" />
@@ -643,10 +644,10 @@ if exist "$(VCRuntimeRedistDir)\*.dll" copy /Y "$(VCRuntimeRedistDir)\*.dll" "$(
     <ClInclude Include="include\application\messaging\MessageCenter.h" />
     <ClInclude Include="include\application\messaging\DebugMessageSink.h" />
     <ClInclude Include="include\application\messaging\UserInterfaceMessageSink.h" />
-    <ClInclude Include="include\GProfile.h" />
-    <ClInclude Include="include\dx_data.h" />
-    <ClInclude Include="include\dx_iface.h" />
-    <ClInclude Include="include\pch.h" />
+    <ClInclude Include="include\infrastructure\config\GProfile.h" />
+    <ClInclude Include="include\infrastructure\dxf\legacy\dx_data.h" />
+    <ClInclude Include="include\infrastructure\dxf\legacy\dx_iface.h" />
+    <ClInclude Include="include\platform\pch.h" />
     <ClInclude Include="include\libdxfrw\drw_base.h" />
     <ClInclude Include="include\libdxfrw\drw_classes.h" />
     <ClInclude Include="include\libdxfrw\drw_entities.h" />

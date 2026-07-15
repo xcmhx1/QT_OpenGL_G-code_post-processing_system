@@ -1,6 +1,6 @@
 #pragma once
 
-#include "CadItem.h"
+#include "cad/items/CadItem.h"
 #include "core/geometry/GeometryCompiler.h"
 
 class LegacyCadItemPathBridge

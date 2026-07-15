@@ -36,6 +36,8 @@ Pro 版本：
 & "D:\Program Files\Microsoft Visual Studio\18\Insiders\MSBuild\Current\Bin\MSBuild.exe" .\G-code_post-processing_system.vcxproj /t:Rebuild /p:Configuration=Release /p:Platform=x64 /m
 ```
 
+构建入口仍是项目根目录下的 `G-code_post-processing_system.vcxproj`。源码按模块整理到 `src/` 和 `include/` 子目录后，发布输出目录仍为 `x64\Release`，打包步骤不变。
+
 构建成功后，主程序位于：
 
 ```text

@@ -20,83 +20,269 @@
     <Filter Include="Documentation">
       <UniqueIdentifier>{CF02A27D-5D25-4A31-A6D6-F2F9958351D5}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Source Files\Application">
-      <UniqueIdentifier>{57D7E8DA-5EA8-4BE0-B785-A8A8D4D21B10}</UniqueIdentifier>
+    <Filter Include="Header Files\application">
+      <UniqueIdentifier>{A77F925A-F8D9-00DD-A0E6-3B8B8914A6FA}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Header Files\Application">
-      <UniqueIdentifier>{16F65A53-1AE7-4E4A-AF75-F90E1A8E7DEE}</UniqueIdentifier>
+    <Filter Include="Header Files\application\export">
+      <UniqueIdentifier>{627CC440-9139-25AA-E857-1AC576D97847}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Source Files\View">
-      <UniqueIdentifier>{65B348BF-8E55-45F1-80A8-DAB97DFCF736}</UniqueIdentifier>
+    <Filter Include="Header Files\application\geometry">
+      <UniqueIdentifier>{57B38F53-4BF7-256C-0083-3541AF83B7BD}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Header Files\View">
-      <UniqueIdentifier>{188A75B2-2DD1-4A85-8E81-F7124C10F5C5}</UniqueIdentifier>
+    <Filter Include="Header Files\application\machine">
+      <UniqueIdentifier>{B0D26AEA-9423-315D-3971-8D8FCB922B34}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Source Files\View\Interaction">
-      <UniqueIdentifier>{9962B557-58D0-4B39-9B02-65B8C514528C}</UniqueIdentifier>
+    <Filter Include="Header Files\application\machining">
+      <UniqueIdentifier>{C585BEA2-6542-52C7-53AA-BCCE5AAEF7DF}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Header Files\View\Interaction">
-      <UniqueIdentifier>{3CB4F63D-D955-4EB8-B9EC-037CC683F516}</UniqueIdentifier>
+    <Filter Include="Header Files\application\messaging">
+      <UniqueIdentifier>{29527568-A4E9-F903-0D7C-6682994804C3}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Source Files\View\Rendering">
-      <UniqueIdentifier>{0DFFAD72-FBB3-4EEA-85AF-09DCA7D6A2F6}</UniqueIdentifier>
+    <Filter Include="Header Files\application\nc">
+      <UniqueIdentifier>{409E2E65-C8EA-DAEF-2786-9387DA741F15}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Header Files\View\Rendering">
-      <UniqueIdentifier>{F04CA29C-271F-49D6-9DE8-7FEB4A3887AF}</UniqueIdentifier>
+    <Filter Include="Header Files\application\planning">
+      <UniqueIdentifier>{837C8568-2172-2BE0-3D54-0E8582125AB1}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Source Files\View\Scene">
-      <UniqueIdentifier>{F2ABFFDA-E671-4A0B-AF9F-9CBCE9B95AF2}</UniqueIdentifier>
+    <Filter Include="Header Files\application\process">
+      <UniqueIdentifier>{36E15DFC-02A4-805C-4964-F49F6B160A8A}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Header Files\View\Scene">
-      <UniqueIdentifier>{57239748-F261-4D04-A385-2F060801B03C}</UniqueIdentifier>
+    <Filter Include="Header Files\application\tasks">
+      <UniqueIdentifier>{9799FD08-18EC-DA94-8C41-634A172EE852}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Source Files\View\Transform">
-      <UniqueIdentifier>{57A3176D-C9A3-41C0-9EBF-6F0DDD7A75A6}</UniqueIdentifier>
+    <Filter Include="Header Files\application\topology">
+      <UniqueIdentifier>{6DA71A29-6139-9511-3DD6-593CB32A4CBA}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Header Files\View\Transform">
-      <UniqueIdentifier>{BBF58C93-97FE-458D-9FFC-9F9DD0C4E43A}</UniqueIdentifier>
+    <Filter Include="Header Files\cad">
+      <UniqueIdentifier>{E84924B0-AB57-C67C-8CD9-91D183607F52}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Source Files\Editing">
-      <UniqueIdentifier>{A7C5AA20-78D9-4C41-BB28-A29192F2D4C8}</UniqueIdentifier>
+    <Filter Include="Header Files\cad\document">
+      <UniqueIdentifier>{FAE69CAB-8F88-2381-6156-6D945CB9175A}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Header Files\Editing">
-      <UniqueIdentifier>{0AB91864-2084-4C45-BCFA-C2BE75054D55}</UniqueIdentifier>
+    <Filter Include="Header Files\cad\editing">
+      <UniqueIdentifier>{F880699E-0BFD-3586-4569-5FD9BB1B3549}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Source Files\Document">
-      <UniqueIdentifier>{3C5C088C-4D5C-47A7-A9BC-4602B82FB74A}</UniqueIdentifier>
+    <Filter Include="Header Files\cad\geometry">
+      <UniqueIdentifier>{62B437B3-C9BD-893E-10E2-909DAD178591}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Header Files\Document">
-      <UniqueIdentifier>{0502B455-873F-4AD5-95CB-FA704CCB2A64}</UniqueIdentifier>
+    <Filter Include="Header Files\cad\items">
+      <UniqueIdentifier>{9FA3D592-E883-6F09-C3C4-9E4EE91E4B8E}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Source Files\Model">
-      <UniqueIdentifier>{B94BE23A-0EBF-4333-91C3-3BC30A830DB6}</UniqueIdentifier>
+    <Filter Include="Header Files\cad\view">
+      <UniqueIdentifier>{54A8F103-151E-F33C-4CC5-4121014E70FD}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Header Files\Model">
-      <UniqueIdentifier>{2AE86FB3-4073-4BDB-8AD4-386C2E4792DC}</UniqueIdentifier>
+    <Filter Include="Header Files\cad\view\interaction">
+      <UniqueIdentifier>{0B87F4A0-BC4F-7978-AEEC-268F2522B301}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Source Files\Model\DX IO">
-      <UniqueIdentifier>{990E623E-FFFB-4F96-8596-34F6C996C494}</UniqueIdentifier>
+    <Filter Include="Header Files\cad\view\rendering">
+      <UniqueIdentifier>{C7178F00-093E-FF4E-2E67-D7225C8CF77C}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Header Files\Model\DX IO">
-      <UniqueIdentifier>{755A190A-BE56-4C19-B8B1-40F95E2DF634}</UniqueIdentifier>
+    <Filter Include="Header Files\cad\view\scene">
+      <UniqueIdentifier>{69F17CA0-10FD-882A-0946-7A5559405BCE}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Source Files\Item">
-      <UniqueIdentifier>{FC314D80-5E66-4C0C-9824-3E9E17E107CB}</UniqueIdentifier>
+    <Filter Include="Header Files\cad\view\transform">
+      <UniqueIdentifier>{27DAD272-A608-6E1B-5E0F-EB54997C71F5}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Header Files\Item">
-      <UniqueIdentifier>{DD8B08FA-F121-4D40-9724-143CF8C0057C}</UniqueIdentifier>
+    <Filter Include="Header Files\compatibility">
+      <UniqueIdentifier>{20DCA38B-A056-8DCD-63B8-3E353C13EA04}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Header Files\Model\libdxfrw">
-      <UniqueIdentifier>{6d26780b-ba68-461b-8583-e7a716ae8024}</UniqueIdentifier>
+    <Filter Include="Header Files\compatibility\legacy">
+      <UniqueIdentifier>{61F2D3CB-3B4C-BD24-1CA6-2B88EF04333B}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Header Files\Model\libdxfrw\intern">
-      <UniqueIdentifier>{7bebb6db-b023-4f00-b12a-c5de980c69e5}</UniqueIdentifier>
+    <Filter Include="Header Files\core">
+      <UniqueIdentifier>{1067CDFC-8932-069D-FA29-97714DF39727}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Source Files\Model\libdxfrw">
-      <UniqueIdentifier>{0cd5bc2a-0a61-44ff-a50f-48f4db43daa6}</UniqueIdentifier>
+    <Filter Include="Header Files\core\diagnostics">
+      <UniqueIdentifier>{BBDC9791-CBDD-8D09-3C40-082448863B0E}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Source Files\Model\libdxfrw\intern">
-      <UniqueIdentifier>{e049507f-f23f-404c-b551-1eb28022ff2c}</UniqueIdentifier>
+    <Filter Include="Header Files\core\geometry">
+      <UniqueIdentifier>{A843CE57-A2AF-5733-C723-F8491BBFF8F7}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\core\machine">
+      <UniqueIdentifier>{056C0260-D14F-F484-7444-596712144515}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\core\machining">
+      <UniqueIdentifier>{CA879434-A42F-54D7-B207-340356DD5E19}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\core\nc">
+      <UniqueIdentifier>{377BB4C3-FAAF-BFA3-E703-4BB82AA92423}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\core\planning">
+      <UniqueIdentifier>{EE3D1924-1EC1-1C40-8FC0-3D0084A2AA89}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\core\topology">
+      <UniqueIdentifier>{9D14E7BA-A440-9D7D-EE4C-5285C4C10E72}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\desktop">
+      <UniqueIdentifier>{4E8247C7-19DE-331B-21F5-17FBB946F683}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\infrastructure">
+      <UniqueIdentifier>{5F4D07C2-9786-D1AF-58BA-1B18324C066F}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\infrastructure\config">
+      <UniqueIdentifier>{34B8411C-65BE-4CF0-E5B7-CADD34C71473}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\infrastructure\dxf">
+      <UniqueIdentifier>{8D983D0A-ECAF-FE36-960D-9F07E093C372}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\infrastructure\dxf\legacy">
+      <UniqueIdentifier>{E22B6136-9052-5CD8-0668-E03DB50DC303}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\infrastructure\image">
+      <UniqueIdentifier>{C1816F80-2365-2A29-080C-3EEFE46FB46B}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\infrastructure\nc">
+      <UniqueIdentifier>{E7F5BA8B-B45B-F36D-A9C8-4591FDC8FA63}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\platform">
+      <UniqueIdentifier>{FDDBBA4D-5C89-9B0B-74F9-D01BFC5CA1D1}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\thirdparty">
+      <UniqueIdentifier>{BD8B4203-F759-6456-ADAB-5D08004158EB}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\thirdparty\libdxfrw">
+      <UniqueIdentifier>{32865A19-B660-453D-D5B8-87C53C5C2BE3}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\thirdparty\libdxfrw\intern">
+      <UniqueIdentifier>{37634414-AAC1-F265-1974-3D75ED535EA7}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\ui">
+      <UniqueIdentifier>{029C247F-770B-F7BD-53F4-4FE6FA23CA86}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\ui\dialogs">
+      <UniqueIdentifier>{3558DD64-F64C-BC0E-42C8-E5D85882D292}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\ui\widgets">
+      <UniqueIdentifier>{ACB090C7-6AB5-05A1-A87D-B0FABA697F9E}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\application">
+      <UniqueIdentifier>{00D687F0-7212-9E47-F97B-5A25B98C914C}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\application\export">
+      <UniqueIdentifier>{BFCF8927-6B83-04EA-CAFE-2B6F2F275A6D}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\application\geometry">
+      <UniqueIdentifier>{39B8AC6D-72F7-8078-2014-3C1870F634E1}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\application\machine">
+      <UniqueIdentifier>{020E2F44-BDD7-EE06-746E-B908FFE949B1}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\application\machining">
+      <UniqueIdentifier>{BB71BB1F-8D5F-57B8-659C-826D533CDB0F}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\application\messaging">
+      <UniqueIdentifier>{108358C8-1484-EAA8-CFE5-DB34C2136CC6}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\application\nc">
+      <UniqueIdentifier>{1A90E92A-2994-72EE-6E23-E5CFED36B1A0}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\application\planning">
+      <UniqueIdentifier>{08BCBAAE-E91A-8A3A-C3D0-8C1B827175F0}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\application\process">
+      <UniqueIdentifier>{CB4CE81E-696E-B753-4B4A-0806A0469A80}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\application\topology">
+      <UniqueIdentifier>{DC9A18F0-F5ED-B933-6ADF-002B8C794AE1}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\cad">
+      <UniqueIdentifier>{96585616-6177-B997-65FF-11AAB1C7BD04}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\cad\document">
+      <UniqueIdentifier>{07F17F61-AAED-4A15-A2DA-8BFF22D7441D}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\cad\editing">
+      <UniqueIdentifier>{3D094FC9-915A-1DB1-55CB-7DEF8AFDB245}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\cad\items">
+      <UniqueIdentifier>{E2D12A12-BE80-97CD-FA73-EEC86B09078B}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\cad\view">
+      <UniqueIdentifier>{CFC47249-C57A-6510-B31A-DE182ED5643B}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\cad\view\interaction">
+      <UniqueIdentifier>{CB7881F9-0536-2363-8446-A4BDD06F0DBE}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\cad\view\rendering">
+      <UniqueIdentifier>{00372F64-EC01-8475-D6A7-9A9BA0A750A5}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\cad\view\scene">
+      <UniqueIdentifier>{A93DFE1A-404B-6530-1C87-C0950081E937}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\cad\view\transform">
+      <UniqueIdentifier>{B79422F4-96E7-01B2-AAA7-401C2FEBE056}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\compatibility">
+      <UniqueIdentifier>{B5CD7A1C-4098-2A44-2282-8E1BAFB0CFF6}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\compatibility\legacy">
+      <UniqueIdentifier>{87A4499D-E560-F1EC-4C05-9BBC02350466}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\core">
+      <UniqueIdentifier>{4B78F999-1B94-9F58-E438-6735AD0DA2BC}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\core\diagnostics">
+      <UniqueIdentifier>{82752983-3EE2-E62F-6FF7-3270707B0B1A}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\core\geometry">
+      <UniqueIdentifier>{E0EA0F58-3355-9956-D9BA-1B0C67CB0D30}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\core\machine">
+      <UniqueIdentifier>{3451D1ED-349E-20E8-68D5-15065C6DEC68}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\core\machining">
+      <UniqueIdentifier>{ADA4DD20-30DD-FBD4-D7D2-00D5D6C04A10}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\core\nc">
+      <UniqueIdentifier>{2419895F-0BC1-98DC-241A-3D1E43F29B7C}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\core\planning">
+      <UniqueIdentifier>{3F7D70EC-0726-EBED-8490-DAEB8700E1D1}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\core\topology">
+      <UniqueIdentifier>{08EAFF43-B520-F463-B8F4-064F4110050B}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\desktop">
+      <UniqueIdentifier>{55F55D5E-E53C-47A5-8553-0A6F7CB82262}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\infrastructure">
+      <UniqueIdentifier>{A7ED8D05-7605-5205-1830-2AE86C1BFB32}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\infrastructure\config">
+      <UniqueIdentifier>{E88FA86E-23E9-115E-F03A-C8F18FFDE089}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\infrastructure\dxf">
+      <UniqueIdentifier>{4D3B9B66-9858-6A56-4419-80599792F2D6}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\infrastructure\dxf\legacy">
+      <UniqueIdentifier>{5DEACE54-6AB2-2E44-60AF-CA0AC274BCD0}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\infrastructure\image">
+      <UniqueIdentifier>{1DF8F31E-D760-8A1E-195E-75312414B8A3}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\infrastructure\nc">
+      <UniqueIdentifier>{74FBA641-6AC6-7928-A7FC-357CBCFD58C2}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\platform">
+      <UniqueIdentifier>{F7B73786-5B05-BAEC-3B16-4441D35679AA}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\thirdparty">
+      <UniqueIdentifier>{D93D871B-2F2C-C147-6488-C5E007F072AA}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\thirdparty\libdxfrw">
+      <UniqueIdentifier>{588360E4-2536-4031-97FE-ED341BA9CB4F}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\thirdparty\libdxfrw\intern">
+      <UniqueIdentifier>{832A0E8E-4881-F73D-CA78-BD32CD0CD374}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\ui">
+      <UniqueIdentifier>{1C913740-92F5-AF0D-76A5-27B4EA10F16D}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\ui\dialogs">
+      <UniqueIdentifier>{1665686E-B903-B8CF-FA50-A34BF8FBEBA5}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\ui\widgets">
+      <UniqueIdentifier>{DFE19E51-646F-658E-0AD1-429EB19054B8}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
@@ -134,639 +320,833 @@
     </None>
   </ItemGroup>
   <ItemGroup>
-    <QtMoc Include="include\Gcode_postprocessing_system.h">
-      <Filter>Header Files\Application</Filter>
+    <QtMoc Include="include\desktop\Gcode_postprocessing_system.h">
+      <Filter>Header Files\desktop</Filter>
     </QtMoc>
-    <QtMoc Include="include\CadViewer.h">
-      <Filter>Header Files\View</Filter>
+    <QtMoc Include="include\cad\view\CadViewer.h">
+      <Filter>Header Files\cad\view</Filter>
     </QtMoc>
-    <QtMoc Include="include\CadItem.h">
-      <Filter>Header Files\Item</Filter>
+    <QtMoc Include="include\cad\items\CadItem.h">
+      <Filter>Header Files\cad\items</Filter>
     </QtMoc>
-    <QtMoc Include="include\CadDocument.h">
-      <Filter>Header Files\Document</Filter>
+    <QtMoc Include="include\cad\document\CadDocument.h">
+      <Filter>Header Files\cad\document</Filter>
     </QtMoc>
-    <QtMoc Include="include\CadToolPanelWidget.h">
-      <Filter>Header Files\Application</Filter>
+    <QtMoc Include="include\ui\widgets\CadToolPanelWidget.h">
+      <Filter>Header Files\ui\widgets</Filter>
     </QtMoc>
-    <QtMoc Include="include\MachiningSettingsWidget.h">
-      <Filter>Header Files\Application</Filter>
+    <QtMoc Include="include\ui\widgets\MachiningSettingsWidget.h">
+      <Filter>Header Files\ui\widgets</Filter>
     </QtMoc>
-    <QtMoc Include="include\CadStatusPaneWidget.h">
-      <Filter>Header Files\View</Filter>
+    <QtMoc Include="include\ui\widgets\CadStatusPaneWidget.h">
+      <Filter>Header Files\ui\widgets</Filter>
     </QtMoc>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="src\pch.cpp">
-      <Filter>Source Files\Application</Filter>
+    <ClCompile Include="src\platform\pch.cpp">
+      <Filter>Source Files\platform</Filter>
     </ClCompile>
-    <ClCompile Include="src\main.cpp">
-      <Filter>Source Files\Application</Filter>
+    <ClCompile Include="src\desktop\main.cpp">
+      <Filter>Source Files\desktop</Filter>
     </ClCompile>
-    <ClCompile Include="src\AppBranding.cpp">
-      <Filter>Source Files\Application</Filter>
+    <ClCompile Include="src\desktop\AppBranding.cpp">
+      <Filter>Source Files\desktop</Filter>
     </ClCompile>
-    <ClCompile Include="src\AppLicense.cpp">
-      <Filter>Source Files\Application</Filter>
+    <ClCompile Include="src\desktop\AppLicense.cpp">
+      <Filter>Source Files\desktop</Filter>
     </ClCompile>
-    <ClCompile Include="src\Gcode_postprocessing_system.cpp">
-      <Filter>Source Files\Application</Filter>
+    <ClCompile Include="src\desktop\Gcode_postprocessing_system.cpp">
+      <Filter>Source Files\desktop</Filter>
     </ClCompile>
-    <ClCompile Include="src\Gcode_postprocessing_system_FileActions.cpp">
-      <Filter>Source Files\Application</Filter>
+    <ClCompile Include="src\desktop\Gcode_postprocessing_system_FileActions.cpp">
+      <Filter>Source Files\desktop</Filter>
     </ClCompile>
-    <ClCompile Include="src\Gcode_postprocessing_system_SortActions.cpp">
-      <Filter>Source Files\Application</Filter>
+    <ClCompile Include="src\desktop\Gcode_postprocessing_system_SortActions.cpp">
+      <Filter>Source Files\desktop</Filter>
     </ClCompile>
-    <ClCompile Include="src\Gcode_postprocessing_system_GCodeActions.cpp">
-      <Filter>Source Files\Application</Filter>
+    <ClCompile Include="src\desktop\Gcode_postprocessing_system_GCodeActions.cpp">
+      <Filter>Source Files\desktop</Filter>
     </ClCompile>
-    <ClCompile Include="src\Gcode_postprocessing_system_EditActions.cpp">
-      <Filter>Source Files\Application</Filter>
+    <ClCompile Include="src\desktop\Gcode_postprocessing_system_EditActions.cpp">
+      <Filter>Source Files\desktop</Filter>
     </ClCompile>
-    <ClCompile Include="src\CadAppearanceSettingsDialog.cpp">
-      <Filter>Source Files\Application</Filter>
+    <ClCompile Include="src\ui\dialogs\CadAppearanceSettingsDialog.cpp">
+      <Filter>Source Files\ui\dialogs</Filter>
     </ClCompile>
-    <ClCompile Include="src\CadHelpDialog.cpp">
-      <Filter>Source Files\Application</Filter>
+    <ClCompile Include="src\ui\dialogs\CadHelpDialog.cpp">
+      <Filter>Source Files\ui\dialogs</Filter>
     </ClCompile>
-    <ClCompile Include="src\CadBitmapImportDialog.cpp">
-      <Filter>Source Files\Application</Filter>
+    <ClCompile Include="src\ui\dialogs\CadBitmapImportDialog.cpp">
+      <Filter>Source Files\ui\dialogs</Filter>
     </ClCompile>
-    <ClCompile Include="src\CadViewer.cpp">
-      <Filter>Source Files\View</Filter>
+    <ClCompile Include="src\cad\view\CadViewer.cpp">
+      <Filter>Source Files\cad\view</Filter>
     </ClCompile>
-    <ClCompile Include="src\CadViewer_EventHandling.cpp">
-      <Filter>Source Files\View</Filter>
+    <ClCompile Include="src\cad\view\CadViewer_EventHandling.cpp">
+      <Filter>Source Files\cad\view</Filter>
     </ClCompile>
-    <ClCompile Include="src\CadViewer_ProcessOrderLabels.cpp">
-      <Filter>Source Files\View</Filter>
+    <ClCompile Include="src\cad\view\CadViewer_ProcessOrderLabels.cpp">
+      <Filter>Source Files\cad\view</Filter>
     </ClCompile>
-    <ClCompile Include="src\CadViewer_SelectionState.cpp">
-      <Filter>Source Files\View</Filter>
+    <ClCompile Include="src\cad\view\CadViewer_SelectionState.cpp">
+      <Filter>Source Files\cad\view</Filter>
     </ClCompile>
-    <ClCompile Include="src\CadViewer_SelectionPreview.cpp">
-      <Filter>Source Files\View</Filter>
+    <ClCompile Include="src\cad\view\CadViewer_SelectionPreview.cpp">
+      <Filter>Source Files\cad\view</Filter>
     </ClCompile>
-    <ClCompile Include="src\CadViewer_ViewNavigation.cpp">
-      <Filter>Source Files\View</Filter>
+    <ClCompile Include="src\cad\view\CadViewer_ViewNavigation.cpp">
+      <Filter>Source Files\cad\view</Filter>
     </ClCompile>
-    <ClCompile Include="src\CadViewer_ViewCube.cpp">
-      <Filter>Source Files\View</Filter>
+    <ClCompile Include="src\cad\view\CadViewer_ViewCube.cpp">
+      <Filter>Source Files\cad\view</Filter>
     </ClCompile>
-    <ClCompile Include="src\CadViewer_TransientPrimitives.cpp">
-      <Filter>Source Files\View</Filter>
+    <ClCompile Include="src\cad\view\CadViewer_TransientPrimitives.cpp">
+      <Filter>Source Files\cad\view</Filter>
     </ClCompile>
-    <ClCompile Include="src\CadViewer_InteractionOverlays.cpp">
-      <Filter>Source Files\View</Filter>
+    <ClCompile Include="src\cad\view\CadViewer_InteractionOverlays.cpp">
+      <Filter>Source Files\cad\view</Filter>
     </ClCompile>
-    <ClCompile Include="src\CadViewer_Snapping.cpp">
-      <Filter>Source Files\View</Filter>
+    <ClCompile Include="src\cad\view\CadViewer_Snapping.cpp">
+      <Filter>Source Files\cad\view</Filter>
     </ClCompile>
-    <ClCompile Include="src\CadCommandLineWidget.cpp">
-      <Filter>Source Files\View</Filter>
+    <ClCompile Include="src\ui\widgets\CadCommandLineWidget.cpp">
+      <Filter>Source Files\ui\widgets</Filter>
     </ClCompile>
-    <ClCompile Include="src\GProfileDialog.cpp">
-      <Filter>Source Files\Application</Filter>
+    <ClCompile Include="src\ui\dialogs\GProfileDialog.cpp">
+      <Filter>Source Files\ui\dialogs</Filter>
     </ClCompile>
-    <ClCompile Include="src\GProfileManagerDialog.cpp">
-      <Filter>Source Files\Application</Filter>
+    <ClCompile Include="src\ui\dialogs\GProfileManagerDialog.cpp">
+      <Filter>Source Files\ui\dialogs</Filter>
     </ClCompile>
-    <ClCompile Include="src\GProfilePathStore.cpp">
-      <Filter>Source Files\Application</Filter>
+    <ClCompile Include="src\infrastructure\config\GProfilePathStore.cpp">
+      <Filter>Source Files\infrastructure\config</Filter>
     </ClCompile>
-    <ClCompile Include="src\CadStatusPaneWidget.cpp">
-      <Filter>Source Files\View</Filter>
+    <ClCompile Include="src\ui\widgets\CadStatusPaneWidget.cpp">
+      <Filter>Source Files\ui\widgets</Filter>
     </ClCompile>
-    <ClCompile Include="src\CadToolPanelWidget.cpp">
-      <Filter>Source Files\Application</Filter>
+    <ClCompile Include="src\ui\widgets\CadToolPanelWidget.cpp">
+      <Filter>Source Files\ui\widgets</Filter>
     </ClCompile>
-    <ClCompile Include="src\MachiningSettingsWidget.cpp">
-      <Filter>Source Files\Application</Filter>
+    <ClCompile Include="src\ui\widgets\MachiningSettingsWidget.cpp">
+      <Filter>Source Files\ui\widgets</Filter>
     </ClCompile>
-    <ClCompile Include="src\CadController.cpp">
-      <Filter>Source Files\View\Interaction</Filter>
+    <ClCompile Include="src\cad\view\interaction\CadController.cpp">
+      <Filter>Source Files\cad\view\interaction</Filter>
     </ClCompile>
-    <ClCompile Include="src\CadController_KeyHandling.cpp">
-      <Filter>Source Files\View\Interaction</Filter>
+    <ClCompile Include="src\cad\view\interaction\CadController_KeyHandling.cpp">
+      <Filter>Source Files\cad\view\interaction</Filter>
     </ClCompile>
-    <ClCompile Include="src\CadController_MouseHandling.cpp">
-      <Filter>Source Files\View\Interaction</Filter>
+    <ClCompile Include="src\cad\view\interaction\CadController_MouseHandling.cpp">
+      <Filter>Source Files\cad\view\interaction</Filter>
     </ClCompile>
-    <ClCompile Include="src\CadController_DynamicInput.cpp">
-      <Filter>Source Files\View\Interaction</Filter>
+    <ClCompile Include="src\cad\view\interaction\CadController_DynamicInput.cpp">
+      <Filter>Source Files\cad\view\interaction</Filter>
     </ClCompile>
-    <ClCompile Include="src\DrawStateMachine.cpp">
-      <Filter>Source Files\View\Interaction</Filter>
+    <ClCompile Include="src\cad\editing\DrawStateMachine.cpp">
+      <Filter>Source Files\cad\editing</Filter>
     </ClCompile>
-    <ClCompile Include="src\CadCrosshairBuilder.cpp">
-      <Filter>Source Files\View\Interaction</Filter>
+    <ClCompile Include="src\cad\view\interaction\CadCrosshairBuilder.cpp">
+      <Filter>Source Files\cad\view\interaction</Filter>
     </ClCompile>
-    <ClCompile Include="src\CadEntityPicker.cpp">
-      <Filter>Source Files\View\Interaction</Filter>
+    <ClCompile Include="src\cad\view\interaction\CadEntityPicker.cpp">
+      <Filter>Source Files\cad\view\interaction</Filter>
     </ClCompile>
-    <ClCompile Include="src\CadPreviewBuilder.cpp">
-      <Filter>Source Files\View\Interaction</Filter>
+    <ClCompile Include="src\cad\view\rendering\CadPreviewBuilder.cpp">
+      <Filter>Source Files\cad\view\rendering</Filter>
     </ClCompile>
-    <ClCompile Include="src\CadViewInteractionController.cpp">
-      <Filter>Source Files\View\Interaction</Filter>
+    <ClCompile Include="src\cad\view\interaction\CadViewInteractionController.cpp">
+      <Filter>Source Files\cad\view\interaction</Filter>
     </ClCompile>
-    <ClCompile Include="src\CadEntityRenderer.cpp">
-      <Filter>Source Files\View\Rendering</Filter>
+    <ClCompile Include="src\cad\view\rendering\CadEntityRenderer.cpp">
+      <Filter>Source Files\cad\view\rendering</Filter>
     </ClCompile>
-    <ClCompile Include="src\CadGraphicsCoordinator.cpp">
-      <Filter>Source Files\View\Rendering</Filter>
+    <ClCompile Include="src\cad\view\scene\CadGraphicsCoordinator.cpp">
+      <Filter>Source Files\cad\view\scene</Filter>
     </ClCompile>
-    <ClCompile Include="src\CadOpenGLState.cpp">
-      <Filter>Source Files\View\Rendering</Filter>
+    <ClCompile Include="src\cad\view\rendering\CadOpenGLState.cpp">
+      <Filter>Source Files\cad\view\rendering</Filter>
     </ClCompile>
-    <ClCompile Include="src\CadOverlayRenderer.cpp">
-      <Filter>Source Files\View\Rendering</Filter>
+    <ClCompile Include="src\cad\view\rendering\CadOverlayRenderer.cpp">
+      <Filter>Source Files\cad\view\rendering</Filter>
     </ClCompile>
-    <ClCompile Include="src\CadReferenceRenderer.cpp">
-      <Filter>Source Files\View\Rendering</Filter>
+    <ClCompile Include="src\cad\view\rendering\CadReferenceRenderer.cpp">
+      <Filter>Source Files\cad\view\rendering</Filter>
     </ClCompile>
-    <ClCompile Include="src\CadShaderManager.cpp">
-      <Filter>Source Files\View\Rendering</Filter>
+    <ClCompile Include="src\cad\view\rendering\CadShaderManager.cpp">
+      <Filter>Source Files\cad\view\rendering</Filter>
     </ClCompile>
-    <ClCompile Include="src\CadSceneCoordinator.cpp">
-      <Filter>Source Files\View\Scene</Filter>
+    <ClCompile Include="src\cad\view\scene\CadSceneCoordinator.cpp">
+      <Filter>Source Files\cad\view\scene</Filter>
     </ClCompile>
-    <ClCompile Include="src\CadSceneContext.cpp">
-      <Filter>Source Files\View\Scene</Filter>
+    <ClCompile Include="src\cad\view\scene\CadSceneContext.cpp">
+      <Filter>Source Files\cad\view\scene</Filter>
     </ClCompile>
-    <ClCompile Include="src\CadSceneRenderCache.cpp">
-      <Filter>Source Files\View\Scene</Filter>
+    <ClCompile Include="src\cad\view\scene\CadSceneRenderCache.cpp">
+      <Filter>Source Files\cad\view\scene</Filter>
     </ClCompile>
-    <ClCompile Include="src\CadCamera.cpp">
-      <Filter>Source Files\View\Transform</Filter>
+    <ClCompile Include="src\cad\view\transform\CadCamera.cpp">
+      <Filter>Source Files\cad\view\transform</Filter>
     </ClCompile>
-    <ClCompile Include="src\CadCameraMath.cpp">
-      <Filter>Source Files\View\Transform</Filter>
+    <ClCompile Include="src\cad\view\transform\CadCameraMath.cpp">
+      <Filter>Source Files\cad\view\transform</Filter>
     </ClCompile>
-    <ClCompile Include="src\CadCameraUtils.cpp">
-      <Filter>Source Files\View\Transform</Filter>
+    <ClCompile Include="src\cad\view\transform\CadCameraUtils.cpp">
+      <Filter>Source Files\cad\view\transform</Filter>
     </ClCompile>
-    <ClCompile Include="src\CadViewTransform.cpp">
-      <Filter>Source Files\View\Transform</Filter>
+    <ClCompile Include="src\cad\view\transform\CadViewTransform.cpp">
+      <Filter>Source Files\cad\view\transform</Filter>
     </ClCompile>
-    <ClCompile Include="src\CadViewerUtils.cpp">
-      <Filter>Source Files\View\Transform</Filter>
+    <ClCompile Include="src\cad\view\CadViewerUtils.cpp">
+      <Filter>Source Files\cad\view</Filter>
     </ClCompile>
-    <ClCompile Include="src\CadEditer.cpp">
-      <Filter>Source Files\Editing</Filter>
+    <ClCompile Include="src\cad\editing\CadEditer.cpp">
+      <Filter>Source Files\cad\editing</Filter>
     </ClCompile>
-    <ClCompile Include="src\CadEditer_CommandActions.cpp">
-      <Filter>Source Files\Editing</Filter>
+    <ClCompile Include="src\cad\editing\CadEditer_CommandActions.cpp">
+      <Filter>Source Files\cad\editing</Filter>
     </ClCompile>
-    <ClCompile Include="src\CadEditer_DrawHandlers.cpp">
-      <Filter>Source Files\Editing</Filter>
+    <ClCompile Include="src\cad\editing\CadEditer_DrawHandlers.cpp">
+      <Filter>Source Files\cad\editing</Filter>
     </ClCompile>
-    <ClCompile Include="src\CadEditer_EntityTransformHelpers.cpp">
-      <Filter>Source Files\Editing</Filter>
+    <ClCompile Include="src\cad\editing\CadEditer_EntityTransformHelpers.cpp">
+      <Filter>Source Files\cad\editing</Filter>
     </ClCompile>
-    <ClCompile Include="src\CadEditer_EntityFactories.cpp">
-      <Filter>Source Files\Editing</Filter>
+    <ClCompile Include="src\cad\editing\CadEditer_EntityFactories.cpp">
+      <Filter>Source Files\cad\editing</Filter>
     </ClCompile>
-    <ClCompile Include="src\CadEditer_ModifyBuilders.cpp">
-      <Filter>Source Files\Editing</Filter>
+    <ClCompile Include="src\cad\editing\CadEditer_ModifyBuilders.cpp">
+      <Filter>Source Files\cad\editing</Filter>
     </ClCompile>
-    <ClCompile Include="src\CadEditer_GeometryHelpers.cpp">
-      <Filter>Source Files\Editing</Filter>
+    <ClCompile Include="src\cad\editing\CadEditer_GeometryHelpers.cpp">
+      <Filter>Source Files\cad\editing</Filter>
     </ClCompile>
-    <ClCompile Include="src\CadEditer_GeometryMath.cpp">
-      <Filter>Source Files\Editing</Filter>
+    <ClCompile Include="src\cad\editing\CadEditer_GeometryMath.cpp">
+      <Filter>Source Files\cad\editing</Filter>
     </ClCompile>
-    <ClCompile Include="src\CadDocument.cpp">
-      <Filter>Source Files\Document</Filter>
+    <ClCompile Include="src\cad\document\CadDocument.cpp">
+      <Filter>Source Files\cad\document</Filter>
     </ClCompile>
-    <ClCompile Include="src\GProfile.cpp">
-      <Filter>Source Files\Document</Filter>
+    <ClCompile Include="src\infrastructure\config\GProfile.cpp">
+      <Filter>Source Files\infrastructure\config</Filter>
     </ClCompile>
-    <ClCompile Include="src\GGenerator.cpp">
-      <Filter>Source Files\Document</Filter>
+    <ClCompile Include="src\application\export\GGenerator.cpp">
+      <Filter>Source Files\application\export</Filter>
     </ClCompile>
-    <ClCompile Include="src\dx_iface.cpp">
-      <Filter>Source Files\Model\DX IO</Filter>
+    <ClCompile Include="src\infrastructure\dxf\legacy\dx_iface.cpp">
+      <Filter>Source Files\infrastructure\dxf\legacy</Filter>
     </ClCompile>
-    <ClCompile Include="src\CadBitmapVectorizer.cpp">
-      <Filter>Source Files\Model</Filter>
+    <ClCompile Include="src\infrastructure\image\CadBitmapVectorizer.cpp">
+      <Filter>Source Files\infrastructure\image</Filter>
     </ClCompile>
-    <ClCompile Include="src\CadArcItem.cpp">
-      <Filter>Source Files\Item</Filter>
+    <ClCompile Include="src\cad\items\CadArcItem.cpp">
+      <Filter>Source Files\cad\items</Filter>
     </ClCompile>
-    <ClCompile Include="src\CadSplineConverter.cpp">
-      <Filter>Source Files\Model</Filter>
+    <ClCompile Include="src\compatibility\legacy\CadSplineConverter.cpp">
+      <Filter>Source Files\compatibility\legacy</Filter>
     </ClCompile>
-    <ClCompile Include="src\RotaryCutBoundaryAnalyzer.cpp">
-      <Filter>Source Files\Model</Filter>
+    <ClCompile Include="src\application\machining\RotaryCutBoundaryAnalyzer.cpp">
+      <Filter>Source Files\application\machining</Filter>
     </ClCompile>
     <ClCompile Include="src\core\machining\TubeCutBoundary.cpp">
-      <Filter>Source Files\Model</Filter>
+      <Filter>Source Files\core\machining</Filter>
     </ClCompile>
     <ClCompile Include="src\core\machining\TubeSection.cpp">
-      <Filter>Source Files\Model</Filter>
+      <Filter>Source Files\core\machining</Filter>
     </ClCompile>
     <ClCompile Include="src\core\machine\RotaryKinematics.cpp">
-      <Filter>Source Files\Model</Filter>
+      <Filter>Source Files\core\machine</Filter>
     </ClCompile>
     <ClCompile Include="src\core\machine\RotaryTrajectoryBuilder.cpp">
-      <Filter>Source Files\Model</Filter>
+      <Filter>Source Files\core\machine</Filter>
     </ClCompile>
     <ClCompile Include="src\core\planning\ProcessPlanBuilder.cpp">
-      <Filter>Source Files\Model</Filter>
+      <Filter>Source Files\core\planning</Filter>
     </ClCompile>
     <ClCompile Include="src\application\planning\ProcessPlanningService.cpp">
-      <Filter>Source Files\Model</Filter>
+      <Filter>Source Files\application\planning</Filter>
     </ClCompile>
     <ClCompile Include="src\application\machine\MachineTrajectoryService.cpp">
-      <Filter>Source Files\Model</Filter>
+      <Filter>Source Files\application\machine</Filter>
     </ClCompile>
     <ClCompile Include="src\application\planning\DocumentProcessPlanningAdapter.cpp">
-      <Filter>Source Files\Model</Filter>
+      <Filter>Source Files\application\planning</Filter>
     </ClCompile>
     <ClCompile Include="src\application\process\DocumentProcessState.cpp">
-      <Filter>Source Files\Model</Filter>
+      <Filter>Source Files\application\process</Filter>
     </ClCompile>
     <ClCompile Include="src\application\process\ProcessPresentationSnapshot.cpp">
-      <Filter>Source Files\Model</Filter>
+      <Filter>Source Files\application\process</Filter>
     </ClCompile>
-    <ClCompile Include="src\RotaryPathTopology.cpp">
-      <Filter>Source Files\Model</Filter>
+    <ClCompile Include="src\application\machining\RotaryPathTopology.cpp">
+      <Filter>Source Files\application\machining</Filter>
     </ClCompile>
-    <ClCompile Include="src\RotaryTubeGeometryAnalyzer.cpp">
-      <Filter>Source Files\Model</Filter>
+    <ClCompile Include="src\application\machining\RotaryTubeGeometryAnalyzer.cpp">
+      <Filter>Source Files\application\machining</Filter>
     </ClCompile>
-    <ClCompile Include="src\CadCircleItem.cpp">
-      <Filter>Source Files\Item</Filter>
+    <ClCompile Include="src\cad\items\CadCircleItem.cpp">
+      <Filter>Source Files\cad\items</Filter>
     </ClCompile>
-    <ClCompile Include="src\CadEllipseItem.cpp">
-      <Filter>Source Files\Item</Filter>
+    <ClCompile Include="src\cad\items\CadEllipseItem.cpp">
+      <Filter>Source Files\cad\items</Filter>
     </ClCompile>
-    <ClCompile Include="src\CadLineItem.cpp">
-      <Filter>Source Files\Item</Filter>
+    <ClCompile Include="src\cad\items\CadLineItem.cpp">
+      <Filter>Source Files\cad\items</Filter>
     </ClCompile>
-    <ClCompile Include="src\CadXlineItem.cpp">
-      <Filter>Source Files\Item</Filter>
+    <ClCompile Include="src\cad\items\CadXlineItem.cpp">
+      <Filter>Source Files\cad\items</Filter>
     </ClCompile>
-    <ClCompile Include="src\CadLWPolylineItem.cpp">
-      <Filter>Source Files\Item</Filter>
+    <ClCompile Include="src\cad\items\CadLWPolylineItem.cpp">
+      <Filter>Source Files\cad\items</Filter>
     </ClCompile>
-    <ClCompile Include="src\CadPointItem.cpp">
-      <Filter>Source Files\Item</Filter>
+    <ClCompile Include="src\cad\items\CadPointItem.cpp">
+      <Filter>Source Files\cad\items</Filter>
     </ClCompile>
-    <ClCompile Include="src\CadProcessVisualUtils.cpp">
-      <Filter>Source Files\Document</Filter>
+    <ClCompile Include="src\cad\view\rendering\CadProcessVisualUtils.cpp">
+      <Filter>Source Files\cad\view\rendering</Filter>
     </ClCompile>
-    <ClCompile Include="src\CadPolylineItem.cpp">
-      <Filter>Source Files\Item</Filter>
+    <ClCompile Include="src\cad\items\CadPolylineItem.cpp">
+      <Filter>Source Files\cad\items</Filter>
     </ClCompile>
     <ClCompile Include="src\libdxfrw\libdwgr.cpp">
-      <Filter>Source Files\Model\libdxfrw</Filter>
+      <Filter>Source Files\thirdparty\libdxfrw</Filter>
     </ClCompile>
     <ClCompile Include="src\libdxfrw\libdxfrw.cpp">
-      <Filter>Source Files\Model\libdxfrw</Filter>
+      <Filter>Source Files\thirdparty\libdxfrw</Filter>
     </ClCompile>
     <ClCompile Include="src\libdxfrw\drw_base.cpp">
-      <Filter>Source Files\Model\libdxfrw</Filter>
+      <Filter>Source Files\thirdparty\libdxfrw</Filter>
     </ClCompile>
     <ClCompile Include="src\libdxfrw\drw_classes.cpp">
-      <Filter>Source Files\Model\libdxfrw</Filter>
+      <Filter>Source Files\thirdparty\libdxfrw</Filter>
     </ClCompile>
     <ClCompile Include="src\libdxfrw\drw_entities.cpp">
-      <Filter>Source Files\Model\libdxfrw</Filter>
+      <Filter>Source Files\thirdparty\libdxfrw</Filter>
     </ClCompile>
     <ClCompile Include="src\libdxfrw\drw_header.cpp">
-      <Filter>Source Files\Model\libdxfrw</Filter>
+      <Filter>Source Files\thirdparty\libdxfrw</Filter>
     </ClCompile>
     <ClCompile Include="src\libdxfrw\drw_objects.cpp">
-      <Filter>Source Files\Model\libdxfrw</Filter>
+      <Filter>Source Files\thirdparty\libdxfrw</Filter>
     </ClCompile>
     <ClCompile Include="src\libdxfrw\intern\drw_dbg.cpp">
-      <Filter>Source Files\Model\libdxfrw\intern</Filter>
+      <Filter>Source Files\thirdparty\libdxfrw\intern</Filter>
     </ClCompile>
     <ClCompile Include="src\libdxfrw\intern\drw_textcodec.cpp">
-      <Filter>Source Files\Model\libdxfrw\intern</Filter>
+      <Filter>Source Files\thirdparty\libdxfrw\intern</Filter>
     </ClCompile>
     <ClCompile Include="src\libdxfrw\intern\dwgbuffer.cpp">
-      <Filter>Source Files\Model\libdxfrw\intern</Filter>
+      <Filter>Source Files\thirdparty\libdxfrw\intern</Filter>
     </ClCompile>
     <ClCompile Include="src\libdxfrw\intern\dwgreader.cpp">
-      <Filter>Source Files\Model\libdxfrw\intern</Filter>
+      <Filter>Source Files\thirdparty\libdxfrw\intern</Filter>
     </ClCompile>
     <ClCompile Include="src\libdxfrw\intern\dwgreader15.cpp">
-      <Filter>Source Files\Model\libdxfrw\intern</Filter>
+      <Filter>Source Files\thirdparty\libdxfrw\intern</Filter>
     </ClCompile>
     <ClCompile Include="src\libdxfrw\intern\dwgreader18.cpp">
-      <Filter>Source Files\Model\libdxfrw\intern</Filter>
+      <Filter>Source Files\thirdparty\libdxfrw\intern</Filter>
     </ClCompile>
     <ClCompile Include="src\libdxfrw\intern\dwgreader21.cpp">
-      <Filter>Source Files\Model\libdxfrw\intern</Filter>
+      <Filter>Source Files\thirdparty\libdxfrw\intern</Filter>
     </ClCompile>
     <ClCompile Include="src\libdxfrw\intern\dwgreader24.cpp">
-      <Filter>Source Files\Model\libdxfrw\intern</Filter>
+      <Filter>Source Files\thirdparty\libdxfrw\intern</Filter>
     </ClCompile>
     <ClCompile Include="src\libdxfrw\intern\dwgreader27.cpp">
-      <Filter>Source Files\Model\libdxfrw\intern</Filter>
+      <Filter>Source Files\thirdparty\libdxfrw\intern</Filter>
     </ClCompile>
     <ClCompile Include="src\libdxfrw\intern\dwgutil.cpp">
-      <Filter>Source Files\Model\libdxfrw\intern</Filter>
+      <Filter>Source Files\thirdparty\libdxfrw\intern</Filter>
     </ClCompile>
     <ClCompile Include="src\libdxfrw\intern\dxfreader.cpp">
-      <Filter>Source Files\Model\libdxfrw\intern</Filter>
+      <Filter>Source Files\thirdparty\libdxfrw\intern</Filter>
     </ClCompile>
     <ClCompile Include="src\libdxfrw\intern\dxfwriter.cpp">
-      <Filter>Source Files\Model\libdxfrw\intern</Filter>
+      <Filter>Source Files\thirdparty\libdxfrw\intern</Filter>
     </ClCompile>
     <ClCompile Include="src\libdxfrw\intern\rscodec.cpp">
-      <Filter>Source Files\Model\libdxfrw\intern</Filter>
+      <Filter>Source Files\thirdparty\libdxfrw\intern</Filter>
     </ClCompile>
-    <ClCompile Include="src\CadItem.cpp">
-      <Filter>Source Files\Item</Filter>
+    <ClCompile Include="src\cad\items\CadItem.cpp">
+      <Filter>Source Files\cad\items</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="include\pch.h">
-      <Filter>Header Files\Application</Filter>
+    <ClInclude Include="include\platform\pch.h">
+      <Filter>Header Files\platform</Filter>
     </ClInclude>
-    <ClInclude Include="include\AppBranding.h">
-      <Filter>Header Files\Application</Filter>
+    <ClInclude Include="include\desktop\AppBranding.h">
+      <Filter>Header Files\desktop</Filter>
     </ClInclude>
-    <ClInclude Include="include\AppLicense.h">
-      <Filter>Header Files\Application</Filter>
+    <ClInclude Include="include\desktop\AppLicense.h">
+      <Filter>Header Files\desktop</Filter>
     </ClInclude>
-    <ClInclude Include="include\AppTheme.h">
-      <Filter>Header Files\Application</Filter>
+    <ClInclude Include="include\desktop\AppTheme.h">
+      <Filter>Header Files\desktop</Filter>
     </ClInclude>
-    <ClInclude Include="include\CadAppearanceSettingsDialog.h">
-      <Filter>Header Files\Application</Filter>
+    <ClInclude Include="include\ui\dialogs\CadAppearanceSettingsDialog.h">
+      <Filter>Header Files\ui\dialogs</Filter>
     </ClInclude>
-    <ClInclude Include="include\CadHelpDialog.h">
-      <Filter>Header Files\Application</Filter>
+    <ClInclude Include="include\ui\dialogs\CadHelpDialog.h">
+      <Filter>Header Files\ui\dialogs</Filter>
     </ClInclude>
-    <ClInclude Include="include\CadBitmapImportDialog.h">
-      <Filter>Header Files\Application</Filter>
+    <ClInclude Include="include\ui\dialogs\CadBitmapImportDialog.h">
+      <Filter>Header Files\ui\dialogs</Filter>
     </ClInclude>
-    <ClInclude Include="include\GProfileDialog.h">
-      <Filter>Header Files\Application</Filter>
+    <ClInclude Include="include\ui\dialogs\GProfileDialog.h">
+      <Filter>Header Files\ui\dialogs</Filter>
     </ClInclude>
-    <ClInclude Include="include\GProfileManagerDialog.h">
-      <Filter>Header Files\Application</Filter>
+    <ClInclude Include="include\ui\dialogs\GProfileManagerDialog.h">
+      <Filter>Header Files\ui\dialogs</Filter>
     </ClInclude>
-    <ClInclude Include="include\GProfilePathStore.h">
-      <Filter>Header Files\Application</Filter>
+    <ClInclude Include="include\infrastructure\config\GProfilePathStore.h">
+      <Filter>Header Files\infrastructure\config</Filter>
     </ClInclude>
-    <ClInclude Include="include\CadCommandLineWidget.h">
-      <Filter>Header Files\View</Filter>
+    <ClInclude Include="include\ui\widgets\CadCommandLineWidget.h">
+      <Filter>Header Files\ui\widgets</Filter>
     </ClInclude>
-    <ClInclude Include="include\CadController.h">
-      <Filter>Header Files\View\Interaction</Filter>
+    <ClInclude Include="include\cad\view\interaction\CadController.h">
+      <Filter>Header Files\cad\view\interaction</Filter>
     </ClInclude>
-    <ClInclude Include="include\DrawStateMachine.h">
-      <Filter>Header Files\View\Interaction</Filter>
+    <ClInclude Include="include\cad\editing\DrawStateMachine.h">
+      <Filter>Header Files\cad\editing</Filter>
     </ClInclude>
-    <ClInclude Include="include\CadCrosshairBuilder.h">
-      <Filter>Header Files\View\Interaction</Filter>
+    <ClInclude Include="include\cad\view\interaction\CadCrosshairBuilder.h">
+      <Filter>Header Files\cad\view\interaction</Filter>
     </ClInclude>
-    <ClInclude Include="include\CadEntityPicker.h">
-      <Filter>Header Files\View\Interaction</Filter>
+    <ClInclude Include="include\cad\view\interaction\CadEntityPicker.h">
+      <Filter>Header Files\cad\view\interaction</Filter>
     </ClInclude>
-    <ClInclude Include="include\CadPreviewBuilder.h">
-      <Filter>Header Files\View\Interaction</Filter>
+    <ClInclude Include="include\cad\view\rendering\CadPreviewBuilder.h">
+      <Filter>Header Files\cad\view\rendering</Filter>
     </ClInclude>
-    <ClInclude Include="include\CadProcessVisualUtils.h">
-      <Filter>Header Files\Document</Filter>
+    <ClInclude Include="include\cad\view\rendering\CadProcessVisualUtils.h">
+      <Filter>Header Files\cad\view\rendering</Filter>
     </ClInclude>
-    <ClInclude Include="include\CadViewInteractionController.h">
-      <Filter>Header Files\View\Interaction</Filter>
+    <ClInclude Include="include\cad\view\interaction\CadViewInteractionController.h">
+      <Filter>Header Files\cad\view\interaction</Filter>
     </ClInclude>
-    <ClInclude Include="include\CadInteractionConstants.h">
-      <Filter>Header Files\View\Interaction</Filter>
+    <ClInclude Include="include\cad\view\interaction\CadInteractionConstants.h">
+      <Filter>Header Files\cad\view\interaction</Filter>
     </ClInclude>
-    <ClInclude Include="include\CadEntityRenderer.h">
-      <Filter>Header Files\View\Rendering</Filter>
+    <ClInclude Include="include\cad\view\rendering\CadEntityRenderer.h">
+      <Filter>Header Files\cad\view\rendering</Filter>
     </ClInclude>
-    <ClInclude Include="include\CadGraphicsCoordinator.h">
-      <Filter>Header Files\View\Rendering</Filter>
+    <ClInclude Include="include\cad\view\scene\CadGraphicsCoordinator.h">
+      <Filter>Header Files\cad\view\scene</Filter>
     </ClInclude>
-    <ClInclude Include="include\CadOpenGLState.h">
-      <Filter>Header Files\View\Rendering</Filter>
+    <ClInclude Include="include\cad\view\rendering\CadOpenGLState.h">
+      <Filter>Header Files\cad\view\rendering</Filter>
     </ClInclude>
-    <ClInclude Include="include\CadOverlayRenderer.h">
-      <Filter>Header Files\View\Rendering</Filter>
+    <ClInclude Include="include\cad\view\rendering\CadOverlayRenderer.h">
+      <Filter>Header Files\cad\view\rendering</Filter>
     </ClInclude>
-    <ClInclude Include="include\CadReferenceRenderer.h">
-      <Filter>Header Files\View\Rendering</Filter>
+    <ClInclude Include="include\cad\view\rendering\CadReferenceRenderer.h">
+      <Filter>Header Files\cad\view\rendering</Filter>
     </ClInclude>
-    <ClInclude Include="include\CadRenderTypes.h">
-      <Filter>Header Files\View\Rendering</Filter>
+    <ClInclude Include="include\cad\view\rendering\CadRenderTypes.h">
+      <Filter>Header Files\cad\view\rendering</Filter>
     </ClInclude>
-    <ClInclude Include="include\CadShaderManager.h">
-      <Filter>Header Files\View\Rendering</Filter>
+    <ClInclude Include="include\cad\view\rendering\CadShaderManager.h">
+      <Filter>Header Files\cad\view\rendering</Filter>
     </ClInclude>
-    <ClInclude Include="include\CadSceneCoordinator.h">
-      <Filter>Header Files\View\Scene</Filter>
+    <ClInclude Include="include\cad\view\scene\CadSceneCoordinator.h">
+      <Filter>Header Files\cad\view\scene</Filter>
     </ClInclude>
-    <ClInclude Include="include\CadSceneContext.h">
-      <Filter>Header Files\View\Scene</Filter>
+    <ClInclude Include="include\cad\view\scene\CadSceneContext.h">
+      <Filter>Header Files\cad\view\scene</Filter>
     </ClInclude>
-    <ClInclude Include="include\CadSceneRenderCache.h">
-      <Filter>Header Files\View\Scene</Filter>
+    <ClInclude Include="include\cad\view\scene\CadSceneRenderCache.h">
+      <Filter>Header Files\cad\view\scene</Filter>
     </ClInclude>
-    <ClInclude Include="include\CadCamera.h">
-      <Filter>Header Files\View\Transform</Filter>
+    <ClInclude Include="include\cad\view\transform\CadCamera.h">
+      <Filter>Header Files\cad\view\transform</Filter>
     </ClInclude>
-    <ClInclude Include="include\CadCameraMath.h">
-      <Filter>Header Files\View\Transform</Filter>
+    <ClInclude Include="include\cad\view\transform\CadCameraMath.h">
+      <Filter>Header Files\cad\view\transform</Filter>
     </ClInclude>
-    <ClInclude Include="include\CadCameraUtils.h">
-      <Filter>Header Files\View\Transform</Filter>
+    <ClInclude Include="include\cad\view\transform\CadCameraUtils.h">
+      <Filter>Header Files\cad\view\transform</Filter>
     </ClInclude>
-    <ClInclude Include="include\CadViewTransform.h">
-      <Filter>Header Files\View\Transform</Filter>
+    <ClInclude Include="include\cad\view\transform\CadViewTransform.h">
+      <Filter>Header Files\cad\view\transform</Filter>
     </ClInclude>
-    <ClInclude Include="include\CadViewerUtils.h">
-      <Filter>Header Files\View\Transform</Filter>
+    <ClInclude Include="include\cad\view\CadViewerUtils.h">
+      <Filter>Header Files\cad\view</Filter>
     </ClInclude>
-    <ClInclude Include="include\CadEditer.h">
-      <Filter>Header Files\Editing</Filter>
+    <ClInclude Include="include\cad\editing\CadEditer.h">
+      <Filter>Header Files\cad\editing</Filter>
     </ClInclude>
-    <ClInclude Include="include\GProfile.h">
-      <Filter>Header Files\Document</Filter>
+    <ClInclude Include="include\infrastructure\config\GProfile.h">
+      <Filter>Header Files\infrastructure\config</Filter>
     </ClInclude>
-    <ClInclude Include="include\GGenerator.h">
-      <Filter>Header Files\Document</Filter>
+    <ClInclude Include="include\application\export\GGenerator.h">
+      <Filter>Header Files\application\export</Filter>
     </ClInclude>
-    <ClInclude Include="include\dx_data.h">
-      <Filter>Header Files\Model\DX IO</Filter>
+    <ClInclude Include="include\infrastructure\dxf\legacy\dx_data.h">
+      <Filter>Header Files\infrastructure\dxf\legacy</Filter>
     </ClInclude>
-    <ClInclude Include="include\dx_iface.h">
-      <Filter>Header Files\Model\DX IO</Filter>
+    <ClInclude Include="include\infrastructure\dxf\legacy\dx_iface.h">
+      <Filter>Header Files\infrastructure\dxf\legacy</Filter>
     </ClInclude>
-    <ClInclude Include="include\CadBitmapVectorizer.h">
-      <Filter>Header Files\Model</Filter>
+    <ClInclude Include="include\infrastructure\image\CadBitmapVectorizer.h">
+      <Filter>Header Files\infrastructure\image</Filter>
     </ClInclude>
-    <ClInclude Include="include\CadArcItem.h">
-      <Filter>Header Files\Item</Filter>
+    <ClInclude Include="include\cad\items\CadArcItem.h">
+      <Filter>Header Files\cad\items</Filter>
     </ClInclude>
-    <ClInclude Include="include\CadOcsGeometry.h">
-      <Filter>Header Files\Item</Filter>
+    <ClInclude Include="include\cad\geometry\CadOcsGeometry.h">
+      <Filter>Header Files\cad\geometry</Filter>
     </ClInclude>
-    <ClInclude Include="include\CadSplineConverter.h">
-      <Filter>Header Files\Model</Filter>
+    <ClInclude Include="include\compatibility\legacy\CadSplineConverter.h">
+      <Filter>Header Files\compatibility\legacy</Filter>
     </ClInclude>
-    <ClInclude Include="include\RotaryCutBoundaryAnalyzer.h">
-      <Filter>Header Files\Model</Filter>
+    <ClInclude Include="include\application\machining\RotaryCutBoundaryAnalyzer.h">
+      <Filter>Header Files\application\machining</Filter>
     </ClInclude>
     <ClInclude Include="include\core\machining\TubeCutBoundary.h">
-      <Filter>Header Files\Model</Filter>
+      <Filter>Header Files\core\machining</Filter>
     </ClInclude>
     <ClInclude Include="include\core\machining\TubeSection.h">
-      <Filter>Header Files\Model</Filter>
+      <Filter>Header Files\core\machining</Filter>
     </ClInclude>
     <ClInclude Include="include\core\machine\MachineTrajectory.h">
-      <Filter>Header Files\Model</Filter>
+      <Filter>Header Files\core\machine</Filter>
     </ClInclude>
     <ClInclude Include="include\core\machine\RotaryKinematics.h">
-      <Filter>Header Files\Model</Filter>
+      <Filter>Header Files\core\machine</Filter>
     </ClInclude>
     <ClInclude Include="include\core\machine\RotaryTrajectoryBuilder.h">
-      <Filter>Header Files\Model</Filter>
+      <Filter>Header Files\core\machine</Filter>
     </ClInclude>
     <ClInclude Include="include\core\planning\ProcessPlan.h">
-      <Filter>Header Files\Model</Filter>
+      <Filter>Header Files\core\planning</Filter>
     </ClInclude>
     <ClInclude Include="include\core\planning\ProcessPlanBuilder.h">
-      <Filter>Header Files\Model</Filter>
+      <Filter>Header Files\core\planning</Filter>
     </ClInclude>
     <ClInclude Include="include\application\planning\ProcessPlanningService.h">
-      <Filter>Header Files\Model</Filter>
+      <Filter>Header Files\application\planning</Filter>
     </ClInclude>
     <ClInclude Include="include\application\machine\MachineTrajectoryService.h">
-      <Filter>Header Files\Model</Filter>
+      <Filter>Header Files\application\machine</Filter>
     </ClInclude>
     <ClInclude Include="include\application\planning\DocumentProcessPlanningAdapter.h">
-      <Filter>Header Files\Model</Filter>
+      <Filter>Header Files\application\planning</Filter>
     </ClInclude>
     <ClInclude Include="include\application\process\DocumentProcessState.h">
-      <Filter>Header Files\Model</Filter>
+      <Filter>Header Files\application\process</Filter>
     </ClInclude>
     <ClInclude Include="include\application\process\ProcessPresentationSnapshot.h">
-      <Filter>Header Files\Model</Filter>
+      <Filter>Header Files\application\process</Filter>
     </ClInclude>
-    <ClInclude Include="include\RotaryPathTopology.h">
-      <Filter>Header Files\Model</Filter>
+    <ClInclude Include="include\application\machining\RotaryPathTopology.h">
+      <Filter>Header Files\application\machining</Filter>
     </ClInclude>
-    <ClInclude Include="include\RotaryTubeGeometryAnalyzer.h">
-      <Filter>Header Files\Model</Filter>
+    <ClInclude Include="include\application\machining\RotaryTubeGeometryAnalyzer.h">
+      <Filter>Header Files\application\machining</Filter>
     </ClInclude>
-    <ClInclude Include="include\CadCircleItem.h">
-      <Filter>Header Files\Item</Filter>
+    <ClInclude Include="include\cad\items\CadCircleItem.h">
+      <Filter>Header Files\cad\items</Filter>
     </ClInclude>
-    <ClInclude Include="include\CadEllipseItem.h">
-      <Filter>Header Files\Item</Filter>
+    <ClInclude Include="include\cad\items\CadEllipseItem.h">
+      <Filter>Header Files\cad\items</Filter>
     </ClInclude>
-    <ClInclude Include="include\CadEllipseGeometry.h">
-      <Filter>Header Files\Item</Filter>
+    <ClInclude Include="include\cad\geometry\CadEllipseGeometry.h">
+      <Filter>Header Files\cad\geometry</Filter>
     </ClInclude>
-    <ClInclude Include="include\CadLineItem.h">
-      <Filter>Header Files\Item</Filter>
+    <ClInclude Include="include\cad\items\CadLineItem.h">
+      <Filter>Header Files\cad\items</Filter>
     </ClInclude>
-    <ClInclude Include="include\CadXlineItem.h">
-      <Filter>Header Files\Item</Filter>
+    <ClInclude Include="include\cad\items\CadXlineItem.h">
+      <Filter>Header Files\cad\items</Filter>
     </ClInclude>
-    <ClInclude Include="include\CadLWPolylineItem.h">
-      <Filter>Header Files\Item</Filter>
+    <ClInclude Include="include\cad\items\CadLWPolylineItem.h">
+      <Filter>Header Files\cad\items</Filter>
     </ClInclude>
-    <ClInclude Include="include\CadPointItem.h">
-      <Filter>Header Files\Item</Filter>
+    <ClInclude Include="include\cad\items\CadPointItem.h">
+      <Filter>Header Files\cad\items</Filter>
     </ClInclude>
-    <ClInclude Include="include\CadPolylineItem.h">
-      <Filter>Header Files\Item</Filter>
+    <ClInclude Include="include\cad\items\CadPolylineItem.h">
+      <Filter>Header Files\cad\items</Filter>
     </ClInclude>
     <ClInclude Include="include\libdxfrw\libdwgr.h">
-      <Filter>Header Files\Model\libdxfrw</Filter>
+      <Filter>Header Files\thirdparty\libdxfrw</Filter>
     </ClInclude>
     <ClInclude Include="include\libdxfrw\libdxfrw.h">
-      <Filter>Header Files\Model\libdxfrw</Filter>
+      <Filter>Header Files\thirdparty\libdxfrw</Filter>
     </ClInclude>
     <ClInclude Include="include\libdxfrw\drw_objects.h">
-      <Filter>Header Files\Model\libdxfrw</Filter>
+      <Filter>Header Files\thirdparty\libdxfrw</Filter>
     </ClInclude>
     <ClInclude Include="include\libdxfrw\drw_base.h">
-      <Filter>Header Files\Model\libdxfrw</Filter>
+      <Filter>Header Files\thirdparty\libdxfrw</Filter>
     </ClInclude>
     <ClInclude Include="include\libdxfrw\drw_classes.h">
-      <Filter>Header Files\Model\libdxfrw</Filter>
+      <Filter>Header Files\thirdparty\libdxfrw</Filter>
     </ClInclude>
     <ClInclude Include="include\libdxfrw\drw_entities.h">
-      <Filter>Header Files\Model\libdxfrw</Filter>
+      <Filter>Header Files\thirdparty\libdxfrw</Filter>
     </ClInclude>
     <ClInclude Include="include\libdxfrw\drw_header.h">
-      <Filter>Header Files\Model\libdxfrw</Filter>
+      <Filter>Header Files\thirdparty\libdxfrw</Filter>
     </ClInclude>
     <ClInclude Include="include\libdxfrw\drw_interface.h">
-      <Filter>Header Files\Model\libdxfrw</Filter>
+      <Filter>Header Files\thirdparty\libdxfrw</Filter>
     </ClInclude>
     <ClInclude Include="include\libdxfrw\intern\rscodec.h">
-      <Filter>Header Files\Model\libdxfrw\intern</Filter>
+      <Filter>Header Files\thirdparty\libdxfrw\intern</Filter>
     </ClInclude>
     <ClInclude Include="include\libdxfrw\intern\drw_cptable932.h">
-      <Filter>Header Files\Model\libdxfrw\intern</Filter>
+      <Filter>Header Files\thirdparty\libdxfrw\intern</Filter>
     </ClInclude>
     <ClInclude Include="include\libdxfrw\intern\drw_cptable936.h">
-      <Filter>Header Files\Model\libdxfrw\intern</Filter>
+      <Filter>Header Files\thirdparty\libdxfrw\intern</Filter>
     </ClInclude>
     <ClInclude Include="include\libdxfrw\intern\drw_cptable949.h">
-      <Filter>Header Files\Model\libdxfrw\intern</Filter>
+      <Filter>Header Files\thirdparty\libdxfrw\intern</Filter>
     </ClInclude>
     <ClInclude Include="include\libdxfrw\intern\drw_cptable950.h">
-      <Filter>Header Files\Model\libdxfrw\intern</Filter>
+      <Filter>Header Files\thirdparty\libdxfrw\intern</Filter>
     </ClInclude>
     <ClInclude Include="include\libdxfrw\intern\drw_cptables.h">
-      <Filter>Header Files\Model\libdxfrw\intern</Filter>
+      <Filter>Header Files\thirdparty\libdxfrw\intern</Filter>
     </ClInclude>
     <ClInclude Include="include\libdxfrw\intern\drw_dbg.h">
-      <Filter>Header Files\Model\libdxfrw\intern</Filter>
+      <Filter>Header Files\thirdparty\libdxfrw\intern</Filter>
     </ClInclude>
     <ClInclude Include="include\libdxfrw\intern\drw_reserve.h">
-      <Filter>Header Files\Model\libdxfrw\intern</Filter>
+      <Filter>Header Files\thirdparty\libdxfrw\intern</Filter>
     </ClInclude>
     <ClInclude Include="include\libdxfrw\intern\drw_textcodec.h">
-      <Filter>Header Files\Model\libdxfrw\intern</Filter>
+      <Filter>Header Files\thirdparty\libdxfrw\intern</Filter>
     </ClInclude>
     <ClInclude Include="include\libdxfrw\intern\dwgbuffer.h">
-      <Filter>Header Files\Model\libdxfrw\intern</Filter>
+      <Filter>Header Files\thirdparty\libdxfrw\intern</Filter>
     </ClInclude>
     <ClInclude Include="include\libdxfrw\intern\dwgreader.h">
-      <Filter>Header Files\Model\libdxfrw\intern</Filter>
+      <Filter>Header Files\thirdparty\libdxfrw\intern</Filter>
     </ClInclude>
     <ClInclude Include="include\libdxfrw\intern\dwgreader15.h">
-      <Filter>Header Files\Model\libdxfrw\intern</Filter>
+      <Filter>Header Files\thirdparty\libdxfrw\intern</Filter>
     </ClInclude>
     <ClInclude Include="include\libdxfrw\intern\dwgreader18.h">
-      <Filter>Header Files\Model\libdxfrw\intern</Filter>
+      <Filter>Header Files\thirdparty\libdxfrw\intern</Filter>
     </ClInclude>
     <ClInclude Include="include\libdxfrw\intern\dwgreader21.h">
-      <Filter>Header Files\Model\libdxfrw\intern</Filter>
+      <Filter>Header Files\thirdparty\libdxfrw\intern</Filter>
     </ClInclude>
     <ClInclude Include="include\libdxfrw\intern\dwgreader24.h">
-      <Filter>Header Files\Model\libdxfrw\intern</Filter>
+      <Filter>Header Files\thirdparty\libdxfrw\intern</Filter>
     </ClInclude>
     <ClInclude Include="include\libdxfrw\intern\dwgreader27.h">
-      <Filter>Header Files\Model\libdxfrw\intern</Filter>
+      <Filter>Header Files\thirdparty\libdxfrw\intern</Filter>
     </ClInclude>
     <ClInclude Include="include\libdxfrw\intern\dwgreader32.h">
-      <Filter>Header Files\Model\libdxfrw\intern</Filter>
+      <Filter>Header Files\thirdparty\libdxfrw\intern</Filter>
     </ClInclude>
     <ClInclude Include="include\libdxfrw\intern\dwgutil.h">
-      <Filter>Header Files\Model\libdxfrw\intern</Filter>
+      <Filter>Header Files\thirdparty\libdxfrw\intern</Filter>
     </ClInclude>
     <ClInclude Include="include\libdxfrw\intern\dxfreader.h">
-      <Filter>Header Files\Model\libdxfrw\intern</Filter>
+      <Filter>Header Files\thirdparty\libdxfrw\intern</Filter>
     </ClInclude>
     <ClInclude Include="include\libdxfrw\intern\dxfwriter.h">
-      <Filter>Header Files\Model\libdxfrw\intern</Filter>
+      <Filter>Header Files\thirdparty\libdxfrw\intern</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="src\cad\items\CadSplineItem.cpp">
+      <Filter>Source Files\cad\items</Filter>
+    </ClCompile>
+    <ClCompile Include="src\core\diagnostics\Diagnostic.cpp">
+      <Filter>Source Files\core\diagnostics</Filter>
+    </ClCompile>
+    <ClCompile Include="src\core\diagnostics\OperationContext.cpp">
+      <Filter>Source Files\core\diagnostics</Filter>
+    </ClCompile>
+    <ClCompile Include="src\core\geometry\GeometryTypes.cpp">
+      <Filter>Source Files\core\geometry</Filter>
+    </ClCompile>
+    <ClCompile Include="src\core\geometry\Path3D.cpp">
+      <Filter>Source Files\core\geometry</Filter>
+    </ClCompile>
+    <ClCompile Include="src\core\geometry\GeometryCompiler.cpp">
+      <Filter>Source Files\core\geometry</Filter>
+    </ClCompile>
+    <ClCompile Include="src\core\geometry\LocalCoordinateFrame.cpp">
+      <Filter>Source Files\core\geometry</Filter>
+    </ClCompile>
+    <ClCompile Include="src\core\geometry\NurbsCurveEvaluator.cpp">
+      <Filter>Source Files\core\geometry</Filter>
+    </ClCompile>
+    <ClCompile Include="src\application\geometry\DocumentGeometrySnapshotBuilder.cpp">
+      <Filter>Source Files\application\geometry</Filter>
+    </ClCompile>
+    <ClCompile Include="src\application\geometry\GeometrySnapshotCompiler.cpp">
+      <Filter>Source Files\application\geometry</Filter>
+    </ClCompile>
+    <ClCompile Include="src\application\topology\GeometrySnapshotTopologyAdapter.cpp">
+      <Filter>Source Files\application\topology</Filter>
+    </ClCompile>
+    <ClCompile Include="src\core\topology\PathTopology.cpp">
+      <Filter>Source Files\core\topology</Filter>
+    </ClCompile>
+    <ClCompile Include="src\core\nc\NcProgramBuilder.cpp">
+      <Filter>Source Files\core\nc</Filter>
+    </ClCompile>
+    <ClCompile Include="src\core\nc\PlanarNcProgramBuilder.cpp">
+      <Filter>Source Files\core\nc</Filter>
+    </ClCompile>
+    <ClCompile Include="src\core\planning\PlanarProcessPlanBuilder.cpp">
+      <Filter>Source Files\core\planning</Filter>
+    </ClCompile>
+    <ClCompile Include="src\application\nc\NcProgramService.cpp">
+      <Filter>Source Files\application\nc</Filter>
+    </ClCompile>
+    <ClCompile Include="src\infrastructure\nc\GCodePostProcessor.cpp">
+      <Filter>Source Files\infrastructure\nc</Filter>
+    </ClCompile>
+    <ClCompile Include="src\infrastructure\dxf\DxfGeometryAdapter.cpp">
+      <Filter>Source Files\infrastructure\dxf</Filter>
+    </ClCompile>
+    <ClCompile Include="src\compatibility\legacy\LegacyCadItemPathBridge.cpp">
+      <Filter>Source Files\compatibility\legacy</Filter>
+    </ClCompile>
+    <ClCompile Include="src\compatibility\legacy\LegacyCadItemTopologyAdapter.cpp">
+      <Filter>Source Files\compatibility\legacy</Filter>
+    </ClCompile>
+    <ClCompile Include="src\compatibility\legacy\DocumentNcMetadataAdapter.cpp">
+      <Filter>Source Files\compatibility\legacy</Filter>
+    </ClCompile>
+    <ClCompile Include="src\compatibility\legacy\DocumentPlanarNcInputAdapter.cpp">
+      <Filter>Source Files\compatibility\legacy</Filter>
+    </ClCompile>
+    <ClCompile Include="src\compatibility\legacy\SplineEntityClone.cpp">
+      <Filter>Source Files\compatibility\legacy</Filter>
+    </ClCompile>
+    <ClCompile Include="src\compatibility\legacy\SplineProductionPathProvider.cpp">
+      <Filter>Source Files\compatibility\legacy</Filter>
+    </ClCompile>
+    <ClCompile Include="src\compatibility\legacy\GeometrySnapshotParityVerifier.cpp">
+      <Filter>Source Files\compatibility\legacy</Filter>
+    </ClCompile>
+    <ClCompile Include="src\compatibility\legacy\LegacyTopologyParityVerifier.cpp">
+      <Filter>Source Files\compatibility\legacy</Filter>
+    </ClCompile>
+    <ClCompile Include="src\application\messaging\MessageCenter.cpp">
+      <Filter>Source Files\application\messaging</Filter>
+    </ClCompile>
+    <ClCompile Include="src\application\messaging\DebugMessageSink.cpp">
+      <Filter>Source Files\application\messaging</Filter>
+    </ClCompile>
+    <ClCompile Include="src\application\messaging\UserInterfaceMessageSink.cpp">
+      <Filter>Source Files\application\messaging</Filter>
+    </ClCompile>
+    <ClInclude Include="include\cad\editing\CadEditerWorkflowInternal.h">
+      <Filter>Header Files\cad\editing</Filter>
+    </ClInclude>
+    <ClInclude Include="include\cad\items\CadSplineItem.h">
+      <Filter>Header Files\cad\items</Filter>
+    </ClInclude>
+    <ClInclude Include="include\core\diagnostics\Diagnostic.h">
+      <Filter>Header Files\core\diagnostics</Filter>
+    </ClInclude>
+    <ClInclude Include="include\core\diagnostics\OperationContext.h">
+      <Filter>Header Files\core\diagnostics</Filter>
+    </ClInclude>
+    <ClInclude Include="include\core\diagnostics\OperationResult.h">
+      <Filter>Header Files\core\diagnostics</Filter>
+    </ClInclude>
+    <ClInclude Include="include\core\geometry\GeometryTypes.h">
+      <Filter>Header Files\core\geometry</Filter>
+    </ClInclude>
+    <ClInclude Include="include\core\geometry\EntityIdAllocator.h">
+      <Filter>Header Files\core\geometry</Filter>
+    </ClInclude>
+    <ClInclude Include="include\core\geometry\Path3D.h">
+      <Filter>Header Files\core\geometry</Filter>
+    </ClInclude>
+    <ClInclude Include="include\core\geometry\GeometryCompiler.h">
+      <Filter>Header Files\core\geometry</Filter>
+    </ClInclude>
+    <ClInclude Include="include\core\geometry\NurbsCurveEvaluator.h">
+      <Filter>Header Files\core\geometry</Filter>
+    </ClInclude>
+    <ClInclude Include="include\infrastructure\dxf\DxfGeometryAdapter.h">
+      <Filter>Header Files\infrastructure\dxf</Filter>
+    </ClInclude>
+    <ClInclude Include="include\compatibility\legacy\LegacyCadItemPathBridge.h">
+      <Filter>Header Files\compatibility\legacy</Filter>
+    </ClInclude>
+    <ClInclude Include="include\compatibility\legacy\SplineEntityClone.h">
+      <Filter>Header Files\compatibility\legacy</Filter>
+    </ClInclude>
+    <ClInclude Include="include\compatibility\legacy\SplineProductionPathProvider.h">
+      <Filter>Header Files\compatibility\legacy</Filter>
+    </ClInclude>
+    <ClInclude Include="include\compatibility\legacy\GeometrySnapshotParityVerifier.h">
+      <Filter>Header Files\compatibility\legacy</Filter>
+    </ClInclude>
+    <ClInclude Include="include\application\geometry\GeometrySnapshot.h">
+      <Filter>Header Files\application\geometry</Filter>
+    </ClInclude>
+    <ClInclude Include="include\application\geometry\DocumentGeometrySnapshotBuilder.h">
+      <Filter>Header Files\application\geometry</Filter>
+    </ClInclude>
+    <ClInclude Include="include\application\geometry\GeometrySnapshotCompiler.h">
+      <Filter>Header Files\application\geometry</Filter>
+    </ClInclude>
+    <ClInclude Include="include\application\tasks\TaskContext.h">
+      <Filter>Header Files\application\tasks</Filter>
+    </ClInclude>
+    <ClInclude Include="include\application\topology\GeometrySnapshotTopologyAdapter.h">
+      <Filter>Header Files\application\topology</Filter>
+    </ClInclude>
+    <ClInclude Include="include\core\topology\PathTopology.h">
+      <Filter>Header Files\core\topology</Filter>
+    </ClInclude>
+    <ClInclude Include="include\core\nc\NcProgram.h">
+      <Filter>Header Files\core\nc</Filter>
+    </ClInclude>
+    <ClInclude Include="include\core\nc\NcProgramBuilder.h">
+      <Filter>Header Files\core\nc</Filter>
+    </ClInclude>
+    <ClInclude Include="include\core\nc\PlanarNcProgramBuilder.h">
+      <Filter>Header Files\core\nc</Filter>
+    </ClInclude>
+    <ClInclude Include="include\core\planning\PlanarProcessPlanBuilder.h">
+      <Filter>Header Files\core\planning</Filter>
+    </ClInclude>
+    <ClInclude Include="include\application\nc\NcProgramService.h">
+      <Filter>Header Files\application\nc</Filter>
+    </ClInclude>
+    <ClInclude Include="include\infrastructure\nc\GCodePostProcessor.h">
+      <Filter>Header Files\infrastructure\nc</Filter>
+    </ClInclude>
+    <ClInclude Include="include\infrastructure\nc\GCodePostProcessorProfile.h">
+      <Filter>Header Files\infrastructure\nc</Filter>
+    </ClInclude>
+    <ClInclude Include="include\compatibility\legacy\LegacyTopologyParityVerifier.h">
+      <Filter>Header Files\compatibility\legacy</Filter>
+    </ClInclude>
+    <ClInclude Include="include\compatibility\legacy\LegacyCadItemTopologyAdapter.h">
+      <Filter>Header Files\compatibility\legacy</Filter>
+    </ClInclude>
+    <ClInclude Include="include\compatibility\legacy\DocumentNcMetadataAdapter.h">
+      <Filter>Header Files\compatibility\legacy</Filter>
+    </ClInclude>
+    <ClInclude Include="include\compatibility\legacy\DocumentPlanarNcInputAdapter.h">
+      <Filter>Header Files\compatibility\legacy</Filter>
+    </ClInclude>
+    <ClInclude Include="include\application\messaging\MessageCenter.h">
+      <Filter>Header Files\application\messaging</Filter>
+    </ClInclude>
+    <ClInclude Include="include\application\messaging\DebugMessageSink.h">
+      <Filter>Header Files\application\messaging</Filter>
+    </ClInclude>
+    <ClInclude Include="include\application\messaging\UserInterfaceMessageSink.h">
+      <Filter>Header Files\application\messaging</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

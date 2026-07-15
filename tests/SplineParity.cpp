@@ -1,7 +1,7 @@
 #include "SplineParity.h"
 
-#include "CadPolylineItem.h"
-#include "CadSplineConverter.h"
+#include "cad/items/CadPolylineItem.h"
+#include "compatibility/legacy/CadSplineConverter.h"
 #include "compatibility/legacy/LegacyCadItemPathBridge.h"
 #include "core/geometry/GeometryCompiler.h"
 #include "infrastructure/dxf/DxfGeometryAdapter.h"

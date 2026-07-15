@@ -35,7 +35,7 @@
 - 意外变化与当前任务冲突时停止并说明；无冲突时忽略。
 - 只删除本次修改造成的未使用代码。
 - 不使用破坏性 Git 命令，不擅自 amend。
-- `src/dx_iface.cpp`、`include/dx_iface.h`、`include/libdxfrw/` 和 `src/libdxfrw/` 默认视为第三方代码。
+- `src/infrastructure/dxf/legacy/dx_iface.cpp`、`include/infrastructure/dxf/legacy/dx_iface.h`、`include/libdxfrw/` 和 `src/libdxfrw/` 默认视为第三方代码。
 
 ## 4. Data-Flow Verification
 
@@ -173,6 +173,9 @@
 - 不使用脚本重写少量代码。
 - 格式化工具只能作用于任务涉及的文件。
 - 生成文件、构建产物和第三方代码不做无关编辑。
+- 自有 C/C++ 文件必须放入有明确职责的模块目录，不得直接新增到 `include/` 或 `src/` 根目录。
+- 自有头文件和实现文件应保持 `include/<module>/` 与 `src/<module>/` 的物理目录镜像；引用头文件时从 `include/` 根使用完整模块路径，不新增子目录 include 搜索路径或转发头。
+- 新增、删除或移动 C/C++ 文件时，必须同步 `G-code_post-processing_system.vcxproj`、`G-code_post-processing_system.vcxproj.filters` 和 `.ua/.understandignore`；测试工程直接引用该文件时也必须同步。
 
 ## 15. Verification
 

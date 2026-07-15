@@ -1,8 +1,8 @@
 #include "compatibility/legacy/DocumentNcMetadataAdapter.h"
 
-#include "CadDocument.h"
-#include "CadItem.h"
-#include "GProfile.h"
+#include "cad/document/CadDocument.h"
+#include "cad/items/CadItem.h"
+#include "infrastructure/config/GProfile.h"
 #include "drw_entities.h"
 
 #include <QColor>

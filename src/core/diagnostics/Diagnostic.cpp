@@ -1,4 +1,4 @@
-#include "pch.h"
+#include "platform/pch.h"
 
 #include "core/diagnostics/Diagnostic.h"
 

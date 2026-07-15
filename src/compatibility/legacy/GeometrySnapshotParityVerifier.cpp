@@ -1,7 +1,7 @@
 #include "compatibility/legacy/GeometrySnapshotParityVerifier.h"
 
-#include "CadDocument.h"
-#include "CadItem.h"
+#include "cad/document/CadDocument.h"
+#include "cad/items/CadItem.h"
 #include "compatibility/legacy/LegacyCadItemPathBridge.h"
 
 #include <QThread>

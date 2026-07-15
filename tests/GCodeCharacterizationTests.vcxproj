@@ -71,23 +71,23 @@
     <ClCompile Include="GeometrySnapshotTests.cpp" />
     <ClCompile Include="TopologyTests.cpp" />
     <ClCompile Include="TranslationInvarianceTests.cpp" />
-    <ClCompile Include="..\src\CadDocument.cpp" />
-    <ClCompile Include="..\src\CadItem.cpp" />
-    <ClCompile Include="..\src\CadLineItem.cpp" />
-    <ClCompile Include="..\src\CadCircleItem.cpp" />
-    <ClCompile Include="..\src\CadArcItem.cpp" />
-    <ClCompile Include="..\src\CadEllipseItem.cpp" />
-    <ClCompile Include="..\src\CadPolylineItem.cpp" />
-    <ClCompile Include="..\src\CadLWPolylineItem.cpp" />
-    <ClCompile Include="..\src\CadSplineItem.cpp" />
-    <ClCompile Include="..\src\CadPointItem.cpp" />
-    <ClCompile Include="..\src\CadXlineItem.cpp" />
-    <ClCompile Include="..\src\dx_iface.cpp" />
-    <ClCompile Include="..\src\CadSplineConverter.cpp">
+    <ClCompile Include="..\src\cad\document\CadDocument.cpp" />
+    <ClCompile Include="..\src\cad\items\CadItem.cpp" />
+    <ClCompile Include="..\src\cad\items\CadLineItem.cpp" />
+    <ClCompile Include="..\src\cad\items\CadCircleItem.cpp" />
+    <ClCompile Include="..\src\cad\items\CadArcItem.cpp" />
+    <ClCompile Include="..\src\cad\items\CadEllipseItem.cpp" />
+    <ClCompile Include="..\src\cad\items\CadPolylineItem.cpp" />
+    <ClCompile Include="..\src\cad\items\CadLWPolylineItem.cpp" />
+    <ClCompile Include="..\src\cad\items\CadSplineItem.cpp" />
+    <ClCompile Include="..\src\cad\items\CadPointItem.cpp" />
+    <ClCompile Include="..\src\cad\items\CadXlineItem.cpp" />
+    <ClCompile Include="..\src\infrastructure\dxf\legacy\dx_iface.cpp" />
+    <ClCompile Include="..\src\compatibility\legacy\CadSplineConverter.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
-    <ClCompile Include="..\src\GProfile.cpp" />
-    <ClCompile Include="..\src\GGenerator.cpp" />
+    <ClCompile Include="..\src\infrastructure\config\GProfile.cpp" />
+    <ClCompile Include="..\src\application\export\GGenerator.cpp" />
     <ClCompile Include="..\src\core\diagnostics\Diagnostic.cpp" />
     <ClCompile Include="..\src\core\diagnostics\OperationContext.cpp" />
     <ClCompile Include="..\src\core\geometry\GeometryTypes.cpp" />
@@ -110,9 +110,9 @@
     <ClCompile Include="..\src\infrastructure\nc\GCodePostProcessor.cpp" />
     <ClCompile Include="..\src\core\planning\ProcessPlanBuilder.cpp" />
     <ClCompile Include="..\src\core\planning\PlanarProcessPlanBuilder.cpp" />
-    <ClCompile Include="..\src\RotaryPathTopology.cpp" />
-    <ClCompile Include="..\src\RotaryTubeGeometryAnalyzer.cpp" />
-    <ClCompile Include="..\src\RotaryCutBoundaryAnalyzer.cpp" />
+    <ClCompile Include="..\src\application\machining\RotaryPathTopology.cpp" />
+    <ClCompile Include="..\src\application\machining\RotaryTubeGeometryAnalyzer.cpp" />
+    <ClCompile Include="..\src\application\machining\RotaryCutBoundaryAnalyzer.cpp" />
     <ClCompile Include="..\src\infrastructure\dxf\DxfGeometryAdapter.cpp" />
     <ClCompile Include="..\src\compatibility\legacy\LegacyCadItemPathBridge.cpp" />
     <ClCompile Include="..\src\compatibility\legacy\LegacyCadItemTopologyAdapter.cpp" />
@@ -150,8 +150,8 @@
     <ClCompile Include="..\src\libdxfrw\libdxfrw.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <QtMoc Include="..\include\CadItem.h" />
-    <QtMoc Include="..\include\CadDocument.h" />
+    <QtMoc Include="..\include\cad\items\CadItem.h" />
+    <QtMoc Include="..\include\cad\document\CadDocument.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Condition="Exists('$(QtMsBuild)\qt.targets')">

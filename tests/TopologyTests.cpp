@@ -1,12 +1,12 @@
 #include "TopologyTests.h"
 
-#include "CadDocument.h"
-#include "CadItem.h"
-#include "GGenerator.h"
-#include "GProfile.h"
-#include "RotaryCutBoundaryAnalyzer.h"
-#include "RotaryPathTopology.h"
-#include "RotaryTubeGeometryAnalyzer.h"
+#include "cad/document/CadDocument.h"
+#include "cad/items/CadItem.h"
+#include "application/export/GGenerator.h"
+#include "infrastructure/config/GProfile.h"
+#include "application/machining/RotaryCutBoundaryAnalyzer.h"
+#include "application/machining/RotaryPathTopology.h"
+#include "application/machining/RotaryTubeGeometryAnalyzer.h"
 #include "application/geometry/DocumentGeometrySnapshotBuilder.h"
 #include "application/geometry/GeometrySnapshotCompiler.h"
 #include "application/topology/GeometrySnapshotTopologyAdapter.h"
@@ -2768,7 +2768,7 @@ namespace
             "legacy wrapper maps core failure diagnostic to error message");
 
         const QString sourcePath = QFileInfo(QString::fromUtf8(__FILE__))
-            .absoluteDir().absoluteFilePath(QStringLiteral("../src/RotaryPathTopology.cpp"));
+            .absoluteDir().absoluteFilePath(QStringLiteral("../src/application/machining/RotaryPathTopology.cpp"));
         QFile sourceFile(sourcePath);
         check(sourceFile.open(QIODevice::ReadOnly), "legacy topology wrapper source opens");
         const QByteArray sourceText = sourceFile.readAll();

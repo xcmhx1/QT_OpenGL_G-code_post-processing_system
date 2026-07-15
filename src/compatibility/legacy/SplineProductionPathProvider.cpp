@@ -1,6 +1,6 @@
 #include "compatibility/legacy/SplineProductionPathProvider.h"
 
-#include "CadSplineConverter.h"
+#include "compatibility/legacy/CadSplineConverter.h"
 #include "core/geometry/NurbsCurveEvaluator.h"
 #include "infrastructure/dxf/DxfGeometryAdapter.h"
 

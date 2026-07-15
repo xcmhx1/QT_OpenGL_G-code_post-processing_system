@@ -1,8 +1,8 @@
 #include "compatibility/legacy/LegacyTopologyParityVerifier.h"
 
-#include "CadDocument.h"
-#include "CadItem.h"
-#include "RotaryPathTopology.h"
+#include "cad/document/CadDocument.h"
+#include "cad/items/CadItem.h"
+#include "application/machining/RotaryPathTopology.h"
 #include "application/topology/GeometrySnapshotTopologyAdapter.h"
 
 #include <QThread>

@@ -1,6 +1,6 @@
 #include "application/machine/MachineTrajectoryService.h"
 
-#include "CadDocument.h"
+#include "cad/document/CadDocument.h"
 #include "application/geometry/DocumentGeometrySnapshotBuilder.h"
 #include "core/geometry/GeometryCompiler.h"
 #include "core/machine/RotaryTrajectoryBuilder.h"

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "GProfile.h"
+#include "infrastructure/config/GProfile.h"
 #include "application/tasks/TaskContext.h"
 #include "application/process/DocumentProcessState.h"
 #include "core/machine/MachineTrajectory.h"

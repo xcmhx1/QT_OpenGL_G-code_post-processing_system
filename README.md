@@ -412,16 +412,22 @@ Result 是控制和数据契约，Diagnostic 是结构化失败或警告。`Part
 ## 16. 仓库目录
 
 ```text
+include/desktop/          主窗口、应用入口、品牌和授权接口
+src/desktop/              主窗口动作、应用入口、品牌和授权实现
+include/ui/               对话框和复用控件接口
+src/ui/                   对话框和复用控件实现
+include/cad/              CAD 文档、图元、编辑、视图及渲染接口
+src/cad/                  CAD 文档、图元、编辑、视图及渲染实现
 include/core/             纯计算数据模型与算法公共接口
 src/core/                 几何、拓扑、加工、规划、机床和 NC 核心实现
-include/application/      文档快照、加工状态、消息和服务接口
-src/application/          版本校验、捕获和业务编排实现
-include/infrastructure/   DXF 与 G-code 外部格式适配接口
-src/infrastructure/       DXF 值对象适配和后处理文本实现
+include/application/      文档快照、加工状态、消息、规划和导出接口
+src/application/          版本校验、捕获、规划、加工分析和导出编排实现
+include/infrastructure/   配置、图像和 DXF/G-code 外部格式适配接口
+src/infrastructure/       配置、图像、DXF 适配和后处理文本实现
 include/compatibility/    CadItem/DRW 旧边界兼容接口
 src/compatibility/        尚未移除的兼容适配实现
-include/                  主窗口、CAD、Viewer、配置及第三方头文件
-src/                      UI、CAD 编辑、渲染、文件动作及第三方实现
+include/platform/         Visual Studio 预编译头等平台接口
+src/platform/             Visual Studio 预编译头实现
 include/libdxfrw/         第三方 libdxfrw 头文件
 src/libdxfrw/             第三方 libdxfrw/libdwgr 源码
 tests/                    无 GUI characterization tests 与黄金数据
@@ -430,7 +436,9 @@ tools/                    授权生成工具
 docxs/                    论文、实习和答辩材料，不参与程序构建
 ```
 
-`src/dx_iface.cpp`、`include/dx_iface.h` 及 libdxfrw 默认视为第三方边界。除非问题明确位于该层，否则不要修改；修改后必须验证导入、普通保存、安全导出和重新导入闭环。
+`include/` 与 `src/` 中的自有模块保持镜像目录，不在两者根目录直接放置 C/C++ 文件。工程只把 `include/` 作为自有头文件根目录，源码使用完整模块路径，例如 `#include "cad/items/CadItem.h"` 和 `#include "platform/pch.h"`，不为子目录增加额外 include 搜索路径。
+
+`src/infrastructure/dxf/legacy/dx_iface.cpp`、`include/infrastructure/dxf/legacy/dx_iface.h` 及 libdxfrw 默认视为第三方边界。除非问题明确位于该层，否则不要修改；修改后必须验证导入、普通保存、安全导出和重新导入闭环。
 
 ## 17. 开发入口表
 
@@ -449,11 +457,11 @@ docxs/                    论文、实习和答辩材料，不参与程序构建
 | 三轴 NC | `DocumentPlanarNcInputAdapter`、`PlanarNcProgramBuilder` |
 | 四轴 NC | `NcProgramBuilder`、`NcProgramService` |
 | G-code 文本 | `GCodePostProcessor` |
-| 文件导出 | `GGenerator`、`Gcode_postprocessing_system_GCodeActions.cpp` |
-| CAD 编辑 | `CadEditer_*`、`CadController_*` |
-| OpenGL 显示 | `CadViewer_*`、渲染和拾取文件 |
+| 文件导出 | `include/application/export/`、`src/application/export/`、`src/desktop/Gcode_postprocessing_system_GCodeActions.cpp` |
+| CAD 编辑 | `include/cad/editing/`、`src/cad/editing/`、`include/cad/view/interaction/`、`src/cad/view/interaction/` |
+| OpenGL 显示 | `include/cad/view/`、`src/cad/view/`，以及其 `rendering/`、`scene/`、`transform/` 子目录 |
 | 诊断 | `include/core/diagnostics/`、`src/core/diagnostics/` |
-| 配置 | `GProfile`、`GProfileDialog` |
+| 配置 | `include/infrastructure/config/`、`src/infrastructure/config/`、`include/ui/dialogs/GProfileDialog.h` |
 | 授权和部署 | `COMMERCIAL_RELEASE.md` |
 
 ## 18. 新功能开发规则

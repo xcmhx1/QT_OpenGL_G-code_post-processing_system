@@ -1,17 +1,17 @@
 #include "SplineProductionTests.h"
 
-#include "CadDocument.h"
-#include "CadPolylineItem.h"
-#include "CadSplineItem.h"
-#include "GGenerator.h"
-#include "GProfile.h"
+#include "cad/document/CadDocument.h"
+#include "cad/items/CadPolylineItem.h"
+#include "cad/items/CadSplineItem.h"
+#include "application/export/GGenerator.h"
+#include "infrastructure/config/GProfile.h"
 #include "SplineParity.h"
 #include "core/machine/RotaryKinematics.h"
 #include "application/process/DocumentProcessState.h"
 #include "compatibility/legacy/SplineEntityClone.h"
 #include "compatibility/legacy/SplineProductionPathProvider.h"
 #include "core/geometry/GeometryCompiler.h"
-#include "dx_data.h"
+#include "infrastructure/dxf/legacy/dx_data.h"
 
 #include <QDir>
 #include <QFile>

@@ -1,6 +1,6 @@
 #include "application/planning/DocumentProcessPlanningAdapter.h"
 
-#include "CadDocument.h"
+#include "cad/document/CadDocument.h"
 #include "application/geometry/DocumentGeometrySnapshotBuilder.h"
 #include "application/tasks/TaskContext.h"
 #include "core/geometry/GeometryCompiler.h"

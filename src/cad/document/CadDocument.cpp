@@ -1,0 +1,778 @@
+// 实现 CadDocument 模块，对应头文件中声明的主要行为和协作流程。
+// 文档模型模块，负责持有原始 DXF 数据、内部图元容器以及场景变更通知。
+#include "platform/pch.h"
+
+#include "cad/document/CadDocument.h"
+
+#include "cad/items/CadArcItem.h"
+#include "cad/items/CadCircleItem.h"
+#include "cad/items/CadEllipseItem.h"
+#include "cad/items/CadLineItem.h"
+#include "cad/items/CadLWPolylineItem.h"
+#include "cad/items/CadPointItem.h"
+#include "cad/items/CadPolylineItem.h"
+#include "cad/items/CadSplineItem.h"
+#include "compatibility/legacy/CadSplineConverter.h"
+#include "cad/items/CadXlineItem.h"
+#include "infrastructure/dxf/legacy/dx_data.h"
+#include "infrastructure/dxf/legacy/dx_iface.h"
+
+#include <QDebug>
+#include <QSet>
+
+namespace
+{
+    std::unique_ptr<DRW_Entity> convertPolylineToLightweight(const DRW_Polyline* polyline)
+    {
+        if (polyline == nullptr)
+        {
+            return nullptr;
+        }
+
+        // 仅把“普通 2D 多段线”转换为 LWPOLYLINE；3D/网格/面片多段线在安全模式下跳过。
+        constexpr int kUnsupportedPolylineFlags = 8 | 16 | 32 | 64;
+
+        if ((polyline->flags & kUnsupportedPolylineFlags) != 0)
+        {
+            return nullptr;
+        }
+
+        auto lwPolyline = std::make_unique<DRW_LWPolyline>();
+        lwPolyline->space = polyline->space;
+        lwPolyline->layer = polyline->layer;
+        lwPolyline->lineType = polyline->lineType;
+        lwPolyline->color = polyline->color;
+        lwPolyline->color24 = polyline->color24;
+        lwPolyline->lWeight = polyline->lWeight;
+        lwPolyline->ltypeScale = polyline->ltypeScale;
+        lwPolyline->visible = polyline->visible;
+        lwPolyline->haveExtrusion = polyline->haveExtrusion;
+        lwPolyline->thickness = polyline->thickness;
+        lwPolyline->extPoint = polyline->extPoint;
+        lwPolyline->elevation = polyline->basePoint.z;
+        lwPolyline->flags = polyline->flags & (1 | 128);
+
+        if (std::abs(polyline->defstawidth - polyline->defendwidth) <= 1.0e-9)
+        {
+            lwPolyline->width = polyline->defstawidth;
+        }
+
+        lwPolyline->vertlist.reserve(polyline->vertlist.size());
+
+        for (const std::shared_ptr<DRW_Vertex>& vertex : polyline->vertlist)
+        {
+            if (vertex == nullptr)
+            {
+                continue;
+            }
+
+            // 面片顶点（64/128）不属于 LWPOLYLINE 语义，直接放弃转换。
+            if ((vertex->flags & (64 | 128)) != 0)
+            {
+                return nullptr;
+            }
+
+            auto lwVertex = std::make_shared<DRW_Vertex2D>();
+            lwVertex->x = vertex->basePoint.x;
+            lwVertex->y = vertex->basePoint.y;
+            lwVertex->stawidth = vertex->stawidth;
+            lwVertex->endwidth = vertex->endwidth;
+            lwVertex->bulge = vertex->bulge;
+            lwPolyline->vertlist.push_back(lwVertex);
+        }
+
+        if (lwPolyline->vertlist.size() < 2)
+        {
+            return nullptr;
+        }
+
+        lwPolyline->vertexnum = static_cast<int>(lwPolyline->vertlist.size());
+        return lwPolyline;
+    }
+
+    std::unique_ptr<DRW_Entity> cloneSupportedEntity(const DRW_Entity* entity)
+    {
+        if (entity == nullptr)
+        {
+            return nullptr;
+        }
+
+        switch (entity->eType)
+        {
+        case DRW::ETYPE::POINT:
+            return std::make_unique<DRW_Point>(*static_cast<const DRW_Point*>(entity));
+        case DRW::ETYPE::LINE:
+            return std::make_unique<DRW_Line>(*static_cast<const DRW_Line*>(entity));
+        case DRW::ETYPE::XLINE:
+            return std::make_unique<DRW_Xline>(*static_cast<const DRW_Xline*>(entity));
+        case DRW::ETYPE::CIRCLE:
+            return std::make_unique<DRW_Circle>(*static_cast<const DRW_Circle*>(entity));
+        case DRW::ETYPE::ARC:
+            return std::make_unique<DRW_Arc>(*static_cast<const DRW_Arc*>(entity));
+        case DRW::ETYPE::ELLIPSE:
+            return std::make_unique<DRW_Ellipse>(*static_cast<const DRW_Ellipse*>(entity));
+        case DRW::ETYPE::POLYLINE:
+            return convertPolylineToLightweight(static_cast<const DRW_Polyline*>(entity));
+        case DRW::ETYPE::LWPOLYLINE:
+            return std::make_unique<DRW_LWPolyline>(*static_cast<const DRW_LWPolyline*>(entity));
+        case DRW::ETYPE::SPLINE:
+            return convertSplineToPolyline(static_cast<const DRW_Spline*>(entity));
+        default:
+            return nullptr;
+        }
+    }
+
+    void sanitizeEntityForSafeExport(DRW_Entity* entity)
+    {
+        if (entity == nullptr)
+        {
+            return;
+        }
+
+        entity->handle = DRW::NoHandle;
+        entity->parentHandle = DRW::NoHandle;
+        entity->appData.clear();
+        entity->extData.clear();
+        entity->numProxyGraph = 0;
+        entity->proxyGraphics.clear();
+        entity->colorName.clear();
+        entity->material = DRW::MaterialByLayer;
+        entity->plotStyle = DRW::DefaultPlotStyle;
+
+        if (entity->layer.empty())
+        {
+            entity->layer = "0";
+        }
+
+        if (entity->lineType.empty())
+        {
+            entity->lineType = "BYLAYER";
+        }
+    }
+
+    std::unique_ptr<dx_data> buildSafeExportData(const CadDocument& document)
+    {
+        auto safeData = std::make_unique<dx_data>();
+
+        if (document.m_data != nullptr)
+        {
+            safeData->headerC = document.m_data->headerC;
+        }
+
+        QSet<QString> addedLayerNames;
+        const auto tryAppendLayer =
+            [&addedLayerNames, &document, &safeData](const QString& layerName)
+            {
+                const QString normalizedLayerName = layerName.trimmed().isEmpty()
+                    ? QStringLiteral("0")
+                    : layerName.trimmed();
+
+                if (addedLayerNames.contains(normalizedLayerName))
+                {
+                    return;
+                }
+
+                if (document.m_data != nullptr)
+                {
+                    for (const DRW_Layer& layer : document.m_data->layers)
+                    {
+                        if (QString::fromUtf8(layer.name.c_str()).compare(normalizedLayerName, Qt::CaseSensitive) != 0)
+                        {
+                            continue;
+                        }
+
+                        DRW_Layer copiedLayer(layer);
+                        copiedLayer.handle = DRW::NoHandle;
+                        copiedLayer.parentHandle = DRW::NoHandle;
+                        safeData->layers.push_back(copiedLayer);
+                        addedLayerNames.insert(normalizedLayerName);
+                        return;
+                    }
+                }
+
+                DRW_Layer layer;
+                layer.name = normalizedLayerName.toUtf8().constData();
+                safeData->layers.push_back(layer);
+                addedLayerNames.insert(normalizedLayerName);
+            };
+
+        tryAppendLayer(QStringLiteral("0"));
+
+        for (const std::unique_ptr<CadItem>& item : document.m_entities)
+        {
+            if (item == nullptr || item->m_nativeEntity == nullptr)
+            {
+                continue;
+            }
+
+            std::unique_ptr<DRW_Entity> safeEntity = cloneSupportedEntity(item->m_nativeEntity);
+
+            if (safeEntity == nullptr)
+            {
+                continue;
+            }
+
+            sanitizeEntityForSafeExport(safeEntity.get());
+            tryAppendLayer(QString::fromUtf8(safeEntity->layer.c_str()));
+            safeData->mBlock->ent.push_back(safeEntity.release());
+        }
+
+        return safeData;
+    }
+
+    QColor colorFromAci(int index)
+    {
+        static const QRgb aciStandardColors[] =
+        {
+            qRgb(0, 0, 0),
+            qRgb(255, 0, 0),
+            qRgb(255, 255, 0),
+            qRgb(0, 255, 0),
+            qRgb(0, 255, 255),
+            qRgb(0, 0, 255),
+            qRgb(255, 0, 255),
+            qRgb(255, 255, 255),
+            qRgb(128, 128, 128),
+            qRgb(192, 192, 192)
+        };
+
+        if (index >= 1 && index <= 9)
+        {
+            return QColor(aciStandardColors[index]);
+        }
+
+        if (index == 0)
+        {
+            return QColor(Qt::white);
+        }
+
+        return QColor();
+    }
+
+    QColor colorFromTrueColor(int color24)
+    {
+        if (color24 < 0)
+        {
+            return QColor();
+        }
+
+        return QColor((color24 >> 16) & 0xFF, (color24 >> 8) & 0xFF, color24 & 0xFF);
+    }
+
+    QColor resolveEntityDisplayColor(const CadDocument& document, const CadItem* item)
+    {
+        if (item == nullptr || item->m_nativeEntity == nullptr)
+        {
+            return QColor(Qt::white);
+        }
+
+        const QColor trueColor = colorFromTrueColor(item->m_nativeEntity->color24);
+
+        if (trueColor.isValid())
+        {
+            return trueColor;
+        }
+
+        if (item->m_nativeEntity->color == DRW::ColorByLayer)
+        {
+            return document.layerColor(QString::fromUtf8(item->m_nativeEntity->layer.c_str()), item->m_color);
+        }
+
+        const QColor indexColor = colorFromAci(item->m_nativeEntity->color);
+        return indexColor.isValid() ? indexColor : item->m_color;
+    }
+}
+
+std::unique_ptr<CadItem> CadDocument::createCadItemForEntity(DRW_Entity* entity)
+{
+    // 文档层把原始 DXF 实体适配为项目内部图元对象。
+    // 这里是“解析数据 -> 可渲染/可编辑对象”的唯一分发入口。
+    if (!entity)
+    {
+        return nullptr;
+    }
+
+    switch (entity->eType)
+    {
+    // 每个受支持的实体类型都映射到一个对应的 Cad*Item 派生类。
+    case DRW::ETYPE::LINE:
+        return std::make_unique<CadLineItem>(entity);
+
+    case DRW::ETYPE::XLINE:
+        return std::make_unique<CadXlineItem>(entity);
+
+    case DRW::ETYPE::CIRCLE:
+        return std::make_unique<CadCircleItem>(entity);
+
+    case DRW::ETYPE::ARC:
+        return std::make_unique<CadArcItem>(entity);
+
+    case DRW::ETYPE::ELLIPSE:
+        return std::make_unique<CadEllipseItem>(entity);
+
+    case DRW::ETYPE::LWPOLYLINE:
+        return std::make_unique<CadLWPolylineItem>(entity);
+
+    case DRW::ETYPE::POINT:
+        return std::make_unique<CadPointItem>(entity);
+
+    case DRW::ETYPE::POLYLINE:
+        return std::make_unique<CadPolylineItem>(entity);
+    case DRW::ETYPE::SPLINE:
+        return std::make_unique<CadSplineItem>(entity);
+
+    default:
+        // 未适配的实体类型暂时不进入当前场景图元系统。
+        return nullptr;
+    }
+}
+
+
+CadDocument::CadDocument(QObject* parent)
+    : QObject(parent)
+{
+    clearAll();
+}
+
+CadDocument::ContentChangeBatch::ContentChangeBatch(CadDocument& document)
+    : m_document(&document)
+{
+    m_document->beginContentChange();
+}
+
+CadDocument::ContentChangeBatch::ContentChangeBatch(ContentChangeBatch&& other) noexcept
+    : m_document(other.m_document)
+{
+    other.m_document = nullptr;
+}
+
+CadDocument::ContentChangeBatch::~ContentChangeBatch()
+{
+    if (m_document != nullptr)
+    {
+        m_document->endContentChange();
+    }
+}
+
+CadDocument::~CadDocument()
+{
+    clearAll();
+}
+
+void CadDocument::readDxfDocument(const QString& filePath)
+{
+    ContentChangeBatch contentBatch(*this);
+    // 导入新文件前先清空现有文档，避免旧实体与新实体混杂。
+    clearAll();
+
+    // dx_iface 负责把文件内容解析进 dx_data。
+    std::make_unique<dx_iface>()->fileImport(filePath.toLocal8Bit().constData(), m_data.get(), false);
+
+    // 解析完成后再把支持的原始实体转换为内部 CadItem。
+    init();
+    emit sceneChanged();
+
+    qDebug() << "CadDocument::readDxfDocument() ->" << filePath << "导入成功";
+}
+
+bool CadDocument::saveDxfDocument(const QString& filePath, bool safeMode)
+{
+    if (m_data == nullptr || filePath.trimmed().isEmpty())
+    {
+        return false;
+    }
+
+    std::unique_ptr<dx_data> safeExportData;
+    dx_data* exportData = m_data.get();
+    DRW::Version exportVersion = DRW::Version::AC1027;
+
+    if (safeMode)
+    {
+        // 安全模式：仅导出当前系统支持的实体，并剥离扩展数据，提升 AutoCAD 兼容性。
+        safeExportData = buildSafeExportData(*this);
+        exportData = safeExportData.get();
+        exportVersion = DRW::Version::AC1015;
+    }
+
+    const bool success = std::make_unique<dx_iface>()->fileExport
+    (
+        filePath.toLocal8Bit().constData(),
+        exportVersion,
+        false,
+        exportData,
+        false
+    );
+
+    if (!success)
+    {
+        qWarning() << "CadDocument::saveDxfDocument() failed ->" << filePath;
+        return false;
+    }
+
+    qDebug() << "CadDocument::saveDxfDocument() ->" << filePath
+        << (safeMode ? "安全导出成功" : "保存成功");
+    return true;
+}
+
+bool CadDocument::eportDxfDocument(const QString& filePath, bool safeMode)
+{
+    // 当前导出与保存共用同一条 DXF 写出链路。
+    return saveDxfDocument(filePath, safeMode);
+}
+
+void CadDocument::clearAll()
+{
+    ContentChangeBatch contentBatch(*this);
+    // m_entities 清空后会释放所有内部图元；
+    // 重新创建 dx_data 则会重置原始解析结果容器。
+    m_entities.clear();
+    m_entityIdAllocator.reset();
+    m_data = std::make_unique<dx_data>();
+    ensureLayerExists(QStringLiteral("0"));
+    markContentChanged();
+}
+
+void CadDocument::init()
+{
+    ContentChangeBatch contentBatch(*this);
+    bool initializedAnyEntity = false;
+    for (DRW_Entity* entity : m_data->mBlock->ent)
+    {
+        if (entity == nullptr)
+        {
+            continue;
+        }
+
+        if (std::unique_ptr<CadItem> item = createCadItemForEntity(entity))
+        {
+            ensureEntityId(*item);
+            item->m_color = resolveEntityDisplayColor(*this, item.get());
+            m_entities.push_back(std::move(item));
+            initializedAnyEntity = true;
+        }
+    }
+    if (initializedAnyEntity)
+    {
+        markContentChanged();
+    }
+}
+
+CadItem* CadDocument::appendEntity(std::unique_ptr<DRW_Entity> entity, std::unique_ptr<CadItem> item)
+{
+    ContentChangeBatch contentBatch(*this);
+    if (entity == nullptr)
+    {
+        return nullptr;
+    }
+
+    if (item == nullptr)
+    {
+        // 调用方只给了原始实体时，这里自动补建对应 CadItem。
+        item = createCadItemForEntity(entity.get());
+    }
+
+    if (item == nullptr)
+    {
+        return nullptr;
+    }
+
+    // m_data 持有原始实体，m_entities 持有内部图元，两者通过指针关联。
+    DRW_Entity* nativeEntity = entity.release();
+    CadItem* rawItem = item.get();
+
+    ensureLayerExists(QString::fromUtf8(nativeEntity->layer.c_str()));
+    ensureEntityId(*rawItem);
+    rawItem->m_color = resolveEntityDisplayColor(*this, rawItem);
+    m_data->mBlock->ent.push_back(nativeEntity);
+    m_entities.push_back(std::move(item));
+
+    markContentChanged();
+    emit sceneChanged();
+    return rawItem;
+}
+
+int CadDocument::appendEntities(std::vector<std::unique_ptr<DRW_Entity>> entities, bool replaceExisting)
+{
+    ContentChangeBatch contentBatch(*this);
+    int appendedCount = 0;
+
+    if (replaceExisting)
+    {
+        clearAll();
+    }
+
+    for (std::unique_ptr<DRW_Entity>& entity : entities)
+    {
+        if (entity == nullptr)
+        {
+            continue;
+        }
+
+        std::unique_ptr<CadItem> item = createCadItemForEntity(entity.get());
+
+        if (item == nullptr)
+        {
+            continue;
+        }
+
+        ensureLayerExists(QString::fromUtf8(entity->layer.c_str()));
+        ensureEntityId(*item);
+        item->m_color = resolveEntityDisplayColor(*this, item.get());
+        m_data->mBlock->ent.push_back(entity.release());
+        m_entities.push_back(std::move(item));
+        ++appendedCount;
+    }
+
+    if (replaceExisting || appendedCount > 0)
+    {
+        markContentChanged();
+        emit sceneChanged();
+    }
+
+    return appendedCount;
+}
+
+void CadDocument::ensureEntityId(CadItem& item)
+{
+    const bool idAlreadyUsed = item.m_entityId != 0 && std::any_of
+    (
+        m_entities.cbegin(),
+        m_entities.cend(),
+        [&item](const std::unique_ptr<CadItem>& existing)
+        {
+            return existing != nullptr
+                && existing.get() != &item
+                && existing->m_entityId == item.m_entityId;
+        }
+    );
+
+    if (idAlreadyUsed)
+    {
+        item.m_entityId = 0;
+    }
+    item.m_entityId = m_entityIdAllocator.ensure(item.m_entityId);
+}
+
+std::pair<std::unique_ptr<DRW_Entity>, std::unique_ptr<CadItem>> CadDocument::takeEntity(CadItem* item)
+{
+    // 删除/撤销等操作需要同时取回“原始实体 + 内部图元”这对对象。
+    if (item == nullptr)
+    {
+        return {};
+    }
+
+    // 先在内部图元数组中定位对象，再到原始实体列表中定位其 nativeEntity。
+    const auto itemIt = std::find_if
+    (
+        m_entities.begin(),
+        m_entities.end(),
+        [item](const std::unique_ptr<CadItem>& candidate)
+        {
+            return candidate.get() == item;
+        }
+    );
+
+    if (itemIt == m_entities.end())
+    {
+        return {};
+    }
+
+    const auto nativeIt = std::find(m_data->mBlock->ent.begin(), m_data->mBlock->ent.end(), item->m_nativeEntity);
+
+    if (nativeIt == m_data->mBlock->ent.end())
+    {
+        return {};
+    }
+
+    // 这里把原始指针重新包装回 unique_ptr，便于后续命令对象接管所有权。
+    std::unique_ptr<DRW_Entity> entity(*nativeIt);
+    std::unique_ptr<CadItem> removedItem = std::move(*itemIt);
+
+    m_data->mBlock->ent.erase(nativeIt);
+    m_entities.erase(itemIt);
+
+    markContentChanged();
+    emit sceneChanged();
+    return { std::move(entity), std::move(removedItem) };
+}
+
+bool CadDocument::refreshEntity(CadItem* item, bool geometryContentChanged)
+{
+    // 原始实体被改动后，需要重新生成离散几何、方向和最终显示颜色。
+    if (!containsEntity(item))
+    {
+        return false;
+    }
+
+    item->buildGeometryDatay();
+    item->m_color = resolveEntityDisplayColor(*this, item);
+
+    if (geometryContentChanged)
+    {
+        markContentChanged();
+    }
+    emit sceneChanged();
+    return true;
+}
+
+void CadDocument::notifySceneChanged()
+{
+    emit sceneChanged();
+}
+
+std::uint64_t CadDocument::contentRevision() const
+{
+    return m_contentRevision;
+}
+
+CadDocument::ContentChangeBatch CadDocument::beginContentChangeBatch()
+{
+    return ContentChangeBatch(*this);
+}
+
+void CadDocument::beginContentChange()
+{
+    ++m_contentChangeDepth;
+}
+
+void CadDocument::endContentChange()
+{
+    if (m_contentChangeDepth <= 0)
+    {
+        return;
+    }
+    --m_contentChangeDepth;
+    if (m_contentChangeDepth == 0 && m_contentChangePending)
+    {
+        ++m_contentRevision;
+        m_contentChangePending = false;
+    }
+}
+
+void CadDocument::markContentChanged()
+{
+    if (m_contentChangeDepth > 0)
+    {
+        m_contentChangePending = true;
+        return;
+    }
+    ++m_contentRevision;
+}
+
+bool CadDocument::containsEntity(const CadItem* item) const
+{
+    // 通过地址判断图元是否仍属于当前文档，供编辑命令做安全检查。
+    return std::any_of
+    (
+        m_entities.begin(),
+        m_entities.end(),
+        [item](const std::unique_ptr<CadItem>& candidate)
+        {
+            return candidate.get() == item;
+        }
+    );
+}
+
+QStringList CadDocument::layerNames() const
+{
+    QStringList layers;
+    QSet<QString> seenLayers;
+
+    const auto appendLayerName =
+        [&layers, &seenLayers](const QString& layerName)
+        {
+            const QString normalizedLayerName = layerName.trimmed().isEmpty()
+                ? QStringLiteral("0")
+                : layerName.trimmed();
+
+            if (seenLayers.contains(normalizedLayerName))
+            {
+                return;
+            }
+
+            seenLayers.insert(normalizedLayerName);
+            layers.push_back(normalizedLayerName);
+        };
+
+    appendLayerName(QStringLiteral("0"));
+
+    if (m_data != nullptr)
+    {
+        for (const DRW_Layer& layer : m_data->layers)
+        {
+            appendLayerName(QString::fromUtf8(layer.name.c_str()));
+        }
+    }
+
+    for (const std::unique_ptr<CadItem>& entity : m_entities)
+    {
+        if (entity == nullptr || entity->m_nativeEntity == nullptr)
+        {
+            continue;
+        }
+
+        appendLayerName(QString::fromUtf8(entity->m_nativeEntity->layer.c_str()));
+    }
+
+    return layers;
+}
+
+bool CadDocument::ensureLayerExists(const QString& layerName)
+{
+    if (m_data == nullptr)
+    {
+        return false;
+    }
+
+    const QString normalizedLayerName = layerName.trimmed().isEmpty()
+        ? QStringLiteral("0")
+        : layerName.trimmed();
+
+    for (const DRW_Layer& layer : m_data->layers)
+    {
+        if (QString::fromUtf8(layer.name.c_str()).compare(normalizedLayerName, Qt::CaseSensitive) == 0)
+        {
+            return false;
+        }
+    }
+
+    DRW_Layer layer;
+    layer.name = normalizedLayerName.toUtf8().constData();
+    m_data->layers.push_back(layer);
+    markContentChanged();
+    return true;
+}
+
+QColor CadDocument::layerColor(const QString& layerName, const QColor& fallback) const
+{
+    if (m_data == nullptr)
+    {
+        return fallback;
+    }
+
+    const QString normalizedLayerName = layerName.trimmed().isEmpty()
+        ? QStringLiteral("0")
+        : layerName.trimmed();
+
+    for (const DRW_Layer& layer : m_data->layers)
+    {
+        if (QString::fromUtf8(layer.name.c_str()).compare(normalizedLayerName, Qt::CaseSensitive) != 0)
+        {
+            continue;
+        }
+
+        const QColor trueColor = colorFromTrueColor(layer.color24);
+
+        if (trueColor.isValid())
+        {
+            return trueColor;
+        }
+
+        const QColor indexColor = colorFromAci(layer.color);
+        return indexColor.isValid() ? indexColor : fallback;
+    }
+
+    return fallback;
+}
+
+

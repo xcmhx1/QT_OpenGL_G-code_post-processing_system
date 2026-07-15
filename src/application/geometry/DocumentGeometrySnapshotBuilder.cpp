@@ -1,7 +1,7 @@
 #include "application/geometry/DocumentGeometrySnapshotBuilder.h"
 
-#include "CadDocument.h"
-#include "CadItem.h"
+#include "cad/document/CadDocument.h"
+#include "cad/items/CadItem.h"
 #include "infrastructure/dxf/DxfGeometryAdapter.h"
 
 #include <QThread>

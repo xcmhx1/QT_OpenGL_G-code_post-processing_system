@@ -1,6 +1,6 @@
 #include "application/nc/NcProgramService.h"
 
-#include "CadDocument.h"
+#include "cad/document/CadDocument.h"
 #include "application/machine/MachineTrajectoryService.h"
 #include "compatibility/legacy/DocumentNcMetadataAdapter.h"
 #include "compatibility/legacy/DocumentPlanarNcInputAdapter.h"

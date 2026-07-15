@@ -1,6 +1,6 @@
 #include "application/planning/ProcessPlanningService.h"
 
-#include "CadDocument.h"
+#include "cad/document/CadDocument.h"
 #include "application/planning/DocumentProcessPlanningAdapter.h"
 #include "core/planning/PlanarProcessPlanBuilder.h"
 #include "core/planning/ProcessPlanBuilder.h"

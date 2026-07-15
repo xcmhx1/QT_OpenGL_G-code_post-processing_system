@@ -1,7 +1,7 @@
 #include "compatibility/legacy/DocumentPlanarNcInputAdapter.h"
 
-#include "CadDocument.h"
-#include "CadItem.h"
+#include "cad/document/CadDocument.h"
+#include "cad/items/CadItem.h"
 #include "application/geometry/DocumentGeometrySnapshotBuilder.h"
 #include "compatibility/legacy/DocumentNcMetadataAdapter.h"
 

@@ -1,6 +1,6 @@
 #include "infrastructure/nc/GCodePostProcessor.h"
 
-#include "GProfile.h"
+#include "infrastructure/config/GProfile.h"
 
 #include <QStringList>
 

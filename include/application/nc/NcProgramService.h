@@ -1,6 +1,6 @@
 #pragma once
 
-#include "GProfile.h"
+#include "infrastructure/config/GProfile.h"
 #include "application/tasks/TaskContext.h"
 #include "core/machining/TubeSection.h"
 #include "core/nc/NcProgram.h"

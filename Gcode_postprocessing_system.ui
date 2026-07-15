@@ -121,7 +121,7 @@
   <customwidget>
    <class>CadViewer</class>
    <extends>QOpenGLWidget</extends>
-   <header>CadViewer.h</header>
+   <header>cad/view/CadViewer.h</header>
   </customwidget>
  </customwidgets>
  <resources>
