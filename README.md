@@ -96,14 +96,25 @@
 | 项目 | 当前工程配置 |
 | --- | --- |
 | 操作系统 | Windows x64；工程目标为 Windows 10 SDK |
-| IDE/编译器 | Visual Studio 18 Insiders，`PlatformToolset=v145` |
+| IDE | Visual Studio 2026 Insiders；当前安装内部版本为 18.8 |
+| IDE 可执行文件 | `D:\Program Files\Microsoft Visual Studio\18\Insiders\Common7\IDE\devenv.exe` |
+| 编译器 | MSVC `PlatformToolset=v145` |
 | C++ | C++17 |
-| Qt | Qt 6.9.3，MSVC 2022 x64，模块为 Core/Gui/Widgets/OpenGL/OpenGLWidgets |
+| Qt | Qt 6.9.3，套件标识 `msvc2022_64`，模块为 Core/Gui/Widgets/OpenGL/OpenGLWidgets |
 | OpenCV | OpenCV 4.11.0，工程默认 `OpenCVRoot=D:\develop\opencv` |
 | 图形 | 支持 OpenGL 的 Windows 图形环境；部署包含 Qt OpenGL 组件和软件 OpenGL 回退库 |
 | 构建模式 | 仅维护 `Release|x64` 验证要求 |
 
 如果 OpenCV 不在默认目录，应在 MSBuild 属性或本机工程设置中覆盖 `OpenCVRoot`，不要提交个人路径变更。
+
+Qt 安装目录中的 `msvc2022_64` 是 Qt 官方预编译套件名称，不代表本项目使用 Visual Studio 2022；当前项目 IDE 是 Visual Studio 2026 Insiders，工程使用 v145 工具集。
+
+使用当前 IDE 打开解决方案：
+
+```powershell
+& "D:\Program Files\Microsoft Visual Studio\18\Insiders\Common7\IDE\devenv.exe" `
+  ".\G-code_post-processing_system.slnx"
+```
 
 ### 4.2 构建
 
