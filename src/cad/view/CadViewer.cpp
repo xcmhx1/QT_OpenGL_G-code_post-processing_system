@@ -692,6 +692,7 @@ void CadViewer::renderEntities(const QMatrix4x4& viewProjection)
         m_selectedEntityId,
         m_theme,
         m_processVisualsVisible && m_excludedEntitiesDimmed,
+        m_processState,
         m_processPresentation
     );
 }

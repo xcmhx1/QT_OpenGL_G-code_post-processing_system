@@ -986,6 +986,27 @@ namespace
     }
 }
 
+CadProcessExclusionVisual resolveProcessExclusionVisual
+(
+    cadcam::geometry::EntityId entityId,
+    const cadcam::process::DocumentProcessState* processState,
+    const cadcam::process::ProcessPresentationSnapshot* presentation
+)
+{
+    const cadcam::process::EntityProcessState* state = processState != nullptr
+        ? processState->find(entityId) : nullptr;
+    if (state != nullptr && state->analysis.excludedAsInternalGeometry)
+    {
+        return CadProcessExclusionVisual::InternalGeometry;
+    }
+
+    const cadcam::process::ProcessPresentationEntry* entry = presentation != nullptr
+        ? presentation->find(entityId) : nullptr;
+    return entry != nullptr && entry->excluded
+        ? CadProcessExclusionVisual::PlannedExclusion
+        : CadProcessExclusionVisual::None;
+}
+
 bool isProcessVisualizable(const CadItem* item)
 {
     if (item == nullptr)

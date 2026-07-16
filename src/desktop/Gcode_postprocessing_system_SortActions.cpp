@@ -2660,7 +2660,7 @@ bool Gcode_postprocessing_system::removeInternalMachiningPaths(bool interactive)
 
     invalidateProcessOrdersAfterEndCutChange();
     refreshWasteProcessingExclusions();
-    const QString message = m_rotaryTubeSectionModel.valid
+    QString message = m_rotaryTubeSectionModel.valid
         ? QStringLiteral("内部线条识别完成：拓扑内部 %1 个，进入方管内部 %2 个，去重后共排除 %3 个图元。")
             .arg(topologicalItems.size())
             .arg(physicalItems.size())
@@ -2669,6 +2669,12 @@ bool Gcode_postprocessing_system::removeInternalMachiningPaths(bool interactive)
             .arg(topologicalItems.size())
             .arg(internalItems.size())
             .arg(result.skippedComponentCount);
+    if (!internalItems.isEmpty()
+        && (!ui->openGLWidget->processVisualsVisible()
+            || !ui->openGLWidget->excludedEntitiesDimmed()))
+    {
+        message += QStringLiteral(" 内部线状态已标记；当前排除图元显示已关闭。");
+    }
     ui->openGLWidget->appendCommandMessage(message);
     for (const Diagnostic& diagnostic : result.diagnostics)
     {
@@ -2943,9 +2949,15 @@ bool Gcode_postprocessing_system::toggleSelectedInternalPathAssignment()
 
     invalidateProcessOrdersAfterEndCutChange();
     refreshWasteProcessingExclusions();
-    const QString message = hasOrdinaryItem
+    QString message = hasOrdinaryItem
         ? QStringLiteral("已将选中图元指定为内部线条。")
         : QStringLiteral("已恢复选中的内部线条。");
+    if (hasOrdinaryItem
+        && (!ui->openGLWidget->processVisualsVisible()
+            || !ui->openGLWidget->excludedEntitiesDimmed()))
+    {
+        message += QStringLiteral(" 内部线状态已标记；当前排除图元显示已关闭。");
+    }
     ui->openGLWidget->appendCommandMessage(message);
     ui->openGLWidget->update();
     statusBar()->showMessage(message, 4000);

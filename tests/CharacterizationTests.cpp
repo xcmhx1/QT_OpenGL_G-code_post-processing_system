@@ -14,6 +14,7 @@
 #include "application/machine/MachineTrajectoryService.h"
 #include "application/process/DocumentProcessState.h"
 #include "application/process/ProcessPresentationSnapshot.h"
+#include "cad/view/rendering/CadProcessVisualUtils.h"
 #include "compatibility/legacy/LegacyCadItemPathBridge.h"
 #include "core/diagnostics/OperationResult.h"
 #include "core/geometry/EntityIdAllocator.h"
@@ -2297,6 +2298,24 @@ namespace
             && excluded->exclusionReason
                 == planning::ProcessExclusionReason::InternalGeometry,
             "process presentation derives assignment and exclusion data from plan");
+
+        process::DocumentProcessState visualState;
+        visualState.setInternalGeometryExcluded(10U, true);
+        check(resolveProcessExclusionVisual(10U, &visualState, nullptr)
+                == CadProcessExclusionVisual::InternalGeometry,
+            "direct internal geometry state remains visible without a process presentation");
+        if (presentation.value.has_value())
+        {
+            check(resolveProcessExclusionVisual(10U, &visualState, &*presentation.value)
+                    == CadProcessExclusionVisual::InternalGeometry,
+                "direct internal geometry state takes visual priority over plan exclusion");
+            check(resolveProcessExclusionVisual(10U, nullptr, &*presentation.value)
+                    == CadProcessExclusionVisual::PlannedExclusion,
+                "plan exclusion remains visible without direct internal state");
+            check(resolveProcessExclusionVisual(30U, &visualState, &*presentation.value)
+                    == CadProcessExclusionVisual::None,
+                "entity without direct or planned exclusion remains normal");
+        }
     }
 
     void testPlanarProcessPlanIsNcSourceOfTruth()

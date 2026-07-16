@@ -6,6 +6,7 @@
 #include "cad/view/rendering/CadEntityRenderer.h"
 
 #include "cad/items/CadItem.h"
+#include "cad/view/rendering/CadProcessVisualUtils.h"
 #include "cad/view/scene/CadSceneRenderCache.h"
 #include "cad/view/CadViewerUtils.h"
 
@@ -101,6 +102,7 @@ void CadEntityRenderer::renderEntities
     EntityId selectedEntityId,
     const AppThemeColors& theme,
     bool dimExcludedEntities,
+    const cadcam::process::DocumentProcessState* processState,
     const cadcam::process::ProcessPresentationSnapshot* presentation
 )
 {
@@ -134,15 +136,29 @@ void CadEntityRenderer::renderEntities
         EntityGpuBuffer& buffer = it->second;
         // 保持实体原始显示色；选中效果改由 Viewer 的叠加层统一绘制。
         const bool isSelected = entity->m_isSelected || id == selectedEntityId;
-        const auto* processEntry = presentation != nullptr ? presentation->find(id) : nullptr;
-        const bool isDimmed = dimExcludedEntities && processEntry != nullptr && processEntry->excluded;
-        const QVector3D color = isDimmed
-            ? (theme.dark ? QVector3D(0.58f, 0.48f, 0.34f) : QVector3D(0.48f, 0.39f, 0.28f))
-            : resolveDisplayColor(buffer.color, theme);
+        const CadProcessExclusionVisual exclusionVisual = dimExcludedEntities
+            ? resolveProcessExclusionVisual(id, processState, presentation)
+            : CadProcessExclusionVisual::None;
+        QVector3D color = resolveDisplayColor(buffer.color, theme);
+        float opacity = 1.0f;
+        if (exclusionVisual == CadProcessExclusionVisual::InternalGeometry)
+        {
+            color = theme.dark
+                ? QVector3D(0.56f, 0.30f, 0.44f)
+                : QVector3D(0.43f, 0.22f, 0.34f);
+            opacity = 0.36f;
+        }
+        else if (exclusionVisual == CadProcessExclusionVisual::PlannedExclusion)
+        {
+            color = theme.dark
+                ? QVector3D(0.58f, 0.48f, 0.34f)
+                : QVector3D(0.48f, 0.39f, 0.28f);
+            opacity = 0.42f;
+        }
         const float pointSize = buffer.primitiveType == GL_POINTS ? (isSelected ? 9.5f : 8.0f) : 1.0f;
 
         shader.setUniformValue("uColor", color);
-        shader.setUniformValue("uOpacity", isDimmed ? 0.42f : 1.0f);
+        shader.setUniformValue("uOpacity", opacity);
         shader.setUniformValue("uPointSize", pointSize);
 
         // 每个实体使用自己的 VAO，内部已经绑定好了顶点格式和 VBO。

@@ -73,6 +73,7 @@
     <ClCompile Include="TranslationInvarianceTests.cpp" />
     <ClCompile Include="..\src\cad\document\CadDocument.cpp" />
     <ClCompile Include="..\src\cad\items\CadItem.cpp" />
+    <ClCompile Include="..\src\cad\view\rendering\CadProcessVisualUtils.cpp" />
     <ClCompile Include="..\src\cad\items\CadLineItem.cpp" />
     <ClCompile Include="..\src\cad\items\CadCircleItem.cpp" />
     <ClCompile Include="..\src\cad\items\CadArcItem.cpp" />

@@ -115,6 +115,7 @@ public:
     void setProcessOrderVisible(bool visible);
     void setRotaryEndCutsVisible(bool visible);
     void setExcludedEntitiesDimmed(bool dimmed);
+    bool excludedEntitiesDimmed() const { return m_excludedEntitiesDimmed; }
     void setBackgroundGridVisible(bool visible);
 
     // 开始绘制指定类型图元。

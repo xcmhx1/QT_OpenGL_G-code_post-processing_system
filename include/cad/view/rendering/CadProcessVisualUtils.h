@@ -3,6 +3,7 @@
 #include <QVector>
 #include <QVector3D>
 
+#include "application/process/DocumentProcessState.h"
 #include "application/process/ProcessPresentationSnapshot.h"
 
 class CadItem;
@@ -19,6 +20,13 @@ struct CadProcessVisualInfo
     QVector3D endPoint;
     QVector3D direction;
     QVector3D labelAnchor;
+};
+
+enum class CadProcessExclusionVisual
+{
+    None,
+    InternalGeometry,
+    PlannedExclusion
 };
 
 enum class CadSelectionHandleShape
@@ -38,6 +46,13 @@ struct CadSelectionHandleInfo
 };
 
 bool isProcessVisualizable(const CadItem* item);
+
+CadProcessExclusionVisual resolveProcessExclusionVisual
+(
+    cadcam::geometry::EntityId entityId,
+    const cadcam::process::DocumentProcessState* processState,
+    const cadcam::process::ProcessPresentationSnapshot* presentation
+);
 
 CadProcessVisualInfo buildProcessVisualInfo
 (

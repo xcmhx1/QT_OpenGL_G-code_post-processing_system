@@ -11,6 +11,7 @@
 
 #include "desktop/AppTheme.h"
 #include "cad/view/rendering/CadRenderTypes.h"
+#include "application/process/DocumentProcessState.h"
 #include "application/process/ProcessPresentationSnapshot.h"
 
 class CadItem;
@@ -36,6 +37,7 @@ public:
         EntityId selectedEntityId,
         const AppThemeColors& theme,
         bool dimExcludedEntities,
+        const cadcam::process::DocumentProcessState* processState,
         const cadcam::process::ProcessPresentationSnapshot* presentation
     );
 };
