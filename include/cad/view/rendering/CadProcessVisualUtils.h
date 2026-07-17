@@ -49,7 +49,7 @@ bool isProcessVisualizable(const CadItem* item);
 
 CadProcessExclusionVisual resolveProcessExclusionVisual
 (
-    cadcam::geometry::EntityId entityId,
+    const CadItem* item,
     const cadcam::process::DocumentProcessState* processState,
     const cadcam::process::ProcessPresentationSnapshot* presentation
 );

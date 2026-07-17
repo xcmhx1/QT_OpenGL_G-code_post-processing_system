@@ -213,7 +213,7 @@ std::vector<CadViewer::ProcessOrderLabelOverlay> CadViewer::buildProcessOrderLab
 
         const auto* presentation = m_processPresentation != nullptr
             ? m_processPresentation->find(entity->m_entityId) : nullptr;
-        if (resolveProcessExclusionVisual(entity->m_entityId, m_processState, m_processPresentation)
+        if (resolveProcessExclusionVisual(entity.get(), m_processState, m_processPresentation)
             != CadProcessExclusionVisual::None)
         {
             continue;

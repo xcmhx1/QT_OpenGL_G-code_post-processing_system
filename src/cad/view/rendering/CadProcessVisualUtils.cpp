@@ -986,25 +986,50 @@ namespace
     }
 }
 
+namespace
+{
+    CadProcessExclusionVisual resolveProcessExclusionVisualByEntityId
+    (
+        cadcam::geometry::EntityId entityId,
+        const cadcam::process::DocumentProcessState* processState,
+        const cadcam::process::ProcessPresentationSnapshot* presentation
+    )
+    {
+        const cadcam::process::EntityProcessState* state = processState != nullptr
+            ? processState->find(entityId) : nullptr;
+        if (state != nullptr && state->analysis.excludedAsInternalGeometry)
+        {
+            return CadProcessExclusionVisual::InternalGeometry;
+        }
+
+        const cadcam::process::ProcessPresentationEntry* entry = presentation != nullptr
+            ? presentation->find(entityId) : nullptr;
+        return entry != nullptr && entry->excluded
+            ? CadProcessExclusionVisual::PlannedExclusion
+            : CadProcessExclusionVisual::None;
+    }
+}
+
 CadProcessExclusionVisual resolveProcessExclusionVisual
 (
-    cadcam::geometry::EntityId entityId,
+    const CadItem* item,
     const cadcam::process::DocumentProcessState* processState,
     const cadcam::process::ProcessPresentationSnapshot* presentation
 )
 {
-    const cadcam::process::EntityProcessState* state = processState != nullptr
-        ? processState->find(entityId) : nullptr;
-    if (state != nullptr && state->analysis.excludedAsInternalGeometry)
+    if (item == nullptr)
     {
-        return CadProcessExclusionVisual::InternalGeometry;
+        return CadProcessExclusionVisual::None;
     }
 
-    const cadcam::process::ProcessPresentationEntry* entry = presentation != nullptr
-        ? presentation->find(entityId) : nullptr;
-    return entry != nullptr && entry->excluded
-        ? CadProcessExclusionVisual::PlannedExclusion
-        : CadProcessExclusionVisual::None;
+    const cadcam::geometry::EntityId processEntityId = item->m_entityId;
+    if (processEntityId == 0)
+    {
+        return CadProcessExclusionVisual::None;
+    }
+
+    return resolveProcessExclusionVisualByEntityId
+        (processEntityId, processState, presentation);
 }
 
 bool isProcessVisualizable(const CadItem* item)

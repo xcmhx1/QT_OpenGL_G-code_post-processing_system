@@ -124,8 +124,8 @@ void CadEntityRenderer::renderEntities
 
     for (const std::unique_ptr<CadItem>& entity : entities)
     {
-        const EntityId id = CadViewerUtils::toEntityId(entity.get());
-        const auto it = entityBuffers.find(id);
+        const EntityId renderEntityId = CadViewerUtils::toEntityId(entity.get());
+        const auto it = entityBuffers.find(renderEntityId);
 
         // 没有 GPU 缓冲的实体说明尚未上传或已被清理，直接跳过。
         if (it == entityBuffers.end())
@@ -135,9 +135,9 @@ void CadEntityRenderer::renderEntities
 
         EntityGpuBuffer& buffer = it->second;
         // 保持实体原始显示色；选中效果改由 Viewer 的叠加层统一绘制。
-        const bool isSelected = entity->m_isSelected || id == selectedEntityId;
+        const bool isSelected = entity->m_isSelected || renderEntityId == selectedEntityId;
         const CadProcessExclusionVisual exclusionVisual = dimExcludedEntities
-            ? resolveProcessExclusionVisual(id, processState, presentation)
+            ? resolveProcessExclusionVisual(entity.get(), processState, presentation)
             : CadProcessExclusionVisual::None;
         QVector3D color = resolveDisplayColor(buffer.color, theme);
         float opacity = 1.0f;

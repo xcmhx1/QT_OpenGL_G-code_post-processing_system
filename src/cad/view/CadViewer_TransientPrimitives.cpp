@@ -110,7 +110,7 @@ std::vector<TransientPrimitive> CadViewer::buildProcessArrowPrimitives() const
         const auto* presentation = m_processPresentation != nullptr
             ? m_processPresentation->find(entity->m_entityId) : nullptr;
         if (presentation == nullptr
-            || resolveProcessExclusionVisual(entity->m_entityId, m_processState, m_processPresentation)
+            || resolveProcessExclusionVisual(entity.get(), m_processState, m_processPresentation)
                 != CadProcessExclusionVisual::None) continue;
         const CadProcessVisualInfo info = buildProcessVisualInfo(entity.get(), presentation);
 

@@ -7,6 +7,7 @@
 #include "cad/items/CadLWPolylineItem.h"
 #include "cad/geometry/CadOcsGeometry.h"
 #include "cad/items/CadPolylineItem.h"
+#include "cad/view/CadViewerUtils.h"
 #include "compatibility/legacy/CadSplineConverter.h"
 #include "application/export/GGenerator.h"
 #include "infrastructure/config/GProfile.h"
@@ -2299,23 +2300,46 @@ namespace
                 == planning::ProcessExclusionReason::InternalGeometry,
             "process presentation derives assignment and exclusion data from plan");
 
+        auto visualEntity = makeLine(0.0, 0.0, 0.0, 10.0, 0.0, 0.0);
+        CadLineItem visualItem(visualEntity.get());
+        visualItem.m_entityId = 1234U;
+        check(CadViewerUtils::toEntityId(&visualItem) != visualItem.m_entityId,
+            "Viewer render EntityId differs from stable process EntityId");
+
         process::DocumentProcessState visualState;
-        visualState.setInternalGeometryExcluded(10U, true);
-        check(resolveProcessExclusionVisual(10U, &visualState, nullptr)
+        visualState.setInternalGeometryExcluded(visualItem.m_entityId, true);
+        check(resolveProcessExclusionVisual(&visualItem, &visualState, nullptr)
                 == CadProcessExclusionVisual::InternalGeometry,
-            "direct internal geometry state remains visible without a process presentation");
-        if (presentation.value.has_value())
+            "CadItem process EntityId resolves direct internal state without presentation");
+
+        visualState.setInternalGeometryExcluded(visualItem.m_entityId, false);
+        check(resolveProcessExclusionVisual(&visualItem, &visualState, nullptr)
+                == CadProcessExclusionVisual::None,
+            "restored CadItem internal state resolves to normal display");
+
+        planning::ProcessPlan visualPlan;
+        visualPlan.exclusions.push_back
+            ({ visualItem.m_entityId, planning::ProcessExclusionReason::InternalGeometry });
+        const auto visualPresentation = process::ProcessPresentationSnapshot::build
+            (visualPlan, testContext(QStringLiteral("process-visual-entity-id-test")));
+        check(visualPresentation.succeeded() && visualPresentation.value.has_value(),
+            "process visual presentation builds for stable CadItem EntityId");
+        if (visualPresentation.value.has_value())
         {
-            check(resolveProcessExclusionVisual(10U, &visualState, &*presentation.value)
-                    == CadProcessExclusionVisual::InternalGeometry,
-                "direct internal geometry state takes visual priority over plan exclusion");
-            check(resolveProcessExclusionVisual(10U, nullptr, &*presentation.value)
+            check(resolveProcessExclusionVisual(&visualItem, &visualState, &*visualPresentation.value)
                     == CadProcessExclusionVisual::PlannedExclusion,
-                "plan exclusion remains visible without direct internal state");
-            check(resolveProcessExclusionVisual(30U, &visualState, &*presentation.value)
-                    == CadProcessExclusionVisual::None,
-                "entity without direct or planned exclusion remains normal");
+                "CadItem process EntityId resolves plan exclusion");
+            visualState.setInternalGeometryExcluded(visualItem.m_entityId, true);
+            check(resolveProcessExclusionVisual(&visualItem, &visualState, &*visualPresentation.value)
+                    == CadProcessExclusionVisual::InternalGeometry,
+                "direct CadItem internal state takes priority over plan exclusion");
         }
+
+        visualItem.m_entityId = 0;
+        check(resolveProcessExclusionVisual(&visualItem, &visualState,
+                  visualPresentation.value.has_value() ? &*visualPresentation.value : nullptr)
+                == CadProcessExclusionVisual::None,
+            "CadItem without stable process EntityId has no process exclusion visual");
     }
 
     void testPlanarProcessPlanIsNcSourceOfTruth()

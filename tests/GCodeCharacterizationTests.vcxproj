@@ -26,7 +26,7 @@
   </ImportGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'Release|x64'" Label="QtSettings">
     <QtInstall>6.9.3_msvc2022_64</QtInstall>
-    <QtModules>core;gui;widgets</QtModules>
+    <QtModules>core;gui;widgets;opengl;openglwidgets</QtModules>
     <QtBuildConfig>release</QtBuildConfig>
   </PropertyGroup>
   <Target Name="QtMsBuildNotFound" BeforeTargets="CustomBuild;ClCompile" Condition="!Exists('$(QtMsBuild)\qt.targets') or !Exists('$(QtMsBuild)\qt.props')">
@@ -73,6 +73,7 @@
     <ClCompile Include="TranslationInvarianceTests.cpp" />
     <ClCompile Include="..\src\cad\document\CadDocument.cpp" />
     <ClCompile Include="..\src\cad\items\CadItem.cpp" />
+    <ClCompile Include="..\src\cad\view\CadViewerUtils.cpp" />
     <ClCompile Include="..\src\cad\view\rendering\CadProcessVisualUtils.cpp" />
     <ClCompile Include="..\src\cad\items\CadLineItem.cpp" />
     <ClCompile Include="..\src\cad\items\CadCircleItem.cpp" />

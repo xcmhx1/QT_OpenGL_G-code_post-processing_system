@@ -1,3 +1,0 @@
-Clementine
-DESKTOP-DELLG16 
-2026Äê7ÔÂ17ÈÕ  0:05:59
