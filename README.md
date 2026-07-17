@@ -223,17 +223,23 @@ NC 文件
 
 `rawPathPoints3D` 仍存在，但只用于尚未移除的兼容边界和部分旧 UI 分析调用，不是新的几何、规划或 NC 事实来源。`CadItem` 不拥有加工顺序、实际 reverse、连续组、Break/Waste、内部排除或四轴机床轨迹。
 
-### 7.2 SourceEntity
+### 7.2 身份模型
+
+`cadcam::geometry::EntityId` 是文档和加工链中的稳定业务身份，来源为 `CadItem::m_entityId`，贯穿 `SourceEntity`、`Path3D`、`DocumentProcessState`、`ProcessPlan`、`MachineTrajectory` 和 `NcProgram`。对象地址不得进入这些状态或输出模型。
+
+`RenderEntityKey` 是 Viewer 内部的短生命周期强类型键，只用于 GPU buffer、拾取、临时选择和交互覆盖层。它由 `CadItem*` 经 `CadViewerUtils::toRenderEntityKey()` 创建，不可转换为稳定 `EntityId`，也不可跨对象或文档生命周期持久保存。`DRW_Entity*` 和 `CadItem*` 仅用于对象访问，不承担业务身份。
+
+### 7.3 SourceEntity
 
 `SourceEntity` 是从 DXF/CAD 捕获的精确几何值对象，使用稳定 `EntityId` 和 `SourceGeometryKind` 描述 Point、Line、Arc、Circle、Ellipse、Polyline 和 Spline 等几何。它不保存 `CadItem*`、`DRW_Entity*` 或 GUI 对象，是 CAD 精确事实进入核心计算的边界。
 
-### 7.3 Path3D
+### 7.4 Path3D
 
 `Path3D` 是统一计算路径，坐标为世界坐标 `double`，包含 `EntityId`、来源类型、顶点和 `sourceParameter`。`closed` 独立表达语义闭合，核心闭合路径不重复保存首点。
 
 `Path3D` 是拓扑、规划和轨迹的重要输入，但它是采样后的计算表示，不替代 `SourceEntity` 中的精确圆弧、椭圆或 NURBS 事实。
 
-### 7.4 DocumentProcessState
+### 7.5 DocumentProcessState
 
 `DocumentProcessState` 保存用户和分析层的加工输入：
 
@@ -246,7 +252,7 @@ NC 文件
 
 自动计划结果不得写回这些用户意图。
 
-### 7.5 ProcessPlan
+### 7.6 ProcessPlan
 
 `ProcessPlan` 保存一次规划的不可变结果：
 
@@ -258,11 +264,11 @@ NC 文件
 - 加工断面前置约束；
 - `NearestNext` 或 `LazyRotation` 策略。
 
-### 7.6 ProcessPresentationSnapshot
+### 7.7 ProcessPresentationSnapshot
 
 `ProcessPresentationSnapshot` 由 `ProcessPlan` 构建，只向 Viewer/显示层提供加工序号、方向、起点、连续组和排除状态。它不参与规划、机床轨迹或 NC 生成。
 
-### 7.7 MachineTrajectory
+### 7.8 MachineTrajectory
 
 `MachineTrajectory` 保存四轴机床运动事实：
 
@@ -274,7 +280,7 @@ NC 文件
 
 它不保存 `CadItem`、DRW、GUI 对象或完整 G-code 字符串。
 
-### 7.8 NcProgram
+### 7.9 NcProgram
 
 `NcProgram` 是与文本方言分离的 NC 语义模型，保存程序模式、注释、实体元数据块，以及 Rapid/Linear/Circular 运动。轴字为可选的 X/Y/Z/A/I/J/K/R，并保留 `EntityId`、`processOrder` 和 group 元数据。
 
@@ -296,6 +302,20 @@ NC 文件
 | UI/CAD | `CadItem`、Viewer、Controller、窗口 | 编辑、显示和用户操作 | 计划、机床轨迹和 NC 事实 |
 
 `RotaryTubeGeometryAnalyzer` 和 `RotaryCutBoundaryAnalyzer` 当前是 Qt/CadItem 兼容入口；最终截面和加工断面算法分别归 `TubeSectionAnalyzer` 与 `TubeCutBoundaryClassifier` 所有。
+
+### 8.1 Compatibility 状态
+
+本阶段审计的 11 个重点兼容模块按生产调用和测试用途分类如下：
+
+| 分类 | 数量 | 当前状态 |
+| --- | ---: | --- |
+| `DeleteNow` | 0 | 未发现同时满足无生产调用、无有效测试用途和无隐式注册的可直接删除项 |
+| `TestOnlyParity` | 2 | 仅由无 GUI 测试使用，已从主程序工程移除并保留在测试工程 |
+| `ProductionAdapter` | 5 | 正式入口仍需要其完成 CadItem/DRW 到现有核心值对象的边界转换 |
+| `Blocked` | 3 | 仍涉及生产缓存、兼容采样或明确 fallback，当前删除会改变行为 |
+| `ThirdPartyBoundary` | 1 | `infrastructure/dxf/legacy` 中的 `dx_iface` 承担 libdxfrw 格式边界，不属于待删除的旧生产算法 |
+
+新的核心模块不得依赖 `compatibility`。兼容代码删除前必须同时确认生产 callers、测试 callers、工程项、Qt 隐式使用以及 Release 构建和行为测试，不能依据目录名或“零调用者”单独判断。
 
 ## 9. 数值稳定性
 

@@ -67,10 +67,10 @@ public:
     // @return 只读渲染缓存引用
     const CadSceneRenderCache& renderCache() const;
 
-    // 通过实体 ID 查找对应场景对象
-    // @param id 实体 ID
+    // 通过 Viewer 实体键查找对应场景对象
+    // @param renderKey Viewer 实体键
     // @return 对应实体指针，未找到时返回 nullptr
-    CadItem* findEntityById(EntityId id) const;
+    CadItem* findEntityByRenderKey(RenderEntityKey renderKey) const;
 
 private:
     // scene context 管理文档绑定、边界和基础场景查询。

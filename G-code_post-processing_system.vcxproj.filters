@@ -1028,12 +1028,6 @@
     <ClCompile Include="src\compatibility\legacy\SplineProductionPathProvider.cpp">
       <Filter>Source Files\compatibility\legacy</Filter>
     </ClCompile>
-    <ClCompile Include="src\compatibility\legacy\GeometrySnapshotParityVerifier.cpp">
-      <Filter>Source Files\compatibility\legacy</Filter>
-    </ClCompile>
-    <ClCompile Include="src\compatibility\legacy\LegacyTopologyParityVerifier.cpp">
-      <Filter>Source Files\compatibility\legacy</Filter>
-    </ClCompile>
     <ClCompile Include="src\application\messaging\MessageCenter.cpp">
       <Filter>Source Files\application\messaging</Filter>
     </ClCompile>
@@ -1085,9 +1079,6 @@
     <ClInclude Include="include\compatibility\legacy\SplineProductionPathProvider.h">
       <Filter>Header Files\compatibility\legacy</Filter>
     </ClInclude>
-    <ClInclude Include="include\compatibility\legacy\GeometrySnapshotParityVerifier.h">
-      <Filter>Header Files\compatibility\legacy</Filter>
-    </ClInclude>
     <ClInclude Include="include\application\geometry\GeometrySnapshot.h">
       <Filter>Header Files\application\geometry</Filter>
     </ClInclude>
@@ -1126,9 +1117,6 @@
     </ClInclude>
     <ClInclude Include="include\infrastructure\nc\GCodePostProcessorProfile.h">
       <Filter>Header Files\infrastructure\nc</Filter>
-    </ClInclude>
-    <ClInclude Include="include\compatibility\legacy\LegacyTopologyParityVerifier.h">
-      <Filter>Header Files\compatibility\legacy</Filter>
     </ClInclude>
     <ClInclude Include="include\compatibility\legacy\LegacyCadItemTopologyAdapter.h">
       <Filter>Header Files\compatibility\legacy</Filter>

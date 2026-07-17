@@ -13,13 +13,12 @@
 
 namespace CadViewerUtils
 {
-    // 把对象地址稳定映射为实体 ID
+    // 把对象地址映射为 Viewer 短生命周期缓存键
     // @param entity 实体对象指针
-    // @return 运行期实体 ID
-    EntityId toEntityId(const CadItem* entity)
+    // @return Viewer 运行期实体键
+    RenderEntityKey toRenderEntityKey(const CadItem* entity)
     {
-        // 直接以对象地址作为运行期实体 ID，避免额外维护独立编号表。
-        return static_cast<EntityId>(reinterpret_cast<quintptr>(entity));
+        return RenderEntityKey(reinterpret_cast<std::uintptr_t>(entity));
     }
 
     // 把世界坐标投影到屏幕像素坐标

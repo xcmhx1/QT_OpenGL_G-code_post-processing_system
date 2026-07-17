@@ -8,6 +8,7 @@
 #include "cad/geometry/CadOcsGeometry.h"
 #include "cad/items/CadPolylineItem.h"
 #include "cad/view/CadViewerUtils.h"
+#include "cad/view/scene/CadSceneRenderCache.h"
 #include "compatibility/legacy/CadSplineConverter.h"
 #include "application/export/GGenerator.h"
 #include "infrastructure/config/GProfile.h"
@@ -35,10 +36,15 @@
 #include "infrastructure/dxf/legacy/dx_data.h"
 
 #include <QDir>
+#include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
+
+#include <type_traits>
+#include <unordered_map>
+#include <utility>
 #include <QJsonObject>
 
 #include <algorithm>
@@ -193,6 +199,22 @@ namespace
     QString goldenDirectory()
     {
         return QDir(QFileInfo(QString::fromUtf8(__FILE__)).absolutePath()).filePath(QStringLiteral("golden"));
+    }
+
+    QString repositoryRoot()
+    {
+        return QDir(QFileInfo(QString::fromUtf8(__FILE__)).absolutePath())
+            .absoluteFilePath(QStringLiteral(".."));
+    }
+
+    QByteArray readRepositoryFile(const QString& relativePath)
+    {
+        QFile file(QDir(repositoryRoot()).filePath(relativePath));
+        if (!file.open(QIODevice::ReadOnly))
+        {
+            return {};
+        }
+        return file.readAll();
     }
 
     void verifyGolden(const QString& fileName, const QString& actual)
@@ -2303,11 +2325,34 @@ namespace
         auto visualEntity = makeLine(0.0, 0.0, 0.0, 10.0, 0.0, 0.0);
         CadLineItem visualItem(visualEntity.get());
         visualItem.m_entityId = 1234U;
-        check(CadViewerUtils::toEntityId(&visualItem) != visualItem.m_entityId,
-            "Viewer render EntityId differs from stable process EntityId");
+        const RenderEntityKey renderKey = CadViewerUtils::toRenderEntityKey(&visualItem);
+        check(renderKey.valid(), "CadItem receives a valid Viewer render key");
+        check(CadViewerUtils::toRenderEntityKey(&visualItem) == renderKey,
+            "same CadItem receives the same Viewer render key");
+        check(!CadViewerUtils::toRenderEntityKey(nullptr).valid(),
+            "null CadItem receives an invalid Viewer render key");
+
+        auto secondVisualEntity = makeLine(0.0, 1.0, 0.0, 10.0, 1.0, 0.0);
+        CadLineItem secondVisualItem(secondVisualEntity.get());
+        secondVisualItem.m_entityId = 5678U;
+        check(CadViewerUtils::toRenderEntityKey(&secondVisualItem) != renderKey,
+            "different live CadItems receive different Viewer render keys");
+
+        using RenderBufferMap = std::remove_reference_t<decltype
+            (std::declval<CadSceneRenderCache&>().entityBuffers())>;
+        static_assert(std::is_same_v
+            <
+                RenderBufferMap,
+                std::unordered_map<RenderEntityKey, EntityGpuBuffer, RenderEntityKeyHash>
+            >);
 
         process::DocumentProcessState visualState;
         visualState.setInternalGeometryExcluded(visualItem.m_entityId, true);
+        const process::EntityProcessState* storedVisualState =
+            visualState.find(visualItem.m_entityId);
+        check(storedVisualState != nullptr
+                && storedVisualState->analysis.excludedAsInternalGeometry,
+            "DocumentProcessState resolves the stable CadItem EntityId");
         check(resolveProcessExclusionVisual(&visualItem, &visualState, nullptr)
                 == CadProcessExclusionVisual::InternalGeometry,
             "CadItem process EntityId resolves direct internal state without presentation");
@@ -2340,6 +2385,124 @@ namespace
                   visualPresentation.value.has_value() ? &*visualPresentation.value : nullptr)
                 == CadProcessExclusionVisual::None,
             "CadItem without stable process EntityId has no process exclusion visual");
+
+        auto recreatedEntity = makeLine(0.0, 2.0, 0.0, 10.0, 2.0, 0.0);
+        CadLineItem recreatedItem(recreatedEntity.get());
+        check(CadViewerUtils::toRenderEntityKey(&recreatedItem).valid(),
+            "new CadItem receives a valid key without assuming address non-reuse");
+    }
+
+    void testIdentityAndDependencySourceBoundaries()
+    {
+        const QByteArray mainProject = readRepositoryFile
+            (QStringLiteral("G-code_post-processing_system.vcxproj"));
+        const QByteArray testProject = readRepositoryFile
+            (QStringLiteral("tests/GCodeCharacterizationTests.vcxproj"));
+        check(!mainProject.isEmpty(), "main project source boundary file opens");
+        check(!testProject.isEmpty(), "test project source boundary file opens");
+        check(!mainProject.contains("GeometrySnapshotParityVerifier")
+                && !mainProject.contains("LegacyTopologyParityVerifier"),
+            "test-only parity verifiers are absent from the main program");
+        check(testProject.contains("GeometrySnapshotParityVerifier")
+                && testProject.contains("LegacyTopologyParityVerifier"),
+            "test-only parity verifiers remain in the test program");
+
+        int pointerAddressConversionCount = 0;
+        bool pointerAddressConversionOutsideFactory = false;
+        bool oldAddressIdFactoryFound = false;
+        const QString root = repositoryRoot();
+        for (const QString& directory : { QStringLiteral("include"), QStringLiteral("src") })
+        {
+            QDirIterator iterator
+            (
+                QDir(root).filePath(directory),
+                { QStringLiteral("*.h"), QStringLiteral("*.cpp") },
+                QDir::Files,
+                QDirIterator::Subdirectories
+            );
+            while (iterator.hasNext())
+            {
+                const QString path = iterator.next();
+                QFile file(path);
+                if (!file.open(QIODevice::ReadOnly))
+                {
+                    check(false, "identity source boundary file opens");
+                    continue;
+                }
+                const QByteArray text = file.readAll();
+                oldAddressIdFactoryFound = oldAddressIdFactoryFound
+                    || text.contains("toEntityId(");
+                if (text.contains("reinterpret_cast<std::uintptr_t>"))
+                {
+                    ++pointerAddressConversionCount;
+                    pointerAddressConversionOutsideFactory =
+                        pointerAddressConversionOutsideFactory
+                        || !QDir::cleanPath(path).endsWith
+                            (QStringLiteral("src/cad/view/CadViewerUtils.cpp"));
+                }
+            }
+        }
+        check(!oldAddressIdFactoryFound, "legacy Viewer toEntityId factory is removed");
+        check(pointerAddressConversionCount == 1
+                && !pointerAddressConversionOutsideFactory,
+            "CadItem address conversion is confined to toRenderEntityKey");
+
+        bool forbiddenCoreDependency = false;
+        for (const QString& directory :
+            { QStringLiteral("include/core"), QStringLiteral("src/core") })
+        {
+            QDirIterator iterator
+            (
+                QDir(root).filePath(directory),
+                { QStringLiteral("*.h"), QStringLiteral("*.cpp") },
+                QDir::Files,
+                QDirIterator::Subdirectories
+            );
+            while (iterator.hasNext())
+            {
+                QFile file(iterator.next());
+                if (!file.open(QIODevice::ReadOnly))
+                {
+                    check(false, "core dependency source file opens");
+                    continue;
+                }
+                const QByteArray text = file.readAll();
+                forbiddenCoreDependency = forbiddenCoreDependency
+                    || text.contains("#include \"cad/")
+                    || text.contains("#include \"ui/")
+                    || text.contains("#include \"compatibility/");
+            }
+        }
+        check(!forbiddenCoreDependency,
+            "core source does not depend on cad ui or compatibility");
+
+        bool renderKeyOutsideViewer = false;
+        for (const QString& directory :
+            {
+                QStringLiteral("include/application"), QStringLiteral("src/application"),
+                QStringLiteral("include/core"), QStringLiteral("src/core"),
+                QStringLiteral("include/infrastructure"), QStringLiteral("src/infrastructure")
+            })
+        {
+            QDirIterator iterator
+            (
+                QDir(root).filePath(directory),
+                { QStringLiteral("*.h"), QStringLiteral("*.cpp") },
+                QDir::Files,
+                QDirIterator::Subdirectories
+            );
+            while (iterator.hasNext())
+            {
+                QFile file(iterator.next());
+                if (file.open(QIODevice::ReadOnly)
+                    && file.readAll().contains("RenderEntityKey"))
+                {
+                    renderKeyOutsideViewer = true;
+                }
+            }
+        }
+        check(!renderKeyOutsideViewer,
+            "RenderEntityKey does not enter application core or infrastructure");
     }
 
     void testPlanarProcessPlanIsNcSourceOfTruth()
@@ -2409,6 +2572,7 @@ int main(int argc, char* argv[])
     testNcProgramPipeline();
     testPlanarNcProgramPipeline();
     testDocumentProcessStateAndPresentation();
+    testIdentityAndDependencySourceBoundaries();
     testPlanarProcessPlanIsNcSourceOfTruth();
     testFailures();
     failureCount += runSplineProductionTests(updateSplineProductionGoldenFiles);

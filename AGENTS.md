@@ -82,7 +82,10 @@
 - `GGenerator` 只编排服务和写文件，不重新生成几何、A 轴、安全移动或过切。
 - UI、Viewer 和主窗口不得成为几何、规划、轨迹或 NC 算法所有者。
 - Core 不依赖 `CadItem`、DRW、QObject、QWidget 或 GUI。
+- 稳定加工身份只能来自 `CadItem::m_entityId`；不得使用对象地址作为业务 `EntityId`。
+- Viewer 短生命周期缓存和选择键必须使用 `RenderEntityKey`，不得跨对象生命周期持久保存。
 - Compatibility 只处理边界兼容，不承接新功能所有权。
+- 新核心不得依赖 compatibility。
 
 ## 7. Numerical Rules
 
@@ -164,6 +167,8 @@
 - 修改第三方 DXF 边界前先证明问题位于该层。
 - 配置键变化必须提供兼容迁移或明确破坏性说明。
 - 用户可见术语应在 UI、README 和诊断中保持一致。
+- 删除遗留代码前必须分别检查生产 callers 和测试 callers；仅测试使用的 parity 不得编入主程序。
+- 修改调用边界前优先使用 CodeGraph 检查 callers、callees 和依赖路径，结果必须再由源码、测试和构建验证。
 
 ## 14. Editing Rules
 

@@ -21,11 +21,11 @@ void CadSceneRenderCache::uploadEntity(const CadItem* entity)
         return;
     }
 
-    const EntityId id = CadViewerUtils::toEntityId(entity);
+    const RenderEntityKey renderKey = CadViewerUtils::toRenderEntityKey(entity);
     // 先删旧缓冲再重建，避免刷新实体时残留历史 VAO/VBO。
-    removeEntityBuffer(id);
+    removeEntityBuffer(renderKey);
 
-    EntityGpuBuffer& gpuBuffer = m_entityBuffers[id];
+    EntityGpuBuffer& gpuBuffer = m_entityBuffers[renderKey];
     // 这里把图元缓存转换为渲染层直接可用的顶点数、图元类型和 RGB 颜色。
     gpuBuffer.vertexCount = entity->m_geometry.vertices.size();
     gpuBuffer.primitiveType = CadViewerUtils::primitiveTypeForEntity(entity);
@@ -64,11 +64,11 @@ void CadSceneRenderCache::uploadEntity(const CadItem* entity)
 }
 
 // 删除指定实体对应的 GPU 资源
-// @param id 目标实体 ID
-void CadSceneRenderCache::removeEntityBuffer(EntityId id)
+// @param renderKey 目标 Viewer 实体键
+void CadSceneRenderCache::removeEntityBuffer(RenderEntityKey renderKey)
 {
     // 删除前先销毁底层 OpenGL 资源，再把缓存表项移除。
-    const auto it = m_entityBuffers.find(id);
+    const auto it = m_entityBuffers.find(renderKey);
 
     if (it == m_entityBuffers.end())
     {
@@ -97,9 +97,9 @@ void CadSceneRenderCache::rebuildAllBuffers(const std::vector<std::unique_ptr<Ca
 void CadSceneRenderCache::clearAllBuffers()
 {
     // 显式销毁 VAO/VBO，确保上下文仍有效时能及时释放 GPU 资源。
-    for (auto& [id, buffer] : m_entityBuffers)
+    for (auto& [renderKey, buffer] : m_entityBuffers)
     {
-        Q_UNUSED(id);
+        Q_UNUSED(renderKey);
         buffer.vao.destroy();
         buffer.vbo.destroy();
     }
@@ -109,14 +109,16 @@ void CadSceneRenderCache::clearAllBuffers()
 
 // 获取实体缓冲表
 // @return 只读实体缓冲映射表引用
-const std::unordered_map<EntityId, EntityGpuBuffer>& CadSceneRenderCache::entityBuffers() const
+const std::unordered_map<RenderEntityKey, EntityGpuBuffer, RenderEntityKeyHash>&
+CadSceneRenderCache::entityBuffers() const
 {
     return m_entityBuffers;
 }
 
 // 获取实体缓冲表
 // @return 可修改的实体缓冲映射表引用
-std::unordered_map<EntityId, EntityGpuBuffer>& CadSceneRenderCache::entityBuffers()
+std::unordered_map<RenderEntityKey, EntityGpuBuffer, RenderEntityKeyHash>&
+CadSceneRenderCache::entityBuffers()
 {
     return m_entityBuffers;
 }

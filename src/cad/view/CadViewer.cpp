@@ -95,7 +95,8 @@ CadViewer::CadViewer(QWidget* parent)
             const CadItem* selectedItem = selectedEntity();
 
             if (selectedItem == nullptr
-                || CadViewerUtils::toEntityId(selectedItem) != m_overlappedHandleHoverState.entityId)
+                || CadViewerUtils::toRenderEntityKey(selectedItem)
+                    != m_overlappedHandleHoverState.renderKey)
             {
                 return;
             }
@@ -132,8 +133,8 @@ void CadViewer::setDocument(CadDocument* document)
     m_sceneCoordinator.bindDocument(document, this, &CadViewer::handleDocumentSceneChanged);
     invalidateSnapCache();
     // 清除选中实体
-    setSelectedEntityId(0);
-    m_pendingProcessOrderSwapEntityId = 0;
+    setSelectedRenderKey({});
+    m_pendingProcessOrderSwapRenderKey = {};
     resetOverlappedHandleHoverState();
     hideSelectionWindowPreview();
 
@@ -286,7 +287,7 @@ void CadViewer::setProcessVisualsVisible(bool visible)
     }
 
     m_processVisualsVisible = visible;
-    m_pendingProcessOrderSwapEntityId = 0;
+    m_pendingProcessOrderSwapRenderKey = {};
     update();
 }
 
@@ -299,7 +300,7 @@ void CadViewer::setProcessDirectionVisible(bool visible)
 void CadViewer::setProcessOrderVisible(bool visible)
 {
     m_processOrderVisible = visible;
-    m_pendingProcessOrderSwapEntityId = 0;
+    m_pendingProcessOrderSwapRenderKey = {};
     update();
 }
 
@@ -495,7 +496,7 @@ void CadViewer::requestViewUpdate()
 // @return 选中实体指针，如果没有选中则返回 nullptr
 CadItem* CadViewer::selectedEntity() const
 {
-    return findEntityById(m_selectedEntityId);
+    return findEntityByRenderKey(m_selectedRenderKey);
 }
 
 // 追加命令消息
@@ -689,7 +690,7 @@ void CadViewer::renderEntities(const QMatrix4x4& viewProjection)
         viewProjection,
         scene->m_entities,
         m_sceneCoordinator.renderCache(),
-        m_selectedEntityId,
+        m_selectedRenderKey,
         m_theme,
         m_processVisualsVisible && m_excludedEntitiesDimmed,
         m_processState,
@@ -777,14 +778,14 @@ void CadViewer::renderScreenCrosshair()
 void CadViewer::handleDocumentSceneChanged()
 {
     invalidateSnapCache();
-    m_pendingProcessOrderSwapEntityId = 0;
+    m_pendingProcessOrderSwapRenderKey = {};
     // 标记缓冲脏
     m_sceneCoordinator.markBuffersDirty();
     // 刷新场景边界
     m_sceneCoordinator.refreshBounds();
 
     // 场景变化后重算选中集合，自动剔除已失效实体。
-    setSelectedEntities(m_selectedEntityIds, m_selectedEntityId);
+    setSelectedRenderKeys(m_selectedRenderKeys, m_selectedRenderKey);
 
     if (m_selectionWindowPreview.visible)
     {
@@ -792,7 +793,7 @@ void CadViewer::handleDocumentSceneChanged()
     }
     else
     {
-        m_windowPreviewEntityIds.clear();
+        m_windowPreviewRenderKeys.clear();
     }
 
     // 如果图形协调器已初始化，则重建缓冲
@@ -810,16 +811,16 @@ void CadViewer::handleDocumentSceneChanged()
 // 屏幕空间拾取：
 // - 点实体：测鼠标点到投影点距离
 // - 线实体：测鼠标点到各投影线段距离
-// 返回距离最近且在阈值内的实体 ID。
+// 返回距离最近且在阈值内的 Viewer 渲染键。
 // @param screenPos 屏幕坐标
-// @return 命中的实体ID，0 表示未命中
-EntityId CadViewer::pickEntity(const QPoint& screenPos) const
+// @return 命中的 Viewer 渲染键，无效键表示未命中
+RenderEntityKey CadViewer::pickRenderKey(const QPoint& screenPos) const
 {
     CadDocument* scene = m_sceneCoordinator.document();
 
     if (scene == nullptr)
     {
-        return 0;
+        return {};
     }
 
     return CadEntityPicker::pickEntity
@@ -834,11 +835,11 @@ EntityId CadViewer::pickEntity(const QPoint& screenPos) const
 }
 
 // 根据 ID 查找实体
-// @param id 实体ID
+// @param renderKey Viewer 渲染键
 // @return 实体指针，nullptr 表示未找到
-CadItem* CadViewer::findEntityById(EntityId id) const
+CadItem* CadViewer::findEntityByRenderKey(RenderEntityKey renderKey) const
 {
-    return m_sceneCoordinator.findEntityById(id);
+    return m_sceneCoordinator.findEntityByRenderKey(renderKey);
 }
 
 

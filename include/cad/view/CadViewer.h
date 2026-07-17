@@ -297,7 +297,7 @@ signals:
     // 绘图约束模式变化。
     void orthoEnabledChanged(bool enabled);
     void polarTrackingEnabledChanged(bool enabled);
-    void processDirectionToggleRequested(EntityId entityId);
+    void processDirectionToggleRequested(cadcam::geometry::EntityId processEntityId);
 
 protected:
     // OpenGL 初始化，在窗口第一次显示时调用
@@ -452,20 +452,24 @@ private:
     float currentGridStep() const;
 
     // 更新当前选中实体并在变化时发出信号。
-    void setSelectedEntityId(EntityId entityId);
+    void setSelectedRenderKey(RenderEntityKey renderKey);
 
     // 批量设置当前选中实体集合并同步主选中实体。
-    void setSelectedEntities(const QSet<EntityId>& entityIds, EntityId preferredEntityId = 0);
+    void setSelectedRenderKeys
+    (
+        const QSet<RenderEntityKey>& renderKeys,
+        RenderEntityKey preferredRenderKey = {}
+    );
 
-    // 简单屏幕空间拾取，返回命中的实体 ID
+    // 简单屏幕空间拾取，返回命中的 Viewer 渲染键
     // @param screenPos 屏幕坐标
-    // @return 命中的实体ID，0 表示未命中
-    EntityId pickEntity(const QPoint& screenPos) const;
+    // @return 命中的 Viewer 渲染键，无效键表示未命中
+    RenderEntityKey pickRenderKey(const QPoint& screenPos) const;
 
-    // 根据 ID 查找实体
-    // @param id 实体ID
+    // 根据 Viewer 渲染键查找实体
+    // @param renderKey Viewer 渲染键
     // @return 实体指针，nullptr 表示未找到
-    CadItem* findEntityById(EntityId id) const;
+    CadItem* findEntityByRenderKey(RenderEntityKey renderKey) const;
 
     // 构建临时图元列表
     // @return 临时图元列表
@@ -569,14 +573,14 @@ private:
     // 视图交互控制器，管理用户交互逻辑
     CadViewInteractionController m_viewInteractionController;
 
-    // 当前选中实体的 ID，0 表示无选中
-    EntityId m_selectedEntityId = 0;
+    // 当前选中实体的 Viewer 短生命周期键。
+    RenderEntityKey m_selectedRenderKey;
 
     // 当前选中实体集合，用于后续批量编辑能力扩展。
-    QSet<EntityId> m_selectedEntityIds;
+    QSet<RenderEntityKey> m_selectedRenderKeys;
 
     // 框选拖拽预览阶段的候选实体集合（鼠标释放前实时更新）。
-    QSet<EntityId> m_windowPreviewEntityIds;
+    QSet<RenderEntityKey> m_windowPreviewRenderKeys;
 
     // 框选预览状态。
     struct SelectionWindowPreviewState
@@ -604,8 +608,8 @@ private:
     // 当前主题颜色
     AppThemeColors m_theme = buildAppThemeColors(AppThemeMode::Light);
 
-    // 顺序标签交换的首个候选实体 ID。
-    EntityId m_pendingProcessOrderSwapEntityId = 0;
+    // 顺序标签交换的首个候选 Viewer 实体键。
+    RenderEntityKey m_pendingProcessOrderSwapRenderKey;
 
     // 画布显示选项。
     bool m_processVisualsVisible = true;
@@ -662,7 +666,7 @@ private:
     // 重叠夹点候选状态。
     struct OverlappedHandleHoverState
     {
-        EntityId entityId = 0;
+        RenderEntityKey renderKey;
         QVector<int> candidateIndices;
         int activeCandidateOrdinal = 0;
         QPoint anchorScreenPos;

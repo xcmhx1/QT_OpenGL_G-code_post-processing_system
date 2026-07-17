@@ -49,7 +49,8 @@ void CadViewer::renderProcessOrderLabels()
     for (const ProcessOrderLabelOverlay& label : labels)
     {
         const bool pendingSwap = label.item != nullptr
-            && CadViewerUtils::toEntityId(label.item) == m_pendingProcessOrderSwapEntityId;
+            && CadViewerUtils::toRenderEntityKey(label.item)
+                == m_pendingProcessOrderSwapRenderKey;
 
         const bool emphasized = pendingSwap || label.selected;
         const QColor baseFillColor = pendingSwap
@@ -316,19 +317,20 @@ bool CadViewer::handleProcessOrderLabelClick(const QPoint& screenPos)
 
     if (!hitTestProcessOrderLabel(screenPos, &clickedLabel) || clickedLabel.item == nullptr)
     {
-        if (m_pendingProcessOrderSwapEntityId != 0)
+        if (m_pendingProcessOrderSwapRenderKey.valid())
         {
-            m_pendingProcessOrderSwapEntityId = 0;
+            m_pendingProcessOrderSwapRenderKey = {};
             update();
         }
 
         return false;
     }
 
-    const EntityId clickedId = CadViewerUtils::toEntityId(clickedLabel.item);
-    setSelectedEntityId(clickedId);
+    const RenderEntityKey clickedRenderKey =
+        CadViewerUtils::toRenderEntityKey(clickedLabel.item);
+    setSelectedRenderKey(clickedRenderKey);
 
-    m_pendingProcessOrderSwapEntityId = 0;
+    m_pendingProcessOrderSwapRenderKey = {};
     appendCommandMessage(QStringLiteral("已选中加工顺序 %1。").arg(clickedLabel.order + 1));
     return true;
 }
@@ -342,11 +344,16 @@ bool CadViewer::handleProcessOrderLabelDoubleClick(const QPoint& screenPos)
         return false;
     }
 
-    const EntityId clickedId = CadViewerUtils::toEntityId(clickedLabel.item);
-    setSelectedEntityId(clickedId);
-    m_pendingProcessOrderSwapEntityId = 0;
+    const RenderEntityKey clickedRenderKey =
+        CadViewerUtils::toRenderEntityKey(clickedLabel.item);
+    setSelectedRenderKey(clickedRenderKey);
+    m_pendingProcessOrderSwapRenderKey = {};
 
-    emit processDirectionToggleRequested(clickedId);
+    const cadcam::geometry::EntityId processEntityId = clickedLabel.item->m_entityId;
+    if (processEntityId != 0)
+    {
+        emit processDirectionToggleRequested(processEntityId);
+    }
 
     return true;
 }

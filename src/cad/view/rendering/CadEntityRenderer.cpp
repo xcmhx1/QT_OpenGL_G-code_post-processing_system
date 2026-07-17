@@ -92,14 +92,14 @@ namespace
 // @param mvp 当前视图使用的模型视图投影矩阵
 // @param entities 场景实体列表
 // @param sceneRenderCache 实体对应的 GPU 缓冲缓存
-// @param selectedEntityId 当前选中的实体 ID
+// @param selectedRenderKey 当前选中的 Viewer 实体键
 void CadEntityRenderer::renderEntities
 (
     QOpenGLShaderProgram& shader,
     const QMatrix4x4& mvp,
     const std::vector<std::unique_ptr<CadItem>>& entities,
     CadSceneRenderCache& sceneRenderCache,
-    EntityId selectedEntityId,
+    RenderEntityKey selectedRenderKey,
     const AppThemeColors& theme,
     bool dimExcludedEntities,
     const cadcam::process::DocumentProcessState* processState,
@@ -124,8 +124,8 @@ void CadEntityRenderer::renderEntities
 
     for (const std::unique_ptr<CadItem>& entity : entities)
     {
-        const EntityId renderEntityId = CadViewerUtils::toEntityId(entity.get());
-        const auto it = entityBuffers.find(renderEntityId);
+        const RenderEntityKey renderKey = CadViewerUtils::toRenderEntityKey(entity.get());
+        const auto it = entityBuffers.find(renderKey);
 
         // 没有 GPU 缓冲的实体说明尚未上传或已被清理，直接跳过。
         if (it == entityBuffers.end())
@@ -135,7 +135,7 @@ void CadEntityRenderer::renderEntities
 
         EntityGpuBuffer& buffer = it->second;
         // 保持实体原始显示色；选中效果改由 Viewer 的叠加层统一绘制。
-        const bool isSelected = entity->m_isSelected || renderEntityId == selectedEntityId;
+        const bool isSelected = entity->m_isSelected || renderKey == selectedRenderKey;
         const CadProcessExclusionVisual exclusionVisual = dimExcludedEntities
             ? resolveProcessExclusionVisual(entity.get(), processState, presentation)
             : CadProcessExclusionVisual::None;

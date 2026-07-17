@@ -121,23 +121,23 @@ const CadSceneRenderCache& CadSceneCoordinator::renderCache() const
     return m_sceneRenderCache;
 }
 
-// 通过实体 ID 查找对应场景对象
-// @param id 实体 ID
+// 通过 Viewer 实体键查找对应场景对象
+// @param renderKey Viewer 实体键
 // @return 对应实体指针，未找到时返回 nullptr
-CadItem* CadSceneCoordinator::findEntityById(EntityId id) const
+CadItem* CadSceneCoordinator::findEntityByRenderKey(RenderEntityKey renderKey) const
 {
     CadDocument* scene = m_sceneContext.document();
 
-    // 0 被保留为“未选中/无实体”，空场景也直接返回空。
-    if (id == 0 || scene == nullptr)
+    // 无效渲染键表示“未选中/无实体”，空场景也直接返回空。
+    if (!renderKey.valid() || scene == nullptr)
     {
         return nullptr;
     }
 
-    // 通过运行期实体 ID 回查真实对象，供选中状态同步使用。
+    // 通过 Viewer 渲染键回查真实对象，供选中状态同步使用。
     for (const std::unique_ptr<CadItem>& entity : scene->m_entities)
     {
-        if (CadViewerUtils::toEntityId(entity.get()) == id)
+        if (CadViewerUtils::toRenderEntityKey(entity.get()) == renderKey)
         {
             return entity.get();
         }

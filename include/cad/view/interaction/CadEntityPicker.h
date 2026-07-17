@@ -29,15 +29,15 @@ namespace CadEntityPicker
     // 3. 根据实体类型计算屏幕距离：
     //    - 点图元：计算鼠标点到投影点的距离
     //    - 线/折线类图元：计算鼠标点到各投影线段的距离
-    // 4. 返回在拾取阈值内且距离最近的实体ID
+    // 4. 返回在拾取阈值内且距离最近的 Viewer 渲染键
     // @param entities 实体列表，每个实体为唯一指针
     // @param viewProjection 视图投影矩阵，用于将世界坐标变换到裁剪空间
     // @param viewportWidth 视口宽度（像素）
     // @param viewportHeight 视口高度（像素）
     // @param screenPos 屏幕坐标点（像素）
     // @param pickThresholdPixels 拾取阈值（像素），小于此距离认为命中
-    // @return 命中的实体ID，0表示未命中任何实体
-    EntityId pickEntity
+    // @return 命中的 Viewer 渲染键，无效键表示未命中
+    RenderEntityKey pickEntity
     (
         const std::vector<std::unique_ptr<CadItem>>& entities,
         const QMatrix4x4& viewProjection,
@@ -50,7 +50,7 @@ namespace CadEntityPicker
     // 在屏幕空间窗口内批量拾取实体：
     // - crossingSelection=true：碰选（实体与窗口有交集即命中）
     // - crossingSelection=false：包含选（实体离散顶点全部落入窗口才命中）
-    std::vector<EntityId> pickEntitiesByWindow
+    std::vector<RenderEntityKey> pickEntitiesByWindow
     (
         const std::vector<std::unique_ptr<CadItem>>& entities,
         const QMatrix4x4& viewProjection,

@@ -13,11 +13,10 @@ class CadItem;
 
 namespace CadViewerUtils
 {
-    // 把对象地址稳定映射为实体 ID。
-    // 当前实现直接使用指针值，因此只在对象生命周期内有效。
+    // 把对象地址映射为 Viewer 短生命周期缓存键。
     // @param entity 实体对象指针
-    // @return 运行期实体 ID
-    EntityId toEntityId(const CadItem* entity);
+    // @return Viewer 运行期实体键
+    RenderEntityKey toRenderEntityKey(const CadItem* entity);
 
     // 把世界坐标投影到屏幕像素坐标，供拾取和辅助 UI 使用。
     // @param worldPos 世界坐标

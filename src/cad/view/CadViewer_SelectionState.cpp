@@ -24,36 +24,36 @@ namespace
 
 void CadViewer::selectEntityAt(const QPoint& screenPos, SelectionUpdateMode updateMode)
 {
-    const EntityId pickedId = pickEntity(screenPos);
+    const RenderEntityKey pickedRenderKey = pickRenderKey(screenPos);
 
     if (updateMode == SelectionUpdateMode::Toggle)
     {
-        if (pickedId != 0)
+        if (pickedRenderKey.valid())
         {
-            QSet<EntityId> selectedIds = m_selectedEntityIds;
-            EntityId preferredEntityId = m_selectedEntityId;
+            QSet<RenderEntityKey> selectedRenderKeys = m_selectedRenderKeys;
+            RenderEntityKey preferredRenderKey = m_selectedRenderKey;
 
-            if (selectedIds.contains(pickedId))
+            if (selectedRenderKeys.contains(pickedRenderKey))
             {
-                selectedIds.remove(pickedId);
+                selectedRenderKeys.remove(pickedRenderKey);
 
-                if (preferredEntityId == pickedId)
+                if (preferredRenderKey == pickedRenderKey)
                 {
-                    preferredEntityId = 0;
+                    preferredRenderKey = {};
                 }
             }
             else
             {
-                selectedIds.insert(pickedId);
-                preferredEntityId = pickedId;
+                selectedRenderKeys.insert(pickedRenderKey);
+                preferredRenderKey = pickedRenderKey;
             }
 
-            setSelectedEntities(selectedIds, preferredEntityId);
+            setSelectedRenderKeys(selectedRenderKeys, preferredRenderKey);
         }
     }
     else
     {
-        setSelectedEntityId(pickedId);
+        setSelectedRenderKey(pickedRenderKey);
     }
 
     update();
@@ -73,7 +73,7 @@ void CadViewer::selectEntitiesInWindow
     {
         if (updateMode == SelectionUpdateMode::Replace)
         {
-            setSelectedEntities(QSet<EntityId>(), 0);
+            setSelectedRenderKeys({}, {});
         }
 
         update();
@@ -86,14 +86,14 @@ void CadViewer::selectEntitiesInWindow
     {
         if (updateMode == SelectionUpdateMode::Replace)
         {
-            setSelectedEntities(QSet<EntityId>(), 0);
+            setSelectedRenderKeys({}, {});
         }
 
         update();
         return;
     }
 
-    const std::vector<EntityId> pickedIds = CadEntityPicker::pickEntitiesByWindow
+    const std::vector<RenderEntityKey> pickedRenderKeys = CadEntityPicker::pickEntitiesByWindow
     (
         scene->m_entities,
         m_camera.viewProjectionMatrix(aspectRatio()),
@@ -103,59 +103,60 @@ void CadViewer::selectEntitiesInWindow
         crossingSelection
     );
 
-    QSet<EntityId> selectedIds;
-    selectedIds.reserve(static_cast<qsizetype>(pickedIds.size()));
+    QSet<RenderEntityKey> selectedRenderKeys;
+    selectedRenderKeys.reserve(static_cast<qsizetype>(pickedRenderKeys.size()));
 
-    for (EntityId id : pickedIds)
+    for (RenderEntityKey renderKey : pickedRenderKeys)
     {
-        if (id != 0)
+        if (renderKey.valid())
         {
-            selectedIds.insert(id);
+            selectedRenderKeys.insert(renderKey);
         }
     }
 
-    EntityId preferredEntityId = pickedIds.empty() ? 0 : pickedIds.front();
+    RenderEntityKey preferredRenderKey = pickedRenderKeys.empty()
+        ? RenderEntityKey{} : pickedRenderKeys.front();
 
     if (updateMode == SelectionUpdateMode::Toggle)
     {
-        QSet<EntityId> mergedSelection = m_selectedEntityIds;
+        QSet<RenderEntityKey> mergedSelection = m_selectedRenderKeys;
 
-        for (EntityId id : selectedIds)
+        for (RenderEntityKey renderKey : selectedRenderKeys)
         {
-            if (mergedSelection.contains(id))
+            if (mergedSelection.contains(renderKey))
             {
-                mergedSelection.remove(id);
+                mergedSelection.remove(renderKey);
             }
             else
             {
-                mergedSelection.insert(id);
+                mergedSelection.insert(renderKey);
             }
         }
 
-        preferredEntityId = m_selectedEntityId;
+        preferredRenderKey = m_selectedRenderKey;
 
-        for (EntityId id : pickedIds)
+        for (RenderEntityKey renderKey : pickedRenderKeys)
         {
-            if (id != 0 && mergedSelection.contains(id))
+            if (renderKey.valid() && mergedSelection.contains(renderKey))
             {
-                preferredEntityId = id;
+                preferredRenderKey = renderKey;
                 break;
             }
         }
 
-        if (preferredEntityId != 0 && !mergedSelection.contains(preferredEntityId))
+        if (preferredRenderKey.valid() && !mergedSelection.contains(preferredRenderKey))
         {
-            preferredEntityId = 0;
+            preferredRenderKey = {};
         }
 
-        setSelectedEntities(mergedSelection, preferredEntityId);
+        setSelectedRenderKeys(mergedSelection, preferredRenderKey);
     }
     else
     {
-        setSelectedEntities(selectedIds, preferredEntityId);
+        setSelectedRenderKeys(selectedRenderKeys, preferredRenderKey);
     }
 
-    m_windowPreviewEntityIds.clear();
+    m_windowPreviewRenderKeys.clear();
     update();
 }
 
@@ -164,12 +165,12 @@ QVector<CadItem*> CadViewer::selectedEntities() const
     QVector<CadItem*> entities;
     CadDocument* scene = m_sceneCoordinator.document();
 
-    if (scene == nullptr || m_selectedEntityIds.isEmpty())
+    if (scene == nullptr || m_selectedRenderKeys.isEmpty())
     {
         return entities;
     }
 
-    entities.reserve(static_cast<qsizetype>(m_selectedEntityIds.size()));
+    entities.reserve(static_cast<qsizetype>(m_selectedRenderKeys.size()));
 
     for (const std::unique_ptr<CadItem>& entity : scene->m_entities)
     {
@@ -178,9 +179,9 @@ QVector<CadItem*> CadViewer::selectedEntities() const
             continue;
         }
 
-        const EntityId id = CadViewerUtils::toEntityId(entity.get());
+        const RenderEntityKey renderKey = CadViewerUtils::toRenderEntityKey(entity.get());
 
-        if (m_selectedEntityIds.contains(id))
+        if (m_selectedRenderKeys.contains(renderKey))
         {
             entities.push_back(entity.get());
         }
@@ -204,44 +205,48 @@ void CadViewer::hideSelectionWindowPreview()
     const bool hadVisiblePreview = m_selectionWindowPreview.visible;
     m_selectionWindowPreview.visible = false;
 
-    if (m_windowPreviewEntityIds.isEmpty() && !hadVisiblePreview)
+    if (m_windowPreviewRenderKeys.isEmpty() && !hadVisiblePreview)
     {
         return;
     }
 
-    m_windowPreviewEntityIds.clear();
+    m_windowPreviewRenderKeys.clear();
     update();
 }
 
 void CadViewer::clearSelection()
 {
-    setSelectedEntityId(0);
-    m_windowPreviewEntityIds.clear();
+    setSelectedRenderKey({});
+    m_windowPreviewRenderKeys.clear();
     resetOverlappedHandleHoverState();
     update();
 }
 
-void CadViewer::setSelectedEntityId(EntityId entityId)
+void CadViewer::setSelectedRenderKey(RenderEntityKey renderKey)
 {
-    QSet<EntityId> ids;
+    QSet<RenderEntityKey> renderKeys;
 
-    if (entityId != 0)
+    if (renderKey.valid())
     {
-        ids.insert(entityId);
+        renderKeys.insert(renderKey);
     }
 
-    setSelectedEntities(ids, entityId);
+    setSelectedRenderKeys(renderKeys, renderKey);
 }
 
-void CadViewer::setSelectedEntities(const QSet<EntityId>& entityIds, EntityId preferredEntityId)
+void CadViewer::setSelectedRenderKeys
+(
+    const QSet<RenderEntityKey>& renderKeys,
+    RenderEntityKey preferredRenderKey
+)
 {
     CadDocument* scene = m_sceneCoordinator.document();
-    QSet<EntityId> filteredIds;
-    EntityId resolvedPrimaryId = 0;
+    QSet<RenderEntityKey> filteredRenderKeys;
+    RenderEntityKey resolvedPrimaryRenderKey;
 
     if (scene != nullptr)
     {
-        filteredIds.reserve(entityIds.size());
+        filteredRenderKeys.reserve(renderKeys.size());
 
         for (const std::unique_ptr<CadItem>& entity : scene->m_entities)
         {
@@ -250,22 +255,22 @@ void CadViewer::setSelectedEntities(const QSet<EntityId>& entityIds, EntityId pr
                 continue;
             }
 
-            const EntityId id = CadViewerUtils::toEntityId(entity.get());
-            const bool selected = entityIds.contains(id);
+            const RenderEntityKey renderKey = CadViewerUtils::toRenderEntityKey(entity.get());
+            const bool selected = renderKeys.contains(renderKey);
             entity->m_isSelected = selected;
 
             if (selected)
             {
-                filteredIds.insert(id);
+                filteredRenderKeys.insert(renderKey);
             }
         }
     }
 
-    if (preferredEntityId != 0 && filteredIds.contains(preferredEntityId))
+    if (preferredRenderKey.valid() && filteredRenderKeys.contains(preferredRenderKey))
     {
-        resolvedPrimaryId = preferredEntityId;
+        resolvedPrimaryRenderKey = preferredRenderKey;
     }
-    else if (!filteredIds.isEmpty() && scene != nullptr)
+    else if (!filteredRenderKeys.isEmpty() && scene != nullptr)
     {
         for (const std::unique_ptr<CadItem>& entity : scene->m_entities)
         {
@@ -274,19 +279,20 @@ void CadViewer::setSelectedEntities(const QSet<EntityId>& entityIds, EntityId pr
                 continue;
             }
 
-            const EntityId id = CadViewerUtils::toEntityId(entity.get());
+            const RenderEntityKey renderKey = CadViewerUtils::toRenderEntityKey(entity.get());
 
-            if (filteredIds.contains(id))
+            if (filteredRenderKeys.contains(renderKey))
             {
-                resolvedPrimaryId = id;
+                resolvedPrimaryRenderKey = renderKey;
                 break;
             }
         }
     }
 
-    const bool selectionChanged = m_selectedEntityId != resolvedPrimaryId || m_selectedEntityIds != filteredIds;
-    m_selectedEntityId = resolvedPrimaryId;
-    m_selectedEntityIds = filteredIds;
+    const bool selectionChanged = m_selectedRenderKey != resolvedPrimaryRenderKey
+        || m_selectedRenderKeys != filteredRenderKeys;
+    m_selectedRenderKey = resolvedPrimaryRenderKey;
+    m_selectedRenderKeys = filteredRenderKeys;
 
     if (selectionChanged)
     {

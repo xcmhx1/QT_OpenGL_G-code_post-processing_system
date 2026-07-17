@@ -19,8 +19,8 @@ public:
     void uploadEntity(const CadItem* entity);
 
     // 删除指定实体对应的 GPU 资源
-    // @param id 目标实体 ID
-    void removeEntityBuffer(EntityId id);
+    // @param renderKey 目标 Viewer 实体键
+    void removeEntityBuffer(RenderEntityKey renderKey);
 
     // 按当前实体列表整体重建缓存
     // @param entities 当前场景实体列表
@@ -31,13 +31,13 @@ public:
 
     // 获取实体缓冲表
     // @return 只读实体缓冲映射表引用
-    const std::unordered_map<EntityId, EntityGpuBuffer>& entityBuffers() const;
+    const std::unordered_map<RenderEntityKey, EntityGpuBuffer, RenderEntityKeyHash>& entityBuffers() const;
 
     // 获取实体缓冲表
     // @return 可修改的实体缓冲映射表引用
-    std::unordered_map<EntityId, EntityGpuBuffer>& entityBuffers();
+    std::unordered_map<RenderEntityKey, EntityGpuBuffer, RenderEntityKeyHash>& entityBuffers();
 
 private:
-    // 实体 ID 到 GPU 缓冲的映射表
-    std::unordered_map<EntityId, EntityGpuBuffer> m_entityBuffers;
+    // Viewer 短生命周期实体键到 GPU 缓冲的映射表
+    std::unordered_map<RenderEntityKey, EntityGpuBuffer, RenderEntityKeyHash> m_entityBuffers;
 };

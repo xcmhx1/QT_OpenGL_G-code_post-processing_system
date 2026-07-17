@@ -2,13 +2,73 @@
 // 渲染数据类型模块，定义顶点、缓存和 transient 图元等核心结构。
 #pragma once
 
+#include <cstdint>
+#include <functional>
+#include <type_traits>
+
 #include <QOpenGLBuffer>
 #include <QOpenGLVertexArrayObject>
 #include <QVector>
 #include <QVector3D>
 #include <QtGlobal>
 
-using EntityId = quintptr;
+#include "core/geometry/GeometryTypes.h"
+
+class CadItem;
+struct RenderEntityKey;
+
+namespace CadViewerUtils
+{
+    RenderEntityKey toRenderEntityKey(const CadItem* entity);
+}
+
+struct RenderEntityKey final
+{
+    constexpr RenderEntityKey() noexcept = default;
+
+    constexpr bool valid() const noexcept
+    {
+        return m_value != 0;
+    }
+
+    friend constexpr bool operator==(RenderEntityKey left, RenderEntityKey right) noexcept
+    {
+        return left.m_value == right.m_value;
+    }
+
+    friend constexpr bool operator!=(RenderEntityKey left, RenderEntityKey right) noexcept
+    {
+        return !(left == right);
+    }
+
+private:
+    explicit constexpr RenderEntityKey(std::uintptr_t value) noexcept
+        : m_value(value)
+    {
+    }
+
+    std::uintptr_t m_value = 0;
+
+    friend RenderEntityKey CadViewerUtils::toRenderEntityKey(const CadItem* entity);
+    friend struct RenderEntityKeyHash;
+    friend size_t qHash(RenderEntityKey key, size_t seed) noexcept;
+};
+
+struct RenderEntityKeyHash final
+{
+    std::size_t operator()(RenderEntityKey key) const noexcept
+    {
+        return std::hash<std::uintptr_t>{}(key.m_value);
+    }
+};
+
+inline size_t qHash(RenderEntityKey key, size_t seed = 0) noexcept
+{
+    return ::qHash(static_cast<quintptr>(key.m_value), seed);
+}
+
+static_assert(!std::is_convertible_v<RenderEntityKey, cadcam::geometry::EntityId>);
+static_assert(!std::is_convertible_v<cadcam::geometry::EntityId, RenderEntityKey>);
 
 // 单个实体对应的一组 GPU 资源。
 struct EntityGpuBuffer

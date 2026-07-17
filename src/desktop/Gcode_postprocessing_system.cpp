@@ -305,13 +305,13 @@ Gcode_postprocessing_system::Gcode_postprocessing_system(QWidget* parent)
     };
     connect(ui->openGLWidget, &CadViewer::selectedEntityChanged, this, [updateStatusEntityType](CadItem*) { updateStatusEntityType(); });
     connect(ui->openGLWidget, &CadViewer::processDirectionToggleRequested, this,
-        [this](EntityId entityId)
+        [this](cadcam::geometry::EntityId processEntityId)
         {
-            const auto state = m_processState.stateOrDefault(entityId);
+            const auto state = m_processState.stateOrDefault(processEntityId);
             const auto direction = state.overrideData.direction == cadcam::process::DirectionPreference::Reverse
                 ? cadcam::process::DirectionPreference::Forward
                 : cadcam::process::DirectionPreference::Reverse;
-            if (m_processState.setDirection(entityId, direction))
+            if (m_processState.setDirection(processEntityId, direction))
             {
                 invalidateCurrentProcessPlan();
                 ui->openGLWidget->appendCommandMessage(QStringLiteral("已更新加工方向偏好，请重新排序。"));

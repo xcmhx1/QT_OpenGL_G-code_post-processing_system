@@ -22,19 +22,19 @@ class CadEntityRenderer
 public:
     // 绘制场景实体
     // 遍历场景中的所有图元，按缓存好的 GPU 资源逐个发起绘制
-    // selectedEntityId 用于在绘制阶段直接叠加选中高亮效果
+    // selectedRenderKey 用于在绘制阶段直接叠加选中高亮效果
     // @param shader 通用绘制 Shader
     // @param mvp 当前视图使用的模型视图投影矩阵
     // @param entities 场景实体列表
     // @param sceneRenderCache 实体对应的 GPU 缓冲缓存
-    // @param selectedEntityId 当前选中的实体 ID
+    // @param selectedRenderKey 当前选中的 Viewer 实体键
     static void renderEntities
     (
         QOpenGLShaderProgram& shader,
         const QMatrix4x4& mvp,
         const std::vector<std::unique_ptr<CadItem>>& entities,
         CadSceneRenderCache& sceneRenderCache,
-        EntityId selectedEntityId,
+        RenderEntityKey selectedRenderKey,
         const AppThemeColors& theme,
         bool dimExcludedEntities,
         const cadcam::process::DocumentProcessState* processState,

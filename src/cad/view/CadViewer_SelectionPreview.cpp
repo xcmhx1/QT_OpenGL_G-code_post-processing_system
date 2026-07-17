@@ -27,7 +27,7 @@ namespace
 
 void CadViewer::updateSelectionWindowPreviewCandidates()
 {
-    m_windowPreviewEntityIds.clear();
+    m_windowPreviewRenderKeys.clear();
 
     if (!m_selectionWindowPreview.visible)
     {
@@ -52,7 +52,7 @@ void CadViewer::updateSelectionWindowPreviewCandidates()
         return;
     }
 
-    const std::vector<EntityId> previewIds = CadEntityPicker::pickEntitiesByWindow
+    const std::vector<RenderEntityKey> previewRenderKeys = CadEntityPicker::pickEntitiesByWindow
     (
         scene->m_entities,
         m_camera.viewProjectionMatrix(aspectRatio()),
@@ -62,11 +62,11 @@ void CadViewer::updateSelectionWindowPreviewCandidates()
         m_selectionWindowPreview.crossingSelection
     );
 
-    for (EntityId id : previewIds)
+    for (RenderEntityKey renderKey : previewRenderKeys)
     {
-        if (id != 0)
+        if (renderKey.valid())
         {
-            m_windowPreviewEntityIds.insert(id);
+            m_windowPreviewRenderKeys.insert(renderKey);
         }
     }
 }
@@ -80,7 +80,7 @@ void CadViewer::renderEntitySelectionOverlays()
         return;
     }
 
-    if (m_selectedEntityIds.isEmpty() && m_windowPreviewEntityIds.isEmpty())
+    if (m_selectedRenderKeys.isEmpty() && m_windowPreviewRenderKeys.isEmpty())
     {
         return;
     }
@@ -96,9 +96,9 @@ void CadViewer::renderEntitySelectionOverlays()
             continue;
         }
 
-        const EntityId id = CadViewerUtils::toEntityId(entity.get());
-        const bool committedSelected = m_selectedEntityIds.contains(id);
-        const bool previewSelected = m_windowPreviewEntityIds.contains(id);
+        const RenderEntityKey renderKey = CadViewerUtils::toRenderEntityKey(entity.get());
+        const bool committedSelected = m_selectedRenderKeys.contains(renderKey);
+        const bool previewSelected = m_windowPreviewRenderKeys.contains(renderKey);
 
         if (!committedSelected && !previewSelected)
         {

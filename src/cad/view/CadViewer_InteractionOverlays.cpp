@@ -282,7 +282,7 @@ namespace
 void CadViewer::resetOverlappedHandleHoverState()
 {
     m_overlappedHandlePopupTimer.stop();
-    m_overlappedHandleHoverState.entityId = 0;
+    m_overlappedHandleHoverState.renderKey = {};
     m_overlappedHandleHoverState.candidateIndices.clear();
     m_overlappedHandleHoverState.activeCandidateOrdinal = 0;
     m_overlappedHandleHoverState.anchorScreenPos = QPoint();
@@ -336,8 +336,8 @@ void CadViewer::updateOverlappedHandleHoverState(const QPoint& screenPos)
         return;
     }
 
-    const EntityId entityId = CadViewerUtils::toEntityId(selectedItem);
-    const bool sameEntity = m_overlappedHandleHoverState.entityId == entityId;
+    const RenderEntityKey renderKey = CadViewerUtils::toRenderEntityKey(selectedItem);
+    const bool sameEntity = m_overlappedHandleHoverState.renderKey == renderKey;
     const bool sameCandidates = m_overlappedHandleHoverState.candidateIndices == candidateIndices;
     const bool stableCursor = sameEntity
         && sameCandidates
@@ -345,7 +345,7 @@ void CadViewer::updateOverlappedHandleHoverState(const QPoint& screenPos)
 
     if (!stableCursor)
     {
-        m_overlappedHandleHoverState.entityId = entityId;
+        m_overlappedHandleHoverState.renderKey = renderKey;
         m_overlappedHandleHoverState.candidateIndices = candidateIndices;
         m_overlappedHandleHoverState.activeCandidateOrdinal = 0;
         m_overlappedHandleHoverState.anchorScreenPos = screenPos;
@@ -405,10 +405,10 @@ int CadViewer::resolveHoveredHandleIndex(const QVector<CadSelectionHandleInfo>& 
     }
 
     const CadItem* selectedItem = selectedEntity();
-    const EntityId selectedEntityId = selectedItem != nullptr ? CadViewerUtils::toEntityId(selectedItem) : 0;
+    const RenderEntityKey selectedRenderKey = CadViewerUtils::toRenderEntityKey(selectedItem);
 
     if (candidateIndices.size() >= 2
-        && m_overlappedHandleHoverState.entityId == selectedEntityId
+        && m_overlappedHandleHoverState.renderKey == selectedRenderKey
         && m_overlappedHandleHoverState.candidateIndices == candidateIndices)
     {
         int resolvedOrdinal = std::clamp
@@ -433,7 +433,8 @@ bool CadViewer::handleOverlappedHandlePopupPress(const QPoint& screenPos)
     const CadItem* selectedItem = selectedEntity();
 
     if (selectedItem == nullptr
-        || CadViewerUtils::toEntityId(selectedItem) != m_overlappedHandleHoverState.entityId)
+        || CadViewerUtils::toRenderEntityKey(selectedItem)
+            != m_overlappedHandleHoverState.renderKey)
     {
         return false;
     }
@@ -499,7 +500,8 @@ bool CadViewer::cycleOverlappedHandleCandidate(int step)
     const CadItem* selectedItem = selectedEntity();
 
     if (selectedItem == nullptr
-        || CadViewerUtils::toEntityId(selectedItem) != m_overlappedHandleHoverState.entityId)
+        || CadViewerUtils::toRenderEntityKey(selectedItem)
+            != m_overlappedHandleHoverState.renderKey)
     {
         return false;
     }
@@ -538,7 +540,8 @@ void CadViewer::renderOverlappedHandlePopup()
     const CadItem* selectedItem = selectedEntity();
 
     if (selectedItem == nullptr
-        || CadViewerUtils::toEntityId(selectedItem) != m_overlappedHandleHoverState.entityId
+        || CadViewerUtils::toRenderEntityKey(selectedItem)
+            != m_overlappedHandleHoverState.renderKey
         || m_overlappedHandleHoverState.candidateIndices.size() < 2)
     {
         return;
@@ -863,7 +866,8 @@ bool CadViewer::pickSelectedHandle(const QPoint& screenPos, CadSelectionHandleIn
     int selectedIndex = candidateIndices.front();
 
     if (candidateIndices.size() >= 2
-        && m_overlappedHandleHoverState.entityId == CadViewerUtils::toEntityId(selectedItem)
+        && m_overlappedHandleHoverState.renderKey
+            == CadViewerUtils::toRenderEntityKey(selectedItem)
         && m_overlappedHandleHoverState.candidateIndices == candidateIndices)
     {
         int resolvedOrdinal = std::clamp
