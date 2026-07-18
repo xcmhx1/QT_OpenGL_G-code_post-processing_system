@@ -364,3 +364,6 @@ FodyWeavers.xsd
 
 # obsidian file
 .obsidian
+
+# CodeGraph local index and cache
+.codegraph/
