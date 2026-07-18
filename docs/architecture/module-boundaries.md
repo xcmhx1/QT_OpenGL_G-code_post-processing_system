@@ -21,14 +21,14 @@
 主要业务依赖方向为：
 
 ```text
-UI / Desktop
-      ↓
-CAD 与 Application
-      ↓
-Core
+UI / CAD ──→ Application ──→ Core
+                 ↕
+          Infrastructure
+                 ↕
+              外部格式
 ```
 
-Infrastructure 为 Application 和 Core 的外部边界提供适配。文件解析、配置读取和文本输出通过 Infrastructure 进入或离开生产数据流。
+Application 组织 Infrastructure 的边界适配。文件解析、配置读取和文本输出通过 Infrastructure 进入或离开生产数据流，Core 不依赖 Infrastructure。
 
 Compatibility 仅位于遗留对象转换边界。新业务事实进入 Core 后，不再由 Compatibility 决定其含义。
 
@@ -53,13 +53,11 @@ Viewer 使用 CAD 文档和当前加工展示快照完成渲染、拾取、标�
 DXF/DWG 输入、配置文件和 G-code 文本属于外部表示。Infrastructure 负责在外部表示与内部业务对象之间转换：
 
 ```text
-外部格式
-↔ Infrastructure
-↔ Application / Core 业务对象
+外部格式 ↔ Infrastructure ↔ Application → Core 业务对象
 ```
 
 格式规则不进入几何、拓扑、规划或机床运动模块。加工决策也不由文件读写代码推断。
 
 ## 相关需求
 
-SCOPE-001、SCOPE-002、SCOPE-003、FILE-001、FILE-002、FILE-005、FILE-006、PROCESS-017、GCODE-001、GCODE-005、GCODE-024、GCODE-025。
+SCOPE-001、SCOPE-002、SCOPE-003、FILE-001、FILE-002、GCODE-024。
