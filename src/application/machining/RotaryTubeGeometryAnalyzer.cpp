@@ -14,6 +14,9 @@ namespace
 {
     using cadcam::geometry::EntityId;
     using cadcam::machining::InternalPathClassification;
+    using cadcam::machining::TubeCornerGeometry;
+    using cadcam::machining::TubeCutBoundaryClassifier;
+    using cadcam::machining::TubeSectionGeometry;
     using cadcam::machining::TubeSectionAnalyzer;
     using cadcam::machining::TubeSectionModel;
     using cadcam::machining::TubeSectionPolicy;
@@ -355,6 +358,144 @@ RotaryTubeSectionModel RotaryTubeGeometryAnalyzer::findBestSectionModel
     }
 
     return toLegacyModel(*analyzed.value, sceneItems, diagnostics);
+}
+
+RotaryTubeSectionModel RotaryTubeGeometryAnalyzer::buildManualSectionModel
+(
+    double yLength,
+    double zWidth,
+    double cornerRadius,
+    double centerX,
+    double centerY,
+    double centerZ,
+    std::uint64_t contentRevision
+)
+{
+    RotaryTubeSectionModel model;
+    constexpr double epsilon = 1.0e-5;
+
+    if (!std::isfinite(yLength) || !std::isfinite(zWidth)
+        || !std::isfinite(cornerRadius) || !std::isfinite(centerX)
+        || !std::isfinite(centerY) || !std::isfinite(centerZ)
+        || yLength <= epsilon || zWidth <= epsilon || cornerRadius < 0.0)
+    {
+        model.errorMessage = QStringLiteral("Y 长和 Z 宽必须大于 0，圆角半径不能为负数。");
+        return model;
+    }
+
+    const double maximumRadius = std::min(yLength, zWidth) * 0.5;
+    if (cornerRadius > maximumRadius + epsilon)
+    {
+        model.errorMessage = QStringLiteral("圆角半径不能超过 Y 长和 Z 宽较小值的一半。");
+        return model;
+    }
+
+    cornerRadius = std::min(cornerRadius, maximumRadius);
+    const double halfY = yLength * 0.5;
+    const double halfZ = zWidth * 0.5;
+    const double minimumY = centerY - halfY;
+    const double maximumY = centerY + halfY;
+    const double minimumZ = centerZ - halfZ;
+    const double maximumZ = centerZ + halfZ;
+    TubeSectionGeometry geometry;
+    geometry.centerY = centerY;
+    geometry.centerZ = centerZ;
+    geometry.yLength = yLength;
+    geometry.zWidth = zWidth;
+
+    if (cornerRadius <= epsilon)
+    {
+        geometry.boundary =
+        {
+            { minimumY, maximumZ },
+            { maximumY, maximumZ },
+            { maximumY, minimumZ },
+            { minimumY, minimumZ }
+        };
+    }
+    else
+    {
+        constexpr int arcSegments = 16;
+        constexpr double halfPi = 1.57079632679489661923;
+        constexpr double pi = 3.14159265358979323846;
+        auto appendArc = [&geometry, cornerRadius]
+        (
+            double arcCenterY,
+            double arcCenterZ,
+            double startAngle,
+            double endAngle
+        )
+        {
+            for (int segment = 1; segment <= arcSegments; ++segment)
+            {
+                const double ratio = static_cast<double>(segment) / arcSegments;
+                const double angle = startAngle + (endAngle - startAngle) * ratio;
+                geometry.boundary.push_back
+                ({
+                    arcCenterY + cornerRadius * std::cos(angle),
+                    arcCenterZ + cornerRadius * std::sin(angle)
+                });
+            }
+        };
+
+        geometry.boundary.push_back({ minimumY + cornerRadius, maximumZ });
+        geometry.boundary.push_back({ maximumY - cornerRadius, maximumZ });
+        appendArc(maximumY - cornerRadius, maximumZ - cornerRadius, halfPi, 0.0);
+        geometry.boundary.push_back({ maximumY, minimumZ + cornerRadius });
+        appendArc(maximumY - cornerRadius, minimumZ + cornerRadius, 0.0, -halfPi);
+        geometry.boundary.push_back({ minimumY + cornerRadius, minimumZ });
+        appendArc(minimumY + cornerRadius, minimumZ + cornerRadius, -halfPi, -pi);
+        geometry.boundary.push_back({ minimumY, maximumZ - cornerRadius });
+        appendArc(minimumY + cornerRadius, maximumZ - cornerRadius, pi, halfPi);
+    }
+
+    const OperationContext context = createOperationContext
+        (QStringLiteral("BuildManualTubeSection"));
+    const OperationResult<TubeSectionGeometry> prepared =
+        TubeCutBoundaryClassifier::prepareSection(geometry, context, epsilon);
+    if (!prepared.succeeded() || !prepared.value.has_value())
+    {
+        model.errorMessage = QStringLiteral("手动方管截面参数无法形成有效边界。");
+        return model;
+    }
+
+    TubeSectionModel core;
+    core.contentRevision = contentRevision;
+    core.geometry = *prepared.value;
+    core.centerX = centerX;
+    core.roundedCornerCount = cornerRadius > epsilon ? 4 : 0;
+    core.cornerRadius = cornerRadius;
+    core.cornerConfidence = 1.0;
+    if (core.roundedCornerCount == 4)
+    {
+        core.cornerRadii.assign(4, cornerRadius);
+        for (const int yDirection : { -1, 1 })
+        {
+            for (const int zDirection : { -1, 1 })
+            {
+                core.corners.push_back
+                (TubeCornerGeometry
+                {
+                    {
+                        centerY + yDirection * (halfY - cornerRadius),
+                        centerZ + zDirection * (halfZ - cornerRadius)
+                    },
+                    cornerRadius,
+                    yDirection,
+                    zDirection
+                });
+            }
+        }
+    }
+    core.orderedBoundary3D.reserve(core.geometry.boundary.size());
+    for (const cadcam::geometry::Vector2d& point : core.geometry.boundary)
+    {
+        core.orderedBoundary3D.push_back({ centerX, point.x, point.y });
+    }
+
+    model = toLegacyModel(core, {}, {});
+    model.manuallyConfigured = true;
+    return model;
 }
 
 RotaryInternalPathResult RotaryTubeGeometryAnalyzer::findInternalPaths

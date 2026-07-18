@@ -3,7 +3,9 @@
 #include <QWidget>
 
 class QCheckBox;
+class QDoubleSpinBox;
 class QLabel;
+class QPushButton;
 class QTimer;
 
 class MachiningSettingsWidget : public QWidget
@@ -21,7 +23,8 @@ public:
         double yLength,
         double zWidth,
         double cornerRadius,
-        int roundedCornerCount
+        int roundedCornerCount,
+        bool manuallyConfigured
     );
     void setRotaryEndCutCount(int count);
     void setInternalPathCount(int count);
@@ -33,6 +36,7 @@ signals:
     void autoRemoveInternalPathsOnImportChanged(bool enabled);
     void useDefaultExportDirectoryChanged(bool enabled);
     void useDxfFileNameChanged(bool enabled);
+    void manualRotaryTubeSectionRequested(double yLength, double zWidth, double cornerRadius);
 
 private:
     void updateAutomaticOptionDependencies();
@@ -46,9 +50,10 @@ private:
     QCheckBox* m_useDefaultExportDirectoryCheckBox = nullptr;
     QCheckBox* m_useDxfFileNameCheckBox = nullptr;
     QLabel* m_sectionStatusValue = nullptr;
-    QLabel* m_yLengthValue = nullptr;
-    QLabel* m_zWidthValue = nullptr;
-    QLabel* m_cornerRadiusValue = nullptr;
+    QDoubleSpinBox* m_yLengthInput = nullptr;
+    QDoubleSpinBox* m_zWidthInput = nullptr;
+    QDoubleSpinBox* m_cornerRadiusInput = nullptr;
+    QPushButton* m_applyManualSectionButton = nullptr;
     QLabel* m_roundedCornerCountValue = nullptr;
     QLabel* m_rotaryEndCutCountValue = nullptr;
     QLabel* m_internalPathCountValue = nullptr;

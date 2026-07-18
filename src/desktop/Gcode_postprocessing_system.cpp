@@ -1524,6 +1524,55 @@ void Gcode_postprocessing_system::initializeMachiningSettingsDock()
         saveUseDxfFileNameOnExport(enabled);
         QMetaObject::invokeMethod(this, [this]() { syncMachiningSettingsState(); }, Qt::QueuedConnection);
     });
+    connect
+    (
+        m_machiningSettingsWidget,
+        &MachiningSettingsWidget::manualRotaryTubeSectionRequested,
+        this,
+        [this](double yLength, double zWidth, double cornerRadius)
+        {
+            const GProfileRotaryAxisConfig& rotaryConfig = m_activeProfile.rotaryAxisConfig();
+            const double centerX = m_rotaryTubeSectionModel.valid
+                ? m_rotaryTubeSectionModel.centerX : 0.0;
+            const double centerY = m_rotaryTubeSectionModel.centerValid
+                ? m_rotaryTubeSectionModel.centerY : rotaryConfig.centerY;
+            const double centerZ = m_rotaryTubeSectionModel.centerValid
+                ? m_rotaryTubeSectionModel.centerZ : rotaryConfig.centerZ;
+            RotaryTubeSectionModel manualModel =
+                RotaryTubeGeometryAnalyzer::buildManualSectionModel
+                (
+                    yLength,
+                    zWidth,
+                    cornerRadius,
+                    centerX,
+                    centerY,
+                    centerZ,
+                    m_document.contentRevision()
+                );
+
+            if (!manualModel.valid)
+            {
+                const QString message = manualModel.errorMessage.isEmpty()
+                    ? QStringLiteral("手动方管截面参数无效。")
+                    : manualModel.errorMessage;
+                ui->openGLWidget->appendCommandMessage(message);
+                statusBar()->showMessage(message, 5000);
+                return;
+            }
+
+            m_rotaryTubeSectionModel = std::move(manualModel);
+            invalidateProcessOrdersAfterEndCutChange();
+            syncToolPanelState();
+            syncMachiningSettingsState();
+            const QString message = QStringLiteral
+                ("已应用手动方管截面：Y 长 %1 mm，Z 宽 %2 mm，圆角半径 %3 mm。")
+                .arg(yLength, 0, 'f', 3)
+                .arg(zWidth, 0, 'f', 3)
+                .arg(cornerRadius, 0, 'f', 3);
+            ui->openGLWidget->appendCommandMessage(message);
+            statusBar()->showMessage(message, 5000);
+        }
+    );
 
     syncMachiningSettingsState();
 }
@@ -1907,7 +1956,8 @@ void Gcode_postprocessing_system::syncMachiningSettingsState()
         m_rotaryTubeSectionModel.yLength,
         m_rotaryTubeSectionModel.zWidth,
         m_rotaryTubeSectionModel.cornerRadius,
-        m_rotaryTubeSectionModel.roundedCornerCount
+        m_rotaryTubeSectionModel.roundedCornerCount,
+        m_rotaryTubeSectionModel.manuallyConfigured
     );
 
     QSet<int> rotaryEndCutIds;

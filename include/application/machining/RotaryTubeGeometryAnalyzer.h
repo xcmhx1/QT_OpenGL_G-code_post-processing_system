@@ -30,6 +30,7 @@ struct RotaryTubeSectionModel
     int inspectedCandidateCount = 0;
     int validCandidateCount = 0;
     int roundedCandidateCount = 0;
+    bool manuallyConfigured = false;
     QString errorMessage;
 };
 
@@ -56,6 +57,17 @@ public:
     (
         const QVector<CadItem*>& sceneItems,
         double connectionTolerance = 1.0,
+        std::uint64_t contentRevision = 1U
+    );
+
+    static RotaryTubeSectionModel buildManualSectionModel
+    (
+        double yLength,
+        double zWidth,
+        double cornerRadius,
+        double centerX,
+        double centerY,
+        double centerZ,
         std::uint64_t contentRevision = 1U
     );
 

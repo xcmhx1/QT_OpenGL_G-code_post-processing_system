@@ -3,9 +3,11 @@
 #include "ui/widgets/MachiningSettingsWidget.h"
 
 #include <QCheckBox>
+#include <QDoubleSpinBox>
 #include <QFormLayout>
 #include <QGroupBox>
 #include <QLabel>
+#include <QPushButton>
 #include <QScrollArea>
 #include <QTimer>
 #include <QVBoxLayout>
@@ -17,6 +19,17 @@ namespace
         QLabel* label = new QLabel(QStringLiteral("--"), parent);
         label->setTextInteractionFlags(Qt::TextSelectableByMouse);
         return label;
+    }
+
+    QDoubleSpinBox* createSectionInput(QWidget* parent)
+    {
+        QDoubleSpinBox* input = new QDoubleSpinBox(parent);
+        input->setDecimals(3);
+        input->setRange(0.0, 1000000.0);
+        input->setSingleStep(1.0);
+        input->setSuffix(QStringLiteral(" mm"));
+        input->setSpecialValueText(QStringLiteral("--"));
+        return input;
     }
 }
 
@@ -68,16 +81,21 @@ MachiningSettingsWidget::MachiningSettingsWidget(QWidget* parent)
     QFormLayout* statusLayout = new QFormLayout(statusGroup);
     statusLayout->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
     m_sectionStatusValue = createStatusValue(statusGroup);
-    m_yLengthValue = createStatusValue(statusGroup);
-    m_zWidthValue = createStatusValue(statusGroup);
-    m_cornerRadiusValue = createStatusValue(statusGroup);
+    m_yLengthInput = createSectionInput(statusGroup);
+    m_zWidthInput = createSectionInput(statusGroup);
+    m_cornerRadiusInput = createSectionInput(statusGroup);
+    m_cornerRadiusInput->setSingleStep(0.1);
+    m_applyManualSectionButton = new QPushButton(QStringLiteral("应用手动截面"), statusGroup);
+    m_applyManualSectionButton->setToolTip
+        (QStringLiteral("手动设置优先用于后续内部线识别、加工断面、排序和导出。"));
     m_roundedCornerCountValue = createStatusValue(statusGroup);
     m_rotaryEndCutCountValue = createStatusValue(statusGroup);
     m_internalPathCountValue = createStatusValue(statusGroup);
     statusLayout->addRow(QStringLiteral("截面状态："), m_sectionStatusValue);
-    statusLayout->addRow(QStringLiteral("Y 长："), m_yLengthValue);
-    statusLayout->addRow(QStringLiteral("Z 宽："), m_zWidthValue);
-    statusLayout->addRow(QStringLiteral("圆角半径："), m_cornerRadiusValue);
+    statusLayout->addRow(QStringLiteral("Y 长："), m_yLengthInput);
+    statusLayout->addRow(QStringLiteral("Z 宽："), m_zWidthInput);
+    statusLayout->addRow(QStringLiteral("圆角半径："), m_cornerRadiusInput);
+    statusLayout->addRow(QString(), m_applyManualSectionButton);
     statusLayout->addRow(QStringLiteral("圆角数量："), m_roundedCornerCountValue);
     statusLayout->addRow(QStringLiteral("加工断面："), m_rotaryEndCutCountValue);
     statusLayout->addRow(QStringLiteral("内部线条："), m_internalPathCountValue);
@@ -136,6 +154,15 @@ MachiningSettingsWidget::MachiningSettingsWidget(QWidget* parent)
     {
         if (!m_updatingUi) emit useDxfFileNameChanged(enabled);
     });
+    connect(m_applyManualSectionButton, &QPushButton::clicked, this, [this]()
+    {
+        emit manualRotaryTubeSectionRequested
+        (
+            m_yLengthInput->value(),
+            m_zWidthInput->value(),
+            m_cornerRadiusInput->value()
+        );
+    });
 }
 
 void MachiningSettingsWidget::setAutomaticOptions
@@ -170,26 +197,30 @@ void MachiningSettingsWidget::setRotaryTubeSectionProperties
     double yLength,
     double zWidth,
     double cornerRadius,
-    int roundedCornerCount
+    int roundedCornerCount,
+    bool manuallyConfigured
 )
 {
+    m_updatingUi = true;
     m_sectionRecognized = recognized;
     m_sectionBlinkVisible = true;
-    m_sectionStatusValue->setText(recognized ? QStringLiteral("已识别") : QStringLiteral("未识别"));
+    m_sectionStatusValue->setText(recognized
+        ? (manuallyConfigured ? QStringLiteral("已手动设置") : QStringLiteral("已识别"))
+        : QStringLiteral("未识别"));
 
     if (recognized)
     {
         m_sectionBlinkTimer->stop();
-        m_yLengthValue->setText(QStringLiteral("%1 mm").arg(yLength, 0, 'f', 2));
-        m_zWidthValue->setText(QStringLiteral("%1 mm").arg(zWidth, 0, 'f', 2));
-        m_cornerRadiusValue->setText(QStringLiteral("R %1 mm").arg(cornerRadius, 0, 'f', 2));
+        m_yLengthInput->setValue(yLength);
+        m_zWidthInput->setValue(zWidth);
+        m_cornerRadiusInput->setValue(cornerRadius);
         m_roundedCornerCountValue->setText(QString::number(std::clamp(roundedCornerCount, 0, 4)));
     }
     else
     {
-        m_yLengthValue->setText(QStringLiteral("--"));
-        m_zWidthValue->setText(QStringLiteral("--"));
-        m_cornerRadiusValue->setText(QStringLiteral("--"));
+        m_yLengthInput->setValue(0.0);
+        m_zWidthInput->setValue(0.0);
+        m_cornerRadiusInput->setValue(0.0);
         m_roundedCornerCountValue->setText(QStringLiteral("--"));
 
         if (!m_sectionBlinkTimer->isActive())
@@ -198,6 +229,7 @@ void MachiningSettingsWidget::setRotaryTubeSectionProperties
         }
     }
 
+    m_updatingUi = false;
     refreshSectionStatusStyle();
 }
 
