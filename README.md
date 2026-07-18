@@ -79,6 +79,7 @@ x64/Release/
 
 - [文档入口](./docs/index.md)
 - [需求索引](./docs/requirements/index.md)
+- [概要设计](./docs/architecture/index.md)
 - [产品范围](./docs/requirements/product-scope.md)
 - [文件和 CAD](./docs/requirements/file-and-cad.md)
 - [编辑与交互](./docs/requirements/editing-and-interaction.md)
