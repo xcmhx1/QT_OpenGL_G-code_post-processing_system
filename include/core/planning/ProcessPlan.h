@@ -44,6 +44,7 @@ namespace cadcam::planning
         int boundaryPairId = -1;
         process::DirectionPreference directionPreference = process::DirectionPreference::Auto;
         std::optional<double> startParameter;
+        std::optional<int> manualProcessOrder;
     };
 
     struct ProcessAssignment
@@ -96,5 +97,6 @@ namespace cadcam::planning
         topology::TopologyInput topologyInput;
         const topology::PathTopology* topology = nullptr;
         std::optional<machining::TubeSectionModel> tubeSection;
+        std::optional<geometry::Vector2d> tubeSectionCenter;
     };
 }

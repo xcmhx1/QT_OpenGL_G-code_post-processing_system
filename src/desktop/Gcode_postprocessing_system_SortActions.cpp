@@ -2327,7 +2327,7 @@ QVector<CadItem*> Gcode_postprocessing_system::expandedSelectedRotaryEndCut(QStr
     for (const std::unique_ptr<CadItem>& entity : m_document.m_entities)
     {
         if (entity != nullptr
-            && (!m_processState.stateOrDefault(entity->m_entityId).analysis.excludedAsInternalGeometry
+            && (!m_processState.stateOrDefault(entity->m_entityId).effectiveInternalExclusion()
                 || selectedItems.contains(entity.get())))
         {
             sceneItems.push_back(entity.get());
@@ -2594,6 +2594,7 @@ bool Gcode_postprocessing_system::recognizeRotaryTubeSection(bool interactive)
         return false;
     }
 
+    recognized.setUserCenter(m_rotaryTubeSectionModel.userCenter);
     m_rotaryTubeSectionModel = recognized;
     invalidateProcessOrdersAfterEndCutChange();
     syncToolPanelState();
@@ -2601,6 +2602,22 @@ bool Gcode_postprocessing_system::recognizeRotaryTubeSection(bool interactive)
         .arg(recognized.sectionBoundary.size());
     ui->openGLWidget->appendCommandMessage(message);
     statusBar()->showMessage(message, 5000);
+    return true;
+}
+
+bool Gcode_postprocessing_system::setRotaryTubeSectionUserCenter
+    (std::optional<cadcam::geometry::Vector2d> center)
+{
+    const cadcam::geometry::Vector2d previous =
+        m_rotaryTubeSectionModel.effectiveCenter();
+    if (!m_rotaryTubeSectionModel.setUserCenter(center)) return false;
+    const cadcam::geometry::Vector2d current =
+        m_rotaryTubeSectionModel.effectiveCenter();
+    if (previous.x == current.x && previous.y == current.y) return true;
+
+    invalidateProcessOrdersAfterEndCutChange();
+    syncToolPanelState();
+    syncMachiningSettingsState();
     return true;
 }
 
@@ -2653,7 +2670,7 @@ bool Gcode_postprocessing_system::removeInternalMachiningPaths(bool interactive)
         if (entity != nullptr)
         {
             const bool shouldExclude = internalItems.contains(entity.get());
-            m_processState.setInternalGeometryExcluded(entity->m_entityId, shouldExclude);
+            m_processState.setAutomaticInternalExclusion(entity->m_entityId, shouldExclude);
         }
     }
     m_processState.endBatch();
@@ -2697,11 +2714,16 @@ bool Gcode_postprocessing_system::restoreInternalMachiningPaths(bool interactive
     m_processState.beginBatch();
     for (const std::unique_ptr<CadItem>& entity : m_document.m_entities)
     {
-        if (entity != nullptr && m_processState.stateOrDefault(entity->m_entityId)
-            .analysis.excludedAsInternalGeometry)
+        if (entity != nullptr)
         {
-            m_processState.setInternalGeometryExcluded(entity->m_entityId, false);
-            ++restoredCount;
+            const auto state = m_processState.stateOrDefault(entity->m_entityId);
+            if (state.analysis.automaticInternalExclusion
+                || state.overrideData.manualInternalExclusionOverride.has_value())
+            {
+                m_processState.setAutomaticInternalExclusion(entity->m_entityId, false);
+                m_processState.setManualInternalExclusionOverride(entity->m_entityId, std::nullopt);
+                ++restoredCount;
+            }
         }
     }
     m_processState.endBatch();
@@ -2786,7 +2808,7 @@ bool Gcode_postprocessing_system::recognizeAllRotaryEndCuts(bool interactive)
     for (const std::unique_ptr<CadItem>& entity : m_document.m_entities)
     {
         if (entity != nullptr && !m_processState.stateOrDefault(entity->m_entityId)
-            .analysis.excludedAsInternalGeometry)
+            .effectiveInternalExclusion())
         {
             documentItems.push_back(entity.get());
             sceneItems.push_back(entity.get());
@@ -2934,7 +2956,7 @@ bool Gcode_postprocessing_system::toggleSelectedInternalPathAssignment()
     const bool hasOrdinaryItem = std::any_of(selectedItems.begin(), selectedItems.end(), [this](const CadItem* item)
     {
         return item != nullptr && !m_processState.stateOrDefault(item->m_entityId)
-            .analysis.excludedAsInternalGeometry;
+            .effectiveInternalExclusion();
     });
 
     m_processState.beginBatch();
@@ -2942,7 +2964,8 @@ bool Gcode_postprocessing_system::toggleSelectedInternalPathAssignment()
     {
         if (item != nullptr)
         {
-            m_processState.setInternalGeometryExcluded(item->m_entityId, hasOrdinaryItem);
+            m_processState.setManualInternalExclusionOverride
+                (item->m_entityId, hasOrdinaryItem);
         }
     }
     m_processState.endBatch();

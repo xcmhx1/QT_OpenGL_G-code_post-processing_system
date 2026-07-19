@@ -729,7 +729,7 @@ bool Gcode_postprocessing_system::removeDuplicateEntities(bool interactive)
             continue;
         }
         const auto state = m_processState.stateOrDefault(item->m_entityId);
-        if (!state.overrideData.processEnabled || state.analysis.excludedAsInternalGeometry) continue;
+        if (!state.overrideData.processEnabled || state.effectiveInternalExclusion()) continue;
 
         const QString geometryKey = duplicateGeometryKey(item);
 

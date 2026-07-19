@@ -154,6 +154,8 @@ private:
     bool clearRotaryEndCutAssignments();
     QVector<CadItem*> expandedSelectedRotaryEndCut(QString* errorMessage = nullptr) const;
     bool recognizeRotaryTubeSection(bool interactive = true);
+    bool setRotaryTubeSectionUserCenter
+        (std::optional<cadcam::geometry::Vector2d> center);
     bool removeInternalMachiningPaths(bool interactive = true);
     bool restoreInternalMachiningPaths(bool interactive = true);
     bool toggleSelectedRotaryEndCutAssignment();

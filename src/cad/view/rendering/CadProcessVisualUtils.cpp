@@ -997,7 +997,7 @@ namespace
     {
         const cadcam::process::EntityProcessState* state = processState != nullptr
             ? processState->find(entityId) : nullptr;
-        if (state != nullptr && state->analysis.excludedAsInternalGeometry)
+        if (state != nullptr && state->effectiveInternalExclusion())
         {
             return CadProcessExclusionVisual::InternalGeometry;
         }

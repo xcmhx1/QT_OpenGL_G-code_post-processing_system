@@ -161,9 +161,10 @@ DocumentProcessPlanningAdapter::capturePlanar
         entity.visible = entry.attributes.visible;
         const process::EntityProcessState state = processState.stateOrDefault(entity.entityId);
         entity.processEnabled = state.overrideData.processEnabled;
-        entity.excludedAsInternalGeometry = state.analysis.excludedAsInternalGeometry;
+        entity.excludedAsInternalGeometry = state.effectiveInternalExclusion();
         entity.directionPreference = state.overrideData.direction;
         entity.startParameter = state.overrideData.startParameter;
+        entity.manualProcessOrder = state.overrideData.manualProcessOrder;
         if (entry.sourceEntity.has_value())
         {
             entity.sourceEntity = *entry.sourceEntity;
@@ -238,6 +239,11 @@ DocumentProcessPlanningAdapter::captureRotary
     input.contentRevision = contentRevision;
     input.processStateRevision = stateRevision;
     input.tubeSection = tubeSection;
+    if (tubeSection.has_value())
+    {
+        input.tubeSectionCenter = geometry::Vector2d
+            { tubeSection->geometry.centerY, tubeSection->geometry.centerZ };
+    }
     input.topologyInput.contentRevision = contentRevision;
     input.entities.reserve(snapshot.value->entries.size());
     geometry::GeometryCompiler compiler;
@@ -250,11 +256,12 @@ DocumentProcessPlanningAdapter::captureRotary
         entity.visible = entry.attributes.visible;
         const process::EntityProcessState state = processState.stateOrDefault(entity.entityId);
         entity.processEnabled = state.overrideData.processEnabled;
-        entity.excludedAsInternalGeometry = state.analysis.excludedAsInternalGeometry;
+        entity.excludedAsInternalGeometry = state.effectiveInternalExclusion();
         entity.boundaryRole = state.overrideData.boundaryRole;
         entity.boundaryPairId = state.overrideData.boundaryPairId;
         entity.directionPreference = state.overrideData.direction;
         entity.startParameter = state.overrideData.startParameter;
+        entity.manualProcessOrder = state.overrideData.manualProcessOrder;
 
         if (entry.sourceEntity.has_value())
         {

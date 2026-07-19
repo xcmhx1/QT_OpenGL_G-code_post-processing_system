@@ -52,11 +52,85 @@ namespace cadcam::process
         return store(id, state);
     }
 
-    bool DocumentProcessState::setInternalGeometryExcluded(geometry::EntityId id, bool value)
+    bool DocumentProcessState::setAutomaticInternalExclusion(geometry::EntityId id, bool value)
     {
         EntityProcessState state = stateOrDefault(id);
-        state.analysis.excludedAsInternalGeometry = value;
+        state.analysis.automaticInternalExclusion = value;
         return store(id, state);
+    }
+
+    bool DocumentProcessState::automaticInternalExclusion(geometry::EntityId id) const
+    {
+        return stateOrDefault(id).analysis.automaticInternalExclusion;
+    }
+
+    bool DocumentProcessState::setManualInternalExclusionOverride
+    (geometry::EntityId id, std::optional<bool> value)
+    {
+        EntityProcessState state = stateOrDefault(id);
+        state.overrideData.manualInternalExclusionOverride = value;
+        return store(id, state);
+    }
+
+    bool DocumentProcessState::clearManualInternalExclusionOverride(geometry::EntityId id)
+    {
+        return setManualInternalExclusionOverride(id, std::nullopt);
+    }
+
+    std::optional<bool> DocumentProcessState::manualInternalExclusionOverride
+        (geometry::EntityId id) const
+    {
+        return stateOrDefault(id).overrideData.manualInternalExclusionOverride;
+    }
+
+    bool DocumentProcessState::effectiveInternalExclusion(geometry::EntityId id) const
+    {
+        return stateOrDefault(id).effectiveInternalExclusion();
+    }
+
+    bool DocumentProcessState::setManualProcessOrder
+    (geometry::EntityId id, std::optional<int> value)
+    {
+        if (value.has_value() && *value < 0) return false;
+        EntityProcessState state = stateOrDefault(id);
+        state.overrideData.manualProcessOrder = value;
+        return store(id, state);
+    }
+
+    bool DocumentProcessState::clearManualProcessOrder(geometry::EntityId id)
+    {
+        return setManualProcessOrder(id, std::nullopt);
+    }
+
+    bool DocumentProcessState::clearAllManualProcessOrders()
+    {
+        bool changed = false;
+        beginBatch();
+        for (auto it = m_states.begin(); it != m_states.end();)
+        {
+            if (!it->second.overrideData.manualProcessOrder.has_value())
+            {
+                ++it;
+                continue;
+            }
+            EntityProcessState state = it->second;
+            state.overrideData.manualProcessOrder.reset();
+            const geometry::EntityId id = it->first;
+            ++it;
+            changed = store(id, state) || changed;
+        }
+        endBatch();
+        return changed;
+    }
+
+    std::optional<int> DocumentProcessState::manualProcessOrder(geometry::EntityId id) const
+    {
+        return stateOrDefault(id).overrideData.manualProcessOrder;
+    }
+
+    bool DocumentProcessState::setInternalGeometryExcluded(geometry::EntityId id, bool value)
+    {
+        return setAutomaticInternalExclusion(id, value);
     }
 
     bool DocumentProcessState::setState(geometry::EntityId id, const EntityProcessState& state)
@@ -66,7 +140,9 @@ namespace cadcam::process
             || (state.overrideData.boundaryRole != planning::BoundaryRole::None
                 && state.overrideData.boundaryPairId < 0)
             || (state.overrideData.startParameter.has_value()
-                && !std::isfinite(*state.overrideData.startParameter))) return false;
+                && !std::isfinite(*state.overrideData.startParameter))
+            || (state.overrideData.manualProcessOrder.has_value()
+                && *state.overrideData.manualProcessOrder < 0)) return false;
         return store(id, state);
     }
 

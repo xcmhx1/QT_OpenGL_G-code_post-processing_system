@@ -191,6 +191,51 @@ namespace
         return result;
     }
 
+    bool finiteCenter(const std::optional<cadcam::geometry::Vector2d>& center)
+    {
+        return !center.has_value()
+            || (std::isfinite(center->x) && std::isfinite(center->y));
+    }
+
+    void moveModelCenter
+    (
+        RotaryTubeSectionModel& model,
+        const cadcam::geometry::Vector2d& target
+    )
+    {
+        const double deltaY = target.x - model.centerY;
+        const double deltaZ = target.y - model.centerZ;
+        model.centerValid = true;
+        model.centerY = target.x;
+        model.centerZ = target.y;
+
+        for (QVector2D& point : model.sectionBoundary)
+        {
+            point.setX(point.x() + static_cast<float>(deltaY));
+            point.setY(point.y() + static_cast<float>(deltaZ));
+        }
+        if (!model.coreModel.has_value()) return;
+
+        auto& core = *model.coreModel;
+        core.geometry.centerY = target.x;
+        core.geometry.centerZ = target.y;
+        for (auto& point : core.geometry.boundary)
+        {
+            point.x += deltaY;
+            point.y += deltaZ;
+        }
+        for (auto& point : core.orderedBoundary3D)
+        {
+            point.y += deltaY;
+            point.z += deltaZ;
+        }
+        for (auto& corner : core.corners)
+        {
+            corner.center.x += deltaY;
+            corner.center.y += deltaZ;
+        }
+    }
+
     RotaryTubeSectionModel toLegacyModel
     (
         const TubeSectionModel& core,
@@ -210,6 +255,8 @@ namespace
         model.centerValid = true;
         model.centerY = core.geometry.centerY;
         model.centerZ = core.geometry.centerZ;
+        model.automaticCenter = cadcam::geometry::Vector2d
+            { core.geometry.centerY, core.geometry.centerZ };
         model.cornerRadii.reserve(static_cast<qsizetype>(core.cornerRadii.size()));
 
         for (const double radius : core.cornerRadii)
@@ -274,6 +321,31 @@ namespace
 
         return ids;
     }
+}
+
+cadcam::geometry::Vector2d RotaryTubeSectionModel::effectiveCenter() const
+{
+    if (userCenter.has_value()) return *userCenter;
+    if (automaticCenter.has_value()) return *automaticCenter;
+    return { 0.0, 0.0 };
+}
+
+bool RotaryTubeSectionModel::setAutomaticCenter
+    (std::optional<cadcam::geometry::Vector2d> center)
+{
+    if (!finiteCenter(center)) return false;
+    automaticCenter = center;
+    moveModelCenter(*this, effectiveCenter());
+    return true;
+}
+
+bool RotaryTubeSectionModel::setUserCenter
+    (std::optional<cadcam::geometry::Vector2d> center)
+{
+    if (!finiteCenter(center)) return false;
+    userCenter = center;
+    moveModelCenter(*this, effectiveCenter());
+    return true;
 }
 
 RotaryTubeSectionModel RotaryTubeGeometryAnalyzer::buildSectionModel
@@ -494,6 +566,8 @@ RotaryTubeSectionModel RotaryTubeGeometryAnalyzer::buildManualSectionModel
     }
 
     model = toLegacyModel(core, {}, {});
+    model.automaticCenter.reset();
+    model.userCenter = cadcam::geometry::Vector2d{ centerY, centerZ };
     model.manuallyConfigured = true;
     return model;
 }

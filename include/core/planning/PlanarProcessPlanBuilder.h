@@ -18,6 +18,7 @@ namespace cadcam::planning
         bool excludedAsInternalGeometry = false;
         process::DirectionPreference directionPreference = process::DirectionPreference::Auto;
         std::optional<double> startParameter;
+        std::optional<int> manualProcessOrder;
     };
 
     struct PlanarProcessPlanningInput

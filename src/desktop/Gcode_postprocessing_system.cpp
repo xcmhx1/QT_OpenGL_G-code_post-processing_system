@@ -1531,13 +1531,10 @@ void Gcode_postprocessing_system::initializeMachiningSettingsDock()
         this,
         [this](double yLength, double zWidth, double cornerRadius)
         {
-            const GProfileRotaryAxisConfig& rotaryConfig = m_activeProfile.rotaryAxisConfig();
             const double centerX = m_rotaryTubeSectionModel.valid
                 ? m_rotaryTubeSectionModel.centerX : 0.0;
-            const double centerY = m_rotaryTubeSectionModel.centerValid
-                ? m_rotaryTubeSectionModel.centerY : rotaryConfig.centerY;
-            const double centerZ = m_rotaryTubeSectionModel.centerValid
-                ? m_rotaryTubeSectionModel.centerZ : rotaryConfig.centerZ;
+            const cadcam::geometry::Vector2d effectiveCenter =
+                m_rotaryTubeSectionModel.effectiveCenter();
             RotaryTubeSectionModel manualModel =
                 RotaryTubeGeometryAnalyzer::buildManualSectionModel
                 (
@@ -1545,8 +1542,8 @@ void Gcode_postprocessing_system::initializeMachiningSettingsDock()
                     zWidth,
                     cornerRadius,
                     centerX,
-                    centerY,
-                    centerZ,
+                    effectiveCenter.x,
+                    effectiveCenter.y,
                     m_document.contentRevision()
                 );
 
@@ -1560,6 +1557,8 @@ void Gcode_postprocessing_system::initializeMachiningSettingsDock()
                 return;
             }
 
+            manualModel.setAutomaticCenter(m_rotaryTubeSectionModel.automaticCenter);
+            manualModel.setUserCenter(m_rotaryTubeSectionModel.userCenter);
             m_rotaryTubeSectionModel = std::move(manualModel);
             invalidateProcessOrdersAfterEndCutChange();
             syncToolPanelState();
@@ -1977,7 +1976,7 @@ void Gcode_postprocessing_system::syncMachiningSettingsState()
             rotaryEndCutIds.insert(state.overrideData.boundaryPairId);
         }
 
-        if (state.analysis.excludedAsInternalGeometry)
+        if (state.effectiveInternalExclusion())
         {
             ++internalPathCount;
         }

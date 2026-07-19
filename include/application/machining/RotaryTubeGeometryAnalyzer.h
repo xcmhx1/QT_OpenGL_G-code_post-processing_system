@@ -27,11 +27,19 @@ struct RotaryTubeSectionModel
     bool centerValid = false;
     double centerY = 0.0;
     double centerZ = 0.0;
+    std::optional<cadcam::geometry::Vector2d> automaticCenter;
+    std::optional<cadcam::geometry::Vector2d> userCenter;
     int inspectedCandidateCount = 0;
     int validCandidateCount = 0;
     int roundedCandidateCount = 0;
     bool manuallyConfigured = false;
     QString errorMessage;
+
+    cadcam::geometry::Vector2d effectiveCenter() const;
+    bool setAutomaticCenter
+        (std::optional<cadcam::geometry::Vector2d> center);
+    bool setUserCenter
+        (std::optional<cadcam::geometry::Vector2d> center);
 };
 
 struct RotaryInternalPathResult
