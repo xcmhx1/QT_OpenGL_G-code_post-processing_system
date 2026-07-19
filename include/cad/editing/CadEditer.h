@@ -68,6 +68,23 @@ public:
         ProcessUnitSequenceApply apply
     );
 
+    using ProcessUnitTraversalApply = std::function<bool
+    (
+        const cadcam::planning::ProcessUnitKey&,
+        const cadcam::process::ProcessUnitTraversalOverride&,
+        const std::optional<cadcam::process::ProcessUnitTraversalOverride>&
+    )>;
+
+    bool changeProcessUnitTraversal
+    (
+        const cadcam::planning::ProcessUnitKey& key,
+        const cadcam::process::ProcessUnitTraversalOverride& beforeTraversal,
+        const std::optional<cadcam::process::ProcessUnitTraversalOverride>& beforeStored,
+        const cadcam::process::ProcessUnitTraversalOverride& afterTraversal,
+        const std::optional<cadcam::process::ProcessUnitTraversalOverride>& afterStored,
+        ProcessUnitTraversalApply apply
+    );
+
     // 处理左键点击驱动的绘图或编辑逻辑
     // @param previousState 点击前的状态机快照
     // @param currentState 点击后可修改的状态机

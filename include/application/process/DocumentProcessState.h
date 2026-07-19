@@ -9,6 +9,41 @@
 
 namespace cadcam::process
 {
+    struct ProcessUnitMemberTraversal
+    {
+        geometry::EntityId entityId = 0;
+        bool reverse = false;
+        std::optional<double> startParameter;
+
+        bool operator==(const ProcessUnitMemberTraversal& other) const
+        {
+            return entityId == other.entityId
+                && reverse == other.reverse
+                && startParameter == other.startParameter;
+        }
+
+        bool operator!=(const ProcessUnitMemberTraversal& other) const
+        {
+            return !(*this == other);
+        }
+    };
+
+    struct ProcessUnitTraversalOverride
+    {
+        std::vector<ProcessUnitMemberTraversal> members;
+
+        bool operator==(const ProcessUnitTraversalOverride& other) const
+        {
+            return members == other.members;
+        }
+
+
+        bool operator!=(const ProcessUnitTraversalOverride& other) const
+        {
+            return !(*this == other);
+        }
+    };
+
     struct ProcessOverride
     {
         bool processEnabled = true;
@@ -78,6 +113,13 @@ namespace cadcam::process
         const planning::ProcessUnitSequence& processUnitSequence() const;
         bool setProcessUnitSequence(const std::vector<planning::ProcessUnitKey>& units);
         bool clearProcessUnitSequence();
+        const ProcessUnitTraversalOverride* findProcessUnitTraversalOverride
+            (const planning::ProcessUnitKey& key) const;
+        bool setProcessUnitTraversalOverride
+        (
+            const planning::ProcessUnitKey& key,
+            const std::optional<ProcessUnitTraversalOverride>& traversal
+        );
 
         // Compatibility wrapper: legacy callers set the automatic analysis result.
         bool setInternalGeometryExcluded(geometry::EntityId entityId, bool excluded);
@@ -97,6 +139,8 @@ namespace cadcam::process
         std::uint64_t m_revision = 1;
         std::map<geometry::EntityId, EntityProcessState> m_states;
         planning::ProcessUnitSequence m_processUnitSequence;
+        std::map<std::vector<geometry::EntityId>, ProcessUnitTraversalOverride>
+            m_processUnitTraversalOverrides;
         int m_batchDepth = 0;
         bool m_batchChanged = false;
     };

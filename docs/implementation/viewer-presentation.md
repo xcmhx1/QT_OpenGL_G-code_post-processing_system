@@ -17,7 +17,7 @@ Viewer 不拥有加工单元身份、加工单元序列或计划事实。
 ## 输入与输出
 
 当前输入包括 CAD 场景、同时含单元级和逐图元数据的 `ProcessPresentationSnapshot`、加工状态和 Viewer 选择状态。
-当前输出是单元顺序标签、逐图元方向箭头、排除样式、整组选择和稳定单元键交互请求。
+当前输出是单元顺序标签、单元起点方向箭头、排除样式、整组选择和稳定单元键交互请求。
 
 三轴连续链、严格闭环以及四轴加工组通过 `ProcessUnitPresentation` 进入 Viewer。普通单击只改变 Viewer 选择；Ctrl 单击仅上报稳定单元键，由 Application 校验并更新序列。
 
@@ -65,6 +65,7 @@ Ctrl 单击时，Viewer 将当前选中图元的稳定 `EntityId` 映射到展�
 ## 关键业务规则
 
 - 一个加工单元只显示一个加工顺序编号。
+- 一个加工单元只显示一个起点方向箭头；箭头使用首个实际执行成员的 `reverse` 和 `startParameter` 计算。
 - 单元编号由 `ProcessUnitPresentation::unitOrder + 1` 产生。
 - 任一成员已被选中时，该单元标签使用选中样式；标签悬停也以完整单元为粒度。
 - 点击单元标签时，Viewer 清除原选择，并按稳定 `EntityId` 选择该单元全部成员。
@@ -73,8 +74,9 @@ Ctrl 单击时，Viewer 将当前选中图元的稳定 `EntityId` 映射到展�
 - 标签双击不再修改单个成员方向，仅给出非阻塞提示。
 - 人工块内编排只接受编号连续的一段加工单元，不接受多个不连续区间。
 - Ctrl + 单击目标必须位于当前连续选择范围内。
-- 有效操作将目标单元移动到范围首位，其他单元保持相对顺序。
-- 点击范围首项不改变顺序，也不推进 revision。
+- 有效操作将目标单元移动到范围末位，其他单元保持相对顺序。
+- 点击范围末项不改变顺序，也不推进 revision。
+- 双击单元编号或单元箭头上报同一 `ProcessUnitKey`，由 Application 倒序成员遍历、取反成员方向并保留闭合起点。
 - 范围不连续或目标在范围外时，仅给出非阻塞提示，不改变序列。
 - 操作成功后立即按序列位置生成连续 `1..N` 编号并刷新显示。
 - 标签命中使用 `ProcessUnitKey`；仅在把稳定成员身份映射为当前场景选择时使用 Viewer 临时键。
@@ -83,10 +85,10 @@ Ctrl 单击时，Viewer 将当前选中图元的稳定 `EntityId` 映射到展�
 
 ```text
 选中 1,2,3，Ctrl + 单击 2
-→ 2,1,3
+→ 1,3,2
 
-选中 4,5,6，Ctrl + 单击 6
-→ 1,2,3,6,4,5,7...
+选中 4,5,6，Ctrl + 单击 4
+→ 1,2,3,5,6,4,7...
 ```
 
 ## 相关源码
@@ -96,7 +98,7 @@ Ctrl 单击时，Viewer 将当前选中图元的稳定 `EntityId` 映射到展�
 - `include/application/process/ProcessPresentationSnapshot.h`：定义单元级与逐图元展示快照。
 - `include/core/planning/ProcessPlan.h`：定义加工单元、单元序列和逐图元 assignment。
 - `src/desktop/Gcode_postprocessing_system_SortActions.cpp`：校验连续选中范围，原子更新单元序列、计划和展示结果。
-- `src/cad/editing/CadEditer_CommandActions.cpp`：保存块内提首前后的完整序列并接入 Undo/Redo。
+- `src/cad/editing/CadEditer_CommandActions.cpp`：保存块内移尾和整组反向前后状态并接入 Undo/Redo。
 
 ## 当前实现差异
 
@@ -107,7 +109,8 @@ Ctrl 单击时，Viewer 将当前选中图元的稳定 `EntityId` 映射到展�
 | 选择粒度 | 点击标签按稳定成员身份选中整个加工单元 | 单元标签支持整组选择 | 已实现；直接点击普通图元仍沿用现有图元选择 |
 | 顺序状态 | 标签读取 `unitOrder`，不读取逐图元 `processOrder` | Viewer 读取单元序列位置 | 已实现 |
 | 排序意图 | 普通排序保留匹配单元相对顺序，智能排序重建序列 | Viewer 不参与排序决策 | 已实现，Viewer 未修改排序 |
-| 点击交互 | 单击选择全部成员；Ctrl 单击执行连续块内提首；双击不切换成员方向 | Ctrl + 单击执行连续块内提首 | 块内提首已实现并支持 Undo/Redo；整组方向切换尚未实现 |
+| 点击交互 | 单击选择全部成员；Ctrl 单击执行连续块内移尾；双击编号或箭头整组反向 | 单元级顺序与方向交互 | 已实现并支持 Undo/Redo |
+| 方向箭头 | 每个 `ProcessUnitPresentation` 只使用首执行成员生成一个箭头 | 一单元一起点方向箭头 | 已实现 |
 | 失效刷新 | 展示随有效 `ProcessPlan` 创建或清除 | 序列编号与有效计划一致 | 当前仍不在计划失效期间单独展示序列 |
 
 ## 对应需求与概要设计

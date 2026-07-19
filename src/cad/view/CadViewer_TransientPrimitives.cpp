@@ -10,7 +10,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <map>
 #include <memory>
+#include <set>
 #include <utility>
 #include <vector>
 
@@ -76,22 +78,93 @@ std::vector<TransientPrimitive> CadViewer::buildTransientPrimitives() const
     return CadPreviewBuilder::buildTransientPrimitives(m_controller.drawState(), selectedEntity(), selectedEntities());
 }
 
-std::vector<TransientPrimitive> CadViewer::buildProcessArrowPrimitives() const
+std::vector<CadViewer::ProcessUnitArrowOverlay>
+CadViewer::buildProcessUnitArrowOverlays() const
 {
-    if (!m_processVisualsVisible || !m_processDirectionVisible)
-    {
-        return {};
-    }
+    if (!m_processVisualsVisible || !m_processDirectionVisible
+        || m_processPresentation == nullptr) return {};
 
     CadDocument* scene = m_sceneCoordinator.document();
+    if (scene == nullptr) return {};
 
-    if (scene == nullptr)
+    std::map<cadcam::geometry::EntityId, CadItem*> itemsById;
+    std::set<cadcam::geometry::EntityId> selectedIds;
+    for (const std::unique_ptr<CadItem>& entity : scene->m_entities)
     {
-        return {};
+        if (entity == nullptr || entity->m_entityId == 0U) continue;
+        itemsById.emplace(entity->m_entityId, entity.get());
+        if (entity->m_isSelected) selectedIds.insert(entity->m_entityId);
     }
 
+    const float pixelScale = std::max(pixelToWorldScale(), 1.0e-4f);
+    const float headLength = pixelScale * 13.0f;
+    std::vector<ProcessUnitArrowOverlay> overlays;
+    overlays.reserve(m_processPresentation->processUnits.size());
+    for (const cadcam::process::ProcessUnitPresentation& unit
+        : m_processPresentation->processUnits)
+    {
+        const auto item = itemsById.find(unit.anchorEntityId);
+        if (item == itemsById.end()) continue;
+
+        cadcam::process::ProcessPresentationEntry anchorPresentation;
+        anchorPresentation.entityId = unit.anchorEntityId;
+        anchorPresentation.processOrder = unit.unitOrder;
+        anchorPresentation.reverse = unit.anchorReverse;
+        anchorPresentation.startParameter = unit.anchorStartParameter;
+        const CadProcessVisualInfo info = buildProcessVisualInfo
+            (item->second, &anchorPresentation);
+        if (!info.valid || info.direction.lengthSquared() <= 1.0e-6f) continue;
+
+        const QPoint tipScreen = worldToScreen(info.startPoint);
+        const QPoint baseScreen = worldToScreen
+            (info.startPoint - info.direction * headLength);
+        if (std::hypot
+            (
+                static_cast<double>(tipScreen.x() - baseScreen.x()),
+                static_cast<double>(tipScreen.y() - baseScreen.y())
+            ) < 3.0) continue;
+
+        const bool selected = std::any_of
+        (
+            unit.key.memberEntityIds.begin(), unit.key.memberEntityIds.end(),
+            [&selectedIds](cadcam::geometry::EntityId id)
+            { return selectedIds.find(id) != selectedIds.end(); }
+        );
+        overlays.push_back
+        ({
+            unit.key,
+            unit.unitOrder,
+            unit.anchorReverse,
+            selected,
+            info.startPoint,
+            info.direction,
+            QRect(tipScreen, baseScreen).normalized().adjusted(-7, -7, 7, 7)
+        });
+    }
+    return overlays;
+}
+
+bool CadViewer::hitTestProcessUnitArrow
+(
+    const QPoint& screenPos,
+    ProcessUnitArrowOverlay* outArrow
+) const
+{
+    const std::vector<ProcessUnitArrowOverlay> arrows = buildProcessUnitArrowOverlays();
+    for (const ProcessUnitArrowOverlay& arrow : arrows)
+    {
+        if (!arrow.hitRect.contains(screenPos)) continue;
+        if (outArrow != nullptr) *outArrow = arrow;
+        return true;
+    }
+    return false;
+}
+
+std::vector<TransientPrimitive> CadViewer::buildProcessArrowPrimitives() const
+{
+    const std::vector<ProcessUnitArrowOverlay> arrows = buildProcessUnitArrowOverlays();
     std::vector<TransientPrimitive> primitives;
-    primitives.reserve(scene->m_entities.size());
+    primitives.reserve(arrows.size());
 
     const float pixelScale = std::max(pixelToWorldScale(), 1.0e-4f);
     const float headLength = pixelScale * 13.0f;
@@ -100,35 +173,18 @@ std::vector<TransientPrimitive> CadViewer::buildProcessArrowPrimitives() const
         ? m_camera.forwardDirection().normalized()
         : QVector3D(0.0f, 0.0f, -1.0f);
 
-    for (const std::unique_ptr<CadItem>& entity : scene->m_entities)
+    for (const ProcessUnitArrowOverlay& arrow : arrows)
     {
-        if (entity == nullptr)
-        {
-            continue;
-        }
-
-        const auto* presentation = m_processPresentation != nullptr
-            ? m_processPresentation->find(entity->m_entityId) : nullptr;
-        if (presentation == nullptr
-            || resolveProcessExclusionVisual(entity.get(), m_processState, m_processPresentation)
-                != CadProcessExclusionVisual::None) continue;
-        const CadProcessVisualInfo info = buildProcessVisualInfo(entity.get(), presentation);
-
-        if (!info.valid || info.direction.lengthSquared() <= 1.0e-6f)
-        {
-            continue;
-        }
-
-        QVector3D perpendicular = QVector3D::crossProduct(viewForward, info.direction);
+        QVector3D perpendicular = QVector3D::crossProduct(viewForward, arrow.direction);
 
         if (perpendicular.lengthSquared() <= 1.0e-6f)
         {
-            perpendicular = QVector3D(-info.direction.y(), info.direction.x(), 0.0f);
+            perpendicular = QVector3D(-arrow.direction.y(), arrow.direction.x(), 0.0f);
         }
 
         if (perpendicular.lengthSquared() <= 1.0e-6f)
         {
-            perpendicular = buildPerpendicularDirection(info.direction);
+            perpendicular = buildPerpendicularDirection(arrow.direction);
         }
 
         if (perpendicular.lengthSquared() > 1.0e-6f)
@@ -141,35 +197,22 @@ std::vector<TransientPrimitive> CadViewer::buildProcessArrowPrimitives() const
             continue;
         }
 
-        const QVector3D tip = info.startPoint;
-        const QVector3D headBase = tip - info.direction * headLength;
-        const QVector3D notch = tip - info.direction * (headLength * 0.72f);
-
-        const QPoint tipScreen = worldToScreen(tip);
-        const QPoint headBaseScreen = worldToScreen(headBase);
-        const double projectedLength = std::hypot
-        (
-            static_cast<double>(tipScreen.x() - headBaseScreen.x()),
-            static_cast<double>(tipScreen.y() - headBaseScreen.y())
-        );
-
-        if (projectedLength < 3.0)
-        {
-            continue;
-        }
+        const QVector3D tip = arrow.startPoint;
+        const QVector3D headBase = tip - arrow.direction * headLength;
+        const QVector3D notch = tip - arrow.direction * (headLength * 0.72f);
 
         QVector3D arrowColor;
-        if (entity->m_isSelected)
+        if (arrow.selected)
         {
             arrowColor = QVector3D(1.0f, 0.78f, 0.30f);
         }
-        else if (info.processOrder >= 0)
+        else if (arrow.unitOrder >= 0)
         {
-            arrowColor = info.isReverse ? QVector3D(1.0f, 0.42f, 0.28f) : QVector3D(0.12f, 0.92f, 0.72f);
+            arrowColor = arrow.reverse ? QVector3D(1.0f, 0.42f, 0.28f) : QVector3D(0.12f, 0.92f, 0.72f);
         }
         else
         {
-            arrowColor = info.isReverse ? QVector3D(0.82f, 0.34f, 0.26f) : QVector3D(0.34f, 0.78f, 0.58f);
+            arrowColor = arrow.reverse ? QVector3D(0.82f, 0.34f, 0.26f) : QVector3D(0.34f, 0.78f, 0.58f);
         }
 
         TransientPrimitive headPrimitive;

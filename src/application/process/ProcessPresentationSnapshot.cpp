@@ -1,6 +1,7 @@
 #include "application/process/ProcessPresentationSnapshot.h"
 
 #include <algorithm>
+#include <map>
 #include <set>
 
 namespace cadcam::process
@@ -43,6 +44,12 @@ namespace cadcam::process
         snapshot.mode = plan.mode;
         snapshot.processUnits.reserve(plan.processUnits.size());
 
+        std::map<geometry::EntityId, const planning::ProcessAssignment*> assignmentsByEntity;
+        for (const planning::ProcessAssignment& assignment : plan.assignments)
+        {
+            assignmentsByEntity.emplace(assignment.entityId, &assignment);
+        }
+
         for (std::size_t index = 0; index < plan.processUnits.size(); ++index)
         {
             const planning::ProcessUnit& unit = plan.processUnits[index];
@@ -52,12 +59,22 @@ namespace cadcam::process
                 return result;
             }
 
+            const auto anchorAssignment = assignmentsByEntity.find
+                (unit.orderedMemberEntityIds.front());
+            if (anchorAssignment == assignmentsByEntity.end())
+            {
+                failInvalidPresentation(QStringLiteral("加工单元起点缺少对应的计划分配。"));
+                return result;
+            }
+
             snapshot.processUnits.push_back
             ({
                 unit.key,
                 static_cast<int>(index),
                 unit.orderedMemberEntityIds,
-                unit.orderedMemberEntityIds.front()
+                unit.orderedMemberEntityIds.front(),
+                anchorAssignment->second->reverse,
+                anchorAssignment->second->startParameter
             });
         }
 

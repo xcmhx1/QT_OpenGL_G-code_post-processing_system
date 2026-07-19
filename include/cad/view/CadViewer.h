@@ -299,11 +299,12 @@ signals:
     void orthoEnabledChanged(bool enabled);
     void polarTrackingEnabledChanged(bool enabled);
     void processDirectionToggleRequested(cadcam::geometry::EntityId processEntityId);
-    void processUnitMoveToFrontRequested
+    void processUnitMoveToBackRequested
     (
         QVector<cadcam::planning::ProcessUnitKey> selectedUnitKeys,
         cadcam::planning::ProcessUnitKey targetUnitKey
     );
+    void processUnitReverseRequested(cadcam::planning::ProcessUnitKey unitKey);
 
 protected:
     // OpenGL 初始化，在窗口第一次显示时调用
@@ -412,6 +413,17 @@ private:
         QString text;
     };
 
+    struct ProcessUnitArrowOverlay
+    {
+        cadcam::planning::ProcessUnitKey unitKey;
+        int unitOrder = -1;
+        bool reverse = false;
+        bool selected = false;
+        QVector3D startPoint;
+        QVector3D direction;
+        QRect hitRect;
+    };
+
     // 构建当前可见的加工顺序标签覆盖信息。
     std::vector<ProcessOrderLabelOverlay> buildProcessOrderLabelOverlays() const;
 
@@ -421,12 +433,16 @@ private:
     // 命中加工顺序标签。
     bool hitTestProcessOrderLabel(const QPoint& screenPos, ProcessOrderLabelOverlay* outLabel = nullptr) const;
 
+    std::vector<ProcessUnitArrowOverlay> buildProcessUnitArrowOverlays() const;
+    bool hitTestProcessUnitArrow
+        (const QPoint& screenPos, ProcessUnitArrowOverlay* outArrow = nullptr) const;
+
     // 处理加工顺序标签单击。
     bool handleProcessOrderLabelClick
         (const QPoint& screenPos, Qt::KeyboardModifiers modifiers);
 
     // 处理加工顺序标签双击。
-    bool handleProcessOrderLabelDoubleClick(const QPoint& screenPos);
+    bool handleProcessUnitDirectionDoubleClick(const QPoint& screenPos);
 
     // 绘制选中/框选候选图元的叠加高亮（AutoCAD 风格）。
     void renderEntitySelectionOverlays();

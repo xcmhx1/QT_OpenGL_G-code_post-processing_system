@@ -6,6 +6,7 @@
 #include "core/planning/ProcessPlanBuilder.h"
 
 #include <limits>
+#include <cmath>
 #include <map>
 #include <set>
 
@@ -54,6 +55,34 @@ namespace
         return true;
     }
 
+    bool rebuildProcessUnitExecution(ProcessPlan& plan)
+    {
+        std::map<EntityId, ProcessAssignment> assignmentsByEntity;
+        for (const ProcessAssignment& assignment : plan.assignments)
+            assignmentsByEntity.emplace(assignment.entityId, assignment);
+
+        plan.processUnitSequence.units.clear();
+        plan.assignments.clear();
+        plan.processUnitSequence.units.reserve(plan.processUnits.size());
+        plan.assignments.reserve(assignmentsByEntity.size());
+        for (std::size_t unitIndex = 0; unitIndex < plan.processUnits.size(); ++unitIndex)
+        {
+            const ProcessUnit& unit = plan.processUnits[unitIndex];
+            plan.processUnitSequence.units.push_back(unit.key);
+            for (const EntityId entityId : unit.orderedMemberEntityIds)
+            {
+                const auto found = assignmentsByEntity.find(entityId);
+                if (found == assignmentsByEntity.end()) return false;
+                ProcessAssignment assignment = found->second;
+                assignment.processUnitIndex = static_cast<int>(unitIndex);
+                assignment.processOrder = static_cast<int>(plan.assignments.size());
+                plan.assignments.push_back(std::move(assignment));
+            }
+        }
+        return cadcam::planning::validateProcessUnitStructure(plan)
+            && satisfiesPrecedenceConstraints(plan);
+    }
+
     bool reorderProcessUnits
     (
         ProcessPlan& plan,
@@ -79,42 +108,79 @@ namespace
             orderedIndices.push_back(found->second);
         }
 
-        std::map<EntityId, ProcessAssignment> assignmentsByEntity;
-        for (const ProcessAssignment& assignment : plan.assignments)
-            assignmentsByEntity.emplace(assignment.entityId, assignment);
-
-        ProcessPlan reordered = plan;
-        reordered.processUnits.clear();
-        reordered.processUnitSequence.units.clear();
-        reordered.assignments.clear();
-        reordered.processUnits.reserve(plan.processUnits.size());
-        reordered.processUnitSequence.units.reserve(plan.processUnits.size());
-        reordered.assignments.reserve(plan.assignments.size());
-
+        std::vector<ProcessUnit> reorderedUnits;
+        reorderedUnits.reserve(plan.processUnits.size());
         for (const std::size_t sourceUnitIndex : orderedIndices)
         {
-            const ProcessUnit& unit = plan.processUnits[sourceUnitIndex];
-            const int processUnitIndex = static_cast<int>(reordered.processUnits.size());
-            reordered.processUnits.push_back(unit);
-            reordered.processUnitSequence.units.push_back(unit.key);
-            for (const EntityId entityId : unit.orderedMemberEntityIds)
-            {
-                const auto found = assignmentsByEntity.find(entityId);
-                if (found == assignmentsByEntity.end()) return false;
-                ProcessAssignment assignment = found->second;
-                assignment.processUnitIndex = processUnitIndex;
-                assignment.processOrder = static_cast<int>(reordered.assignments.size());
-                reordered.assignments.push_back(std::move(assignment));
-            }
+            reorderedUnits.push_back(plan.processUnits[sourceUnitIndex]);
         }
+        plan.processUnits = std::move(reorderedUnits);
+        return rebuildProcessUnitExecution(plan);
+    }
 
-        if (!cadcam::planning::validateProcessUnitStructure(reordered)
-            || !satisfiesPrecedenceConstraints(reordered))
+    bool setProcessUnitTraversal
+    (
+        ProcessPlan& plan,
+        const ProcessUnitKey& key,
+        const cadcam::process::ProcessUnitTraversalOverride& traversal
+    )
+    {
+        if (!cadcam::planning::validProcessUnitKey(key)
+            || traversal.members.size() != key.memberEntityIds.size()) return false;
+
+        std::vector<EntityId> memberIds;
+        memberIds.reserve(traversal.members.size());
+        for (const auto& member : traversal.members)
         {
-            return false;
+            if (member.entityId == 0U
+                || (member.startParameter.has_value()
+                    && !std::isfinite(*member.startParameter))) return false;
+            memberIds.push_back(member.entityId);
         }
-        plan = std::move(reordered);
+        std::sort(memberIds.begin(), memberIds.end());
+        if (memberIds != key.memberEntityIds
+            || std::adjacent_find(memberIds.begin(), memberIds.end()) != memberIds.end())
+            return false;
+
+        auto unit = std::find_if
+        (
+            plan.processUnits.begin(), plan.processUnits.end(),
+            [&key](const ProcessUnit& candidate) { return candidate.key == key; }
+        );
+        if (unit == plan.processUnits.end()) return false;
+
+        std::map<EntityId, ProcessAssignment*> assignmentsByEntity;
+        for (ProcessAssignment& assignment : plan.assignments)
+            assignmentsByEntity.emplace(assignment.entityId, &assignment);
+
+        unit->orderedMemberEntityIds.clear();
+        unit->orderedMemberEntityIds.reserve(traversal.members.size());
+        for (const auto& member : traversal.members)
+        {
+            const auto assignment = assignmentsByEntity.find(member.entityId);
+            if (assignment == assignmentsByEntity.end()) return false;
+            assignment->second->reverse = member.reverse;
+            assignment->second->startParameter = member.startParameter;
+            unit->orderedMemberEntityIds.push_back(member.entityId);
+        }
         return true;
+    }
+
+    bool applyStoredUnitTraversalOverrides
+    (
+        ProcessPlan& plan,
+        const cadcam::process::DocumentProcessState& processState
+    )
+    {
+        bool changed = false;
+        for (const ProcessUnit& unit : plan.processUnits)
+        {
+            const auto* traversal = processState.findProcessUnitTraversalOverride(unit.key);
+            if (traversal == nullptr) continue;
+            if (!setProcessUnitTraversal(plan, unit.key, *traversal)) return false;
+            changed = true;
+        }
+        return !changed || rebuildProcessUnitExecution(plan);
     }
 
     bool preserveCurrentUnitSequence
@@ -193,8 +259,8 @@ OperationResult<cadcam::planning::ProcessPlan> ProcessPlanningService::buildPlan
         return result;
     }
     if (policy.sortIntent == cadcam::planning::ProcessSortIntent::PreserveCurrentSequence
-        && !preserveCurrentUnitSequence
-            (*plan.value, processState.processUnitSequence()))
+        && (!preserveCurrentUnitSequence(*plan.value, processState.processUnitSequence())
+            || !applyStoredUnitTraversalOverrides(*plan.value, processState)))
     {
         result.status = OperationStatus::Failed;
         result.addDiagnostic(sequenceDiagnostic
@@ -251,8 +317,8 @@ OperationResult<cadcam::planning::ProcessPlan> ProcessPlanningService::buildRota
     result.mergeDiagnostics(capture.diagnostics);
     if (result.succeeded() && result.value.has_value()
         && policy.sortIntent == cadcam::planning::ProcessSortIntent::PreserveCurrentSequence
-        && !preserveCurrentUnitSequence
-            (*result.value, processState.processUnitSequence()))
+        && (!preserveCurrentUnitSequence(*result.value, processState.processUnitSequence())
+            || !applyStoredUnitTraversalOverrides(*result.value, processState)))
     {
         result.status = OperationStatus::Failed;
         result.value.reset();
@@ -308,5 +374,34 @@ ProcessPlanningService::reorderPlanByUnitSequence
     reordered.processUnitSequence.revision = sequence.revision;
     result.status = OperationStatus::Success;
     result.value = std::move(reordered);
+    return result;
+}
+
+OperationResult<cadcam::planning::ProcessPlan>
+ProcessPlanningService::applyPlanUnitTraversal
+(
+    const cadcam::planning::ProcessPlan& plan,
+    const cadcam::planning::ProcessUnitKey& key,
+    const cadcam::process::ProcessUnitTraversalOverride& traversal,
+    const OperationContext& context
+) const
+{
+    OperationResult<cadcam::planning::ProcessPlan> result;
+    cadcam::planning::ProcessPlan updated = plan;
+    if (!cadcam::planning::validateProcessUnitStructure(updated)
+        || !setProcessUnitTraversal(updated, key, traversal)
+        || !rebuildProcessUnitExecution(updated))
+    {
+        result.status = OperationStatus::Failed;
+        result.addDiagnostic(sequenceDiagnostic
+        (
+            context,
+            QStringLiteral("apply-process-unit-traversal"),
+            QStringLiteral("加工单元整组反向不符合当前计划或加工断面约束。")
+        ));
+        return result;
+    }
+    result.status = OperationStatus::Success;
+    result.value = std::move(updated);
     return result;
 }

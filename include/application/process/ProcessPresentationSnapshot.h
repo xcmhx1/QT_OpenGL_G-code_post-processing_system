@@ -26,6 +26,8 @@ namespace cadcam::process
         int unitOrder = -1;
         std::vector<geometry::EntityId> orderedMemberEntityIds;
         geometry::EntityId anchorEntityId = 0;
+        bool anchorReverse = false;
+        std::optional<double> anchorStartParameter;
     };
 
     struct ProcessPresentationSnapshot

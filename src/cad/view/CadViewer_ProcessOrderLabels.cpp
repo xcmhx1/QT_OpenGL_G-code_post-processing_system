@@ -399,7 +399,7 @@ bool CadViewer::handleProcessOrderLabelClick
             }
         }
 
-        emit processUnitMoveToFrontRequested
+        emit processUnitMoveToBackRequested
             (selectedUnitKeys, clickedLabel.unitKey);
         return true;
     }
@@ -439,15 +439,21 @@ bool CadViewer::handleProcessOrderLabelClick
     return true;
 }
 
-bool CadViewer::handleProcessOrderLabelDoubleClick(const QPoint& screenPos)
+bool CadViewer::handleProcessUnitDirectionDoubleClick(const QPoint& screenPos)
 {
     ProcessOrderLabelOverlay clickedLabel;
 
-    if (!hitTestProcessOrderLabel(screenPos, &clickedLabel))
+    if (hitTestProcessOrderLabel(screenPos, &clickedLabel))
     {
-        return false;
+        emit processUnitReverseRequested(clickedLabel.unitKey);
+        return true;
     }
 
-    appendCommandMessage(QStringLiteral("加工单元标签暂不支持整组方向切换。"));
-    return true;
+    ProcessUnitArrowOverlay clickedArrow;
+    if (hitTestProcessUnitArrow(screenPos, &clickedArrow))
+    {
+        emit processUnitReverseRequested(clickedArrow.unitKey);
+        return true;
+    }
+    return false;
 }

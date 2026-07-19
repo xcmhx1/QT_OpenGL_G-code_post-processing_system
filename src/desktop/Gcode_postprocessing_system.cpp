@@ -320,9 +320,16 @@ Gcode_postprocessing_system::Gcode_postprocessing_system(QWidget* parent)
     connect
     (
         ui->openGLWidget,
-        &CadViewer::processUnitMoveToFrontRequested,
+        &CadViewer::processUnitMoveToBackRequested,
         this,
-        &Gcode_postprocessing_system::handleProcessUnitMoveToFrontRequest
+        &Gcode_postprocessing_system::handleProcessUnitMoveToBackRequest
+    );
+    connect
+    (
+        ui->openGLWidget,
+        &CadViewer::processUnitReverseRequested,
+        this,
+        &Gcode_postprocessing_system::handleProcessUnitReverseRequest
     );
     connect(&m_document, &CadDocument::sceneChanged, this, updateStatusEntityType);
     connect(m_statusPaneWidget, &CadStatusPaneWidget::basePointSnapToggled, ui->openGLWidget, &CadViewer::setBasePointSnapEnabled);

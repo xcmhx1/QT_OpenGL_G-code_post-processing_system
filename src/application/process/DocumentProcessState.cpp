@@ -22,6 +22,29 @@ namespace cadcam::process
             }
             return true;
         }
+
+        bool validUnitTraversal
+        (
+            const planning::ProcessUnitKey& key,
+            const ProcessUnitTraversalOverride& traversal
+        )
+        {
+            if (!validUnitKey(key)
+                || traversal.members.size() != key.memberEntityIds.size()) return false;
+
+            std::vector<geometry::EntityId> memberIds;
+            memberIds.reserve(traversal.members.size());
+            for (const ProcessUnitMemberTraversal& member : traversal.members)
+            {
+                if (member.entityId == 0U
+                    || (member.startParameter.has_value()
+                        && !std::isfinite(*member.startParameter))) return false;
+                memberIds.push_back(member.entityId);
+            }
+            std::sort(memberIds.begin(), memberIds.end());
+            return memberIds == key.memberEntityIds
+                && std::adjacent_find(memberIds.begin(), memberIds.end()) == memberIds.end();
+        }
     }
 
     std::uint64_t DocumentProcessState::revision() const { return m_revision; }
@@ -136,6 +159,38 @@ namespace cadcam::process
         return true;
     }
 
+    const ProcessUnitTraversalOverride* DocumentProcessState::findProcessUnitTraversalOverride
+        (const planning::ProcessUnitKey& key) const
+    {
+        const auto found = m_processUnitTraversalOverrides.find(key.memberEntityIds);
+        return found == m_processUnitTraversalOverrides.end() ? nullptr : &found->second;
+    }
+
+    bool DocumentProcessState::setProcessUnitTraversalOverride
+    (
+        const planning::ProcessUnitKey& key,
+        const std::optional<ProcessUnitTraversalOverride>& traversal
+    )
+    {
+        if (!validUnitKey(key)
+            || (traversal.has_value() && !validUnitTraversal(key, *traversal))) return false;
+
+        const auto found = m_processUnitTraversalOverrides.find(key.memberEntityIds);
+        if (!traversal.has_value())
+        {
+            if (found == m_processUnitTraversalOverrides.end()) return false;
+            m_processUnitTraversalOverrides.erase(found);
+        }
+        else
+        {
+            if (found != m_processUnitTraversalOverrides.end()
+                && found->second == *traversal) return false;
+            m_processUnitTraversalOverrides[key.memberEntityIds] = *traversal;
+        }
+        markChanged();
+        return true;
+    }
+
     bool DocumentProcessState::setInternalGeometryExcluded(geometry::EntityId id, bool value)
     {
         return setAutomaticInternalExclusion(id, value);
@@ -172,6 +227,19 @@ namespace cadcam::process
             ++m_processUnitSequence.revision;
             changed = true;
         }
+        for (auto it = m_processUnitTraversalOverrides.begin();
+            it != m_processUnitTraversalOverrides.end();)
+        {
+            if (std::binary_search(it->first.begin(), it->first.end(), id))
+            {
+                it = m_processUnitTraversalOverrides.erase(it);
+                changed = true;
+            }
+            else
+            {
+                ++it;
+            }
+        }
         if (!changed) return false;
         markChanged();
         return true;
@@ -206,13 +274,33 @@ namespace cadcam::process
             ++m_processUnitSequence.revision;
             markChanged();
         }
+        for (auto it = m_processUnitTraversalOverrides.begin();
+            it != m_processUnitTraversalOverrides.end();)
+        {
+            const bool invalid = std::any_of
+            (
+                it->first.begin(), it->first.end(),
+                [&valid](geometry::EntityId id) { return valid.count(id) == 0U; }
+            );
+            if (invalid)
+            {
+                it = m_processUnitTraversalOverrides.erase(it);
+                markChanged();
+            }
+            else
+            {
+                ++it;
+            }
+        }
         endBatch();
     }
 
     void DocumentProcessState::clear()
     {
-        if (m_states.empty() && m_processUnitSequence.units.empty()) return;
+        if (m_states.empty() && m_processUnitSequence.units.empty()
+            && m_processUnitTraversalOverrides.empty()) return;
         m_states.clear();
+        m_processUnitTraversalOverrides.clear();
         if (!m_processUnitSequence.units.empty())
         {
             m_processUnitSequence.units.clear();

@@ -37,4 +37,12 @@ public:
         const OperationContext& context
     ) const;
 
+    OperationResult<cadcam::planning::ProcessPlan> applyPlanUnitTraversal
+    (
+        const cadcam::planning::ProcessPlan& plan,
+        const cadcam::planning::ProcessUnitKey& key,
+        const cadcam::process::ProcessUnitTraversalOverride& traversal,
+        const OperationContext& context
+    ) const;
+
 };

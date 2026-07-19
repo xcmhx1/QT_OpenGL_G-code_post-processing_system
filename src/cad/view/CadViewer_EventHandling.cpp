@@ -89,7 +89,8 @@ void CadViewer::mouseDoubleClickEvent(QMouseEvent* event)
         return;
     }
 
-    if (event->button() == Qt::LeftButton && handleProcessOrderLabelDoubleClick(event->pos()))
+    if (event->button() == Qt::LeftButton
+        && handleProcessUnitDirectionDoubleClick(event->pos()))
     {
         event->accept();
         updateHoveredWorldPosition(event->pos());

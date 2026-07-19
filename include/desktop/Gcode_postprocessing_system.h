@@ -168,14 +168,23 @@ private:
     int refreshWasteProcessingExclusions();
     void invalidateProcessOrdersAfterEndCutChange();
     void invalidateCurrentProcessPlan();
-    void handleProcessUnitMoveToFrontRequest
+    void handleProcessUnitMoveToBackRequest
     (
         const QVector<cadcam::planning::ProcessUnitKey>& selectedUnitKeys,
         const cadcam::planning::ProcessUnitKey& targetUnitKey
     );
+    void handleProcessUnitReverseRequest
+        (const cadcam::planning::ProcessUnitKey& unitKey);
     bool applyProcessUnitSequenceToCurrentPlan
     (
         const cadcam::planning::ProcessUnitSequence& sequence,
+        QString* errorMessage = nullptr
+    );
+    bool applyProcessUnitTraversalToCurrentPlan
+    (
+        const cadcam::planning::ProcessUnitKey& key,
+        const cadcam::process::ProcessUnitTraversalOverride& traversal,
+        const std::optional<cadcam::process::ProcessUnitTraversalOverride>& storedOverride,
         QString* errorMessage = nullptr
     );
 

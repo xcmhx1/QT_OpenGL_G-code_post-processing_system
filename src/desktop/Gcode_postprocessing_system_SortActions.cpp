@@ -3177,7 +3177,162 @@ bool Gcode_postprocessing_system::applyProcessUnitSequenceToCurrentPlan
     return true;
 }
 
-void Gcode_postprocessing_system::handleProcessUnitMoveToFrontRequest
+bool Gcode_postprocessing_system::applyProcessUnitTraversalToCurrentPlan
+(
+    const cadcam::planning::ProcessUnitKey& key,
+    const cadcam::process::ProcessUnitTraversalOverride& traversal,
+    const std::optional<cadcam::process::ProcessUnitTraversalOverride>& storedOverride,
+    QString* errorMessage
+)
+{
+    const auto fail = [errorMessage](const QString& message)
+    {
+        if (errorMessage != nullptr) *errorMessage = message;
+        return false;
+    };
+    if (!m_currentProcessPlan.has_value()
+        || m_currentProcessPlan->contentRevision != m_document.contentRevision()
+        || m_currentProcessPlan->processStateRevision != m_processState.revision()
+        || m_currentProcessPlan->processUnitSequence.units
+            != m_processState.processUnitSequence().units)
+    {
+        return fail(QStringLiteral("当前加工计划已失效，请重新排序后再调整加工单元。"));
+    }
+
+    std::optional<cadcam::process::ProcessUnitTraversalOverride> currentStored;
+    if (const auto* value = m_processState.findProcessUnitTraversalOverride(key))
+        currentStored = *value;
+    const bool stateWillChange = currentStored != storedOverride;
+    const std::uint64_t expectedProcessRevision = m_processState.revision()
+        + (stateWillChange ? 1U : 0U);
+
+    const OperationContext context = createOperationContext
+        (QStringLiteral("ReverseCurrentProcessUnitTraversal"));
+    ProcessPlanningService service;
+    auto updated = service.applyPlanUnitTraversal
+        (*m_currentProcessPlan, key, traversal, context);
+    if (!updated.succeeded() || !updated.value.has_value())
+    {
+        QString message = QStringLiteral("加工单元整组反向不符合当前加工约束。");
+        for (const Diagnostic& diagnostic : updated.diagnostics)
+        {
+            if (!diagnostic.userMessage.trimmed().isEmpty())
+            {
+                message = diagnostic.userMessage;
+                break;
+            }
+        }
+        return fail(message);
+    }
+
+    cadcam::planning::ProcessPlan candidatePlan = std::move(*updated.value);
+    candidatePlan.processStateRevision = expectedProcessRevision;
+    auto candidatePresentation = cadcam::process::ProcessPresentationSnapshot::build
+        (candidatePlan, context);
+    if (!candidatePresentation.succeeded() || !candidatePresentation.value.has_value())
+    {
+        return fail(QStringLiteral("加工单元反向后的显示快照构建失败。"));
+    }
+
+    if (stateWillChange
+        && !m_processState.setProcessUnitTraversalOverride(key, storedOverride))
+    {
+        return fail(QStringLiteral("加工单元遍历覆盖更新失败。"));
+    }
+
+    candidatePlan.processStateRevision = m_processState.revision();
+    candidatePresentation.value->processStateRevision = m_processState.revision();
+    m_currentProcessPlan = std::move(candidatePlan);
+    m_processPresentation = std::move(*candidatePresentation.value);
+    ui->openGLWidget->setProcessPresentation(&*m_processPresentation);
+    ui->openGLWidget->update();
+    return true;
+}
+
+void Gcode_postprocessing_system::handleProcessUnitReverseRequest
+    (const cadcam::planning::ProcessUnitKey& unitKey)
+{
+    const auto announce = [this](const QString& message)
+    {
+        ui->openGLWidget->appendCommandMessage(message);
+        ui->openGLWidget->refreshCommandPrompt();
+        statusBar()->showMessage(message, 5000);
+    };
+    if (!m_currentProcessPlan.has_value())
+    {
+        announce(QStringLiteral("当前没有有效加工计划，请先排序。"));
+        return;
+    }
+
+    const auto unit = std::find_if
+    (
+        m_currentProcessPlan->processUnits.begin(),
+        m_currentProcessPlan->processUnits.end(),
+        [&unitKey](const cadcam::planning::ProcessUnit& candidate)
+        { return candidate.key == unitKey; }
+    );
+    if (unit == m_currentProcessPlan->processUnits.end())
+    {
+        announce(QStringLiteral("目标加工单元不属于当前计划。"));
+        return;
+    }
+
+    std::map<cadcam::geometry::EntityId, const cadcam::planning::ProcessAssignment*>
+        assignmentsByEntity;
+    for (const cadcam::planning::ProcessAssignment& assignment
+        : m_currentProcessPlan->assignments)
+        assignmentsByEntity.emplace(assignment.entityId, &assignment);
+
+    cadcam::process::ProcessUnitTraversalOverride beforeTraversal;
+    beforeTraversal.members.reserve(unit->orderedMemberEntityIds.size());
+    for (const cadcam::geometry::EntityId entityId : unit->orderedMemberEntityIds)
+    {
+        const auto assignment = assignmentsByEntity.find(entityId);
+        if (assignment == assignmentsByEntity.end())
+        {
+            announce(QStringLiteral("加工单元成员缺少计划分配，无法整组反向。"));
+            return;
+        }
+        beforeTraversal.members.push_back
+        ({ entityId, assignment->second->reverse, assignment->second->startParameter });
+    }
+
+    cadcam::process::ProcessUnitTraversalOverride afterTraversal = beforeTraversal;
+    std::reverse(afterTraversal.members.begin(), afterTraversal.members.end());
+    for (auto& member : afterTraversal.members) member.reverse = !member.reverse;
+
+    std::optional<cadcam::process::ProcessUnitTraversalOverride> beforeStored;
+    if (const auto* value = m_processState.findProcessUnitTraversalOverride(unitKey))
+        beforeStored = *value;
+    const std::optional<cadcam::process::ProcessUnitTraversalOverride> afterStored =
+        afterTraversal;
+
+    const bool applied = m_editer.changeProcessUnitTraversal
+    (
+        unitKey,
+        beforeTraversal,
+        beforeStored,
+        afterTraversal,
+        afterStored,
+        [this, announce]
+        (
+            const cadcam::planning::ProcessUnitKey& key,
+            const cadcam::process::ProcessUnitTraversalOverride& traversal,
+            const std::optional<cadcam::process::ProcessUnitTraversalOverride>& stored
+        )
+        {
+            QString errorMessage;
+            const bool success = applyProcessUnitTraversalToCurrentPlan
+                (key, traversal, stored, &errorMessage);
+            if (!success) announce(errorMessage);
+            return success;
+        }
+    );
+    if (applied)
+        announce(QStringLiteral("加工单元已整组反向，起点与方向显示已刷新。"));
+}
+
+void Gcode_postprocessing_system::handleProcessUnitMoveToBackRequest
 (
     const QVector<cadcam::planning::ProcessUnitKey>& selectedUnitKeys,
     const cadcam::planning::ProcessUnitKey& targetUnitKey
@@ -3228,19 +3383,19 @@ void Gcode_postprocessing_system::handleProcessUnitMoveToFrontRequest
     const std::size_t rangeLast = *selectedIndices.rbegin();
     if (rangeLast - rangeFirst + 1U != selectedIndices.size())
     {
-        announce(QStringLiteral("选中的加工单元编号不连续，无法执行块内提首。"));
+        announce(QStringLiteral("选中的加工单元编号不连续，无法执行块内移尾。"));
         return;
     }
-    if (target->second == rangeFirst)
+    if (target->second == rangeLast)
     {
-        announce(QStringLiteral("目标加工单元已经位于所选范围首位。"));
+        announce(QStringLiteral("目标加工单元已经位于所选范围末位。"));
         return;
     }
 
     cadcam::planning::ProcessUnitSequence after = before;
     const cadcam::planning::ProcessUnitKey moved = after.units[target->second];
     after.units.erase(after.units.begin() + static_cast<std::ptrdiff_t>(target->second));
-    after.units.insert(after.units.begin() + static_cast<std::ptrdiff_t>(rangeFirst), moved);
+    after.units.insert(after.units.begin() + static_cast<std::ptrdiff_t>(rangeLast), moved);
     ++after.revision;
 
     const bool applied = m_editer.changeProcessUnitSequence
@@ -3261,7 +3416,7 @@ void Gcode_postprocessing_system::handleProcessUnitMoveToFrontRequest
         return;
     }
 
-    announce(QStringLiteral("加工单元 %1 已移动到所选范围首位，编号已连续刷新。")
+    announce(QStringLiteral("加工单元 %1 已移动到所选范围末位，编号已连续刷新。")
         .arg(static_cast<qulonglong>(target->second + 1U)));
 }
 
