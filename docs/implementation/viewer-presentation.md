@@ -18,7 +18,7 @@ Viewer 不拥有加工单元身份、加工单元序列或计划事实。
 当前输入包括 CAD 场景、逐图元 `ProcessPresentationSnapshot`、加工状态和 Viewer 选择状态。
 当前输出是逐图元顺序标签、方向箭头、排除样式和点击反馈。
 
-目标输入增加 `ProcessUnitKey`、当前 `ProcessUnitSequence`、单元成员和单元级展示锚点。
+核心计划和 Application 状态已经提供 `ProcessUnitKey`、当前 `ProcessUnitSequence` 和单元成员；Viewer 当前尚未读取这些字段。
 目标输出是一单元一编号的展示、单元选择反馈及块内提首命令，不直接修改 `ProcessPlan`。
 
 ## 主要数据类型
@@ -26,8 +26,8 @@ Viewer 不拥有加工单元身份、加工单元序列或计划事实。
 - `ProcessPresentationSnapshot`：当前按稳定 `EntityId` 保存逐图元顺序、方向、起点、连续组和排除结果。
 - `ProcessOrderLabelOverlay`：当前单个标签的屏幕位置、文字、图元和命中区域。
 - `RenderEntityKey`：Viewer 对象生命周期内使用的渲染和选择键，不是加工身份。
-- `ProcessUnitKey`：目标加工单元身份，由成员稳定 `EntityId` 的排序规范集合形成。
-- `ProcessUnitSequence`：目标唯一单元序列，序列位置产生 `1..N` 编号。
+- `ProcessUnitKey`：当前核心加工单元身份，由成员稳定 `EntityId` 的排序规范集合形成。
+- `ProcessUnitSequence`：Application 当前持有的唯一单元序列，序列位置产生 `1..N` 编号。
 - `ProcessUnitPresentation`：目标展示投影，包含单元身份、编号、成员身份、锚点和选择状态；具体类型尚未实现。
 
 ## 当前生产数据流
@@ -56,7 +56,7 @@ ProcessUnitSequence
 
 ## 状态所有权
 
-Application 拥有当前 `ProcessUnitSequence` 及其 revision。
+Application 的 `DocumentProcessState` 拥有当前 `ProcessUnitSequence` 及其 revision。
 Core 负责依据统一加工路径和连续关系形成 `ProcessUnit` 集合。
 Viewer 仅保存当前屏幕命中区域、临时悬停和选择反馈。
 
@@ -107,7 +107,7 @@ Viewer 仅保存当前屏幕命中区域、临时悬停和选择反馈。
 | 标签粒度 | 每个有效图元按 assignment 生成标签 | 每个加工单元只生成一个标签 | 连续组当前可能显示多个编号 |
 | 标签锚点 | 从单个图元的可视信息得到 | 从整个加工单元的单元级展示投影得到 | 当前没有稳定单元锚点 |
 | 选择粒度 | Viewer 选择单个 `CadItem` | 成员图元选择映射为加工单元选择 | 当前不能校验连续单元范围 |
-| 顺序状态 | 逐图元 `processOrder` 和 `manualProcessOrder` | Application 持有唯一 `ProcessUnitSequence` | 当前没有单元级重排事实 |
+| 顺序状态 | Application 已持有唯一 `ProcessUnitSequence`；展示仍读取逐图元执行顺序 | Viewer 读取单元序列位置 | 单元状态已落地，展示接入尚未实现 |
 | 点击交互 | 标签点击和双击围绕单图元处理 | Ctrl + 单击执行连续块内提首 | 目标交互尚未实现 |
 | 失效刷新 | 展示随 `ProcessPlan` 创建或清除 | 序列编号可即时刷新，计划派生展示保持失效 | 当前缺少独立单元序列展示 |
 

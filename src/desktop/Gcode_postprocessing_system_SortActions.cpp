@@ -3389,7 +3389,11 @@ bool Gcode_postprocessing_system::sortEntitiesWithProcessPlan2D(const QString& c
         return false;
     }
 
-    m_currentProcessPlan = std::move(*plan.value);
+    cadcam::planning::ProcessPlan resolvedPlan = std::move(*plan.value);
+    m_processState.setProcessUnitSequence(resolvedPlan.processUnitSequence.units);
+    resolvedPlan.processUnitSequence = m_processState.processUnitSequence();
+    resolvedPlan.processStateRevision = m_processState.revision();
+    m_currentProcessPlan = std::move(resolvedPlan);
     auto presentation = cadcam::process::ProcessPresentationSnapshot::build
         (*m_currentProcessPlan, context);
     if (!presentation.succeeded() || !presentation.value.has_value())
@@ -3483,7 +3487,11 @@ bool Gcode_postprocessing_system::sortEntitiesWithProcessPlan3D(const QString& c
         return false;
     }
 
-    m_currentProcessPlan = std::move(*planResult.value);
+    cadcam::planning::ProcessPlan resolvedPlan = std::move(*planResult.value);
+    m_processState.setProcessUnitSequence(resolvedPlan.processUnitSequence.units);
+    resolvedPlan.processUnitSequence = m_processState.processUnitSequence();
+    resolvedPlan.processStateRevision = m_processState.revision();
+    m_currentProcessPlan = std::move(resolvedPlan);
     auto presentation = cadcam::process::ProcessPresentationSnapshot::build
         (*m_currentProcessPlan, context);
     if (!presentation.succeeded() || !presentation.value.has_value())

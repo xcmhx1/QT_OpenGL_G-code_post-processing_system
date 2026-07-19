@@ -1,10 +1,29 @@
 #include "application/process/DocumentProcessState.h"
 
+#include <algorithm>
 #include <cmath>
 #include <set>
 
 namespace cadcam::process
 {
+    namespace
+    {
+        bool validUnitKey(const planning::ProcessUnitKey& key)
+        {
+            if (key.memberEntityIds.empty()) return false;
+            for (std::size_t index = 0; index < key.memberEntityIds.size(); ++index)
+            {
+                if (key.memberEntityIds[index] == 0U
+                    || (index > 0U
+                        && key.memberEntityIds[index - 1U] >= key.memberEntityIds[index]))
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+    }
+
     std::uint64_t DocumentProcessState::revision() const { return m_revision; }
 
     const EntityProcessState* DocumentProcessState::find(geometry::EntityId entityId) const
@@ -88,44 +107,33 @@ namespace cadcam::process
         return stateOrDefault(id).effectiveInternalExclusion();
     }
 
-    bool DocumentProcessState::setManualProcessOrder
-    (geometry::EntityId id, std::optional<int> value)
+    const planning::ProcessUnitSequence& DocumentProcessState::processUnitSequence() const
     {
-        if (value.has_value() && *value < 0) return false;
-        EntityProcessState state = stateOrDefault(id);
-        state.overrideData.manualProcessOrder = value;
-        return store(id, state);
+        return m_processUnitSequence;
     }
 
-    bool DocumentProcessState::clearManualProcessOrder(geometry::EntityId id)
+    bool DocumentProcessState::setProcessUnitSequence
+    (const std::vector<planning::ProcessUnitKey>& units)
     {
-        return setManualProcessOrder(id, std::nullopt);
-    }
-
-    bool DocumentProcessState::clearAllManualProcessOrders()
-    {
-        bool changed = false;
-        beginBatch();
-        for (auto it = m_states.begin(); it != m_states.end();)
+        std::set<std::vector<geometry::EntityId>> uniqueKeys;
+        for (const planning::ProcessUnitKey& key : units)
         {
-            if (!it->second.overrideData.manualProcessOrder.has_value())
-            {
-                ++it;
-                continue;
-            }
-            EntityProcessState state = it->second;
-            state.overrideData.manualProcessOrder.reset();
-            const geometry::EntityId id = it->first;
-            ++it;
-            changed = store(id, state) || changed;
+            if (!validUnitKey(key) || !uniqueKeys.insert(key.memberEntityIds).second) return false;
         }
-        endBatch();
-        return changed;
+        if (m_processUnitSequence.units == units) return false;
+        m_processUnitSequence.units = units;
+        ++m_processUnitSequence.revision;
+        markChanged();
+        return true;
     }
 
-    std::optional<int> DocumentProcessState::manualProcessOrder(geometry::EntityId id) const
+    bool DocumentProcessState::clearProcessUnitSequence()
     {
-        return stateOrDefault(id).overrideData.manualProcessOrder;
+        if (m_processUnitSequence.units.empty()) return false;
+        m_processUnitSequence.units.clear();
+        ++m_processUnitSequence.revision;
+        markChanged();
+        return true;
     }
 
     bool DocumentProcessState::setInternalGeometryExcluded(geometry::EntityId id, bool value)
@@ -140,15 +148,31 @@ namespace cadcam::process
             || (state.overrideData.boundaryRole != planning::BoundaryRole::None
                 && state.overrideData.boundaryPairId < 0)
             || (state.overrideData.startParameter.has_value()
-                && !std::isfinite(*state.overrideData.startParameter))
-            || (state.overrideData.manualProcessOrder.has_value()
-                && *state.overrideData.manualProcessOrder < 0)) return false;
+                && !std::isfinite(*state.overrideData.startParameter))) return false;
         return store(id, state);
     }
 
     bool DocumentProcessState::erase(geometry::EntityId id)
     {
-        if (id == 0 || m_states.erase(id) == 0U) return false;
+        if (id == 0) return false;
+        bool changed = m_states.erase(id) != 0U;
+        const auto newEnd = std::remove_if
+        (
+            m_processUnitSequence.units.begin(),
+            m_processUnitSequence.units.end(),
+            [id](const planning::ProcessUnitKey& key)
+            {
+                return std::binary_search
+                    (key.memberEntityIds.begin(), key.memberEntityIds.end(), id);
+            }
+        );
+        if (newEnd != m_processUnitSequence.units.end())
+        {
+            m_processUnitSequence.units.erase(newEnd, m_processUnitSequence.units.end());
+            ++m_processUnitSequence.revision;
+            changed = true;
+        }
+        if (!changed) return false;
         markChanged();
         return true;
     }
@@ -163,13 +187,37 @@ namespace cadcam::process
             it = m_states.erase(it);
             markChanged();
         }
+        const auto newEnd = std::remove_if
+        (
+            m_processUnitSequence.units.begin(),
+            m_processUnitSequence.units.end(),
+            [&valid](const planning::ProcessUnitKey& key)
+            {
+                return std::any_of
+                (
+                    key.memberEntityIds.begin(), key.memberEntityIds.end(),
+                    [&valid](geometry::EntityId id) { return valid.count(id) == 0U; }
+                );
+            }
+        );
+        if (newEnd != m_processUnitSequence.units.end())
+        {
+            m_processUnitSequence.units.erase(newEnd, m_processUnitSequence.units.end());
+            ++m_processUnitSequence.revision;
+            markChanged();
+        }
         endBatch();
     }
 
     void DocumentProcessState::clear()
     {
-        if (m_states.empty()) return;
+        if (m_states.empty() && m_processUnitSequence.units.empty()) return;
         m_states.clear();
+        if (!m_processUnitSequence.units.empty())
+        {
+            m_processUnitSequence.units.clear();
+            ++m_processUnitSequence.revision;
+        }
         markChanged();
     }
 

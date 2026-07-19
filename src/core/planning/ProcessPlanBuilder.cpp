@@ -1346,11 +1346,22 @@ namespace cadcam::planning
                 || selectedGroup.kind == ProcessGroupKind::ClosedLoop
                 || selectedGroup.kind == ProcessGroupKind::BreakBoundary;
             const int continuousGroupId = continuous ? selectedGroup.groupId : -1;
+            ProcessUnit processUnit;
+            processUnit.key.memberEntityIds = selectedGroup.entityIds;
+            std::sort(processUnit.key.memberEntityIds.begin(), processUnit.key.memberEntityIds.end());
+            processUnit.closed = selectedGroup.closed;
+            processUnit.orderedMemberEntityIds.reserve(selected->entities.size());
+            for (const DirectedEntity& directed : selected->entities)
+                processUnit.orderedMemberEntityIds.push_back(directed.entity->entityId);
+            const int processUnitIndex = static_cast<int>(plan.processUnits.size());
+            plan.processUnits.push_back(processUnit);
+            plan.processUnitSequence.units.push_back(processUnit.key);
             for (const DirectedEntity& directed : selected->entities)
             {
                 ProcessAssignment assignment;
                 assignment.entityId = directed.entity->entityId;
                 assignment.processOrder = processOrder++;
+                assignment.processUnitIndex = processUnitIndex;
                 assignment.continuousGroupId = continuousGroupId;
                 assignment.reverse = directed.reverseRelativeToInput;
                 assignment.startParameter = directed.entity->startParameter;
@@ -1387,6 +1398,8 @@ namespace cadcam::planning
             const ProcessAssignment& assignment = plan.assignments[index];
             if (!assignedIds.insert(assignment.entityId).second
                 || assignment.processOrder != static_cast<int>(index)
+                || assignment.processUnitIndex < 0
+                || static_cast<std::size_t>(assignment.processUnitIndex) >= plan.processUnits.size()
                 || groupByEntity.find(assignment.entityId) == groupByEntity.end())
             {
                 return failure<ProcessPlan>
@@ -1403,6 +1416,33 @@ namespace cadcam::planning
             const int groupId = groupByEntity[assignment.entityId];
             if (firstOrderByGroup.find(groupId) == firstOrderByGroup.end()) firstOrderByGroup[groupId] = assignment.processOrder;
             lastOrderByGroup[groupId] = assignment.processOrder;
+        }
+        if (plan.processUnits.size() != plan.processUnitSequence.units.size())
+        {
+            return failure<ProcessPlan>
+            (
+                OperationStatus::InternalError, context, DiagnosticCode::ProcessPlanningInvariantViolation,
+                QStringLiteral("加工单元序列完整性校验失败。"),
+                QStringLiteral("ProcessUnit and ProcessUnitSequence sizes differ."),
+                diagnosticValues(input, policy)
+            );
+        }
+        for (std::size_t index = 0; index < plan.processUnits.size(); ++index)
+        {
+            const ProcessUnit& unit = plan.processUnits[index];
+            if (unit.key.memberEntityIds.empty()
+                || unit.orderedMemberEntityIds.empty()
+                || !(unit.key == plan.processUnitSequence.units[index])
+                || !sameEntitySet(unit.key.memberEntityIds, unit.orderedMemberEntityIds))
+            {
+                return failure<ProcessPlan>
+                (
+                    OperationStatus::InternalError, context, DiagnosticCode::ProcessPlanningInvariantViolation,
+                    QStringLiteral("加工单元成员校验失败。"),
+                    QStringLiteral("ProcessUnit identity or ordered members are invalid."),
+                    diagnosticValues(input, policy)
+                );
+            }
         }
         for (const ProcessExclusion& exclusion : plan.exclusions)
         {

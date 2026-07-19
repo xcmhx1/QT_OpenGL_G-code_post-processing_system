@@ -164,7 +164,6 @@ DocumentProcessPlanningAdapter::capturePlanar
         entity.excludedAsInternalGeometry = state.effectiveInternalExclusion();
         entity.directionPreference = state.overrideData.direction;
         entity.startParameter = state.overrideData.startParameter;
-        entity.manualProcessOrder = state.overrideData.manualProcessOrder;
         if (entry.sourceEntity.has_value())
         {
             entity.sourceEntity = *entry.sourceEntity;
@@ -261,7 +260,6 @@ DocumentProcessPlanningAdapter::captureRotary
         entity.boundaryPairId = state.overrideData.boundaryPairId;
         entity.directionPreference = state.overrideData.direction;
         entity.startParameter = state.overrideData.startParameter;
-        entity.manualProcessOrder = state.overrideData.manualProcessOrder;
 
         if (entry.sourceEntity.has_value())
         {

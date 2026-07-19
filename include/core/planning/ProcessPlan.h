@@ -44,13 +44,36 @@ namespace cadcam::planning
         int boundaryPairId = -1;
         process::DirectionPreference directionPreference = process::DirectionPreference::Auto;
         std::optional<double> startParameter;
-        std::optional<int> manualProcessOrder;
+    };
+
+    struct ProcessUnitKey
+    {
+        std::vector<geometry::EntityId> memberEntityIds;
+
+        bool operator==(const ProcessUnitKey& other) const
+        {
+            return memberEntityIds == other.memberEntityIds;
+        }
+    };
+
+    struct ProcessUnit
+    {
+        ProcessUnitKey key;
+        std::vector<geometry::EntityId> orderedMemberEntityIds;
+        bool closed = false;
+    };
+
+    struct ProcessUnitSequence
+    {
+        std::vector<ProcessUnitKey> units;
+        std::uint64_t revision = 1;
     };
 
     struct ProcessAssignment
     {
         geometry::EntityId entityId = 0;
         int processOrder = -1;
+        int processUnitIndex = -1;
         int continuousGroupId = -1;
         bool reverse = false;
         std::optional<double> startParameter;
@@ -83,6 +106,8 @@ namespace cadcam::planning
         std::uint64_t processStateRevision = 0;
         ProcessPlanMode mode = ProcessPlanMode::Planar3Axis;
         ProcessOrderingStrategy orderingStrategy = ProcessOrderingStrategy::NearestNext;
+        std::vector<ProcessUnit> processUnits;
+        ProcessUnitSequence processUnitSequence;
         std::vector<ProcessAssignment> assignments;
         std::vector<ProcessGroup> groups;
         std::vector<ProcessExclusion> exclusions;

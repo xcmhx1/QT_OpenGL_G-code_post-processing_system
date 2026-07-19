@@ -268,6 +268,7 @@ namespace cadcam::planning
             ProcessAssignment assignment;
             assignment.entityId = best->entity->entityId;
             assignment.processOrder = static_cast<int>(plan.assignments.size());
+            assignment.processUnitIndex = static_cast<int>(plan.processUnits.size());
             assignment.continuousGroupId = -1;
             assignment.reverse = best->reverse;
             if (best->entity->path.closed)
@@ -276,6 +277,12 @@ namespace cadcam::planning
             plan.groups.push_back
             ({ assignment.processOrder, ProcessGroupKind::SingleEntity,
                 best->entity->path.closed, { assignment.entityId } });
+            ProcessUnit unit;
+            unit.key.memberEntityIds = { assignment.entityId };
+            unit.orderedMemberEntityIds = { assignment.entityId };
+            unit.closed = best->entity->path.closed;
+            plan.processUnits.push_back(unit);
+            plan.processUnitSequence.units.push_back(unit.key);
             current = best->exit;
             remaining.erase(remaining.begin() + static_cast<std::ptrdiff_t>(bestIndex));
         }

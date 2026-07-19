@@ -15,7 +15,6 @@ namespace cadcam::process
         DirectionPreference direction = DirectionPreference::Auto;
         std::optional<double> startParameter;
         std::optional<bool> manualInternalExclusionOverride;
-        std::optional<int> manualProcessOrder;
         planning::BoundaryRole boundaryRole = planning::BoundaryRole::None;
         int boundaryPairId = -1;
 
@@ -25,7 +24,6 @@ namespace cadcam::process
                 && direction == other.direction
                 && startParameter == other.startParameter
                 && manualInternalExclusionOverride == other.manualInternalExclusionOverride
-                && manualProcessOrder == other.manualProcessOrder
                 && boundaryRole == other.boundaryRole
                 && boundaryPairId == other.boundaryPairId;
         }
@@ -77,10 +75,9 @@ namespace cadcam::process
         std::optional<bool> manualInternalExclusionOverride
             (geometry::EntityId entityId) const;
         bool effectiveInternalExclusion(geometry::EntityId entityId) const;
-        bool setManualProcessOrder(geometry::EntityId entityId, std::optional<int> order);
-        bool clearManualProcessOrder(geometry::EntityId entityId);
-        bool clearAllManualProcessOrders();
-        std::optional<int> manualProcessOrder(geometry::EntityId entityId) const;
+        const planning::ProcessUnitSequence& processUnitSequence() const;
+        bool setProcessUnitSequence(const std::vector<planning::ProcessUnitKey>& units);
+        bool clearProcessUnitSequence();
 
         // Compatibility wrapper: legacy callers set the automatic analysis result.
         bool setInternalGeometryExcluded(geometry::EntityId entityId, bool excluded);
@@ -99,6 +96,7 @@ namespace cadcam::process
 
         std::uint64_t m_revision = 1;
         std::map<geometry::EntityId, EntityProcessState> m_states;
+        planning::ProcessUnitSequence m_processUnitSequence;
         int m_batchDepth = 0;
         bool m_batchChanged = false;
     };
