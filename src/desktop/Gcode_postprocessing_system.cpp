@@ -317,6 +317,13 @@ Gcode_postprocessing_system::Gcode_postprocessing_system(QWidget* parent)
                 ui->openGLWidget->appendCommandMessage(QStringLiteral("已更新加工方向偏好，请重新排序。"));
             }
         });
+    connect
+    (
+        ui->openGLWidget,
+        &CadViewer::processUnitMoveToFrontRequested,
+        this,
+        &Gcode_postprocessing_system::handleProcessUnitMoveToFrontRequest
+    );
     connect(&m_document, &CadDocument::sceneChanged, this, updateStatusEntityType);
     connect(m_statusPaneWidget, &CadStatusPaneWidget::basePointSnapToggled, ui->openGLWidget, &CadViewer::setBasePointSnapEnabled);
     connect(m_statusPaneWidget, &CadStatusPaneWidget::controlPointSnapToggled, ui->openGLWidget, &CadViewer::setControlPointSnapEnabled);

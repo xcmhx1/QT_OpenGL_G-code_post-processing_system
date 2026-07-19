@@ -168,6 +168,16 @@ private:
     int refreshWasteProcessingExclusions();
     void invalidateProcessOrdersAfterEndCutChange();
     void invalidateCurrentProcessPlan();
+    void handleProcessUnitMoveToFrontRequest
+    (
+        const QVector<cadcam::planning::ProcessUnitKey>& selectedUnitKeys,
+        const cadcam::planning::ProcessUnitKey& targetUnitKey
+    );
+    bool applyProcessUnitSequenceToCurrentPlan
+    (
+        const cadcam::planning::ProcessUnitSequence& sequence,
+        QString* errorMessage = nullptr
+    );
 
 private:
     Ui::Gcode_postprocessing_systemClass* ui = nullptr;

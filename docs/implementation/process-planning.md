@@ -156,6 +156,9 @@ Application 的 `DocumentProcessState` 持有当前 `ProcessUnitSequence`。Core
 - 普通排序继续读取并保留人工方向和人工起点。
 - 智能排序不读取当前单元序列，并在本次规划输入中把方向视为 `Auto`、人工起点视为未设置；用户状态本身不被删除或修改。
 - 重排结果继续通过加工单元结构校验和 Break 前后约束校验，校验成功后才更新权威序列。
+- 普通排序保序与人工块内提首共用单元级计划重排：整体移动 `ProcessUnit`，保留 `orderedMemberEntityIds`，重建 `processUnitIndex` 和连续 `processOrder`。
+- 人工块内提首在候选计划通过单元结构和 Break 约束校验后才更新 `DocumentProcessState`，然后将计划重新绑定到新 revision 并重建展示快照。
+- Undo/Redo 复用同一重排和发布路径，分别应用命令保存的修改前、修改后完整序列。
 - 展示快照按加工单元保存 `unitOrder` 和成员身份，同时保留逐图元方向、起点、连续组和排除原因。
 - 单元加工编号只由 `ProcessUnitSequence` 的位置 `+1` 产生，不存入成员图元。
 - Viewer 顺序标签只读取单元展示项；逐图元 `processOrder` 继续仅服务轨迹和 NC。
@@ -164,6 +167,7 @@ Application 的 `DocumentProcessState` 持有当前 `ProcessUnitSequence`。Core
 
 - `src/desktop/Gcode_postprocessing_system_SortActions.cpp`：提供排序 UI 入口、策略选择和计划保存。
 - `src/application/planning/ProcessPlanningService.cpp`：组织文档捕获、核心规划和 revision 复核。
+- `src/cad/editing/CadEditer_CommandActions.cpp`：将一次块内提首作为单个可撤销命令保存。
 - `src/application/planning/DocumentProcessPlanningAdapter.cpp`：将生产文档和加工状态转换为规划值对象。
 - `src/core/planning/PlanarProcessPlanBuilder.cpp`：构建三轴最近距离加工计划。
 - `src/core/planning/ProcessPlanBuilder.cpp`：构建四轴分组、断面约束和排序计划。
@@ -176,11 +180,11 @@ Application 的 `DocumentProcessState` 持有当前 `ProcessUnitSequence`。Core
 |---|---|---|---|
 | 普通与智能排序 | 两种入口显式传递不同 `ProcessSortIntent`；普通排序保留匹配单元顺序，智能排序重建序列 | 两种排序语义分离 | 已实现，不依赖按钮文字或命令标题判断 |
 | 加工单元集合 | 三轴从 `PathTopology` 连通分量形成连续链、严格闭环或独立图元单元；四轴从现有加工组形成单元 | 两种模式统一使用加工单元语义 | 已建立统一核心模型；复杂分支分量保持独立图元调度 |
-| 当前顺序 | `DocumentProcessState` 保存唯一 `ProcessUnitSequence` | Application 保存唯一加工单元序列 | 状态基础已实现，人工编辑入口尚未实现 |
+| 当前顺序 | `DocumentProcessState` 保存唯一 `ProcessUnitSequence`；Ctrl 块内提首可修改连续范围 | Application 保存唯一加工单元序列 | 状态和块内提首入口已实现 |
 | 人工方向与起点 | 普通排序读取用户状态；智能排序只在规划输入边界忽略，用户状态继续保留 | 智能排序重新计算方向和起点 | 已实现 |
 | 智能排序替换 | 智能结果不匹配旧序列，直接更新唯一 `ProcessUnitSequence` | 智能结果直接替换当前序列 | 已实现 |
 | 单元编号 | 单元编号由序列位置产生，Viewer 每个单元显示一个标签；assignment 保留逐图元执行顺序 | 一个加工单元一个显示编号 | 已实现 |
-| 单元标签交互 | 标签单击选择全部成员，双击不修改成员方向 | 支持单元级交互 | 整组选择已实现；整组方向切换和块内提首尚未实现 |
+| 单元标签交互 | 标签单击选择全部成员，Ctrl 单击执行连续块内提首，双击不修改成员方向 | 支持单元级交互 | 整组选择和块内提首已实现；整组方向切换尚未实现 |
 | 配置失效层级 | 当前配置切换会清除整个计划 | 仅排序配置变化应使计划失效；运动和文本配置应分别影响下游 | 当前失效范围比概要设计更保守 |
 | 首组懒旋转 | 首个加工组固定按最近距离选择 | 懒旋转工艺强调减少 A 轴往复 | 首组不使用旋转代价，后续组才使用 |
 

@@ -345,7 +345,11 @@ bool CadViewer::hitTestProcessOrderLabel(const QPoint& screenPos, ProcessOrderLa
     return false;
 }
 
-bool CadViewer::handleProcessOrderLabelClick(const QPoint& screenPos)
+bool CadViewer::handleProcessOrderLabelClick
+(
+    const QPoint& screenPos,
+    Qt::KeyboardModifiers modifiers
+)
 {
     ProcessOrderLabelOverlay clickedLabel;
 
@@ -358,6 +362,46 @@ bool CadViewer::handleProcessOrderLabelClick(const QPoint& screenPos)
     if (scene == nullptr)
     {
         return false;
+    }
+
+    if ((modifiers & Qt::ControlModifier) != 0)
+    {
+        if (m_processPresentation == nullptr)
+        {
+            return false;
+        }
+
+        std::set<cadcam::geometry::EntityId> selectedEntityIds;
+        for (const std::unique_ptr<CadItem>& entity : scene->m_entities)
+        {
+            if (entity != nullptr && entity->m_isSelected && entity->m_entityId != 0)
+            {
+                selectedEntityIds.insert(entity->m_entityId);
+            }
+        }
+
+        QVector<cadcam::planning::ProcessUnitKey> selectedUnitKeys;
+        for (const cadcam::process::ProcessUnitPresentation& unit
+            : m_processPresentation->processUnits)
+        {
+            const bool selected = std::any_of
+            (
+                unit.key.memberEntityIds.cbegin(),
+                unit.key.memberEntityIds.cend(),
+                [&selectedEntityIds](cadcam::geometry::EntityId entityId)
+                {
+                    return selectedEntityIds.find(entityId) != selectedEntityIds.end();
+                }
+            );
+            if (selected)
+            {
+                selectedUnitKeys.push_back(unit.key);
+            }
+        }
+
+        emit processUnitMoveToFrontRequested
+            (selectedUnitKeys, clickedLabel.unitKey);
+        return true;
     }
 
     const std::set<cadcam::geometry::EntityId> memberIds

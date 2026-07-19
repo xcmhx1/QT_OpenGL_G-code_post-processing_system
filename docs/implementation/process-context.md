@@ -83,6 +83,8 @@ ProcessPlan 中的加工单元顺序
 - 新建、删除、复制、几何编辑、图层或颜色修改以及 Undo/Redo 会推进文档内容 revision。
 - `DocumentProcessState` 的实际值变化会推进加工状态 revision；批量修改只推进一次。
 - 加工单元序列实际变化时推进加工状态 revision；重复写入相同序列不推进 revision。
+- 块内提首把修改前和修改后的完整单元序列作为一个编辑命令；Undo/Redo 每次实际应用最多推进一次加工状态 revision。
+- 目标已在选中范围首位、选中范围不连续或目标不在范围内时不修改状态，也不进入撤销栈。
 - 删除图元时移除包含该图元的旧单元身份；清空文档时清空加工单元序列。
 - 删除、批量删除和替换命令保存操作前、操作后的完整单元序列；Undo 恢复操作前序列，Redo 恢复操作后序列。
 - 上述命令将逐图元状态和单元序列恢复放在同一个批处理中，一次命令最多推进一次加工状态 revision。
@@ -109,6 +111,8 @@ ProcessPlan 中的加工单元顺序
 - 智能排序只在本次规划输入中忽略人工方向和起点，并忽略当前加工单元序列；`DocumentProcessState` 中的用户设置保持不变。
 - 规划成功后才用结果更新权威加工单元序列，并把计划重新绑定到更新后的加工状态 revision。
 - 展示快照按权威序列位置生成单元编号；Viewer 标签选择只改变当前 CAD 选择，不改变加工状态 revision。
+- Ctrl 单击单元标签时，Viewer 仅上报由稳定 `EntityId` 组成的选中单元键和目标单元键；Application 使用权威序列完成校验和修改。
+- 块内提首先重建并校验候选计划和展示快照，成功后才写入权威序列并发布新快照，失败时不留下部分更新状态。
 - 截面中心按“用户中心、自动中心、`(0,0)`”解析；自动识别保留已有用户中心。
 - 规划捕获完成后再次比较文档与加工状态 revision，避免使用捕获期间已经变化的数据。
 
@@ -119,14 +123,14 @@ ProcessPlan 中的加工单元顺序
 - `include/desktop/Gcode_postprocessing_system.h`：拥有当前文档、截面、加工状态、计划和展示快照。
 - `src/desktop/Gcode_postprocessing_system_FileActions.cpp`：处理导入时的状态清理和自动后处理。
 - `src/desktop/Gcode_postprocessing_system_SortActions.cpp`：写入加工状态并使派生计划失效。
-- `src/cad/editing/CadEditer_CommandActions.cpp`：删除和 Undo 时保存、移除及恢复加工状态。
+- `src/cad/editing/CadEditer_CommandActions.cpp`：删除、替换和块内提首时保存完整序列，并通过 Undo/Redo 恢复。
 - `src/application/planning/DocumentProcessPlanningAdapter.cpp`：将文档与加工状态捕获为核心规划输入。
 
 ## 当前实现差异
 
 | 事项 | 当前生产实现 | 需求或概要设计要求 | 影响 |
 |---|---|---|---|
-| 单元序列人工编辑 | 已保存唯一 `ProcessUnitSequence`，排序成功后整体更新 | 用户可编辑当前加工单元序列 | Ctrl 块内提首和其他人工序列 UI 尚未实现 |
+| 单元序列人工编辑 | Ctrl 单击可将连续选中块内的目标单元提到块首，并支持 Undo/Redo | 用户可编辑当前加工单元序列 | 块内提首已实现；其他人工序列编辑尚未实现 |
 | 单元顺序展示 | `ProcessPresentationSnapshot` 提供单元级展示项，Viewer 一单元一标签 | 一个加工单元只显示一个连续编号 | 已实现；整组方向切换尚未实现 |
 | 连续关系变化 | 删除或替换时保存并切换命令前后序列；普通排序保留可匹配单元并在末尾追加新单元 | 连续关系变化后重新解析单元序列 | 已实现第一版稳定保序，不进行最优插入 |
 | 截面中心输入 | 状态模型支持用户中心、清除用户中心和默认 `(0,0)` | 用户可单独设置 `(Ycenter, Zcenter)` | 当前 UI 尚未提供中心输入控件 |

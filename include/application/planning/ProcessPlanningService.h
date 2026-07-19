@@ -30,4 +30,11 @@ public:
         const OperationContext& context
     ) const;
 
+    OperationResult<cadcam::planning::ProcessPlan> reorderPlanByUnitSequence
+    (
+        const cadcam::planning::ProcessPlan& plan,
+        const cadcam::planning::ProcessUnitSequence& sequence,
+        const OperationContext& context
+    ) const;
+
 };

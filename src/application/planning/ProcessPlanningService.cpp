@@ -54,13 +54,14 @@ namespace
         return true;
     }
 
-    bool preserveCurrentUnitSequence
+    bool reorderProcessUnits
     (
         ProcessPlan& plan,
-        const ProcessUnitSequence& currentSequence
+        const std::vector<ProcessUnitKey>& orderedKeys
     )
     {
-        if (!cadcam::planning::validateProcessUnitStructure(plan)) return false;
+        if (!cadcam::planning::validateProcessUnitStructure(plan)
+            || orderedKeys.size() != plan.processUnits.size()) return false;
 
         std::map<std::vector<EntityId>, std::size_t> automaticUnitIndices;
         for (std::size_t index = 0; index < plan.processUnits.size(); ++index)
@@ -70,18 +71,12 @@ namespace
         std::vector<std::size_t> orderedIndices;
         orderedIndices.reserve(plan.processUnits.size());
         std::set<std::size_t> usedIndices;
-        for (const ProcessUnitKey& key : currentSequence.units)
+        for (const ProcessUnitKey& key : orderedKeys)
         {
             const auto found = automaticUnitIndices.find(key.memberEntityIds);
-            if (found != automaticUnitIndices.end()
-                && usedIndices.insert(found->second).second)
-            {
-                orderedIndices.push_back(found->second);
-            }
-        }
-        for (std::size_t index = 0; index < plan.processUnits.size(); ++index)
-        {
-            if (usedIndices.insert(index).second) orderedIndices.push_back(index);
+            if (found == automaticUnitIndices.end()
+                || !usedIndices.insert(found->second).second) return false;
+            orderedIndices.push_back(found->second);
         }
 
         std::map<EntityId, ProcessAssignment> assignmentsByEntity;
@@ -120,6 +115,36 @@ namespace
         }
         plan = std::move(reordered);
         return true;
+    }
+
+    bool preserveCurrentUnitSequence
+    (
+        ProcessPlan& plan,
+        const ProcessUnitSequence& currentSequence
+    )
+    {
+        if (!cadcam::planning::validateProcessUnitStructure(plan)) return false;
+
+        std::map<std::vector<EntityId>, ProcessUnitKey> automaticUnits;
+        for (const ProcessUnit& unit : plan.processUnits)
+            automaticUnits.emplace(unit.key.memberEntityIds, unit.key);
+
+        std::vector<ProcessUnitKey> orderedKeys;
+        orderedKeys.reserve(plan.processUnits.size());
+        std::set<std::vector<EntityId>> usedKeys;
+        for (const ProcessUnitKey& key : currentSequence.units)
+        {
+            const auto found = automaticUnits.find(key.memberEntityIds);
+            if (found != automaticUnits.end()
+                && usedKeys.insert(found->first).second)
+                orderedKeys.push_back(found->second);
+        }
+        for (const ProcessUnit& unit : plan.processUnits)
+        {
+            if (usedKeys.insert(unit.key.memberEntityIds).second)
+                orderedKeys.push_back(unit.key);
+        }
+        return reorderProcessUnits(plan, orderedKeys);
     }
 
     Diagnostic sequenceDiagnostic
@@ -255,5 +280,33 @@ OperationResult<cadcam::planning::ProcessPlan> ProcessPlanningService::buildRota
         diagnostic.correlationId = context.correlationId;
         result.addDiagnostic(diagnostic);
     }
+    return result;
+}
+
+OperationResult<cadcam::planning::ProcessPlan>
+ProcessPlanningService::reorderPlanByUnitSequence
+(
+    const cadcam::planning::ProcessPlan& plan,
+    const cadcam::planning::ProcessUnitSequence& sequence,
+    const OperationContext& context
+) const
+{
+    OperationResult<cadcam::planning::ProcessPlan> result;
+    cadcam::planning::ProcessPlan reordered = plan;
+    if (!reorderProcessUnits(reordered, sequence.units))
+    {
+        result.status = OperationStatus::Failed;
+        result.addDiagnostic(sequenceDiagnostic
+        (
+            context,
+            QStringLiteral("reorder-process-unit-sequence"),
+            QStringLiteral("加工单元序列不符合当前加工计划或加工断面约束。")
+        ));
+        return result;
+    }
+
+    reordered.processUnitSequence.revision = sequence.revision;
+    result.status = OperationStatus::Success;
+    result.value = std::move(reordered);
     return result;
 }

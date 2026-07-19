@@ -12,14 +12,14 @@ Viewer 不拥有加工单元身份、加工单元序列或计划事实。
 - 普通排序和智能排序已经通过显式 `ProcessSortIntent` 产生不同单元序列，Viewer 仅接收最终计划展示结果。
 - `CadViewer::renderProcessOrderLabels()` 构建并绘制当前加工顺序标签。
 - 标签命中和点击由 `CadViewer_ProcessOrderLabels.cpp` 处理。
-- 块内提首尚未接入；Viewer 当前不会通过标签修改加工单元序列。
+- Ctrl 单击标签时，Viewer 向 Application 上报当前选中单元键和目标单元键；Viewer 本身不修改加工单元序列。
 
 ## 输入与输出
 
 当前输入包括 CAD 场景、同时含单元级和逐图元数据的 `ProcessPresentationSnapshot`、加工状态和 Viewer 选择状态。
-当前输出是单元顺序标签、逐图元方向箭头、排除样式和点击反馈。
+当前输出是单元顺序标签、逐图元方向箭头、排除样式、整组选择和稳定单元键交互请求。
 
-三轴连续链、严格闭环以及四轴加工组通过 `ProcessUnitPresentation` 进入 Viewer。标签点击只改变 Viewer 选择，不修改 `ProcessPlan`、加工单元序列或加工状态 revision。
+三轴连续链、严格闭环以及四轴加工组通过 `ProcessUnitPresentation` 进入 Viewer。普通单击只改变 Viewer 选择；Ctrl 单击仅上报稳定单元键，由 Application 校验并更新序列。
 
 ## 主要数据类型
 
@@ -52,6 +52,8 @@ Viewer 仅保存当前屏幕命中区域、临时悬停和选择反馈。
 
 当前单元编号锚点由展示快照指定为实际执行顺序中的首个成员。Viewer 只用该成员计算实际加工起点附近的屏幕位置，标签业务身份始终是完整 `ProcessUnitKey`。
 
+Ctrl 单击时，Viewer 将当前选中图元的稳定 `EntityId` 映射到展示快照中的单元键；任一成员被选中即视为整个加工单元被选中。
+
 ## 失效条件
 
 - 文档几何或连续关系变化后，旧单元身份映射、单元序列、计划和展示需要重新解析。
@@ -67,6 +69,7 @@ Viewer 仅保存当前屏幕命中区域、临时悬停和选择反馈。
 - 任一成员已被选中时，该单元标签使用选中样式；标签悬停也以完整单元为粒度。
 - 点击单元标签时，Viewer 清除原选择，并按稳定 `EntityId` 选择该单元全部成员。
 - 标签单击不修改加工单元序列，也不推进加工状态 revision。
+- Ctrl 单击不清除当前选择，只上报去重后的选中 `ProcessUnitKey` 集合和目标键。
 - 标签双击不再修改单个成员方向，仅给出非阻塞提示。
 - 人工块内编排只接受编号连续的一段加工单元，不接受多个不连续区间。
 - Ctrl + 单击目标必须位于当前连续选择范围内。
@@ -88,11 +91,12 @@ Viewer 仅保存当前屏幕命中区域、临时悬停和选择反馈。
 
 ## 相关源码
 
-- `src/cad/view/CadViewer_ProcessOrderLabels.cpp`：单元顺序标签的构建、绘制、命中和整组选择处理。
+- `src/cad/view/CadViewer_ProcessOrderLabels.cpp`：单元顺序标签的构建、绘制、命中、整组选择和 Ctrl 交互请求处理。
 - `src/application/process/ProcessPresentationSnapshot.cpp`：校验计划并生成单元级和逐图元展示数据。
 - `include/application/process/ProcessPresentationSnapshot.h`：定义单元级与逐图元展示快照。
 - `include/core/planning/ProcessPlan.h`：定义加工单元、单元序列和逐图元 assignment。
-- `src/desktop/Gcode_postprocessing_system_SortActions.cpp`：保存当前计划并向 Viewer 发布展示结果。
+- `src/desktop/Gcode_postprocessing_system_SortActions.cpp`：校验连续选中范围，原子更新单元序列、计划和展示结果。
+- `src/cad/editing/CadEditer_CommandActions.cpp`：保存块内提首前后的完整序列并接入 Undo/Redo。
 
 ## 当前实现差异
 
@@ -103,7 +107,7 @@ Viewer 仅保存当前屏幕命中区域、临时悬停和选择反馈。
 | 选择粒度 | 点击标签按稳定成员身份选中整个加工单元 | 单元标签支持整组选择 | 已实现；直接点击普通图元仍沿用现有图元选择 |
 | 顺序状态 | 标签读取 `unitOrder`，不读取逐图元 `processOrder` | Viewer 读取单元序列位置 | 已实现 |
 | 排序意图 | 普通排序保留匹配单元相对顺序，智能排序重建序列 | Viewer 不参与排序决策 | 已实现，Viewer 未修改排序 |
-| 点击交互 | 单击选择全部成员；双击不切换成员方向 | Ctrl + 单击执行连续块内提首 | 整组选择已实现；整组方向切换和块内提首尚未实现 |
+| 点击交互 | 单击选择全部成员；Ctrl 单击执行连续块内提首；双击不切换成员方向 | Ctrl + 单击执行连续块内提首 | 块内提首已实现并支持 Undo/Redo；整组方向切换尚未实现 |
 | 失效刷新 | 展示随有效 `ProcessPlan` 创建或清除 | 序列编号与有效计划一致 | 当前仍不在计划失效期间单独展示序列 |
 
 ## 对应需求与概要设计

@@ -299,6 +299,11 @@ signals:
     void orthoEnabledChanged(bool enabled);
     void polarTrackingEnabledChanged(bool enabled);
     void processDirectionToggleRequested(cadcam::geometry::EntityId processEntityId);
+    void processUnitMoveToFrontRequested
+    (
+        QVector<cadcam::planning::ProcessUnitKey> selectedUnitKeys,
+        cadcam::planning::ProcessUnitKey targetUnitKey
+    );
 
 protected:
     // OpenGL 初始化，在窗口第一次显示时调用
@@ -417,7 +422,8 @@ private:
     bool hitTestProcessOrderLabel(const QPoint& screenPos, ProcessOrderLabelOverlay* outLabel = nullptr) const;
 
     // 处理加工顺序标签单击。
-    bool handleProcessOrderLabelClick(const QPoint& screenPos);
+    bool handleProcessOrderLabelClick
+        (const QPoint& screenPos, Qt::KeyboardModifiers modifiers);
 
     // 处理加工顺序标签双击。
     bool handleProcessOrderLabelDoubleClick(const QPoint& screenPos);

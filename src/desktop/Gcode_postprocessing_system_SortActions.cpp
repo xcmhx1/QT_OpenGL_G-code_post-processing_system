@@ -20,9 +20,11 @@
 #include <QStringList>
 
 #include <algorithm>
+#include <cstddef>
 #include <cmath>
 #include <limits>
 #include <map>
+#include <set>
 #include <vector>
 
 namespace
@@ -3106,6 +3108,161 @@ void Gcode_postprocessing_system::invalidateCurrentProcessPlan()
         ui->openGLWidget->setProcessPresentation(nullptr);
         ui->openGLWidget->update();
     }
+}
+
+bool Gcode_postprocessing_system::applyProcessUnitSequenceToCurrentPlan
+(
+    const cadcam::planning::ProcessUnitSequence& sequence,
+    QString* errorMessage
+)
+{
+    const auto fail = [errorMessage](const QString& message)
+    {
+        if (errorMessage != nullptr) *errorMessage = message;
+        return false;
+    };
+
+    if (!m_currentProcessPlan.has_value()
+        || m_currentProcessPlan->contentRevision != m_document.contentRevision()
+        || m_currentProcessPlan->processStateRevision != m_processState.revision()
+        || m_currentProcessPlan->processUnitSequence.units
+            != m_processState.processUnitSequence().units)
+    {
+        return fail(QStringLiteral("当前加工计划已失效，请重新排序后再调整加工单元。"));
+    }
+
+    cadcam::planning::ProcessUnitSequence targetSequence = sequence;
+    targetSequence.revision = m_processState.processUnitSequence().revision + 1U;
+    const OperationContext context = createOperationContext
+        (QStringLiteral("ReorderCurrentProcessUnitSequence"));
+    ProcessPlanningService service;
+    auto reordered = service.reorderPlanByUnitSequence
+        (*m_currentProcessPlan, targetSequence, context);
+    if (!reordered.succeeded() || !reordered.value.has_value())
+    {
+        QString message = QStringLiteral("加工单元重排不符合当前加工约束。");
+        for (const Diagnostic& diagnostic : reordered.diagnostics)
+        {
+            if (!diagnostic.userMessage.trimmed().isEmpty())
+            {
+                message = diagnostic.userMessage;
+                break;
+            }
+        }
+        return fail(message);
+    }
+
+    const std::uint64_t expectedProcessRevision = m_processState.revision() + 1U;
+    cadcam::planning::ProcessPlan candidatePlan = std::move(*reordered.value);
+    candidatePlan.processStateRevision = expectedProcessRevision;
+    auto candidatePresentation = cadcam::process::ProcessPresentationSnapshot::build
+        (candidatePlan, context);
+    if (!candidatePresentation.succeeded() || !candidatePresentation.value.has_value())
+    {
+        return fail(QStringLiteral("加工单元重排后的显示快照构建失败。"));
+    }
+
+    if (!m_processState.setProcessUnitSequence(sequence.units))
+    {
+        return fail(QStringLiteral("加工单元序列未发生变化或状态更新失败。"));
+    }
+
+    candidatePlan.processUnitSequence = m_processState.processUnitSequence();
+    candidatePlan.processStateRevision = m_processState.revision();
+    candidatePresentation.value->processStateRevision = m_processState.revision();
+    m_currentProcessPlan = std::move(candidatePlan);
+    m_processPresentation = std::move(*candidatePresentation.value);
+    ui->openGLWidget->setProcessPresentation(&*m_processPresentation);
+    ui->openGLWidget->update();
+    return true;
+}
+
+void Gcode_postprocessing_system::handleProcessUnitMoveToFrontRequest
+(
+    const QVector<cadcam::planning::ProcessUnitKey>& selectedUnitKeys,
+    const cadcam::planning::ProcessUnitKey& targetUnitKey
+)
+{
+    const auto announce = [this](const QString& message)
+    {
+        ui->openGLWidget->appendCommandMessage(message);
+        ui->openGLWidget->refreshCommandPrompt();
+        statusBar()->showMessage(message, 5000);
+    };
+
+    if (!m_currentProcessPlan.has_value())
+    {
+        announce(QStringLiteral("当前没有有效加工计划，请先排序。"));
+        return;
+    }
+
+    const cadcam::planning::ProcessUnitSequence before =
+        m_processState.processUnitSequence();
+    std::map<std::vector<cadcam::geometry::EntityId>, std::size_t> indicesByKey;
+    for (std::size_t index = 0; index < before.units.size(); ++index)
+    {
+        indicesByKey.emplace(before.units[index].memberEntityIds, index);
+    }
+
+    std::set<std::size_t> selectedIndices;
+    for (const cadcam::planning::ProcessUnitKey& key : selectedUnitKeys)
+    {
+        const auto found = indicesByKey.find(key.memberEntityIds);
+        if (found == indicesByKey.end())
+        {
+            announce(QStringLiteral("选中的加工单元不属于当前权威序列。"));
+            return;
+        }
+        selectedIndices.insert(found->second);
+    }
+
+    const auto target = indicesByKey.find(targetUnitKey.memberEntityIds);
+    if (selectedIndices.empty() || target == indicesByKey.end()
+        || selectedIndices.find(target->second) == selectedIndices.end())
+    {
+        announce(QStringLiteral("请先选中包含目标标签的连续加工单元范围。"));
+        return;
+    }
+
+    const std::size_t rangeFirst = *selectedIndices.begin();
+    const std::size_t rangeLast = *selectedIndices.rbegin();
+    if (rangeLast - rangeFirst + 1U != selectedIndices.size())
+    {
+        announce(QStringLiteral("选中的加工单元编号不连续，无法执行块内提首。"));
+        return;
+    }
+    if (target->second == rangeFirst)
+    {
+        announce(QStringLiteral("目标加工单元已经位于所选范围首位。"));
+        return;
+    }
+
+    cadcam::planning::ProcessUnitSequence after = before;
+    const cadcam::planning::ProcessUnitKey moved = after.units[target->second];
+    after.units.erase(after.units.begin() + static_cast<std::ptrdiff_t>(target->second));
+    after.units.insert(after.units.begin() + static_cast<std::ptrdiff_t>(rangeFirst), moved);
+    ++after.revision;
+
+    const bool applied = m_editer.changeProcessUnitSequence
+    (
+        before,
+        after,
+        [this, announce](const cadcam::planning::ProcessUnitSequence& requested)
+        {
+            QString errorMessage;
+            const bool success = applyProcessUnitSequenceToCurrentPlan
+                (requested, &errorMessage);
+            if (!success) announce(errorMessage);
+            return success;
+        }
+    );
+    if (!applied)
+    {
+        return;
+    }
+
+    announce(QStringLiteral("加工单元 %1 已移动到所选范围首位，编号已连续刷新。")
+        .arg(static_cast<qulonglong>(target->second + 1U)));
 }
 
 int Gcode_postprocessing_system::refreshWasteProcessingExclusions()

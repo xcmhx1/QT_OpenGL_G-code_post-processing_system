@@ -4,6 +4,7 @@
 #pragma once
 
 #include <memory>
+#include <functional>
 #include <vector>
 
 #include <QColor>
@@ -56,6 +57,16 @@ public:
     // 执行重做
     // @return 如果重做成功返回 true，否则返回 false
     bool redo();
+
+    using ProcessUnitSequenceApply = std::function<bool
+        (const cadcam::planning::ProcessUnitSequence&)>;
+
+    bool changeProcessUnitSequence
+    (
+        const cadcam::planning::ProcessUnitSequence& before,
+        const cadcam::planning::ProcessUnitSequence& after,
+        ProcessUnitSequenceApply apply
+    );
 
     // 处理左键点击驱动的绘图或编辑逻辑
     // @param previousState 点击前的状态机快照

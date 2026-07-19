@@ -19,6 +19,37 @@
 
 using namespace CadEditerWorkflowInternal;
 
+class ProcessUnitSequenceCommand final : public CadEditer::EditCommand
+{
+public:
+    ProcessUnitSequenceCommand
+    (
+        cadcam::planning::ProcessUnitSequence before,
+        cadcam::planning::ProcessUnitSequence after,
+        CadEditer::ProcessUnitSequenceApply apply
+    )
+        : m_before(std::move(before))
+        , m_after(std::move(after))
+        , m_apply(std::move(apply))
+    {
+    }
+
+    bool execute() override
+    {
+        return m_apply != nullptr && m_apply(m_after);
+    }
+
+    bool undo() override
+    {
+        return m_apply != nullptr && m_apply(m_before);
+    }
+
+private:
+    cadcam::planning::ProcessUnitSequence m_before;
+    cadcam::planning::ProcessUnitSequence m_after;
+    CadEditer::ProcessUnitSequenceApply m_apply;
+};
+
 // 添加实体命令：
 // 负责把新建原生实体与对应 CadItem 一起插入文档，并支持撤销恢复。
 class AddEntityCommand final : public CadEditer::EditCommand
@@ -1949,6 +1980,23 @@ bool CadEditer::handleGripEditing
     }
 
     return false;
+}
+
+// 将完整加工单元序列作为一个可撤销命令应用。
+bool CadEditer::changeProcessUnitSequence
+(
+    const cadcam::planning::ProcessUnitSequence& before,
+    const cadcam::planning::ProcessUnitSequence& after,
+    ProcessUnitSequenceApply apply
+)
+{
+    if (before.units == after.units || apply == nullptr)
+    {
+        return false;
+    }
+
+    return executeCommand(std::make_unique<ProcessUnitSequenceCommand>
+        (before, after, std::move(apply)));
 }
 
 // 执行命令并压入 Undo 栈
