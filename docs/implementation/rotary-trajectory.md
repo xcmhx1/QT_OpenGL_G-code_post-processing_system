@@ -1,0 +1,121 @@
+# 四轴机床轨迹详细设计
+
+## 职责
+
+四轴轨迹生产链将有效 `Rotary4Axis ProcessPlan` 转换为按加工顺序排列的 XYZ/A 机床运动。
+该链同时支持无方管截面的普通四轴和带有效截面的截面增强四轴。
+轨迹层负责安全移动、连续连接、A 轴展开、加工面 Z 修正和闭合过切。
+
+## 生产入口
+
+- 四轴导出进入 `NcProgramService::buildRotaryProgram()`。
+- 该服务调用 `MachineTrajectoryService::buildRotaryTrajectory()` 构建轨迹。
+- 轨迹服务捕获当前文档几何，按计划分配重新编译每条生产路径。
+- `RotaryTrajectoryBuilder` 调用 `RotaryKinematics` 生成机床姿态并组织安全与切削运动。
+- 当前轨迹仅在导出过程中按需生成，主窗口不长期保存轨迹对象。
+
+## 输入与输出
+
+输入包括当前文档、加工状态、有效四轴计划、可选方管截面、四轴配置和可选显式截面中心。
+计划提供顺序、方向、起点和连续组；几何快照提供不可变源几何。
+输出 `MachineTrajectory`，包含旋转上下文和按实体组织的接近、切削、连接及过切运动。
+输出继续传给 `NcProgramBuilder`，轨迹层不生成 G-code 文本。
+
+## 主要数据类型
+
+- `GeometrySourceSnapshot`：在文档线程捕获的精确源几何和稳定实体属性。
+- `TrajectoryEntityInput`：按计划方向和起点编译后的单图元 `Path3D` 及连续组信息。
+- `RotaryTrajectoryInput`：实体路径、计划分组、revision 和可选截面。
+- `RotaryMachinePolicy`：旋转轴、截面中心、安全距离、Z 修正、过切和角度策略。
+- `MachinePose4D`：单个 XYZ/A 机床姿态。
+- `MachineMove`：快速、切削、连续切削连接或过切运动。
+- `MachineTrajectory`：轨迹实体、revision 和旋转安全上下文。
+
+## 当前生产数据流
+
+普通四轴：
+
+```text
+Rotary4Axis ProcessPlan
++ CadDocument
++ 旋转轴和运动配置
+→ GeometrySourceSnapshot
+→ 按 assignment 重新编译 Path3D
+→ RotaryKinematics
+→ RotaryTrajectoryBuilder
+→ MachineTrajectory
+```
+
+截面增强四轴：
+
+```text
+普通四轴输入
++ TubeSectionModel
++ 截面中心
+→ 圆角匹配与表面方向
+→ 截面边界上下文
+→ 增强四轴 MachineTrajectory
+```
+
+中心选择：
+
+```text
+有效截面几何中心
+→ 否则显式截面中心
+→ 否则全部加工路径的 YZ 包围盒中心
+```
+
+## 状态所有权
+
+`ProcessPlan` 由主窗口持有，`MachineTrajectory` 是导出调用中的临时值对象。
+轨迹保存计划的文档 revision 和加工状态 revision，供 NC 阶段继续校验。
+四轴配置由当前 `GProfile` 提供，构建时复制到 `RotaryMachinePolicy`。
+方管截面由主窗口提供；轨迹服务只读取可选核心模型。
+
+## 失效条件
+
+- 计划模式不是 `Rotary4Axis` 时拒绝构建。
+- 文档快照、计划、加工状态或截面 revision 不一致时拒绝构建。
+- 计划未覆盖全部可加工且未排除的图元时拒绝构建。
+- assignment 顺序不连续、源实体缺失或几何编译失败时拒绝构建。
+- 旋转轴中心、截面中心或运动参数出现非有限值时拒绝构建。
+- 旋转轴、安全距离、初始位置、Z 修正、过切或 A 轴策略变化需要重新生成轨迹及下游结果。
+
+## 关键业务规则
+
+- 每条路径使用计划确定的 `reverse` 和 `startParameter` 重新编译，轨迹不重新排序。
+- `centerY`、`centerZ` 始终作为旋转轴中心参与坐标变换。
+- 无截面时普通四轴继续运行；非固定平面路径按旋转轴进行径向展开。
+- 固定方管平面根据当前截面中心判断顶、底和两侧的基础 A 轴方向。
+- 有效截面存在时，落在圆角上的点以对应圆角中心计算刀头方向。
+- A 轴偏移、反向和连续角度展开在运动学转换中统一应用。
+- 加工面 Z 修正加入变换后的机床 Z 坐标。
+- 首刀可从配置的初始机床位置进入；组间快速移动可先到安全 Z。
+- 安全机床 Z 当前由截面中心、加工路径最大碰撞半径和离轴额外距离组成。
+- 同一连续组内使用切削连接，组间使用快速移动。
+- 闭合组先精确回到组起点，再按原方向执行可选过切；过切不超过一圈总长。
+
+## 相关源码
+
+- `src/application/machine/MachineTrajectoryService.cpp`：校验计划并把文档几何和配置组装为轨迹输入。
+- `src/core/machine/RotaryKinematics.cpp`：将 `Path3D` 转换为连续 XYZ/A 姿态。
+- `src/core/machine/RotaryTrajectoryBuilder.cpp`：组织安全移动、连续切削、闭合和过切。
+- `include/core/machine/MachineTrajectory.h`：定义四轴轨迹、运动和旋转上下文。
+- `include/infrastructure/config/GProfile.h`：定义当前四轴运动配置来源。
+- `src/application/nc/NcProgramService.cpp`：在四轴 NC 生产链中调用轨迹服务。
+
+## 当前实现差异
+
+| 事项 | 当前生产实现 | 需求或概要设计要求 | 影响 |
+|---|---|---|---|
+| 无截面默认中心 | 无有效截面和显式中心时使用路径 YZ 包围盒中心 | 截面中心缺失时默认 `(0,0)` | 普通四轴的表面方向和安全位置可能与需求默认值不同 |
+| 手动中心输入 | 显式中心仅由当前截面包装模型传入，UI 未提供独立中心输入 | 用户可单独设置 `(Ycenter, Zcenter)` | 用户无法直接校正轨迹使用的截面中心 |
+| 碰撞半径 | 最大碰撞半径按加工路径点相对截面中心计算 | 截面增强安全计算应依赖真实工件外形 | 未加工到的外形极值可能未计入安全半径 |
+| 配置版本 | 轨迹保存文档和加工状态 revision，没有独立配置 revision | 运动配置变化应使轨迹及下游失效 | 当前依靠同步导出和上层清计划保证，不具备独立版本证明 |
+| 轨迹持久状态 | 轨迹仅在导出调用内临时生成 | 概要设计允许轨迹作为派生结果管理 | 当前没有可供 UI 单独检查或复用的轨迹生命周期 |
+
+## 对应需求与概要设计
+
+需求：[MACH-031～MACH-040](../requirements/machining.md)、[PROCESS-008～PROCESS-010、PROCESS-013～PROCESS-017](../requirements/machining-process.md)、[GCODE-015～GCODE-020](../requirements/gcode-and-export.md)。
+
+概要设计：[数据流](../architecture/data-flow.md)、[领域模型](../architecture/domain-model.md)、[状态与生命周期](../architecture/state-and-lifecycle.md)。

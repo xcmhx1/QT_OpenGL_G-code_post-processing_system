@@ -1,0 +1,110 @@
+# 加工上下文详细设计
+
+## 职责
+
+加工上下文汇集当前文档上的用户加工输入和自动分析状态，供加工规划读取。
+派生的加工计划与展示快照单独保存，不属于加工上下文本身。
+本文件描述当前生产代码的实际存储边界，不假定概要概念已有一一对应的数据结构。
+
+## 生产入口
+
+- 图元加工设置由桌面命令和 `CadEditer` 写入当前 `DocumentProcessState`。
+- 方管截面由手动参数设置或截面识别命令写入主窗口持有的 `RotaryTubeSectionModel`。
+- 内部线自动识别和手动指定最终都更新 `DocumentProcessState`。
+- 文件导入、删除、复制、Undo/Redo 和几何编辑通过文档及编辑命令维护相关状态。
+- 排序入口通过 `ProcessPlanningService` 捕获当前文档和加工状态，形成规划输入。
+
+## 输入与输出
+
+输入包括当前 CAD 文档、稳定图元身份、用户加工设置、自动内部线结果和可选方管截面。
+输出是可供三轴或四轴规划读取的当前有效加工上下文。
+加工上下文变化后，已有 `ProcessPlan` 和 `ProcessPresentationSnapshot` 会失效。
+加工上下文不会直接生成机床轨迹或 G-code。
+
+## 主要数据类型
+
+- `DocumentProcessState`：按稳定 `EntityId` 保存逐图元加工状态，并维护独立 revision。
+- `ProcessOverride`：保存加工启用、方向、起点、加工断面角色和断面组编号。
+- `ProcessAnalysisState`：当前仅保存内部几何排除标记。
+- `EntityProcessState`：组合单个图元的 override 与 analysis 数据。
+- `RotaryTubeSectionModel`：主窗口持有的方管截面包装对象，包含核心截面、尺寸、中心和来源标记。
+- `ProcessPlan`：规划派生结果，记录文档 revision 和加工状态 revision。
+- `ProcessPresentationSnapshot`：由有效计划生成的 Viewer 展示数据。
+
+## 当前生产数据流
+
+```text
+用户图元操作
+→ DocumentProcessState
+→ revision 变化
+→ 当前计划和展示失效
+→ 下次排序重新捕获
+```
+
+```text
+截面识别或手动设置
+→ RotaryTubeSectionModel
+→ 当前计划和展示失效
+→ 四轴规划按需读取核心截面
+```
+
+```text
+CadDocument + DocumentProcessState + 可选方管截面
+→ DocumentProcessPlanningAdapter
+→ PlanningInput
+→ ProcessPlanningService
+```
+
+## 状态所有权
+
+主窗口拥有当前 `CadDocument`、`DocumentProcessState`、方管截面、当前计划和展示快照。
+`DocumentProcessState` 以 `CadItem::m_entityId` 为键，不使用 Viewer 的对象地址键。
+加工启用、方向、起点、Break/Waste 角色和内部线状态均按图元身份保存。
+方管截面没有存入 `DocumentProcessState`，由主窗口中的独立模型保存。
+当前计划和展示快照属于派生结果，可随时根据上下文重建。
+
+## 失效条件
+
+- 文档导入会清空编辑历史和加工状态、重置方管截面并清除计划与展示。
+- 新建、删除、复制、几何编辑、图层或颜色修改以及 Undo/Redo 会推进文档内容 revision。
+- `DocumentProcessState` 的实际值变化会推进加工状态 revision；批量修改只推进一次。
+- 主窗口监听文档变化；当前计划 revision 与文档或加工状态不一致时立即清除计划和展示。
+- 方管截面携带文档内容 revision；四轴规划发现截面过期时拒绝继续使用。
+- 选择状态、展示开关和 Viewer 临时状态不推进上述业务 revision。
+
+## 关键业务规则
+
+- 删除命令在删除前保存图元加工状态，Undo 时按原 `EntityId` 恢复。
+- 批量删除和恢复通过 `beginBatch()` / `endBatch()` 合并 revision 变化。
+- 复制和阵列产生新 `EntityId`，新图元当前使用默认加工状态，不继承源图元状态。
+- 几何编辑保留原 `EntityId`，对应加工输入继续保留，但派生计划失效。
+- Break 与 Waste 共用断面角色字段，通过角色和组编号区分。
+- 自动与手动内部线目前都写入同一个分析排除标记。
+- 规划捕获完成后再次比较文档与加工状态 revision，避免使用捕获期间已经变化的数据。
+
+## 相关源码
+
+- `include/application/process/DocumentProcessState.h`：定义逐图元加工输入、分析状态和 revision 接口。
+- `src/application/process/DocumentProcessState.cpp`：实现状态去默认值、批处理和 revision 推进。
+- `include/desktop/Gcode_postprocessing_system.h`：拥有当前文档、截面、加工状态、计划和展示快照。
+- `src/desktop/Gcode_postprocessing_system_FileActions.cpp`：处理导入时的状态清理和自动后处理。
+- `src/desktop/Gcode_postprocessing_system_SortActions.cpp`：写入加工状态并使派生计划失效。
+- `src/cad/editing/CadEditer_CommandActions.cpp`：删除和 Undo 时保存、移除及恢复加工状态。
+- `src/application/planning/DocumentProcessPlanningAdapter.cpp`：将文档与加工状态捕获为核心规划输入。
+
+## 当前实现差异
+
+| 事项 | 当前生产实现 | 需求或概要设计要求 | 影响 |
+|---|---|---|---|
+| 人工加工顺序 | 没有独立的正式状态字段；顺序只存在于派生计划和展示中 | 用户可设置、修正、清除或恢复人工顺序 | 重新规划后无法以稳定输入恢复指定顺序 |
+| 内部线来源 | 手动指定和自动识别共用 `excludedAsInternalGeometry` | 用户业务输入与自动分析状态应区分 | 后续无法从状态判断标记来源及优先级 |
+| 方管截面存储 | 独立保存在主窗口模型中 | 用户输入和自动结果应形成明确优先级 | 当前存储边界未完整表达手动覆盖关系 |
+| 截面中心输入 | 手动界面只输入 Y 长、Z 宽和圆角；中心沿用已有值或旋转轴中心 | 用户可单独输入中心，缺失时默认 `(0,0)` | 当前无法完整录入需求定义的手动截面 |
+| 自动识别覆盖 | 识别成功后可直接替换当前截面模型 | 自动识别不得静默覆盖已确认手动截面 | 手动截面的优先级尚未由状态模型强制保证 |
+| 导入后内部线 | 自动后处理在无有效截面时跳过整个内部线操作 | 拓扑内部线阶段不依赖截面 | 手动执行可做拓扑识别，导入自动流程当前不能 |
+
+## 对应需求与概要设计
+
+需求：[SCOPE-006](../requirements/product-scope.md)、[MACH-001～MACH-005、MACH-010～MACH-030](../requirements/machining.md)、[PROCESS-001～PROCESS-003、PROCESS-011～PROCESS-016](../requirements/machining-process.md)。
+
+概要设计：[领域模型](../architecture/domain-model.md)、[状态与生命周期](../architecture/state-and-lifecycle.md)、[数据流](../architecture/data-flow.md)。

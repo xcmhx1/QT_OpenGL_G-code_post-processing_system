@@ -17,3 +17,11 @@
 - [数据流](./architecture/data-flow.md)
 - [模块边界](./architecture/module-boundaries.md)
 - [状态与生命周期](./architecture/state-and-lifecycle.md)
+
+## 详细设计
+
+- [详细设计导航](./implementation/index.md)
+- [加工上下文](./implementation/process-context.md)
+- [加工规划](./implementation/process-planning.md)
+- [四轴机床轨迹](./implementation/rotary-trajectory.md)
+- [NC 与 G-code](./implementation/nc-and-gcode.md)
