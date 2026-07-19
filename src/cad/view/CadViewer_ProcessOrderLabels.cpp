@@ -4,7 +4,6 @@
 #include "cad/view/CadViewer.h"
 
 #include "cad/document/CadDocument.h"
-#include "cad/editing/CadEditer.h"
 #include "cad/items/CadItem.h"
 #include "cad/view/rendering/CadProcessVisualUtils.h"
 #include "cad/view/CadViewerUtils.h"
@@ -48,24 +47,17 @@ void CadViewer::renderProcessOrderLabels()
 
     for (const ProcessOrderLabelOverlay& label : labels)
     {
-        const bool pendingSwap = label.item != nullptr
-            && CadViewerUtils::toRenderEntityKey(label.item)
-                == m_pendingProcessOrderSwapRenderKey;
-
-        const bool emphasized = pendingSwap || label.selected;
-        const QColor baseFillColor = pendingSwap
-            ? m_theme.selectedProcessLabelFillColor
-            : (label.selected ? m_theme.selectedProcessLabelFillColor : m_theme.processLabelFillColor);
-        const QColor baseBorderColor = pendingSwap
-            ? m_theme.selectedProcessLabelBorderColor
-            : (label.selected ? m_theme.selectedProcessLabelBorderColor : m_theme.processLabelBorderColor);
-        const QColor textColor = pendingSwap
-            ? m_theme.selectedProcessLabelTextColor
-            : (label.selected ? m_theme.selectedProcessLabelTextColor : m_theme.processLabelTextColor);
+        const bool emphasized = label.hovered || label.selected;
+        const QColor baseFillColor = emphasized
+            ? m_theme.selectedProcessLabelFillColor : m_theme.processLabelFillColor;
+        const QColor baseBorderColor = emphasized
+            ? m_theme.selectedProcessLabelBorderColor : m_theme.processLabelBorderColor;
+        const QColor textColor = emphasized
+            ? m_theme.selectedProcessLabelTextColor : m_theme.processLabelTextColor;
         const QColor fillColor = withMaximumAlpha(baseFillColor, emphasized ? 148 : 72);
         const QColor borderColor = withMaximumAlpha(baseBorderColor, emphasized ? 220 : 164);
 
-        painter.setPen(QPen(borderColor, pendingSwap ? 1.4 : 1.0));
+        painter.setPen(QPen(borderColor, emphasized ? 1.4 : 1.0));
         painter.setBrush(fillColor);
         painter.drawRoundedRect(label.bubbleRect, 6.0, 6.0);
         painter.setPen(textColor);
@@ -195,33 +187,51 @@ std::vector<CadViewer::ProcessOrderLabelOverlay> CadViewer::buildProcessOrderLab
         return {};
     }
 
+    if (m_processPresentation == nullptr)
+    {
+        return {};
+    }
+
+    std::map<cadcam::geometry::EntityId, CadItem*> entitiesById;
+    for (const std::unique_ptr<CadItem>& entity : scene->m_entities)
+    {
+        if (entity != nullptr && entity->m_entityId != 0)
+        {
+            entitiesById.emplace(entity->m_entityId, entity.get());
+        }
+    }
+
     std::vector<ProcessOrderLabelOverlay> labels;
-    labels.reserve(scene->m_entities.size());
+    labels.reserve(m_processPresentation->processUnits.size());
 
     QFont labelFont = font();
     labelFont.setPointSize(9);
     labelFont.setBold(true);
     const QFontMetrics metrics(labelFont);
     std::vector<QRect> occupiedRects;
-    occupiedRects.reserve(scene->m_entities.size());
+    occupiedRects.reserve(m_processPresentation->processUnits.size());
 
-    for (const std::unique_ptr<CadItem>& entity : scene->m_entities)
+    for (const cadcam::process::ProcessUnitPresentation& unit
+        : m_processPresentation->processUnits)
     {
-        if (entity == nullptr)
+        const auto anchorIterator = entitiesById.find(unit.anchorEntityId);
+        if (unit.unitOrder < 0
+            || unit.orderedMemberEntityIds.empty()
+            || anchorIterator == entitiesById.end())
         {
             continue;
         }
 
-        const auto* presentation = m_processPresentation != nullptr
-            ? m_processPresentation->find(entity->m_entityId) : nullptr;
-        if (resolveProcessExclusionVisual(entity.get(), m_processState, m_processPresentation)
+        CadItem* anchorEntity = anchorIterator->second;
+        const auto* presentation = m_processPresentation->find(unit.anchorEntityId);
+        if (resolveProcessExclusionVisual(anchorEntity, m_processState, m_processPresentation)
             != CadProcessExclusionVisual::None)
         {
             continue;
         }
-        const CadProcessVisualInfo info = buildProcessVisualInfo(entity.get(), presentation);
+        const CadProcessVisualInfo info = buildProcessVisualInfo(anchorEntity, presentation);
 
-        if (!info.valid || info.processOrder < 0)
+        if (!info.valid)
         {
             continue;
         }
@@ -235,11 +245,22 @@ std::vector<CadViewer::ProcessOrderLabelOverlay> CadViewer::buildProcessOrderLab
         }
 
         ProcessOrderLabelOverlay label;
-        label.item = entity.get();
-        label.order = info.processOrder;
-        label.selected = entity->m_isSelected;
+        label.unitKey = unit.key;
+        label.unitOrder = unit.unitOrder;
+        label.hovered = m_hoveredProcessUnitKey.has_value()
+            && *m_hoveredProcessUnitKey == unit.key;
+        label.selected = std::any_of
+        (
+            unit.orderedMemberEntityIds.cbegin(),
+            unit.orderedMemberEntityIds.cend(),
+            [&entitiesById](cadcam::geometry::EntityId entityId)
+            {
+                const auto found = entitiesById.find(entityId);
+                return found != entitiesById.end() && found->second->m_isSelected;
+            }
+        );
         label.center = screenPoint;
-        label.text = QString::number(info.processOrder + 1);
+        label.text = QString::number(unit.unitOrder + 1);
 
         const QRect textRect = metrics.boundingRect(label.text);
         label.bubbleRect = QRect
@@ -284,11 +305,24 @@ std::vector<CadViewer::ProcessOrderLabelOverlay> CadViewer::buildProcessOrderLab
                 return left.selected && !right.selected;
             }
 
-            return left.order < right.order;
+            return left.unitOrder < right.unitOrder;
         }
     );
 
     return labels;
+}
+
+void CadViewer::updateProcessOrderLabelHover(const QPoint& screenPos)
+{
+    ProcessOrderLabelOverlay hoveredLabel;
+    if (hitTestProcessOrderLabel(screenPos, &hoveredLabel))
+    {
+        m_hoveredProcessUnitKey = std::move(hoveredLabel.unitKey);
+    }
+    else
+    {
+        m_hoveredProcessUnitKey.reset();
+    }
 }
 
 bool CadViewer::hitTestProcessOrderLabel(const QPoint& screenPos, ProcessOrderLabelOverlay* outLabel) const
@@ -315,23 +349,49 @@ bool CadViewer::handleProcessOrderLabelClick(const QPoint& screenPos)
 {
     ProcessOrderLabelOverlay clickedLabel;
 
-    if (!hitTestProcessOrderLabel(screenPos, &clickedLabel) || clickedLabel.item == nullptr)
+    if (!hitTestProcessOrderLabel(screenPos, &clickedLabel))
     {
-        if (m_pendingProcessOrderSwapRenderKey.valid())
-        {
-            m_pendingProcessOrderSwapRenderKey = {};
-            update();
-        }
-
         return false;
     }
 
-    const RenderEntityKey clickedRenderKey =
-        CadViewerUtils::toRenderEntityKey(clickedLabel.item);
-    setSelectedRenderKey(clickedRenderKey);
+    CadDocument* scene = m_sceneCoordinator.document();
+    if (scene == nullptr)
+    {
+        return false;
+    }
 
-    m_pendingProcessOrderSwapRenderKey = {};
-    appendCommandMessage(QStringLiteral("已选中加工顺序 %1。").arg(clickedLabel.order + 1));
+    const std::set<cadcam::geometry::EntityId> memberIds
+    (
+        clickedLabel.unitKey.memberEntityIds.cbegin(),
+        clickedLabel.unitKey.memberEntityIds.cend()
+    );
+    QSet<RenderEntityKey> selectedRenderKeys;
+    RenderEntityKey preferredRenderKey;
+    for (const std::unique_ptr<CadItem>& entity : scene->m_entities)
+    {
+        if (entity == nullptr || memberIds.find(entity->m_entityId) == memberIds.end())
+        {
+            continue;
+        }
+
+        const RenderEntityKey renderKey = CadViewerUtils::toRenderEntityKey(entity.get());
+        selectedRenderKeys.insert(renderKey);
+        if (!preferredRenderKey.valid())
+        {
+            preferredRenderKey = renderKey;
+        }
+    }
+
+    if (selectedRenderKeys.isEmpty())
+    {
+        return false;
+    }
+
+    setSelectedRenderKeys(selectedRenderKeys, preferredRenderKey);
+    update();
+    appendCommandMessage(QStringLiteral("已选中加工单元 %1，共 %2 个图元。")
+        .arg(clickedLabel.unitOrder + 1)
+        .arg(selectedRenderKeys.size()));
     return true;
 }
 
@@ -339,21 +399,11 @@ bool CadViewer::handleProcessOrderLabelDoubleClick(const QPoint& screenPos)
 {
     ProcessOrderLabelOverlay clickedLabel;
 
-    if (!hitTestProcessOrderLabel(screenPos, &clickedLabel) || clickedLabel.item == nullptr)
+    if (!hitTestProcessOrderLabel(screenPos, &clickedLabel))
     {
         return false;
     }
 
-    const RenderEntityKey clickedRenderKey =
-        CadViewerUtils::toRenderEntityKey(clickedLabel.item);
-    setSelectedRenderKey(clickedRenderKey);
-    m_pendingProcessOrderSwapRenderKey = {};
-
-    const cadcam::geometry::EntityId processEntityId = clickedLabel.item->m_entityId;
-    if (processEntityId != 0)
-    {
-        emit processDirectionToggleRequested(processEntityId);
-    }
-
+    appendCommandMessage(QStringLiteral("加工单元标签暂不支持整组方向切换。"));
     return true;
 }

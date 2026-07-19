@@ -134,7 +134,7 @@ void CadViewer::setDocument(CadDocument* document)
     invalidateSnapCache();
     // 清除选中实体
     setSelectedRenderKey({});
-    m_pendingProcessOrderSwapRenderKey = {};
+    m_hoveredProcessUnitKey.reset();
     resetOverlappedHandleHoverState();
     hideSelectionWindowPreview();
 
@@ -156,7 +156,6 @@ void CadViewer::setDocument(CadDocument* document)
 // @param editer 编辑器指针
 void CadViewer::setEditer(CadEditer* editer)
 {
-    m_editer = editer;
     m_controller.setEditer(editer);
 }
 
@@ -287,7 +286,7 @@ void CadViewer::setProcessVisualsVisible(bool visible)
     }
 
     m_processVisualsVisible = visible;
-    m_pendingProcessOrderSwapRenderKey = {};
+    m_hoveredProcessUnitKey.reset();
     update();
 }
 
@@ -300,7 +299,7 @@ void CadViewer::setProcessDirectionVisible(bool visible)
 void CadViewer::setProcessOrderVisible(bool visible)
 {
     m_processOrderVisible = visible;
-    m_pendingProcessOrderSwapRenderKey = {};
+    m_hoveredProcessUnitKey.reset();
     update();
 }
 
@@ -778,7 +777,7 @@ void CadViewer::renderScreenCrosshair()
 void CadViewer::handleDocumentSceneChanged()
 {
     invalidateSnapCache();
-    m_pendingProcessOrderSwapRenderKey = {};
+    m_hoveredProcessUnitKey.reset();
     // 标记缓冲脏
     m_sceneCoordinator.markBuffersDirty();
     // 刷新场景边界

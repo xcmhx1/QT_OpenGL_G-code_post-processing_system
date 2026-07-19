@@ -20,11 +20,20 @@ namespace cadcam::process
         std::optional<planning::ProcessExclusionReason> exclusionReason;
     };
 
+    struct ProcessUnitPresentation
+    {
+        planning::ProcessUnitKey key;
+        int unitOrder = -1;
+        std::vector<geometry::EntityId> orderedMemberEntityIds;
+        geometry::EntityId anchorEntityId = 0;
+    };
+
     struct ProcessPresentationSnapshot
     {
         std::uint64_t contentRevision = 0;
         std::uint64_t processStateRevision = 0;
         planning::ProcessPlanMode mode = planning::ProcessPlanMode::Planar3Axis;
+        std::vector<ProcessUnitPresentation> processUnits;
         std::vector<ProcessPresentationEntry> entries;
 
         const ProcessPresentationEntry* find(geometry::EntityId entityId) const;

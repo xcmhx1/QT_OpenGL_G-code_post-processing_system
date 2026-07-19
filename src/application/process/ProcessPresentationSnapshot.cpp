@@ -18,24 +18,55 @@ namespace cadcam::process
     (const planning::ProcessPlan& plan, const OperationContext& context)
     {
         OperationResult<ProcessPresentationSnapshot> result;
+        const auto failInvalidPresentation = [&result, &context](const QString& userMessage)
+        {
+            result.status = OperationStatus::InvalidInput;
+            Diagnostic diagnostic;
+            diagnostic.code = DiagnosticCode::ProcessPresentationInvalid;
+            diagnostic.severity = DiagnosticSeverity::Error;
+            diagnostic.component = QStringLiteral("ProcessPresentationSnapshot");
+            diagnostic.operation = context.operationName;
+            diagnostic.userMessage = userMessage;
+            diagnostic.correlationId = context.correlationId;
+            result.addDiagnostic(diagnostic);
+        };
+
+        if (!planning::validateProcessUnitStructure(plan))
+        {
+            failInvalidPresentation(QStringLiteral("加工显示快照的加工单元与计划序列不一致。"));
+            return result;
+        }
+
         ProcessPresentationSnapshot snapshot;
         snapshot.contentRevision = plan.contentRevision;
         snapshot.processStateRevision = plan.processStateRevision;
         snapshot.mode = plan.mode;
+        snapshot.processUnits.reserve(plan.processUnits.size());
+
+        for (std::size_t index = 0; index < plan.processUnits.size(); ++index)
+        {
+            const planning::ProcessUnit& unit = plan.processUnits[index];
+            if (unit.orderedMemberEntityIds.empty())
+            {
+                failInvalidPresentation(QStringLiteral("加工显示快照包含空加工单元。"));
+                return result;
+            }
+
+            snapshot.processUnits.push_back
+            ({
+                unit.key,
+                static_cast<int>(index),
+                unit.orderedMemberEntityIds,
+                unit.orderedMemberEntityIds.front()
+            });
+        }
+
         std::set<geometry::EntityId> ids;
         for (const planning::ProcessAssignment& assignment : plan.assignments)
         {
             if (assignment.entityId == 0 || !ids.insert(assignment.entityId).second)
             {
-                result.status = OperationStatus::InvalidInput;
-                Diagnostic diagnostic;
-                diagnostic.code = DiagnosticCode::ProcessPresentationInvalid;
-                diagnostic.severity = DiagnosticSeverity::Error;
-                diagnostic.component = QStringLiteral("ProcessPresentationSnapshot");
-                diagnostic.operation = context.operationName;
-                diagnostic.userMessage = QStringLiteral("加工显示快照包含无效或重复图元。");
-                diagnostic.correlationId = context.correlationId;
-                result.addDiagnostic(diagnostic);
+                failInvalidPresentation(QStringLiteral("加工显示快照包含无效或重复图元。"));
                 return result;
             }
             snapshot.entries.push_back({ assignment.entityId, assignment.processOrder,
@@ -46,15 +77,7 @@ namespace cadcam::process
         {
             if (exclusion.entityId == 0 || !ids.insert(exclusion.entityId).second)
             {
-                result.status = OperationStatus::InvalidInput;
-                Diagnostic diagnostic;
-                diagnostic.code = DiagnosticCode::ProcessPresentationInvalid;
-                diagnostic.severity = DiagnosticSeverity::Error;
-                diagnostic.component = QStringLiteral("ProcessPresentationSnapshot");
-                diagnostic.operation = context.operationName;
-                diagnostic.userMessage = QStringLiteral("加工显示快照的计划和排除项发生重叠。");
-                diagnostic.correlationId = context.correlationId;
-                result.addDiagnostic(diagnostic);
+                failInvalidPresentation(QStringLiteral("加工显示快照的计划和排除项发生重叠。"));
                 return result;
             }
             snapshot.entries.push_back({ exclusion.entityId, -1, -1, false, std::nullopt,

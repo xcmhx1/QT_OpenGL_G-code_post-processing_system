@@ -6,6 +6,7 @@
 
 #include <memory>
 #include <limits>
+#include <optional>
 
 // Qt 核心模块
 #include <QDragEnterEvent>
@@ -397,8 +398,9 @@ private:
 
     struct ProcessOrderLabelOverlay
     {
-        CadItem* item = nullptr;
-        int order = -1;
+        cadcam::planning::ProcessUnitKey unitKey;
+        int unitOrder = -1;
+        bool hovered = false;
         bool selected = false;
         QPoint center;
         QRect bubbleRect;
@@ -407,6 +409,9 @@ private:
 
     // 构建当前可见的加工顺序标签覆盖信息。
     std::vector<ProcessOrderLabelOverlay> buildProcessOrderLabelOverlays() const;
+
+    // 更新鼠标当前命中的加工单元标签。
+    void updateProcessOrderLabelHover(const QPoint& screenPos);
 
     // 命中加工顺序标签。
     bool hitTestProcessOrderLabel(const QPoint& screenPos, ProcessOrderLabelOverlay* outLabel = nullptr) const;
@@ -600,16 +605,14 @@ private:
     // 控制器，负责接收 Viewer 输入并维护绘图状态
     CadController m_controller;
 
-    // 当前编辑器，供 Viewer 侧的顺序标签交互直接提交可撤销命令。
-    CadEditer* m_editer = nullptr;
     const cadcam::process::DocumentProcessState* m_processState = nullptr;
     const cadcam::process::ProcessPresentationSnapshot* m_processPresentation = nullptr;
 
     // 当前主题颜色
     AppThemeColors m_theme = buildAppThemeColors(AppThemeMode::Light);
 
-    // 顺序标签交换的首个候选 Viewer 实体键。
-    RenderEntityKey m_pendingProcessOrderSwapRenderKey;
+    // 当前悬停的加工单元身份；仅用于 Viewer 覆盖层状态。
+    std::optional<cadcam::planning::ProcessUnitKey> m_hoveredProcessUnitKey;
 
     // 画布显示选项。
     bool m_processVisualsVisible = true;

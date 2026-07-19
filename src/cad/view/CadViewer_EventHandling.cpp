@@ -109,6 +109,7 @@ void CadViewer::mouseMoveEvent(QMouseEvent* event)
 
     if (m_hoveredViewCubeFace != ViewCubeFace::None)
     {
+        m_hoveredProcessUnitKey.reset();
         setCursor(Qt::ArrowCursor);
         m_showCrosshairOverlay = false;
         resetOverlappedHandleHoverState();
@@ -124,11 +125,13 @@ void CadViewer::mouseMoveEvent(QMouseEvent* event)
 
     if (interactionMode() == ViewInteractionMode::Idle)
     {
+        updateProcessOrderLabelHover(event->pos());
         updateHoveredWorldPosition(event->pos());
         updateOverlappedHandleHoverState(event->pos());
     }
     else
     {
+        m_hoveredProcessUnitKey.reset();
         resetOverlappedHandleHoverState();
     }
 
@@ -139,6 +142,7 @@ void CadViewer::leaveEvent(QEvent* event)
 {
     m_showCrosshairOverlay = false;
     m_hoveredViewCubeFace = ViewCubeFace::None;
+    m_hoveredProcessUnitKey.reset();
     resetOverlappedHandleHoverState();
     update();
     QOpenGLWidget::leaveEvent(event);
