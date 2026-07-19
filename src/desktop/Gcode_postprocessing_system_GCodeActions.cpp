@@ -493,9 +493,8 @@ OperationReport Gcode_postprocessing_system::prepareDocumentForGCodeExport
             QStringLiteral("检测到当前图元尚未完成排序，导出前自动执行智能排序。")
         ));
 
-        const bool sorted = generationMode == GGenerator::GenerationMode::Mode3D
-            ? smartSortEntities3D()
-            : smartSortEntities();
+        const bool sorted = sortEntitiesByCurrentMode
+            (cadcam::planning::ProcessSortIntent::RebuildSequence);
 
         if (!sorted)
         {

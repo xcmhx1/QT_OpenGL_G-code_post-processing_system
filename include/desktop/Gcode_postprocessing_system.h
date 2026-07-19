@@ -120,7 +120,7 @@ private:
         GGenerator::GenerationMode generationMode,
         const OperationContext& context
     );
-    bool sortEntitiesByCurrentMode(bool smartSort);
+    bool sortEntitiesByCurrentMode(cadcam::planning::ProcessSortIntent sortIntent);
     bool writeDocumentToDxf(const QString& filePath, bool updateCurrentPath, bool safeMode = false);
     QString ensureDxfSuffix(const QString& filePath) const;
     QString defaultDxfPathForCurrentDocument() const;
@@ -143,10 +143,12 @@ private:
     bool sortEntitiesByCurrentDirection();
     bool assignSelectedEntityProcessOrder();
     bool smartSortEntities();
-    bool sortEntitiesWithProcessPlan2D(const QString& commandTitle);
+    bool sortEntitiesWithProcessPlan2D
+        (const QString& commandTitle, cadcam::planning::ProcessSortIntent sortIntent);
     bool sortEntitiesByCurrentDirection3D();
     bool smartSortEntities3D();
-    bool sortEntitiesWithProcessPlan3D(const QString& commandTitle);
+    bool sortEntitiesWithProcessPlan3D
+        (const QString& commandTitle, cadcam::planning::ProcessSortIntent sortIntent);
     bool smartAssignSelectedRotaryEndCut();
     bool assignSelectedRotaryEndCut();
     bool assignSelectedWasteEndCut();

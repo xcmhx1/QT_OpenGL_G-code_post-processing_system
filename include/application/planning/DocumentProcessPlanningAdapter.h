@@ -14,6 +14,7 @@ public:
     (
         CadDocument& document,
         const cadcam::process::DocumentProcessState& processState,
+        cadcam::planning::ProcessSortIntent sortIntent,
         const OperationContext& context
     ) const;
 
@@ -22,6 +23,7 @@ public:
         CadDocument& document,
         const cadcam::process::DocumentProcessState& processState,
         const std::optional<cadcam::machining::TubeSectionModel>& tubeSection,
+        cadcam::planning::ProcessSortIntent sortIntent,
         double connectionTolerance,
         cadcam::topology::PathTopology& topologyStorage,
         const OperationContext& context

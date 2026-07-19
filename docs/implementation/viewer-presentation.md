@@ -9,6 +9,7 @@ Viewer 不拥有加工单元身份、加工单元序列或计划事实。
 ## 生产入口
 
 - 当前计划成功后，Application 由 `ProcessPlan` 构建 `ProcessPresentationSnapshot` 并交给 Viewer。
+- 普通排序和智能排序已经通过显式 `ProcessSortIntent` 产生不同单元序列，Viewer 仅接收最终计划展示结果。
 - `CadViewer::renderProcessOrderLabels()` 构建并绘制当前加工顺序标签。
 - 标签命中和点击由 `CadViewer_ProcessOrderLabels.cpp` 处理。
 - 目标块内提首由 Viewer 上报已选加工单元范围和 Ctrl 单击目标，Application 校验并修改序列。
@@ -108,6 +109,7 @@ Viewer 仅保存当前屏幕命中区域、临时悬停和选择反馈。
 | 标签锚点 | 从单个图元的可视信息得到 | 从整个加工单元的单元级展示投影得到 | 当前没有稳定单元锚点 |
 | 选择粒度 | Viewer 选择单个 `CadItem` | 成员图元选择映射为加工单元选择 | 当前不能校验连续单元范围 |
 | 顺序状态 | Application 已持有唯一 `ProcessUnitSequence`；展示仍读取逐图元执行顺序 | Viewer 读取单元序列位置 | 单元状态已落地，展示接入尚未实现 |
+| 排序意图 | 普通排序保留匹配单元相对顺序，智能排序重建序列；Viewer 只显示最终 assignment | Viewer 不参与排序决策 | 已分离，Viewer 行为未修改 |
 | 点击交互 | 标签点击和双击围绕单图元处理 | Ctrl + 单击执行连续块内提首 | 目标交互尚未实现 |
 | 失效刷新 | 展示随 `ProcessPlan` 创建或清除 | 序列编号可即时刷新，计划派生展示保持失效 | 当前缺少独立单元序列展示 |
 

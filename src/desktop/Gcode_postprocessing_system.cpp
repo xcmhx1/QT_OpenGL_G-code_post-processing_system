@@ -522,8 +522,16 @@ Gcode_postprocessing_system::Gcode_postprocessing_system(QWidget* parent)
     connect(restoreInternalPathsAction, &QAction::triggered, this, [this]() { restoreInternalMachiningPaths(); });
     connect(clearSelectedRotaryEndCutAssignmentsAction, &QAction::triggered, this, [this]() { clearSelectedRotaryEndCutAssignments(); });
     connect(clearRotaryEndCutAssignmentsAction, &QAction::triggered, this, [this]() { clearRotaryEndCutAssignments(); });
-    connect(ui->action_Sort_2D_Assign, &QAction::triggered, this, [this]() { sortEntitiesByCurrentMode(false); });
-    connect(ui->action_Sort_2D_Smart, &QAction::triggered, this, [this]() { sortEntitiesByCurrentMode(true); });
+    connect(ui->action_Sort_2D_Assign, &QAction::triggered, this, [this]()
+    {
+        sortEntitiesByCurrentMode
+            (cadcam::planning::ProcessSortIntent::PreserveCurrentSequence);
+    });
+    connect(ui->action_Sort_2D_Smart, &QAction::triggered, this, [this]()
+    {
+        sortEntitiesByCurrentMode
+            (cadcam::planning::ProcessSortIntent::RebuildSequence);
+    });
 
     ui->action_Sort_3D_Assign->setVisible(false);
     ui->action_Sort_3D_Smart->setVisible(false);

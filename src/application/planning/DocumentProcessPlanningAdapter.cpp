@@ -101,13 +101,12 @@ namespace
 
     std::optional<double> effectiveStartParameter
     (
-        const cadcam::process::EntityProcessState& state,
+        const std::optional<double>& requestedStartParameter,
         SourceGeometryKind sourceKind,
         bool closed
     )
     {
-        if (state.overrideData.startParameter.has_value())
-            return state.overrideData.startParameter;
+        if (requestedStartParameter.has_value()) return requestedStartParameter;
         if (closed && (sourceKind == SourceGeometryKind::Circle
             || sourceKind == SourceGeometryKind::Ellipse))
         {
@@ -122,6 +121,7 @@ DocumentProcessPlanningAdapter::capturePlanar
 (
     CadDocument& document,
     const cadcam::process::DocumentProcessState& processState,
+    cadcam::planning::ProcessSortIntent sortIntent,
     const OperationContext& context
 ) const
 {
@@ -152,6 +152,8 @@ DocumentProcessPlanningAdapter::capturePlanar
     input.processStateRevision = stateRevision;
     input.entities.reserve(snapshot.value->entries.size());
     geometry::GeometryCompiler compiler;
+    const bool rebuildSequence =
+        sortIntent == planning::ProcessSortIntent::RebuildSequence;
     for (const GeometrySourceEntry& entry : snapshot.value->entries)
     {
         planning::PlanarPlanningEntity entity;
@@ -162,19 +164,22 @@ DocumentProcessPlanningAdapter::capturePlanar
         const process::EntityProcessState state = processState.stateOrDefault(entity.entityId);
         entity.processEnabled = state.overrideData.processEnabled;
         entity.excludedAsInternalGeometry = state.effectiveInternalExclusion();
-        entity.directionPreference = state.overrideData.direction;
-        entity.startParameter = state.overrideData.startParameter;
+        entity.directionPreference = rebuildSequence
+            ? process::DirectionPreference::Auto : state.overrideData.direction;
+        entity.startParameter = rebuildSequence
+            ? std::nullopt : state.overrideData.startParameter;
         if (entry.sourceEntity.has_value())
         {
             entity.sourceEntity = *entry.sourceEntity;
             geometry::PathCompileOptions options;
-            options.startParameter = state.overrideData.startParameter;
+            options.startParameter = entity.startParameter;
             auto path = compiler.compile(entity.sourceEntity,
                 productionSamplingPolicy(entry.attributes.originalDxfType), options, context);
             if (path.succeeded() && path.value.has_value())
             {
                 entity.path = std::move(*path.value);
-                entity.startParameter = effectiveStartParameter(state, entity.sourceKind, entity.path.closed);
+                entity.startParameter = effectiveStartParameter
+                    (entity.startParameter, entity.sourceKind, entity.path.closed);
             }
             else result.mergeDiagnostics(path);
         }
@@ -205,6 +210,7 @@ DocumentProcessPlanningAdapter::captureRotary
     CadDocument& document,
     const cadcam::process::DocumentProcessState& processState,
     const std::optional<cadcam::machining::TubeSectionModel>& tubeSection,
+    cadcam::planning::ProcessSortIntent sortIntent,
     double connectionTolerance,
     cadcam::topology::PathTopology& topologyStorage,
     const OperationContext& context
@@ -246,6 +252,8 @@ DocumentProcessPlanningAdapter::captureRotary
     input.topologyInput.contentRevision = contentRevision;
     input.entities.reserve(snapshot.value->entries.size());
     geometry::GeometryCompiler compiler;
+    const bool rebuildSequence =
+        sortIntent == planning::ProcessSortIntent::RebuildSequence;
     for (const GeometrySourceEntry& entry : snapshot.value->entries)
     {
         planning::PlanningEntity entity;
@@ -258,20 +266,23 @@ DocumentProcessPlanningAdapter::captureRotary
         entity.excludedAsInternalGeometry = state.effectiveInternalExclusion();
         entity.boundaryRole = state.overrideData.boundaryRole;
         entity.boundaryPairId = state.overrideData.boundaryPairId;
-        entity.directionPreference = state.overrideData.direction;
-        entity.startParameter = state.overrideData.startParameter;
+        entity.directionPreference = rebuildSequence
+            ? process::DirectionPreference::Auto : state.overrideData.direction;
+        entity.startParameter = rebuildSequence
+            ? std::nullopt : state.overrideData.startParameter;
 
         if (entry.sourceEntity.has_value())
         {
             geometry::PathCompileOptions options;
-            options.startParameter = state.overrideData.startParameter;
+            options.startParameter = entity.startParameter;
             geometry::SamplingPolicy pathPolicy =
                 productionSamplingPolicy(entry.attributes.originalDxfType);
             auto path = compiler.compile(*entry.sourceEntity, pathPolicy, options, context);
             if (path.succeeded() && path.value.has_value())
             {
                 entity.path = std::move(*path.value);
-                entity.startParameter = effectiveStartParameter(state, entity.sourceKind, entity.path.closed);
+                entity.startParameter = effectiveStartParameter
+                    (entity.startParameter, entity.sourceKind, entity.path.closed);
                 if (supportsProcessPath(entity.sourceKind)
                     && hasUsablePath(entity.path, topologyTolerance.minimumEdgeLength))
                 {

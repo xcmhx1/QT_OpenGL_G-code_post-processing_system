@@ -29,6 +29,7 @@ namespace cadcam::planning
 
     struct PlanarProcessPlanningPolicy
     {
+        ProcessSortIntent sortIntent = ProcessSortIntent::RebuildSequence;
         bool allowReverse = true;
         bool preserveUserDirection = true;
         geometry::Vector3d initialPosition;

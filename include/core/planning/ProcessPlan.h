@@ -20,6 +20,7 @@ namespace cadcam::planning
 {
     enum class ProcessPlanMode { Planar3Axis, Rotary4Axis };
     enum class ProcessOrderingStrategy { NearestNext, LazyRotation };
+    enum class ProcessSortIntent { PreserveCurrentSequence, RebuildSequence };
     enum class BoundaryRole { None, Break, Waste };
     enum class ProcessGroupKind { SingleEntity, ConnectedChain, ClosedLoop, BreakBoundary, WasteBoundary };
     enum class ProcessExclusionReason { Hidden, UserDisabled, InternalGeometry, WasteRegion, UnsupportedGeometry, InvalidPath };
@@ -27,6 +28,7 @@ namespace cadcam::planning
 
     struct ProcessPlanningPolicy
     {
+        ProcessSortIntent sortIntent = ProcessSortIntent::RebuildSequence;
         ProcessOrderingStrategy orderingStrategy = ProcessOrderingStrategy::NearestNext;
         double connectionTolerance = 1.0;
         bool allowReverse = true;

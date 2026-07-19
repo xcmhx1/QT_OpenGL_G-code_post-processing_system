@@ -25,6 +25,7 @@
 
 - `ProcessPlanningPolicy`：四轴连接容差、起始位置、方向许可、闭环原子组和排序策略。
 - `PlanarProcessPlanningPolicy`：三轴起始位置、连接容差、数值误差和方向处理选项。
+- `ProcessSortIntent`：以 `PreserveCurrentSequence` 和 `RebuildSequence` 明确区分普通排序与智能排序。
 - `PlanningEntity`：核心规划使用的图元路径、状态、断面角色和来源属性。
 - `ProcessGroup`：单图元、连接链、闭环、Break 断面或 Waste 断面组成的加工组。
 - `ProcessAssignment`：逐图元执行顺序、所属加工单元索引、连续组、方向和起点，继续供轨迹与 NC 使用。
@@ -40,9 +41,12 @@
 
 ```text
 “排序”动作
-→ sortEntitiesByCurrentMode(false)
-→ 三轴或四轴排序包装函数
+→ sortEntitiesByCurrentMode(PreserveCurrentSequence)
+→ 三轴或四轴策略显式携带排序意图
 → ProcessPlanningService
+→ 自动候选计划
+→ 按当前 ProcessUnitSequence 匹配并重排仍存在单元
+→ 未匹配新单元按候选计划顺序追加
 → ProcessPlan
 → ProcessPresentationSnapshot
 ```
@@ -51,9 +55,11 @@
 
 ```text
 “智能排序”动作
-→ sortEntitiesByCurrentMode(true)
-→ 三轴或四轴智能排序包装函数
-→ 与普通排序相同的 ProcessPlanningService
+→ sortEntitiesByCurrentMode(RebuildSequence)
+→ 三轴或四轴策略显式携带排序意图
+→ DocumentProcessPlanningAdapter 忽略本次输入中的人工方向和起点
+→ ProcessPlanningService 忽略当前 ProcessUnitSequence
+→ 核心规划器重建全部单元顺序、方向和起点
 → ProcessPlan
 → ProcessPresentationSnapshot
 ```
@@ -87,7 +93,11 @@ CadDocument + DocumentProcessState + 可选 TubeSectionModel
 ```text
 可加工图元
 → 现有排序算法生成 ProcessGroup 和 directed traversal
-→ ProcessUnit + ProcessUnitSequence
+→ 自动候选 ProcessUnit + ProcessUnitSequence
+→ 按 ProcessUnitKey 匹配当前权威序列
+→ 保留匹配单元相对顺序
+→ 新增、拆分或合并后的未匹配单元按候选相对顺序追加
+→ 重建 processUnitIndex 和逐图元 processOrder
 → Application 替换唯一 ProcessUnitSequence
 → ProcessPlan
 ```
@@ -96,7 +106,8 @@ CadDocument + DocumentProcessState + 可选 TubeSectionModel
 
 ```text
 可加工图元
-→ 与普通排序相同的计划入口和排序算法
+→ 忽略当前权威单元序列、人工方向和人工起点
+→ 现有几何排序策略重新计算
 → ProcessGroup 和 directed traversal
 → ProcessUnit + ProcessUnitSequence
 → Application 替换唯一 ProcessUnitSequence
@@ -139,8 +150,12 @@ Application 的 `DocumentProcessState` 持有当前 `ProcessUnitSequence`。Core
 - `ProcessUnitKey` 使用组内全部稳定 `EntityId` 的升序集合，`orderedMemberEntityIds` 使用最终实际加工遍历顺序。
 - 每个逐图元 assignment 通过 `processUnitIndex` 关联唯一加工单元，并继续按执行顺序保持连续且唯一。
 - 三轴和四轴共用加工单元完整性校验：键必须规范，成员集合和执行顺序必须一致，每个 assignment 只属于一个单元，单元在执行序列中必须连续，单元序列与计划单元必须一一对应。
+- 普通排序按 `ProcessUnitKey` 精确匹配当前权威序列，只保留仍存在单元的相对顺序；未匹配单元按自动候选计划中的相对顺序追加到末尾。
+- 单元级重排保持 `orderedMemberEntityIds`、方向、起点和连续组不变，只重建单元位置、`processUnitIndex` 和连续的逐图元 `processOrder`。
+- 普通排序继续读取并保留人工方向和人工起点。
+- 智能排序不读取当前单元序列，并在本次规划输入中把方向视为 `Auto`、人工起点视为未设置；用户状态本身不被删除或修改。
+- 重排结果继续通过加工单元结构校验和 Break 前后约束校验，校验成功后才更新权威序列。
 - 展示快照复制计划中的顺序、方向、起点、连续组和排除原因。
-- 三轴和四轴本阶段保持原排序算法，只将已有分组结果转换为加工单元和唯一序列。
 - 单元加工编号只由 `ProcessUnitSequence` 的位置 `+1` 产生，不存入成员图元。
 
 ## 相关源码
@@ -157,11 +172,11 @@ Application 的 `DocumentProcessState` 持有当前 `ProcessUnitSequence`。Core
 
 | 事项 | 当前生产实现 | 需求或概要设计要求 | 影响 |
 |---|---|---|---|
-| 普通与智能排序 | 两种 UI 入口最终调用相同的三轴或四轴计划函数 | 普通排序尽量保留当前单元序列、人工方向和起点；智能排序替换当前单元序列 | 当前两种入口只有命令名称差异 |
+| 普通与智能排序 | 两种入口显式传递不同 `ProcessSortIntent`；普通排序保留匹配单元顺序，智能排序重建序列 | 两种排序语义分离 | 已实现，不依赖按钮文字或命令标题判断 |
 | 加工单元集合 | 三轴从 `PathTopology` 连通分量形成连续链、严格闭环或独立图元单元；四轴从现有加工组形成单元 | 两种模式统一使用加工单元语义 | 已建立统一核心模型；复杂分支分量保持独立图元调度 |
 | 当前顺序 | `DocumentProcessState` 保存唯一 `ProcessUnitSequence` | Application 保存唯一加工单元序列 | 状态基础已实现，人工编辑入口尚未实现 |
-| 人工方向 | 普通和智能入口都把现有方向偏好送入规划器 | 智能排序应忽略人工方向 | 智能排序当前仍受人工方向约束 |
-| 智能排序替换 | 智能结果更新唯一 `ProcessUnitSequence` | 智能结果直接替换当前序列 | 状态替换已实现，智能算法本身仍与普通入口相同 |
+| 人工方向与起点 | 普通排序读取用户状态；智能排序只在规划输入边界忽略，用户状态继续保留 | 智能排序重新计算方向和起点 | 已实现 |
+| 智能排序替换 | 智能结果不匹配旧序列，直接更新唯一 `ProcessUnitSequence` | 智能结果直接替换当前序列 | 已实现 |
 | 单元编号 | 单元编号由序列位置产生；assignment 保留逐图元执行顺序 | 一个加工单元一个显示编号 | Viewer 当前仍按逐图元执行顺序显示标签 |
 | 配置失效层级 | 当前配置切换会清除整个计划 | 仅排序配置变化应使计划失效；运动和文本配置应分别影响下游 | 当前失效范围比概要设计更保守 |
 | 首组懒旋转 | 首个加工组固定按最近距离选择 | 懒旋转工艺强调减少 A 轴往复 | 首组不使用旋转代价，后续组才使用 |

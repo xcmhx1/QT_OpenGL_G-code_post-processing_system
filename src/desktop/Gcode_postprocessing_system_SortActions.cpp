@@ -2286,12 +2286,20 @@ namespace
 
 }
 
-bool Gcode_postprocessing_system::sortEntitiesByCurrentMode(bool smartSort)
+bool Gcode_postprocessing_system::sortEntitiesByCurrentMode
+(cadcam::planning::ProcessSortIntent sortIntent)
 {
+    const bool rebuildSequence =
+        sortIntent == cadcam::planning::ProcessSortIntent::RebuildSequence;
     const GGenerator::GenerationMode generationMode = resolveGenerationMode();
     if (generationMode == GGenerator::GenerationMode::Mode3D)
     {
-        return smartSort ? smartSortEntities3D() : sortEntitiesByCurrentDirection3D();
+        return sortEntitiesWithProcessPlan3D
+        (
+            rebuildSequence ? QStringLiteral("4轴(绕A)智能排序")
+                : QStringLiteral("4轴(绕A)排序"),
+            sortIntent
+        );
     }
 
     const int excludedCount = refreshWasteProcessingExclusions();
@@ -2304,7 +2312,11 @@ bool Gcode_postprocessing_system::sortEntitiesByCurrentMode(bool smartSort)
         );
     }
 
-    return smartSort ? smartSortEntities() : sortEntitiesByCurrentDirection();
+    return sortEntitiesWithProcessPlan2D
+    (
+        rebuildSequence ? QStringLiteral("3轴智能排序") : QStringLiteral("3轴排序"),
+        sortIntent
+    );
 }
 
 QVector<CadItem*> Gcode_postprocessing_system::expandedSelectedRotaryEndCut(QString* errorMessage) const
@@ -3327,20 +3339,30 @@ int Gcode_postprocessing_system::refreshWasteProcessingExclusions()
 
 bool Gcode_postprocessing_system::sortEntitiesByCurrentDirection()
 {
-    return sortEntitiesWithProcessPlan2D(QStringLiteral("3轴排序"));
+    return sortEntitiesWithProcessPlan2D
+        (QStringLiteral("3轴排序"),
+            cadcam::planning::ProcessSortIntent::PreserveCurrentSequence);
 }
 
 bool Gcode_postprocessing_system::assignSelectedEntityProcessOrder()
 {
-    return sortEntitiesWithProcessPlan2D(QStringLiteral("3轴排序"));
+    return sortEntitiesWithProcessPlan2D
+        (QStringLiteral("3轴排序"),
+            cadcam::planning::ProcessSortIntent::PreserveCurrentSequence);
 }
 
 bool Gcode_postprocessing_system::smartSortEntities()
 {
-    return sortEntitiesWithProcessPlan2D(QStringLiteral("3轴智能排序"));
+    return sortEntitiesWithProcessPlan2D
+        (QStringLiteral("3轴智能排序"),
+            cadcam::planning::ProcessSortIntent::RebuildSequence);
 }
 
-bool Gcode_postprocessing_system::sortEntitiesWithProcessPlan2D(const QString& commandTitle)
+bool Gcode_postprocessing_system::sortEntitiesWithProcessPlan2D
+(
+    const QString& commandTitle,
+    cadcam::planning::ProcessSortIntent sortIntent
+)
 {
     if (m_document.m_entities.empty())
     {
@@ -3363,8 +3385,10 @@ bool Gcode_postprocessing_system::sortEntitiesWithProcessPlan2D(const QString& c
     }
 
     cadcam::planning::PlanarProcessPlanningPolicy policy;
+    policy.sortIntent = sortIntent;
     policy.allowReverse = true;
-    policy.preserveUserDirection = true;
+    policy.preserveUserDirection =
+        sortIntent == cadcam::planning::ProcessSortIntent::PreserveCurrentSequence;
     policy.initialPosition = { 0.0, 0.0, 0.0 };
     policy.hasInitialPosition = true;
     policy.numericalEpsilon = 1.0e-5;
@@ -3420,10 +3444,16 @@ bool Gcode_postprocessing_system::sortEntitiesWithProcessPlan2D(const QString& c
 
 bool Gcode_postprocessing_system::sortEntitiesByCurrentDirection3D()
 {
-    return sortEntitiesWithProcessPlan3D(QStringLiteral("4轴(绕A)排序"));
+    return sortEntitiesWithProcessPlan3D
+        (QStringLiteral("4轴(绕A)排序"),
+            cadcam::planning::ProcessSortIntent::PreserveCurrentSequence);
 }
 
-bool Gcode_postprocessing_system::sortEntitiesWithProcessPlan3D(const QString& commandTitle)
+bool Gcode_postprocessing_system::sortEntitiesWithProcessPlan3D
+(
+    const QString& commandTitle,
+    cadcam::planning::ProcessSortIntent sortIntent
+)
 {
     if (m_document.m_entities.empty())
     {
@@ -3455,6 +3485,7 @@ bool Gcode_postprocessing_system::sortEntitiesWithProcessPlan3D(const QString& c
     }
 
     cadcam::planning::ProcessPlanningPolicy policy;
+    policy.sortIntent = sortIntent;
     policy.orderingStrategy = m_activeProfile.rotaryAxisConfig().lazyRotationProcessing
         ? cadcam::planning::ProcessOrderingStrategy::LazyRotation
         : cadcam::planning::ProcessOrderingStrategy::NearestNext;
@@ -3522,7 +3553,9 @@ bool Gcode_postprocessing_system::sortEntitiesWithProcessPlan3D(const QString& c
 
 bool Gcode_postprocessing_system::smartSortEntities3D()
 {
-    return sortEntitiesWithProcessPlan3D(QStringLiteral("4轴(绕A)智能排序"));
+    return sortEntitiesWithProcessPlan3D
+        (QStringLiteral("4轴(绕A)智能排序"),
+            cadcam::planning::ProcessSortIntent::RebuildSequence);
 }
 
 
