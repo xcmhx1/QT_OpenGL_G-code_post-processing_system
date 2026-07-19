@@ -33,6 +33,7 @@ namespace cadcam::planning
         bool preserveUserDirection = true;
         geometry::Vector3d initialPosition;
         bool hasInitialPosition = false;
+        double connectionTolerance = 1.0;
         double numericalEpsilon = 1.0e-5;
     };
 

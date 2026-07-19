@@ -1417,32 +1417,15 @@ namespace cadcam::planning
             if (firstOrderByGroup.find(groupId) == firstOrderByGroup.end()) firstOrderByGroup[groupId] = assignment.processOrder;
             lastOrderByGroup[groupId] = assignment.processOrder;
         }
-        if (plan.processUnits.size() != plan.processUnitSequence.units.size())
+        if (!validateProcessUnitStructure(plan))
         {
             return failure<ProcessPlan>
             (
                 OperationStatus::InternalError, context, DiagnosticCode::ProcessPlanningInvariantViolation,
-                QStringLiteral("加工单元序列完整性校验失败。"),
-                QStringLiteral("ProcessUnit and ProcessUnitSequence sizes differ."),
+                QStringLiteral("加工单元成员、顺序或分配关系校验失败。"),
+                QStringLiteral("ProcessUnit structure is inconsistent with assignments or sequence."),
                 diagnosticValues(input, policy)
             );
-        }
-        for (std::size_t index = 0; index < plan.processUnits.size(); ++index)
-        {
-            const ProcessUnit& unit = plan.processUnits[index];
-            if (unit.key.memberEntityIds.empty()
-                || unit.orderedMemberEntityIds.empty()
-                || !(unit.key == plan.processUnitSequence.units[index])
-                || !sameEntitySet(unit.key.memberEntityIds, unit.orderedMemberEntityIds))
-            {
-                return failure<ProcessPlan>
-                (
-                    OperationStatus::InternalError, context, DiagnosticCode::ProcessPlanningInvariantViolation,
-                    QStringLiteral("加工单元成员校验失败。"),
-                    QStringLiteral("ProcessUnit identity or ordered members are invalid."),
-                    diagnosticValues(input, policy)
-                );
-            }
         }
         for (const ProcessExclusion& exclusion : plan.exclusions)
         {

@@ -96,7 +96,7 @@ Core 根据统一加工路径及连续关系形成 `ProcessUnit` 集合。每个
 
 该行为与当前需求不一致，后续详细设计和生产实现校准必须明确解决。在完成校准前，不能将当前包围盒中心回退视为符合 `(0, 0)` 默认规则。
 
-当前生产实现仍按图元保存 `manualProcessOrder`，普通排序和智能排序仍共用现有算法，Viewer 也可能按图元显示加工顺序。`ProcessUnitKey`、唯一 `ProcessUnitSequence`、块内提首和单元级编号尚未进入生产实现。
+当前生产实现已由 Application 保存唯一 `ProcessUnitSequence`，三轴和四轴计划均生成 `ProcessUnitKey`。普通排序和智能排序仍共用现有算法，Viewer 仍按图元显示加工顺序；块内提首和单元级编号尚未进入生产实现。
 
 ## 8. 加工展示状态
 

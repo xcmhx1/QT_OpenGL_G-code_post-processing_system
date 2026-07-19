@@ -4,8 +4,11 @@
 #include "core/machining/TubeSection.h"
 #include "core/topology/PathTopology.h"
 
+#include <algorithm>
 #include <cstdint>
+#include <functional>
 #include <optional>
+#include <set>
 #include <vector>
 
 namespace cadcam::process
@@ -113,6 +116,80 @@ namespace cadcam::planning
         std::vector<ProcessExclusion> exclusions;
         std::vector<ProcessPrecedence> precedenceConstraints;
     };
+
+    inline bool validProcessUnitKey(const ProcessUnitKey& key)
+    {
+        return !key.memberEntityIds.empty()
+            && key.memberEntityIds.front() != 0U
+            && std::adjacent_find
+                (key.memberEntityIds.begin(), key.memberEntityIds.end(), std::greater_equal<>())
+                == key.memberEntityIds.end();
+    }
+
+    inline bool validateProcessUnitStructure(const ProcessPlan& plan)
+    {
+        if (plan.processUnitSequence.revision == 0U
+            || plan.processUnits.size() != plan.processUnitSequence.units.size())
+        {
+            return false;
+        }
+
+        std::set<std::vector<geometry::EntityId>> unitKeys;
+        std::size_t expectedAssignmentCount = 0U;
+        for (std::size_t index = 0; index < plan.processUnits.size(); ++index)
+        {
+            const ProcessUnit& unit = plan.processUnits[index];
+            if (!validProcessUnitKey(unit.key)
+                || !(unit.key == plan.processUnitSequence.units[index])
+                || unit.orderedMemberEntityIds.size() != unit.key.memberEntityIds.size()
+                || !unitKeys.insert(unit.key.memberEntityIds).second)
+            {
+                return false;
+            }
+
+            std::vector<geometry::EntityId> orderedSet = unit.orderedMemberEntityIds;
+            std::sort(orderedSet.begin(), orderedSet.end());
+            if (orderedSet != unit.key.memberEntityIds
+                || std::adjacent_find(orderedSet.begin(), orderedSet.end()) != orderedSet.end())
+            {
+                return false;
+            }
+            expectedAssignmentCount += unit.orderedMemberEntityIds.size();
+        }
+
+        if (expectedAssignmentCount != plan.assignments.size()) return false;
+
+        std::vector<std::vector<geometry::EntityId>> assignedByUnit(plan.processUnits.size());
+        std::vector<int> lastAssignmentByUnit(plan.processUnits.size(), -1);
+        std::set<geometry::EntityId> assignedIds;
+        for (std::size_t index = 0; index < plan.assignments.size(); ++index)
+        {
+            const ProcessAssignment& assignment = plan.assignments[index];
+            if (assignment.entityId == 0U
+                || assignment.processOrder != static_cast<int>(index)
+                || assignment.processUnitIndex < 0
+                || static_cast<std::size_t>(assignment.processUnitIndex) >= plan.processUnits.size()
+                || !assignedIds.insert(assignment.entityId).second)
+            {
+                return false;
+            }
+
+            const std::size_t unitIndex = static_cast<std::size_t>(assignment.processUnitIndex);
+            if (lastAssignmentByUnit[unitIndex] >= 0
+                && lastAssignmentByUnit[unitIndex] + 1 != static_cast<int>(index))
+            {
+                return false;
+            }
+            lastAssignmentByUnit[unitIndex] = static_cast<int>(index);
+            assignedByUnit[unitIndex].push_back(assignment.entityId);
+        }
+
+        for (std::size_t index = 0; index < plan.processUnits.size(); ++index)
+        {
+            if (assignedByUnit[index] != plan.processUnits[index].orderedMemberEntityIds) return false;
+        }
+        return true;
+    }
 
     struct ProcessPlanningInput
     {

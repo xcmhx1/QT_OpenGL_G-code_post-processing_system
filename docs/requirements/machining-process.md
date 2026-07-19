@@ -111,7 +111,7 @@
 
 ### PROCESS-018 唯一加工单元序列
 
-当前文档只存在一条 `ProcessUnitSequence`。顺序属于加工单元序列，不属于单个图元；`ProcessOverride::manualProcessOrder` 属于待移除的旧模型。
+当前文档只存在一条 `ProcessUnitSequence`。顺序属于加工单元序列，不属于单个图元。
 
 ### PROCESS-019 连续编号
 

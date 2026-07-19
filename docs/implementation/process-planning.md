@@ -24,7 +24,7 @@
 ## 主要数据类型
 
 - `ProcessPlanningPolicy`：四轴连接容差、起始位置、方向许可、闭环原子组和排序策略。
-- `PlanarProcessPlanningPolicy`：三轴起始位置、连接误差和方向处理选项。
+- `PlanarProcessPlanningPolicy`：三轴起始位置、连接容差、数值误差和方向处理选项。
 - `PlanningEntity`：核心规划使用的图元路径、状态、断面角色和来源属性。
 - `ProcessGroup`：单图元、连接链、闭环、Break 断面或 Waste 断面组成的加工组。
 - `ProcessAssignment`：逐图元执行顺序、所属加工单元索引、连续组、方向和起点，继续供轨迹与 NC 使用。
@@ -64,8 +64,10 @@
 CadDocument + DocumentProcessState
 → DocumentProcessPlanningAdapter::capturePlanar
 → GeometryCompiler
+→ PathTopology 连通分量
 → PlanarProcessPlanBuilder
-→ 单图元 ProcessGroup 转换为 ProcessUnit
+→ 连续端点遍历
+→ SingleEntity / ConnectedChain / ClosedLoop ProcessUnit
 → Planar3Axis ProcessPlan
 ```
 
@@ -127,13 +129,16 @@ Application 的 `DocumentProcessState` 持有当前 `ProcessUnitSequence`。Core
 - 有效内部线按手动覆盖优先、自动分析兜底解析，规划器只接收解析后的最终布尔值。
 - Waste 断面本身及其定义的废弃区间不进入加工分配。
 - Break 断面形成独立加工组和前后工艺约束。
-- 严格闭环和需要连续加工的连通分量可形成原子连续组，组内不得被其他图元插入。
+- 三轴对拓扑连通分量执行端点连续遍历：独立图元形成单图元单元，完整开放链形成 `ConnectedChain`，严格闭环形成 `ClosedLoop`。
+- 三轴分量存在分支、路径中部相交或方向约束冲突，无法形成完整连续遍历时，不强制合并并沿用独立图元调度。
+- 严格闭环和可完整遍历的连续链形成原子加工单元，组内 assignment 在最终执行序列中连续，不被其他单元插入。
 - 三轴当前使用最近距离计划，方向偏好会约束正向或反向候选。
 - 四轴可按配置选择最近距离或懒旋转策略；懒旋转在后续选择中考虑 A 轴旋转代价。
 - 四轴第一次组选择仍使用最近距离，再对后续组应用配置的排序策略。
-- 每个参与加工的 `ProcessGroup` 转换为一个 `ProcessUnit`，Waste 排除组不进入加工单元序列。
+- 三轴由拓扑分量和连续遍历直接形成 `ProcessUnit`，四轴由现有 `ProcessGroup` 和 directed traversal 形成 `ProcessUnit`；Waste 排除组不进入加工单元序列。
 - `ProcessUnitKey` 使用组内全部稳定 `EntityId` 的升序集合，`orderedMemberEntityIds` 使用最终实际加工遍历顺序。
 - 每个逐图元 assignment 通过 `processUnitIndex` 关联唯一加工单元，并继续按执行顺序保持连续且唯一。
+- 三轴和四轴共用加工单元完整性校验：键必须规范，成员集合和执行顺序必须一致，每个 assignment 只属于一个单元，单元在执行序列中必须连续，单元序列与计划单元必须一一对应。
 - 展示快照复制计划中的顺序、方向、起点、连续组和排除原因。
 - 三轴和四轴本阶段保持原排序算法，只将已有分组结果转换为加工单元和唯一序列。
 - 单元加工编号只由 `ProcessUnitSequence` 的位置 `+1` 产生，不存入成员图元。
@@ -153,7 +158,7 @@ Application 的 `DocumentProcessState` 持有当前 `ProcessUnitSequence`。Core
 | 事项 | 当前生产实现 | 需求或概要设计要求 | 影响 |
 |---|---|---|---|
 | 普通与智能排序 | 两种 UI 入口最终调用相同的三轴或四轴计划函数 | 普通排序尽量保留当前单元序列、人工方向和起点；智能排序替换当前单元序列 | 当前两种入口只有命令名称差异 |
-| 加工单元集合 | 三轴和四轴均从现有 `ProcessGroup` 生成 `ProcessUnit` | 两种排序统一使用加工单元语义 | 已建立统一核心模型；三轴现有分组仍为单图元组 |
+| 加工单元集合 | 三轴从 `PathTopology` 连通分量形成连续链、严格闭环或独立图元单元；四轴从现有加工组形成单元 | 两种模式统一使用加工单元语义 | 已建立统一核心模型；复杂分支分量保持独立图元调度 |
 | 当前顺序 | `DocumentProcessState` 保存唯一 `ProcessUnitSequence` | Application 保存唯一加工单元序列 | 状态基础已实现，人工编辑入口尚未实现 |
 | 人工方向 | 普通和智能入口都把现有方向偏好送入规划器 | 智能排序应忽略人工方向 | 智能排序当前仍受人工方向约束 |
 | 智能排序替换 | 智能结果更新唯一 `ProcessUnitSequence` | 智能结果直接替换当前序列 | 状态替换已实现，智能算法本身仍与普通入口相同 |

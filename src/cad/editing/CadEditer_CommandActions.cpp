@@ -175,10 +175,12 @@ public:
     ReplaceEntitiesCommand
     (
         CadDocument* document,
+        cadcam::process::DocumentProcessState* processState,
         const QVector<CadItem*>& sourceItems,
         std::vector<std::unique_ptr<DRW_Entity>> replacementEntities
     )
         : m_document(document)
+        , m_processState(processState)
         , m_replacementEntities(std::move(replacementEntities))
         , m_replacementItems(m_replacementEntities.size())
         , m_replacementItemPtrs(m_replacementEntities.size(), nullptr)
@@ -193,8 +195,17 @@ public:
             }
 
             deduplicated.insert(item);
-            m_sourceStates.push_back({ item, {}, {} });
+            SourceState state;
+            state.itemPtr = item;
+            if (m_processState != nullptr)
+            {
+                if (const auto* saved = m_processState->find(item->m_entityId))
+                    state.processState = *saved;
+            }
+            m_sourceStates.push_back(std::move(state));
         }
+        if (m_processState != nullptr)
+            m_beforeSequence = m_processState->processUnitSequence();
     }
 
     bool execute() override
@@ -248,6 +259,18 @@ public:
             }
         }
 
+        if (m_processState != nullptr)
+        {
+            m_processState->beginBatch();
+            for (const SourceState& state : m_sourceStates)
+                m_processState->erase(state.itemPtr->m_entityId);
+            if (m_afterSequence.has_value())
+                m_processState->setProcessUnitSequence(m_afterSequence->units);
+            m_processState->endBatch();
+            if (!m_afterSequence.has_value())
+                m_afterSequence = m_processState->processUnitSequence();
+        }
+
         return true;
     }
 
@@ -292,6 +315,23 @@ public:
             }
         }
 
+        if (m_processState != nullptr)
+        {
+            m_processState->beginBatch();
+            for (CadItem* item : m_replacementItemPtrs)
+            {
+                if (item != nullptr) m_processState->erase(item->m_entityId);
+            }
+            for (const SourceState& state : m_sourceStates)
+            {
+                if (state.processState.has_value())
+                    m_processState->setState(state.itemPtr->m_entityId, *state.processState);
+            }
+            if (m_beforeSequence.has_value())
+                m_processState->setProcessUnitSequence(m_beforeSequence->units);
+            m_processState->endBatch();
+        }
+
         return true;
     }
 
@@ -301,13 +341,17 @@ private:
         CadItem* itemPtr = nullptr;
         std::unique_ptr<DRW_Entity> entity;
         std::unique_ptr<CadItem> item;
+        std::optional<cadcam::process::EntityProcessState> processState;
     };
 
     CadDocument* m_document = nullptr;
+    cadcam::process::DocumentProcessState* m_processState = nullptr;
     std::vector<SourceState> m_sourceStates;
     std::vector<std::unique_ptr<DRW_Entity>> m_replacementEntities;
     std::vector<std::unique_ptr<CadItem>> m_replacementItems;
     std::vector<CadItem*> m_replacementItemPtrs;
+    std::optional<cadcam::planning::ProcessUnitSequence> m_beforeSequence;
+    std::optional<cadcam::planning::ProcessUnitSequence> m_afterSequence;
 };
 
 // 删除实体命令：
@@ -321,6 +365,8 @@ public:
         , m_processState(processState)
         , m_itemPtr(item)
     {
+        if (m_processState != nullptr)
+            m_beforeSequence = m_processState->processUnitSequence();
     }
 
     bool execute() override
@@ -346,7 +392,16 @@ public:
         m_entity = std::move(entity);
         m_item = std::move(item);
         m_itemPtr = m_item.get();
-        if (m_processState != nullptr) m_processState->erase(entityId);
+        if (m_processState != nullptr)
+        {
+            m_processState->beginBatch();
+            m_processState->erase(entityId);
+            if (m_afterSequence.has_value())
+                m_processState->setProcessUnitSequence(m_afterSequence->units);
+            m_processState->endBatch();
+            if (!m_afterSequence.has_value())
+                m_afterSequence = m_processState->processUnitSequence();
+        }
         return true;
     }
 
@@ -360,8 +415,15 @@ public:
         m_itemPtr = m_item.get();
         CadItem* restored = m_document->appendEntity(std::move(m_entity), std::move(m_item));
         if (restored == nullptr) return false;
-        if (m_processState != nullptr && m_savedState.has_value())
-            m_processState->setState(restored->m_entityId, *m_savedState);
+        if (m_processState != nullptr)
+        {
+            m_processState->beginBatch();
+            if (m_savedState.has_value())
+                m_processState->setState(restored->m_entityId, *m_savedState);
+            if (m_beforeSequence.has_value())
+                m_processState->setProcessUnitSequence(m_beforeSequence->units);
+            m_processState->endBatch();
+        }
         return true;
     }
 
@@ -379,6 +441,8 @@ private:
     CadItem* m_itemPtr = nullptr;
     cadcam::process::DocumentProcessState* m_processState = nullptr;
     std::optional<cadcam::process::EntityProcessState> m_savedState;
+    std::optional<cadcam::planning::ProcessUnitSequence> m_beforeSequence;
+    std::optional<cadcam::planning::ProcessUnitSequence> m_afterSequence;
 };
 
 class DeleteEntitiesCommand final : public CadEditer::EditCommand
@@ -389,6 +453,8 @@ public:
         : m_document(document)
         , m_processState(processState)
     {
+        if (m_processState != nullptr)
+            m_beforeSequence = m_processState->processUnitSequence();
         QSet<CadItem*> deduplicated;
 
         for (CadItem* item : items)
@@ -439,7 +505,11 @@ public:
             state.itemPtr = state.item.get();
             if (m_processState != nullptr) m_processState->erase(state.itemPtr->m_entityId);
         }
+        if (m_processState != nullptr && m_afterSequence.has_value())
+            m_processState->setProcessUnitSequence(m_afterSequence->units);
         if (m_processState != nullptr) m_processState->endBatch();
+        if (m_processState != nullptr && !m_afterSequence.has_value())
+            m_afterSequence = m_processState->processUnitSequence();
         return true;
     }
 
@@ -471,6 +541,8 @@ public:
             if (m_processState != nullptr && state.processState.has_value())
                 m_processState->setState(restored->m_entityId, *state.processState);
         }
+        if (m_processState != nullptr && m_beforeSequence.has_value())
+            m_processState->setProcessUnitSequence(m_beforeSequence->units);
         if (m_processState != nullptr) m_processState->endBatch();
         return true;
     }
@@ -487,6 +559,8 @@ private:
     CadDocument* m_document = nullptr;
     cadcam::process::DocumentProcessState* m_processState = nullptr;
     std::vector<ItemState> m_states;
+    std::optional<cadcam::planning::ProcessUnitSequence> m_beforeSequence;
+    std::optional<cadcam::planning::ProcessUnitSequence> m_afterSequence;
 };
 
 // 移动实体命令：
@@ -1491,7 +1565,8 @@ bool CadEditer::mirrorEntities
 
     if (eraseSource)
     {
-        return executeCommand(std::make_unique<ReplaceEntitiesCommand>(m_document, validItems, std::move(mirroredEntities)));
+        return executeCommand(std::make_unique<ReplaceEntitiesCommand>
+            (m_document, m_processState, validItems, std::move(mirroredEntities)));
     }
 
     return executeCommand(std::make_unique<AddEntitiesCommand>(m_document, std::move(mirroredEntities)));
@@ -1598,7 +1673,8 @@ bool CadEditer::trimEntity(CadItem* boundaryItem, CadItem* targetItem, bool trim
 
     std::vector<std::unique_ptr<DRW_Entity>> replacements;
     replacements.push_back(std::move(trimmed));
-    return executeCommand(std::make_unique<ReplaceEntitiesCommand>(m_document, QVector<CadItem*>{ targetItem }, std::move(replacements)));
+    return executeCommand(std::make_unique<ReplaceEntitiesCommand>
+        (m_document, m_processState, QVector<CadItem*>{ targetItem }, std::move(replacements)));
 }
 
 bool CadEditer::extendEntity(CadItem* boundaryItem, CadItem* targetItem, bool extendStart)
@@ -1622,7 +1698,8 @@ bool CadEditer::extendEntity(CadItem* boundaryItem, CadItem* targetItem, bool ex
 
     std::vector<std::unique_ptr<DRW_Entity>> replacements;
     replacements.push_back(std::move(extended));
-    return executeCommand(std::make_unique<ReplaceEntitiesCommand>(m_document, QVector<CadItem*>{ targetItem }, std::move(replacements)));
+    return executeCommand(std::make_unique<ReplaceEntitiesCommand>
+        (m_document, m_processState, QVector<CadItem*>{ targetItem }, std::move(replacements)));
 }
 
 bool CadEditer::joinEntities(const QVector<CadItem*>& items)
@@ -1660,7 +1737,8 @@ bool CadEditer::joinEntities(const QVector<CadItem*>& items)
 
     std::vector<std::unique_ptr<DRW_Entity>> replacements;
     replacements.push_back(std::move(joinedEntity));
-    return executeCommand(std::make_unique<ReplaceEntitiesCommand>(m_document, validItems, std::move(replacements)));
+    return executeCommand(std::make_unique<ReplaceEntitiesCommand>
+        (m_document, m_processState, validItems, std::move(replacements)));
 }
 
 bool CadEditer::filletEntities(CadItem* firstItem, CadItem* secondItem, double radius)
@@ -1684,7 +1762,8 @@ bool CadEditer::filletEntities(CadItem* firstItem, CadItem* secondItem, double r
 
     return executeCommand
     (
-        std::make_unique<ReplaceEntitiesCommand>(m_document, QVector<CadItem*>{ firstItem, secondItem }, std::move(replacements))
+        std::make_unique<ReplaceEntitiesCommand>
+        (m_document, m_processState, QVector<CadItem*>{ firstItem, secondItem }, std::move(replacements))
     );
 }
 
@@ -1709,7 +1788,8 @@ bool CadEditer::chamferEntities(CadItem* firstItem, CadItem* secondItem, double 
 
     return executeCommand
     (
-        std::make_unique<ReplaceEntitiesCommand>(m_document, QVector<CadItem*>{ firstItem, secondItem }, std::move(replacements))
+        std::make_unique<ReplaceEntitiesCommand>
+        (m_document, m_processState, QVector<CadItem*>{ firstItem, secondItem }, std::move(replacements))
     );
 }
 
