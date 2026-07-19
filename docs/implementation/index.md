@@ -7,6 +7,7 @@
 
 - [加工上下文](./process-context.md)：用户输入、自动分析状态、方管截面和派生结果的当前存储方式。
 - [加工规划](./process-planning.md)：三轴与四轴加工计划的生产入口、规划输入和展示结果。
+- [Viewer 展示与加工单元交互](./viewer-presentation.md)：加工单元编号、选择映射和块内提首的当前实现与目标设计。
 - [四轴机床轨迹](./rotary-trajectory.md)：四轴计划到 XYZ/A 轨迹的转换及截面增强行为。
 - [NC 与 G-code](./nc-and-gcode.md)：三轴和四轴加工结果到 NC 语义、文本及文件的生产链。
 
