@@ -36,6 +36,7 @@
 | `pathCleanupMs` | 适配阶段复制、去重、闭合处理及记录构造的累计耗时 |
 | `coreTopologyBuildMs` | `PathTopologyBuilder::build()` 的总耗时 |
 | `connectivityScanMs` | Core 遍历记录对并建立邻接关系的耗时 |
+| `recordBoundsBuildMs` | Core 在局部投影坐标中一次性构建全部记录级 AABB 的耗时 |
 | `recordMappingMs` | Core 记录映射为 `RotaryPathTopologyRecord` 的耗时 |
 | `pathRebuildMs` | 实际调用 `rebuildRawPathPoints3D()` 的累计耗时 |
 | `pointClassificationMs` | 批量调用 `classifyPointRelativeToBoundary()` 的累计耗时 |
@@ -44,7 +45,7 @@
 | `settingsSyncMs` | 加工设置面板状态同步耗时 |
 
 `endpointCompileMs` 和 `pathCleanupMs` 是 `topologyAdapterMs` 的子阶段；
-`connectivityScanMs` 是 `coreTopologyBuildMs` 的子阶段；适配、Core 构建和记录映射共同位于 `topologyBuildMs` 内。
+`connectivityScanMs` 和 `recordBoundsBuildMs` 是 `coreTopologyBuildMs` 的子阶段；适配、Core 构建和记录映射共同位于 `topologyBuildMs` 内。
 嵌套阶段不能与父阶段直接相加，也不应直接相加后与 `totalMs` 比较。
 
 ## 4. 数据规模与调用次数
@@ -61,6 +62,8 @@
 | `totalPathPointCount` | 全部拓扑记录包含的路径点总数 |
 | `totalSegmentCount` | 全部拓扑记录包含的相邻点线段总数 |
 | `recordPairCount` | Core 连接扫描实际检查的记录对数量 |
+| `recordPairBroadPhaseRejectedCount` | 记录级 AABB 明确分离并直接排除的记录对数量 |
+| `recordPairPreciseTestCount` | 通过记录级 AABB 粗筛并进入原精确连接判断的记录对数量 |
 | `endpointToPathTestCount` | 记录对扫描中实际执行的端点到路径检测次数 |
 | `segmentPairTestCount` | 端点检测未提前命中后实际执行的线段对精确距离检测次数 |
 | `connectedRecordPairCount` | 判定为直接连接的记录对数量 |
@@ -75,13 +78,19 @@
 正常情况下 `topologyBuildCount` 为 `1`，`rebuiltPathCount` 接近本次过滤后的场景图元数；
 废面刷新直接复用拓扑记录中的路径点，并计入 `reusedPathCount`。
 若 `classificationCallCount` 随断面数和采样点数成倍增长，应结合 `pointClassificationMs` 判断点分类是否为主要热点。
+每个记录对只能进入粗筛拒绝或精确检测其中一个分支，因此始终满足：
+
+```text
+recordPairCount
+= recordPairBroadPhaseRejectedCount + recordPairPreciseTestCount
+```
 
 ## 5. 日志格式
 
 日志使用单行固定字段，例如：
 
 ```text
-[Performance][BoundaryAssignment] operation=AssignRotaryEndCut totalMs=... selectionExpansionMs=... boundaryAnalysisMs=... boundaryOrderingMs=... wasteRefreshMs=... topologyBuildMs=... topologyAdapterMs=... endpointCompileMs=... pathCleanupMs=... coreTopologyBuildMs=... connectivityScanMs=... recordMappingMs=... pathRebuildMs=... pointClassificationMs=... processStateUpdateMs=... viewerRefreshMs=... settingsSyncMs=... documentEntityCount=100 selectedEntityCount=1 boundaryGroupCount=4 analyzedBoundaryCount=5 topologyBuildCount=1 topologyReuseCount=7 topologyRecordCount=100 totalPathPointCount=... totalSegmentCount=... recordPairCount=4950 endpointToPathTestCount=... segmentPairTestCount=... connectedRecordPairCount=... adjacencyEdgeCount=... rebuiltPathCount=100 reusedPathCount=... classifiedEntityCount=... classificationCallCount=... samplePointCount=...
+[Performance][BoundaryAssignment] operation=AssignRotaryEndCut totalMs=... selectionExpansionMs=... boundaryAnalysisMs=... boundaryOrderingMs=... wasteRefreshMs=... topologyBuildMs=... topologyAdapterMs=... endpointCompileMs=... pathCleanupMs=... coreTopologyBuildMs=... connectivityScanMs=... recordBoundsBuildMs=... recordMappingMs=... pathRebuildMs=... pointClassificationMs=... processStateUpdateMs=... viewerRefreshMs=... settingsSyncMs=... documentEntityCount=100 selectedEntityCount=1 boundaryGroupCount=4 analyzedBoundaryCount=5 topologyBuildCount=1 topologyReuseCount=7 topologyRecordCount=100 totalPathPointCount=... totalSegmentCount=... recordPairCount=4950 recordPairBroadPhaseRejectedCount=... recordPairPreciseTestCount=... endpointToPathTestCount=... segmentPairTestCount=... connectedRecordPairCount=... adjacencyEdgeCount=... rebuiltPathCount=100 reusedPathCount=... classifiedEntityCount=... classificationCallCount=... samplePointCount=...
 ```
 
 示例数值只用于说明字段格式，实际热点必须以目标 DXF 在 Release 构建中的输出为准。
@@ -95,7 +104,20 @@ Core 只在完整连接扫描阶段外层计时，记录对、端点到路径和
 统计对象仅由 Compatibility、Core 和 Application 同步填写，不参与连接判断、闭环选择或错误处理。
 对于 100 条有效拓扑记录，完整两两扫描的 `recordPairCount` 应为 4950；其他检测次数受现有提前退出规则影响。
 
-## 7. 操作级拓扑快照
+## 7. 记录级 AABB 粗筛
+
+记录包围盒使用连接扫描的局部记录构建。处理顺序为：稳定局部坐标转换、现有平面拟合、
+`projectToTopologyPlane()` 投影，再遍历每条记录的全部路径点生成三维 AABB。每条记录只构建一次，
+记录对循环直接复用结果。
+
+每个 AABB 的 X、Y、Z 范围分别向外扩张
+`max(nodeSnap, intersection)`。两个扩张包围盒仅在任一轴严格分离时拒绝；边界接触仍进入原有端点和线段精确检测。
+投影不会放大点间距离，且包围盒额外扩张，因此粗筛只排除明确不可能连接的记录对。
+包围盒无效或包含非有限投影坐标时保守进入精确检测，不以粗筛替代现有错误处理。
+
+本阶段只增加记录级粗筛。原端点检测顺序、线段距离计算、提前退出、连接容差、Marker、邻接和闭环算法均保持不变。
+
+## 8. 操作级拓扑快照
 
 操作入口按当前内部线和加工断面状态过滤一次场景图元，随后完成一次兼容适配和一次
 `RotaryPathTopology` 构建。快照只保存本次操作的文档内容版本、连接容差、过滤后图元集合和拓扑对象。
@@ -106,7 +128,8 @@ Core 只在完整连接扫描阶段外层计时，记录对、端点到路径和
 快照不写入 `CadDocument` 或主窗口状态，不跨用户操作和文档内容版本复用，也不保存加工断面角色或 Waste 结果。
 加工状态可以在同一操作中更新，但几何内容版本变化后必须重新构建快照。
 
-## 8. 当前边界
+## 9. 当前边界
 
 当前只复用单次加工断面操作内的拓扑，不提供跨操作缓存、增量断面更新或异步计算，也未调整采样和点分类算法。
-本次内部测量未增加粗筛、缓存或高频计时器。后续优化仍应以目标文件的完整汇总日志为依据。
+当前粗筛仅使用记录级 AABB，不包含线段级索引、Sweep-and-Prune、网格、BVH 或 R-tree，也未增加高频计时器。
+后续优化仍应以目标文件的完整汇总日志为依据。

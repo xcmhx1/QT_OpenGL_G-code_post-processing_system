@@ -128,6 +128,13 @@ namespace
         double maximumDeviation = 0.0;
     };
 
+    struct TopologyPathBounds
+    {
+        Vector3d minimum;
+        Vector3d maximum;
+        bool valid = false;
+    };
+
     struct GraphData
     {
         std::vector<Marker> markers;
@@ -325,6 +332,21 @@ namespace
         const Vector3d relative = subtract(point, fit.origin);
         const double factor = dot(relative, fit.normal) / dot(fit.normal, fit.normal);
         return subtract(point, multiply(fit.normal, factor));
+    }
+
+    bool topologyPathBoundsOverlap
+    (
+        const TopologyPathBounds& left,
+        const TopologyPathBounds& right
+    )
+    {
+        if (!left.valid || !right.valid)
+        {
+            return true;
+        }
+        return !(left.maximum.x < right.minimum.x || right.maximum.x < left.minimum.x
+            || left.maximum.y < right.minimum.y || right.maximum.y < left.minimum.y
+            || left.maximum.z < right.minimum.z || right.maximum.z < left.minimum.z);
     }
 
     double pointSegmentDistance
@@ -2051,6 +2073,62 @@ OperationResult<PathTopology> PathTopologyBuilder::build
             point = topologyFrame.toLocal(point);
         }
     }
+    std::vector<TopologyPathBounds> recordBounds(localRecords.size());
+    {
+        ScopedDurationAccumulator boundsTimer
+            (metrics != nullptr ? &metrics->recordBoundsBuildMs : nullptr);
+        std::vector<int> recordIndices;
+        recordIndices.reserve(localRecords.size());
+        for (std::size_t index = 0U; index < localRecords.size(); ++index)
+        {
+            recordIndices.push_back(static_cast<int>(index));
+        }
+        const TopologyPlaneFit planeFit = fitTopologyPlane
+        (
+            localRecords,
+            recordIndices,
+            std::max(0.05, tolerance.nodeSnap * 0.25)
+        );
+        const double broadPhasePadding =
+            std::max(tolerance.nodeSnap, tolerance.intersection);
+        for (std::size_t index = 0U; index < localRecords.size(); ++index)
+        {
+            TopologyPathBounds& bounds = recordBounds[index];
+            for (const Vector3d& point : localRecords[index].points)
+            {
+                const Vector3d projectedPoint = projectToTopologyPlane(point, planeFit);
+                if (!std::isfinite(projectedPoint.x)
+                    || !std::isfinite(projectedPoint.y)
+                    || !std::isfinite(projectedPoint.z))
+                {
+                    bounds.valid = false;
+                    break;
+                }
+                if (!bounds.valid)
+                {
+                    bounds.minimum = projectedPoint;
+                    bounds.maximum = projectedPoint;
+                    bounds.valid = true;
+                    continue;
+                }
+                bounds.minimum.x = std::min(bounds.minimum.x, projectedPoint.x);
+                bounds.minimum.y = std::min(bounds.minimum.y, projectedPoint.y);
+                bounds.minimum.z = std::min(bounds.minimum.z, projectedPoint.z);
+                bounds.maximum.x = std::max(bounds.maximum.x, projectedPoint.x);
+                bounds.maximum.y = std::max(bounds.maximum.y, projectedPoint.y);
+                bounds.maximum.z = std::max(bounds.maximum.z, projectedPoint.z);
+            }
+            if (bounds.valid)
+            {
+                bounds.minimum.x -= broadPhasePadding;
+                bounds.minimum.y -= broadPhasePadding;
+                bounds.minimum.z -= broadPhasePadding;
+                bounds.maximum.x += broadPhasePadding;
+                bounds.maximum.y += broadPhasePadding;
+                bounds.maximum.z += broadPhasePadding;
+            }
+        }
+    }
     {
         ScopedDurationAccumulator connectivityTimer
             (metrics != nullptr ? &metrics->connectivityScanMs : nullptr);
@@ -2074,6 +2152,15 @@ OperationResult<PathTopology> PathTopologyBuilder::build
             for (std::size_t right = left + 1U; right < topology.m_records.size(); ++right)
             {
                 if (metrics != nullptr) ++metrics->recordPairCount;
+                if (!topologyPathBoundsOverlap(recordBounds[left], recordBounds[right]))
+                {
+                    if (metrics != nullptr)
+                    {
+                        ++metrics->recordPairBroadPhaseRejectedCount;
+                    }
+                    continue;
+                }
+                if (metrics != nullptr) ++metrics->recordPairPreciseTestCount;
                 if (pathsConnected
                     (localRecords[left], localRecords[right], tolerance, metrics))
                 {

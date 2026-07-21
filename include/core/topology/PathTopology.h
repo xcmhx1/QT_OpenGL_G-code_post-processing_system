@@ -64,12 +64,15 @@ namespace cadcam::topology
         double pathCleanupMs = 0.0;
         double coreTopologyBuildMs = 0.0;
         double connectivityScanMs = 0.0;
+        double recordBoundsBuildMs = 0.0;
         double recordMappingMs = 0.0;
 
         std::uint64_t topologyRecordCount = 0U;
         std::uint64_t totalPathPointCount = 0U;
         std::uint64_t totalSegmentCount = 0U;
         std::uint64_t recordPairCount = 0U;
+        std::uint64_t recordPairBroadPhaseRejectedCount = 0U;
+        std::uint64_t recordPairPreciseTestCount = 0U;
         std::uint64_t endpointToPathTestCount = 0U;
         std::uint64_t segmentPairTestCount = 0U;
         std::uint64_t connectedRecordPairCount = 0U;

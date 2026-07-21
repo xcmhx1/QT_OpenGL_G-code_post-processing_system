@@ -109,15 +109,17 @@ namespace
                 "selectionExpansionMs=%3 boundaryAnalysisMs=%4 boundaryOrderingMs=%5 "
                 "wasteRefreshMs=%6 topologyBuildMs=%7 topologyAdapterMs=%8 "
                 "endpointCompileMs=%9 pathCleanupMs=%10 coreTopologyBuildMs=%11 "
-                "connectivityScanMs=%12 recordMappingMs=%13 pathRebuildMs=%14 "
-                "pointClassificationMs=%15 processStateUpdateMs=%16 viewerRefreshMs=%17 "
-                "settingsSyncMs=%18 documentEntityCount=%19 selectedEntityCount=%20 "
-                "boundaryGroupCount=%21 analyzedBoundaryCount=%22 topologyBuildCount=%23 "
-                "topologyReuseCount=%24 topologyRecordCount=%25 totalPathPointCount=%26 "
-                "totalSegmentCount=%27 recordPairCount=%28 endpointToPathTestCount=%29 "
-                "segmentPairTestCount=%30 connectedRecordPairCount=%31 adjacencyEdgeCount=%32 "
-                "rebuiltPathCount=%33 reusedPathCount=%34 classifiedEntityCount=%35 "
-                "classificationCallCount=%36 samplePointCount=%37"
+                "connectivityScanMs=%12 recordBoundsBuildMs=%13 recordMappingMs=%14 "
+                "pathRebuildMs=%15 pointClassificationMs=%16 processStateUpdateMs=%17 "
+                "viewerRefreshMs=%18 settingsSyncMs=%19 documentEntityCount=%20 "
+                "selectedEntityCount=%21 boundaryGroupCount=%22 analyzedBoundaryCount=%23 "
+                "topologyBuildCount=%24 topologyReuseCount=%25 topologyRecordCount=%26 "
+                "totalPathPointCount=%27 totalSegmentCount=%28 recordPairCount=%29 "
+                "recordPairBroadPhaseRejectedCount=%30 recordPairPreciseTestCount=%31 "
+                "endpointToPathTestCount=%32 segmentPairTestCount=%33 "
+                "connectedRecordPairCount=%34 adjacencyEdgeCount=%35 rebuiltPathCount=%36 "
+                "reusedPathCount=%37 classifiedEntityCount=%38 classificationCallCount=%39 "
+                "samplePointCount=%40"
             )
                 .arg(report.operation)
                 .arg(report.totalMs, 0, 'f', 3)
@@ -131,6 +133,7 @@ namespace
                 .arg(report.topologyMetrics.pathCleanupMs, 0, 'f', 3)
                 .arg(report.topologyMetrics.coreTopologyBuildMs, 0, 'f', 3)
                 .arg(report.topologyMetrics.connectivityScanMs, 0, 'f', 3)
+                .arg(report.topologyMetrics.recordBoundsBuildMs, 0, 'f', 3)
                 .arg(report.topologyMetrics.recordMappingMs, 0, 'f', 3)
                 .arg(report.pathRebuildMs, 0, 'f', 3)
                 .arg(report.pointClassificationMs, 0, 'f', 3)
@@ -147,6 +150,10 @@ namespace
                 .arg(static_cast<qulonglong>(report.topologyMetrics.totalPathPointCount))
                 .arg(static_cast<qulonglong>(report.topologyMetrics.totalSegmentCount))
                 .arg(static_cast<qulonglong>(report.topologyMetrics.recordPairCount))
+                .arg(static_cast<qulonglong>
+                    (report.topologyMetrics.recordPairBroadPhaseRejectedCount))
+                .arg(static_cast<qulonglong>
+                    (report.topologyMetrics.recordPairPreciseTestCount))
                 .arg(static_cast<qulonglong>(report.topologyMetrics.endpointToPathTestCount))
                 .arg(static_cast<qulonglong>(report.topologyMetrics.segmentPairTestCount))
                 .arg(static_cast<qulonglong>(report.topologyMetrics.connectedRecordPairCount))
