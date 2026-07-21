@@ -15,8 +15,32 @@ namespace
     using cadcam::geometry::SourceGeometryKind;
     using cadcam::geometry::Vector3d;
     using cadcam::topology::PathTopologyTolerance;
+    using cadcam::topology::PathTopologyBuildMetrics;
     using cadcam::topology::TopologyInput;
     using cadcam::topology::TopologyPathRecord;
+
+    class ScopedElapsedAccumulator
+    {
+    public:
+        explicit ScopedElapsedAccumulator(double* accumulator)
+            : m_accumulator(accumulator)
+        {
+            if (m_accumulator != nullptr) m_timer.start();
+        }
+
+        ~ScopedElapsedAccumulator()
+        {
+            if (m_accumulator != nullptr)
+            {
+                *m_accumulator +=
+                    static_cast<double>(m_timer.nsecsElapsed()) / 1000000.0;
+            }
+        }
+
+    private:
+        double* m_accumulator = nullptr;
+        QElapsedTimer m_timer;
+    };
 
     Diagnostic adapterDiagnostic
     (
@@ -118,9 +142,12 @@ LegacyCadItemTopologyAdapter::convert
     const QVector<CadItem*>& items,
     const cadcam::topology::PathTopologyTolerance& tolerance,
     const OperationContext& context,
-    const std::function<void(double)>& pathRebuildObserver
+    const std::function<void(double)>& pathRebuildObserver,
+    PathTopologyBuildMetrics* metrics
 ) const
 {
+    ScopedElapsedAccumulator adapterTimer
+        (metrics != nullptr ? &metrics->topologyAdapterMs : nullptr);
     OperationResult<TopologyInput> result;
     TopologyInput input;
     input.contentRevision = 1U;
@@ -174,15 +201,21 @@ LegacyCadItemTopologyAdapter::convert
         cadcam::geometry::SamplingPolicy endpointPolicy =
             LegacyCadItemPathBridge::legacySamplingPolicy(*item);
         const cadcam::geometry::PathCompileOptions endpointOptions;
-        const OperationResult<cadcam::geometry::Path3D> endpointPathResult =
-            LegacyCadItemPathBridge::compile
+        OperationResult<cadcam::geometry::Path3D> endpointPathResult;
+        {
+            ScopedElapsedAccumulator endpointTimer
+                (metrics != nullptr ? &metrics->endpointCompileMs : nullptr);
+            endpointPathResult = LegacyCadItemPathBridge::compile
             (
                 *item,
                 endpointPolicy,
                 endpointOptions,
                 context
             );
+        }
 
+        ScopedElapsedAccumulator cleanupTimer
+            (metrics != nullptr ? &metrics->pathCleanupMs : nullptr);
         std::vector<Vector3d> cleanPath;
         cleanPath.reserve(rawPath.size() + 1U);
         for (std::size_t pointIndex = 0; pointIndex < rawPath.size(); ++pointIndex)
@@ -231,6 +264,13 @@ LegacyCadItemTopologyAdapter::convert
         }
         record.points = std::move(cleanPath);
         input.records.push_back(std::move(record));
+        if (metrics != nullptr)
+        {
+            const std::size_t pointCount = input.records.back().points.size();
+            ++metrics->topologyRecordCount;
+            metrics->totalPathPointCount += static_cast<std::uint64_t>(pointCount);
+            metrics->totalSegmentCount += static_cast<std::uint64_t>(pointCount - 1U);
+        }
     }
 
     if (!input.diagnostics.isEmpty())

@@ -16,6 +16,7 @@ public:
         const QVector<CadItem*>& items,
         const cadcam::topology::PathTopologyTolerance& tolerance,
         const OperationContext& context,
-        const std::function<void(double)>& pathRebuildObserver = {}
+        const std::function<void(double)>& pathRebuildObserver = {},
+        cadcam::topology::PathTopologyBuildMetrics* metrics = nullptr
     ) const;
 };

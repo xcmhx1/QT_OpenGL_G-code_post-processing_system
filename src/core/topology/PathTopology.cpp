@@ -4,6 +4,7 @@
 #include <QVariantList>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <functional>
 #include <limits>
@@ -21,6 +22,27 @@ namespace
     using geometry::EntityId;
     using geometry::LocalFrame3d;
     using geometry::Vector3d;
+
+    class ScopedDurationAccumulator
+    {
+    public:
+        explicit ScopedDurationAccumulator(double* accumulator)
+            : m_accumulator(accumulator), m_started(std::chrono::steady_clock::now())
+        {
+        }
+
+        ~ScopedDurationAccumulator()
+        {
+            if (m_accumulator == nullptr) return;
+            const auto elapsed = std::chrono::steady_clock::now() - m_started;
+            *m_accumulator +=
+                std::chrono::duration<double, std::milli>(elapsed).count();
+        }
+
+    private:
+        double* m_accumulator = nullptr;
+        std::chrono::steady_clock::time_point m_started;
+    };
 
     class CompensatedSum
     {
@@ -469,7 +491,8 @@ namespace
     (
         const TopologyPathRecord& left,
         const TopologyPathRecord& right,
-        const PathTopologyTolerance& tolerance
+        const PathTopologyTolerance& tolerance,
+        PathTopologyBuildMetrics* metrics
     )
     {
         if (left.points.size() < 2U || right.points.size() < 2U)
@@ -478,6 +501,7 @@ namespace
         }
         for (const Vector3d* endpoint : { &left.points.front(), &left.points.back() })
         {
+            if (metrics != nullptr) ++metrics->endpointToPathTestCount;
             if (distancePointToPath(*endpoint, right.points) <= tolerance.nodeSnap)
             {
                 return true;
@@ -485,6 +509,7 @@ namespace
         }
         for (const Vector3d* endpoint : { &right.points.front(), &right.points.back() })
         {
+            if (metrics != nullptr) ++metrics->endpointToPathTestCount;
             if (distancePointToPath(*endpoint, left.points) <= tolerance.nodeSnap)
             {
                 return true;
@@ -494,6 +519,7 @@ namespace
         {
             for (std::size_t rightSegment = 0; rightSegment + 1U < right.points.size(); ++rightSegment)
             {
+                if (metrics != nullptr) ++metrics->segmentPairTestCount;
                 double leftParameter = 0.0;
                 double rightParameter = 0.0;
                 Vector3d leftPoint;
@@ -1937,9 +1963,12 @@ OperationResult<PathTopology> PathTopologyBuilder::build
 (
     const TopologyInput& input,
     const PathTopologyTolerance& tolerance,
-    const TaskContext& taskContext
+    const TaskContext& taskContext,
+    PathTopologyBuildMetrics* metrics
 ) const
 {
+    ScopedDurationAccumulator buildTimer
+        (metrics != nullptr ? &metrics->coreTopologyBuildMs : nullptr);
     OperationResult<PathTopology> result;
     const bool toleranceValid = input.contentRevision != 0U
         && std::isfinite(tolerance.nodeSnap) && tolerance.nodeSnap > 0.0
@@ -2022,32 +2051,43 @@ OperationResult<PathTopology> PathTopologyBuilder::build
             point = topologyFrame.toLocal(point);
         }
     }
-    taskContext.reportProgress(0U, topology.m_records.size());
-    for (std::size_t left = 0; left < topology.m_records.size(); ++left)
     {
-        if (taskContext.cancellationToken.isCancellationRequested())
+        ScopedDurationAccumulator connectivityTimer
+            (metrics != nullptr ? &metrics->connectivityScanMs : nullptr);
+        taskContext.reportProgress(0U, topology.m_records.size());
+        for (std::size_t left = 0; left < topology.m_records.size(); ++left)
         {
-            result.status = OperationStatus::Cancelled;
-            result.addDiagnostic(topologyDiagnostic
-            (
-                taskContext.operationContext,
-                DiagnosticCode::TopologyBuildFailure,
-                DiagnosticSeverity::Notice,
-                QStringLiteral("topology adjacency build cancelled"),
-                tolerance,
-                topology.m_records.size()
-            ));
-            return result;
-        }
-        for (std::size_t right = left + 1U; right < topology.m_records.size(); ++right)
-        {
-            if (pathsConnected(localRecords[left], localRecords[right], tolerance))
+            if (taskContext.cancellationToken.isCancellationRequested())
             {
-                topology.m_adjacency[left].push_back(static_cast<int>(right));
-                topology.m_adjacency[right].push_back(static_cast<int>(left));
+                result.status = OperationStatus::Cancelled;
+                result.addDiagnostic(topologyDiagnostic
+                (
+                    taskContext.operationContext,
+                    DiagnosticCode::TopologyBuildFailure,
+                    DiagnosticSeverity::Notice,
+                    QStringLiteral("topology adjacency build cancelled"),
+                    tolerance,
+                    topology.m_records.size()
+                ));
+                return result;
             }
+            for (std::size_t right = left + 1U; right < topology.m_records.size(); ++right)
+            {
+                if (metrics != nullptr) ++metrics->recordPairCount;
+                if (pathsConnected
+                    (localRecords[left], localRecords[right], tolerance, metrics))
+                {
+                    topology.m_adjacency[left].push_back(static_cast<int>(right));
+                    topology.m_adjacency[right].push_back(static_cast<int>(left));
+                    if (metrics != nullptr)
+                    {
+                        ++metrics->connectedRecordPairCount;
+                        ++metrics->adjacencyEdgeCount;
+                    }
+                }
+            }
+            taskContext.reportProgress(left + 1U, topology.m_records.size());
         }
-        taskContext.reportProgress(left + 1U, topology.m_records.size());
     }
 
     topology.m_statistics.recordCount = topology.m_records.size();

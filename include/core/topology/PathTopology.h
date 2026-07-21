@@ -57,6 +57,25 @@ namespace cadcam::topology
         int componentCount = 0;
     };
 
+    struct PathTopologyBuildMetrics
+    {
+        double topologyAdapterMs = 0.0;
+        double endpointCompileMs = 0.0;
+        double pathCleanupMs = 0.0;
+        double coreTopologyBuildMs = 0.0;
+        double connectivityScanMs = 0.0;
+        double recordMappingMs = 0.0;
+
+        std::uint64_t topologyRecordCount = 0U;
+        std::uint64_t totalPathPointCount = 0U;
+        std::uint64_t totalSegmentCount = 0U;
+        std::uint64_t recordPairCount = 0U;
+        std::uint64_t endpointToPathTestCount = 0U;
+        std::uint64_t segmentPairTestCount = 0U;
+        std::uint64_t connectedRecordPairCount = 0U;
+        std::uint64_t adjacencyEdgeCount = 0U;
+    };
+
     class PathTopology
     {
     public:
@@ -100,7 +119,8 @@ namespace cadcam::topology
         (
             const TopologyInput& input,
             const PathTopologyTolerance& tolerance,
-            const TaskContext& taskContext
+            const TaskContext& taskContext,
+            PathTopologyBuildMetrics* metrics = nullptr
         ) const;
     };
 }

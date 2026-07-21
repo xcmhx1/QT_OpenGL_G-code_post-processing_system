@@ -107,12 +107,17 @@ namespace
             (
                 "[Performance][BoundaryAssignment] operation=%1 totalMs=%2 "
                 "selectionExpansionMs=%3 boundaryAnalysisMs=%4 boundaryOrderingMs=%5 "
-                "wasteRefreshMs=%6 topologyBuildMs=%7 pathRebuildMs=%8 "
-                "pointClassificationMs=%9 processStateUpdateMs=%10 viewerRefreshMs=%11 "
-                "settingsSyncMs=%12 documentEntityCount=%13 selectedEntityCount=%14 "
-                "boundaryGroupCount=%15 analyzedBoundaryCount=%16 topologyBuildCount=%17 "
-                "topologyReuseCount=%18 rebuiltPathCount=%19 reusedPathCount=%20 "
-                "classifiedEntityCount=%21 classificationCallCount=%22 samplePointCount=%23"
+                "wasteRefreshMs=%6 topologyBuildMs=%7 topologyAdapterMs=%8 "
+                "endpointCompileMs=%9 pathCleanupMs=%10 coreTopologyBuildMs=%11 "
+                "connectivityScanMs=%12 recordMappingMs=%13 pathRebuildMs=%14 "
+                "pointClassificationMs=%15 processStateUpdateMs=%16 viewerRefreshMs=%17 "
+                "settingsSyncMs=%18 documentEntityCount=%19 selectedEntityCount=%20 "
+                "boundaryGroupCount=%21 analyzedBoundaryCount=%22 topologyBuildCount=%23 "
+                "topologyReuseCount=%24 topologyRecordCount=%25 totalPathPointCount=%26 "
+                "totalSegmentCount=%27 recordPairCount=%28 endpointToPathTestCount=%29 "
+                "segmentPairTestCount=%30 connectedRecordPairCount=%31 adjacencyEdgeCount=%32 "
+                "rebuiltPathCount=%33 reusedPathCount=%34 classifiedEntityCount=%35 "
+                "classificationCallCount=%36 samplePointCount=%37"
             )
                 .arg(report.operation)
                 .arg(report.totalMs, 0, 'f', 3)
@@ -121,6 +126,12 @@ namespace
                 .arg(report.boundaryOrderingMs, 0, 'f', 3)
                 .arg(report.wasteRefreshMs, 0, 'f', 3)
                 .arg(report.topologyBuildMs, 0, 'f', 3)
+                .arg(report.topologyMetrics.topologyAdapterMs, 0, 'f', 3)
+                .arg(report.topologyMetrics.endpointCompileMs, 0, 'f', 3)
+                .arg(report.topologyMetrics.pathCleanupMs, 0, 'f', 3)
+                .arg(report.topologyMetrics.coreTopologyBuildMs, 0, 'f', 3)
+                .arg(report.topologyMetrics.connectivityScanMs, 0, 'f', 3)
+                .arg(report.topologyMetrics.recordMappingMs, 0, 'f', 3)
                 .arg(report.pathRebuildMs, 0, 'f', 3)
                 .arg(report.pointClassificationMs, 0, 'f', 3)
                 .arg(report.processStateUpdateMs, 0, 'f', 3)
@@ -132,6 +143,14 @@ namespace
                 .arg(static_cast<qulonglong>(report.analyzedBoundaryCount))
                 .arg(static_cast<qulonglong>(report.topologyBuildCount))
                 .arg(static_cast<qulonglong>(report.topologyReuseCount))
+                .arg(static_cast<qulonglong>(report.topologyMetrics.topologyRecordCount))
+                .arg(static_cast<qulonglong>(report.topologyMetrics.totalPathPointCount))
+                .arg(static_cast<qulonglong>(report.topologyMetrics.totalSegmentCount))
+                .arg(static_cast<qulonglong>(report.topologyMetrics.recordPairCount))
+                .arg(static_cast<qulonglong>(report.topologyMetrics.endpointToPathTestCount))
+                .arg(static_cast<qulonglong>(report.topologyMetrics.segmentPairTestCount))
+                .arg(static_cast<qulonglong>(report.topologyMetrics.connectedRecordPairCount))
+                .arg(static_cast<qulonglong>(report.topologyMetrics.adjacencyEdgeCount))
                 .arg(static_cast<qulonglong>(report.rebuiltPathCount))
                 .arg(static_cast<qulonglong>(report.reusedPathCount))
                 .arg(static_cast<qulonglong>(report.classifiedEntityCount))
@@ -2518,7 +2537,9 @@ Gcode_postprocessing_system::buildRotaryBoundaryOperationGeometry
             geometry.sceneItems,
             RotaryPathTopologyTolerance::fromConnectionTolerance
                 (geometry.connectionTolerance),
-            pathRebuildObserver(m_boundaryAssignmentPerformanceReport)
+            pathRebuildObserver(m_boundaryAssignmentPerformanceReport),
+            m_boundaryAssignmentPerformanceReport != nullptr
+                ? &m_boundaryAssignmentPerformanceReport->topologyMetrics : nullptr
         );
     }
 

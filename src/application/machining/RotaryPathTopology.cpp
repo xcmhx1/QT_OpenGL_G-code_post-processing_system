@@ -5,6 +5,7 @@
 #include "cad/items/CadItem.h"
 #include "compatibility/legacy/LegacyCadItemTopologyAdapter.h"
 
+#include <QElapsedTimer>
 #include <QMap>
 #include <QStringList>
 
@@ -18,6 +19,29 @@ namespace
     using cadcam::geometry::Vector3d;
     using cadcam::topology::TopologyLoopResult;
     using cadcam::topology::TopologyPathRecord;
+
+    class ScopedElapsedAccumulator
+    {
+    public:
+        explicit ScopedElapsedAccumulator(double* accumulator)
+            : m_accumulator(accumulator)
+        {
+            if (m_accumulator != nullptr) m_timer.start();
+        }
+
+        ~ScopedElapsedAccumulator()
+        {
+            if (m_accumulator != nullptr)
+            {
+                *m_accumulator +=
+                    static_cast<double>(m_timer.nsecsElapsed()) / 1000000.0;
+            }
+        }
+
+    private:
+        double* m_accumulator = nullptr;
+        QElapsedTimer m_timer;
+    };
 
     QString entityTypeLabel(DRW::ETYPE type)
     {
@@ -90,22 +114,27 @@ RotaryPathTopology::RotaryPathTopology
 (
     const QVector<CadItem*>& items,
     const RotaryPathTopologyTolerance& tolerance,
-    const std::function<void(double)>& pathRebuildObserver
+    const std::function<void(double)>& pathRebuildObserver,
+    cadcam::topology::PathTopologyBuildMetrics* metrics
 )
     : m_context(createOperationContext(QStringLiteral("BuildRotaryPathTopology")))
 {
-    for (CadItem* item : items)
     {
-        if (item != nullptr && item->m_entityId != 0U)
+        ScopedElapsedAccumulator mappingTimer
+            (metrics != nullptr ? &metrics->recordMappingMs : nullptr);
+        for (CadItem* item : items)
         {
-            m_itemById.emplace(item->m_entityId, item);
-            m_idByItem.emplace(item, item->m_entityId);
+            if (item != nullptr && item->m_entityId != 0U)
+            {
+                m_itemById.emplace(item->m_entityId, item);
+                m_idByItem.emplace(item, item->m_entityId);
+            }
         }
     }
 
     LegacyCadItemTopologyAdapter adapter;
     OperationResult<cadcam::topology::TopologyInput> adapted =
-        adapter.convert(items, tolerance, m_context, pathRebuildObserver);
+        adapter.convert(items, tolerance, m_context, pathRebuildObserver, metrics);
     m_diagnostics += adapted.diagnostics;
     if (!adapted.succeeded() || !adapted.value.has_value())
     {
@@ -117,7 +146,7 @@ RotaryPathTopology::RotaryPathTopology
     taskContext.operationContext = m_context;
     cadcam::topology::PathTopologyBuilder builder;
     OperationResult<cadcam::topology::PathTopology> built =
-        builder.build(*adapted.value, tolerance, taskContext);
+        builder.build(*adapted.value, tolerance, taskContext, metrics);
     m_diagnostics += built.diagnostics;
     if (!built.succeeded() || !built.value.has_value())
     {
@@ -127,6 +156,8 @@ RotaryPathTopology::RotaryPathTopology
 
     m_topology = std::move(*built.value);
     m_status = built.status;
+    ScopedElapsedAccumulator mappingTimer
+        (metrics != nullptr ? &metrics->recordMappingMs : nullptr);
     m_records.reserve(static_cast<qsizetype>(m_topology->records().size()));
     for (const TopologyPathRecord& coreRecord : m_topology->records())
     {

@@ -59,6 +59,7 @@ struct BoundaryAssignmentPerformanceReport
     std::uint64_t classifiedEntityCount = 0U;
     std::uint64_t classificationCallCount = 0U;
     std::uint64_t samplePointCount = 0U;
+    cadcam::topology::PathTopologyBuildMetrics topologyMetrics;
 };
 
 class Gcode_postprocessing_system : public QMainWindow

@@ -47,7 +47,8 @@ public:
     (
         const QVector<CadItem*>& items,
         const RotaryPathTopologyTolerance& tolerance,
-        const std::function<void(double)>& pathRebuildObserver = {}
+        const std::function<void(double)>& pathRebuildObserver = {},
+        cadcam::topology::PathTopologyBuildMetrics* metrics = nullptr
     );
 
     const QVector<RotaryPathTopologyRecord>& records() const;
