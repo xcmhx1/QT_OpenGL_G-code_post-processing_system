@@ -13,6 +13,7 @@
 #include "application/planning/ProcessPlanningService.h"
 
 #include <QDebug>
+#include <QElapsedTimer>
 #include <QHash>
 #include <QMessageBox>
 #include <QSet>
@@ -50,6 +51,141 @@ namespace
     // The machine starts above the workpiece at this pose; use it to select the
     // left end-cut seam that requires the least initial A-axis rotation.
     const QVector3D kRotaryInitialSortOrigin(0.0f, 0.0f, 500.0f);
+
+    class BoundaryPerformanceTimer
+    {
+    public:
+        explicit BoundaryPerformanceTimer(double* accumulator)
+            : m_accumulator(accumulator)
+        {
+            if (m_accumulator != nullptr) m_timer.start();
+        }
+
+        ~BoundaryPerformanceTimer()
+        {
+            if (m_accumulator != nullptr)
+            {
+                *m_accumulator +=
+                    static_cast<double>(m_timer.nsecsElapsed()) / 1000000.0;
+            }
+        }
+
+    private:
+        double* m_accumulator = nullptr;
+        QElapsedTimer m_timer;
+    };
+
+    class BoundaryAssignmentPerformanceOperation
+    {
+    public:
+        BoundaryAssignmentPerformanceOperation
+        (
+            BoundaryAssignmentPerformanceReport*& activeReport,
+            const QString& operation,
+            std::uint64_t documentEntityCount,
+            std::uint64_t selectedEntityCount
+        )
+            : m_activeReport(activeReport)
+        {
+            if (m_activeReport != nullptr) return;
+            m_ownedReport.emplace();
+            m_ownedReport->operation = operation;
+            m_ownedReport->documentEntityCount = documentEntityCount;
+            m_ownedReport->selectedEntityCount = selectedEntityCount;
+            m_activeReport = &*m_ownedReport;
+            m_totalTimer.start();
+            m_owner = true;
+        }
+
+        ~BoundaryAssignmentPerformanceOperation()
+        {
+            if (!m_owner || !m_ownedReport.has_value()) return;
+            BoundaryAssignmentPerformanceReport& report = *m_ownedReport;
+            report.totalMs =
+                static_cast<double>(m_totalTimer.nsecsElapsed()) / 1000000.0;
+            qInfo().noquote() << QStringLiteral
+            (
+                "[Performance][BoundaryAssignment] operation=%1 totalMs=%2 "
+                "selectionExpansionMs=%3 boundaryAnalysisMs=%4 boundaryOrderingMs=%5 "
+                "wasteRefreshMs=%6 pathRebuildMs=%7 pointClassificationMs=%8 "
+                "processStateUpdateMs=%9 viewerRefreshMs=%10 settingsSyncMs=%11 "
+                "documentEntityCount=%12 selectedEntityCount=%13 boundaryGroupCount=%14 "
+                "analyzedBoundaryCount=%15 rebuiltPathCount=%16 reusedPathCount=%17 "
+                "classifiedEntityCount=%18 classificationCallCount=%19 samplePointCount=%20"
+            )
+                .arg(report.operation)
+                .arg(report.totalMs, 0, 'f', 3)
+                .arg(report.selectionExpansionMs, 0, 'f', 3)
+                .arg(report.boundaryAnalysisMs, 0, 'f', 3)
+                .arg(report.boundaryOrderingMs, 0, 'f', 3)
+                .arg(report.wasteRefreshMs, 0, 'f', 3)
+                .arg(report.pathRebuildMs, 0, 'f', 3)
+                .arg(report.pointClassificationMs, 0, 'f', 3)
+                .arg(report.processStateUpdateMs, 0, 'f', 3)
+                .arg(report.viewerRefreshMs, 0, 'f', 3)
+                .arg(report.settingsSyncMs, 0, 'f', 3)
+                .arg(static_cast<qulonglong>(report.documentEntityCount))
+                .arg(static_cast<qulonglong>(report.selectedEntityCount))
+                .arg(static_cast<qulonglong>(report.boundaryGroupCount))
+                .arg(static_cast<qulonglong>(report.analyzedBoundaryCount))
+                .arg(static_cast<qulonglong>(report.rebuiltPathCount))
+                .arg(static_cast<qulonglong>(report.reusedPathCount))
+                .arg(static_cast<qulonglong>(report.classifiedEntityCount))
+                .arg(static_cast<qulonglong>(report.classificationCallCount))
+                .arg(static_cast<qulonglong>(report.samplePointCount));
+            m_activeReport = nullptr;
+        }
+
+    private:
+        BoundaryAssignmentPerformanceReport*& m_activeReport;
+        std::optional<BoundaryAssignmentPerformanceReport> m_ownedReport;
+        QElapsedTimer m_totalTimer;
+        bool m_owner = false;
+    };
+
+    std::function<void(double)> pathRebuildObserver
+        (BoundaryAssignmentPerformanceReport* report)
+    {
+        if (report == nullptr) return {};
+        return [report](double elapsedMs)
+        {
+            report->pathRebuildMs += elapsedMs;
+            ++report->rebuiltPathCount;
+        };
+    }
+
+    RotaryCutBoundaryAnalysis analyzeBoundary
+    (
+        const QVector<CadItem*>& candidateItems,
+        const QVector<CadItem*>& sceneItems,
+        const RotaryTubeSectionModel& sectionModel,
+        double connectionTolerance,
+        BoundaryAssignmentPerformanceReport* report
+    )
+    {
+        BoundaryPerformanceTimer timer
+            (report != nullptr ? &report->boundaryAnalysisMs : nullptr);
+        if (report != nullptr) ++report->analyzedBoundaryCount;
+        return RotaryCutBoundaryAnalyzer::analyze
+        (
+            candidateItems,
+            sceneItems,
+            sectionModel,
+            connectionTolerance,
+            pathRebuildObserver(report)
+        );
+    }
+
+    void updateBoundaryViewer
+    (
+        CadViewer* viewer,
+        BoundaryAssignmentPerformanceReport* report
+    )
+    {
+        BoundaryPerformanceTimer timer
+            (report != nullptr ? &report->viewerRefreshMs : nullptr);
+        if (viewer != nullptr) viewer->update();
+    }
 
     enum class SortStrategy
     {
@@ -2323,6 +2459,9 @@ bool Gcode_postprocessing_system::sortEntitiesByCurrentMode
 
 QVector<CadItem*> Gcode_postprocessing_system::expandedSelectedRotaryEndCut(QString* errorMessage) const
 {
+    BoundaryPerformanceTimer selectionTimer
+        (m_boundaryAssignmentPerformanceReport != nullptr
+            ? &m_boundaryAssignmentPerformanceReport->selectionExpansionMs : nullptr);
     const QVector<CadItem*> selectedItems = ui->openGLWidget->selectedEntities();
 
     if (selectedItems.isEmpty())
@@ -2352,13 +2491,20 @@ QVector<CadItem*> Gcode_postprocessing_system::expandedSelectedRotaryEndCut(QStr
         .arg(describeRotaryPathItems(selectedItems));
     qInfo().noquote() << QStringLiteral("[断面候选] sceneItems 过滤后：%1")
         .arg(describeRotaryPathItems(sceneItems));
-    const RotaryPathTopology topology
-    (
-        sceneItems,
-        RotaryPathTopologyTolerance::fromConnectionTolerance(kEndCutConnectionTolerance)
-    );
     QVector<CadItem*> connectedItems;
-    const RotaryPathLoopResult loop = topology.extractSeededLoop(selectedItems, &connectedItems);
+    RotaryPathLoopResult loop;
+    {
+        BoundaryPerformanceTimer orderingTimer
+            (m_boundaryAssignmentPerformanceReport != nullptr
+                ? &m_boundaryAssignmentPerformanceReport->boundaryOrderingMs : nullptr);
+        const RotaryPathTopology topology
+        (
+            sceneItems,
+            RotaryPathTopologyTolerance::fromConnectionTolerance(kEndCutConnectionTolerance),
+            pathRebuildObserver(m_boundaryAssignmentPerformanceReport)
+        );
+        loop = topology.extractSeededLoop(selectedItems, &connectedItems);
+    }
     qInfo().noquote() << QStringLiteral("[断面候选] 连通扩展：%1")
         .arg(describeRotaryPathItems(connectedItems));
 
@@ -2372,12 +2518,13 @@ QVector<CadItem*> Gcode_postprocessing_system::expandedSelectedRotaryEndCut(QStr
         return {};
     }
 
-    const RotaryCutBoundaryAnalysis analysis = RotaryCutBoundaryAnalyzer::analyze
+    const RotaryCutBoundaryAnalysis analysis = analyzeBoundary
     (
         loop.usedItems,
         sceneItems,
         m_rotaryTubeSectionModel,
-        kEndCutConnectionTolerance
+        kEndCutConnectionTolerance,
+        m_boundaryAssignmentPerformanceReport
     );
 
     if (!analysis.valid)
@@ -2400,6 +2547,13 @@ QVector<CadItem*> Gcode_postprocessing_system::expandedSelectedRotaryEndCut(QStr
 
 bool Gcode_postprocessing_system::assignSelectedRotaryEndCut()
 {
+    BoundaryAssignmentPerformanceOperation performance
+    (
+        m_boundaryAssignmentPerformanceReport,
+        QStringLiteral("AssignRotaryEndCut"),
+        static_cast<std::uint64_t>(m_document.m_entities.size()),
+        static_cast<std::uint64_t>(ui->openGLWidget->selectedEntities().size())
+    );
     QString selectionError;
     const QVector<CadItem*> expandedItems = expandedSelectedRotaryEndCut(&selectionError);
 
@@ -2439,17 +2593,23 @@ bool Gcode_postprocessing_system::assignSelectedRotaryEndCut()
 
     const int boundaryId = highestBoundaryId + 1;
 
-    m_processState.beginBatch();
-    for (CadItem* item : expandedItems)
     {
-        if (item == nullptr)
+        BoundaryPerformanceTimer stateTimer
+            (m_boundaryAssignmentPerformanceReport != nullptr
+                ? &m_boundaryAssignmentPerformanceReport->processStateUpdateMs : nullptr);
+        m_processState.beginBatch();
+        for (CadItem* item : expandedItems)
         {
-            continue;
-        }
+            if (item == nullptr)
+            {
+                continue;
+            }
 
-        m_processState.setBoundary(item->m_entityId, cadcam::planning::BoundaryRole::Break, boundaryId);
+            m_processState.setBoundary
+                (item->m_entityId, cadcam::planning::BoundaryRole::Break, boundaryId);
+        }
+        m_processState.endBatch();
     }
-    m_processState.endBatch();
 
     const QString message = QStringLiteral("已指定加工断面 断%1，共识别 %2 个相连图元，已通过方管周向分离验证。")
         .arg(boundaryId + 1)
@@ -2458,13 +2618,20 @@ bool Gcode_postprocessing_system::assignSelectedRotaryEndCut()
     invalidateProcessOrdersAfterEndCutChange();
     refreshWasteProcessingExclusions();
     ui->openGLWidget->appendCommandMessage(message);
-    ui->openGLWidget->update();
+    updateBoundaryViewer(ui->openGLWidget, m_boundaryAssignmentPerformanceReport);
     statusBar()->showMessage(message, 5000);
     return true;
 }
 
 bool Gcode_postprocessing_system::assignSelectedWasteEndCut()
 {
+    BoundaryAssignmentPerformanceOperation performance
+    (
+        m_boundaryAssignmentPerformanceReport,
+        QStringLiteral("AssignWasteEndCut"),
+        static_cast<std::uint64_t>(m_document.m_entities.size()),
+        static_cast<std::uint64_t>(ui->openGLWidget->selectedEntities().size())
+    );
     QString selectionError;
     const QVector<CadItem*> expandedItems = expandedSelectedRotaryEndCut(&selectionError);
 
@@ -2498,17 +2665,23 @@ bool Gcode_postprocessing_system::assignSelectedWasteEndCut()
 
     const int wasteId = highestBoundaryId + 1;
 
-    m_processState.beginBatch();
-    for (CadItem* item : expandedItems)
     {
-        if (item == nullptr)
+        BoundaryPerformanceTimer stateTimer
+            (m_boundaryAssignmentPerformanceReport != nullptr
+                ? &m_boundaryAssignmentPerformanceReport->processStateUpdateMs : nullptr);
+        m_processState.beginBatch();
+        for (CadItem* item : expandedItems)
         {
-            continue;
-        }
+            if (item == nullptr)
+            {
+                continue;
+            }
 
-        m_processState.setBoundary(item->m_entityId, cadcam::planning::BoundaryRole::Waste, wasteId);
+            m_processState.setBoundary
+                (item->m_entityId, cadcam::planning::BoundaryRole::Waste, wasteId);
+        }
+        m_processState.endBatch();
     }
-    m_processState.endBatch();
 
     invalidateProcessOrdersAfterEndCutChange();
     const int excludedCount = refreshWasteProcessingExclusions();
@@ -2517,13 +2690,20 @@ bool Gcode_postprocessing_system::assignSelectedWasteEndCut()
         .arg(expandedItems.size())
         .arg(excludedCount);
     ui->openGLWidget->appendCommandMessage(message);
-    ui->openGLWidget->update();
+    updateBoundaryViewer(ui->openGLWidget, m_boundaryAssignmentPerformanceReport);
     statusBar()->showMessage(message, 6000);
     return true;
 }
 
 bool Gcode_postprocessing_system::smartAssignSelectedRotaryEndCut()
 {
+    BoundaryAssignmentPerformanceOperation performance
+    (
+        m_boundaryAssignmentPerformanceReport,
+        QStringLiteral("SmartAssignRotaryEndCut"),
+        static_cast<std::uint64_t>(m_document.m_entities.size()),
+        static_cast<std::uint64_t>(ui->openGLWidget->selectedEntities().size())
+    );
     return assignSelectedRotaryEndCut();
 }
 
@@ -2715,7 +2895,7 @@ bool Gcode_postprocessing_system::removeInternalMachiningPaths(bool interactive)
             ui->openGLWidget->appendCommandMessage(diagnostic.userMessage);
         }
     }
-    ui->openGLWidget->update();
+    updateBoundaryViewer(ui->openGLWidget, m_boundaryAssignmentPerformanceReport);
     statusBar()->showMessage(message, 6000);
     return true;
 }
@@ -2725,26 +2905,32 @@ bool Gcode_postprocessing_system::restoreInternalMachiningPaths(bool interactive
     Q_UNUSED(interactive);
     int restoredCount = 0;
 
-    m_processState.beginBatch();
-    for (const std::unique_ptr<CadItem>& entity : m_document.m_entities)
     {
-        if (entity != nullptr)
+        BoundaryPerformanceTimer stateTimer
+            (m_boundaryAssignmentPerformanceReport != nullptr
+                ? &m_boundaryAssignmentPerformanceReport->processStateUpdateMs : nullptr);
+        m_processState.beginBatch();
+        for (const std::unique_ptr<CadItem>& entity : m_document.m_entities)
         {
-            const auto state = m_processState.stateOrDefault(entity->m_entityId);
-            if (state.analysis.automaticInternalExclusion
-                || state.overrideData.manualInternalExclusionOverride.has_value())
+            if (entity != nullptr)
             {
-                m_processState.setAutomaticInternalExclusion(entity->m_entityId, false);
-                m_processState.setManualInternalExclusionOverride(entity->m_entityId, std::nullopt);
-                ++restoredCount;
+                const auto state = m_processState.stateOrDefault(entity->m_entityId);
+                if (state.analysis.automaticInternalExclusion
+                    || state.overrideData.manualInternalExclusionOverride.has_value())
+                {
+                    m_processState.setAutomaticInternalExclusion(entity->m_entityId, false);
+                    m_processState.setManualInternalExclusionOverride
+                        (entity->m_entityId, std::nullopt);
+                    ++restoredCount;
+                }
             }
         }
+        m_processState.endBatch();
     }
-    m_processState.endBatch();
 
     if (restoredCount > 0) invalidateProcessOrdersAfterEndCutChange();
     refreshWasteProcessingExclusions();
-    ui->openGLWidget->update();
+    updateBoundaryViewer(ui->openGLWidget, m_boundaryAssignmentPerformanceReport);
 
     const QString message = restoredCount > 0
         ? QStringLiteral("已恢复 %1 个由内部线识别排除的图元。").arg(restoredCount)
@@ -2757,17 +2943,39 @@ bool Gcode_postprocessing_system::restoreInternalMachiningPaths(bool interactive
 bool Gcode_postprocessing_system::toggleSelectedRotaryEndCutAssignment()
 {
     const QVector<CadItem*> selectedItems = ui->openGLWidget->selectedEntities();
+    const bool hasUnassignedItem = std::any_of
+    (
+        selectedItems.begin(), selectedItems.end(), [this](const CadItem* item)
+        {
+            return item != nullptr && m_processState.stateOrDefault(item->m_entityId)
+                .overrideData.boundaryRole == cadcam::planning::BoundaryRole::None;
+        }
+    );
+    const bool hasAssignedItem = std::any_of
+    (
+        selectedItems.begin(), selectedItems.end(), [this](const CadItem* item)
+        {
+            return item != nullptr && m_processState.stateOrDefault(item->m_entityId)
+                .overrideData.boundaryRole != cadcam::planning::BoundaryRole::None;
+        }
+    );
+    const QString operation = selectedItems.isEmpty()
+        ? QStringLiteral("ToggleRotaryEndCut")
+        : (!hasUnassignedItem ? QStringLiteral("ClearSelectedRotaryEndCut")
+            : (hasAssignedItem ? QStringLiteral("ReassignRotaryEndCut")
+                : QStringLiteral("AssignRotaryEndCut")));
+    BoundaryAssignmentPerformanceOperation performance
+    (
+        m_boundaryAssignmentPerformanceReport,
+        operation,
+        static_cast<std::uint64_t>(m_document.m_entities.size()),
+        static_cast<std::uint64_t>(selectedItems.size())
+    );
 
     if (selectedItems.isEmpty())
     {
         return false;
     }
-
-    const bool hasUnassignedItem = std::any_of(selectedItems.begin(), selectedItems.end(), [this](const CadItem* item)
-    {
-        return item != nullptr && m_processState.stateOrDefault(item->m_entityId)
-            .overrideData.boundaryRole == cadcam::planning::BoundaryRole::None;
-    });
 
     if (!hasUnassignedItem)
     {
@@ -2795,13 +3003,18 @@ bool Gcode_postprocessing_system::toggleSelectedRotaryEndCutAssignment()
         }
     }
 
-    m_processState.beginBatch();
-    for (CadItem* item : boundaryItems)
     {
-        if (item != nullptr) m_processState.setBoundary
-            (item->m_entityId, cadcam::planning::BoundaryRole::Break, nextBoundaryId);
+        BoundaryPerformanceTimer stateTimer
+            (m_boundaryAssignmentPerformanceReport != nullptr
+                ? &m_boundaryAssignmentPerformanceReport->processStateUpdateMs : nullptr);
+        m_processState.beginBatch();
+        for (CadItem* item : boundaryItems)
+        {
+            if (item != nullptr) m_processState.setBoundary
+                (item->m_entityId, cadcam::planning::BoundaryRole::Break, nextBoundaryId);
+        }
+        m_processState.endBatch();
     }
-    m_processState.endBatch();
 
     invalidateProcessOrdersAfterEndCutChange();
     refreshWasteProcessingExclusions();
@@ -2809,13 +3022,20 @@ bool Gcode_postprocessing_system::toggleSelectedRotaryEndCutAssignment()
         .arg(nextBoundaryId + 1)
         .arg(boundaryItems.size());
     ui->openGLWidget->appendCommandMessage(message);
-    ui->openGLWidget->update();
+    updateBoundaryViewer(ui->openGLWidget, m_boundaryAssignmentPerformanceReport);
     statusBar()->showMessage(message, 5000);
     return true;
 }
 
 bool Gcode_postprocessing_system::recognizeAllRotaryEndCuts(bool interactive)
 {
+    BoundaryAssignmentPerformanceOperation performance
+    (
+        m_boundaryAssignmentPerformanceReport,
+        QStringLiteral("RecognizeAllRotaryEndCuts"),
+        static_cast<std::uint64_t>(m_document.m_entities.size()),
+        static_cast<std::uint64_t>(ui->openGLWidget->selectedEntities().size())
+    );
     QVector<CadItem*> documentItems;
     QVector<CadItem*> sceneItems;
 
@@ -2845,11 +3065,18 @@ bool Gcode_postprocessing_system::recognizeAllRotaryEndCuts(bool interactive)
 
     qInfo().noquote() << QStringLiteral("[断面候选] sceneItems 过滤后：%1")
         .arg(describeRotaryPathItems(sceneItems));
-    const RotaryPathTopology topology
-    (
-        sceneItems,
-        RotaryPathTopologyTolerance::fromConnectionTolerance(kEndCutConnectionTolerance)
-    );
+    std::optional<RotaryPathTopology> topology;
+    {
+        BoundaryPerformanceTimer orderingTimer
+            (m_boundaryAssignmentPerformanceReport != nullptr
+                ? &m_boundaryAssignmentPerformanceReport->boundaryOrderingMs : nullptr);
+        topology.emplace
+        (
+            sceneItems,
+            RotaryPathTopologyTolerance::fromConnectionTolerance(kEndCutConnectionTolerance),
+            pathRebuildObserver(m_boundaryAssignmentPerformanceReport)
+        );
+    }
     int nextBoundaryId = 0;
 
     for (CadItem* item : documentItems)
@@ -2876,7 +3103,13 @@ bool Gcode_postprocessing_system::recognizeAllRotaryEndCuts(bool interactive)
 
         const QVector<CadItem*> seedItems{ seedItem };
         QVector<CadItem*> connectedItems;
-        const RotaryPathLoopResult loop = topology.extractSeededLoop(seedItems, &connectedItems);
+        RotaryPathLoopResult loop;
+        {
+            BoundaryPerformanceTimer orderingTimer
+                (m_boundaryAssignmentPerformanceReport != nullptr
+                    ? &m_boundaryAssignmentPerformanceReport->boundaryOrderingMs : nullptr);
+            loop = topology->extractSeededLoop(seedItems, &connectedItems);
+        }
 
         if (!loop.valid || loop.usedItems.isEmpty())
         {
@@ -2905,12 +3138,13 @@ bool Gcode_postprocessing_system::recognizeAllRotaryEndCuts(bool interactive)
             continue;
         }
 
-        const RotaryCutBoundaryAnalysis analysis = RotaryCutBoundaryAnalyzer::analyze
+        const RotaryCutBoundaryAnalysis analysis = analyzeBoundary
         (
             loop.usedItems,
             sceneItems,
             m_rotaryTubeSectionModel,
-            kEndCutConnectionTolerance
+            kEndCutConnectionTolerance,
+            m_boundaryAssignmentPerformanceReport
         );
 
         if (!analysis.valid)
@@ -2924,13 +3158,18 @@ bool Gcode_postprocessing_system::recognizeAllRotaryEndCuts(bool interactive)
             ? loop.usedItems
             : analysis.boundaryItems;
 
-        m_processState.beginBatch();
-        for (CadItem* item : recognizedItems)
         {
-            if (item != nullptr) m_processState.setBoundary
-                (item->m_entityId, cadcam::planning::BoundaryRole::Break, nextBoundaryId);
+            BoundaryPerformanceTimer stateTimer
+                (m_boundaryAssignmentPerformanceReport != nullptr
+                    ? &m_boundaryAssignmentPerformanceReport->processStateUpdateMs : nullptr);
+            m_processState.beginBatch();
+            for (CadItem* item : recognizedItems)
+            {
+                if (item != nullptr) m_processState.setBoundary
+                    (item->m_entityId, cadcam::planning::BoundaryRole::Break, nextBoundaryId);
+            }
+            m_processState.endBatch();
         }
-        m_processState.endBatch();
 
         ++nextBoundaryId;
         ++recognizedCount;
@@ -2946,7 +3185,7 @@ bool Gcode_postprocessing_system::recognizeAllRotaryEndCuts(bool interactive)
     }
 
     ui->openGLWidget->appendCommandMessage(message);
-    ui->openGLWidget->update();
+    updateBoundaryViewer(ui->openGLWidget, m_boundaryAssignmentPerformanceReport);
     statusBar()->showMessage(message, 5000);
 
     if (interactive && recognizedCount == 0)
@@ -3003,6 +3242,13 @@ bool Gcode_postprocessing_system::toggleSelectedInternalPathAssignment()
 
 bool Gcode_postprocessing_system::clearAllMachiningFaceAndLineAssignments()
 {
+    BoundaryAssignmentPerformanceOperation performance
+    (
+        m_boundaryAssignmentPerformanceReport,
+        QStringLiteral("ClearAllBoundaryAndInternalAssignments"),
+        static_cast<std::uint64_t>(m_document.m_entities.size()),
+        static_cast<std::uint64_t>(ui->openGLWidget->selectedEntities().size())
+    );
     const bool clearedSections = clearRotaryEndCutAssignments();
     const bool restoredLines = restoreInternalMachiningPaths();
     const QString message = QStringLiteral("已清空所有加工断面和内部线条状态，未删除 CAD 图元。");
@@ -3014,6 +3260,13 @@ bool Gcode_postprocessing_system::clearAllMachiningFaceAndLineAssignments()
 bool Gcode_postprocessing_system::clearSelectedRotaryEndCutAssignments()
 {
     const QVector<CadItem*> selectedItems = ui->openGLWidget->selectedEntities();
+    BoundaryAssignmentPerformanceOperation performance
+    (
+        m_boundaryAssignmentPerformanceReport,
+        QStringLiteral("ClearSelectedRotaryEndCut"),
+        static_cast<std::uint64_t>(m_document.m_entities.size()),
+        static_cast<std::uint64_t>(selectedItems.size())
+    );
     QSet<int> pairIds;
 
     for (const CadItem* item : selectedItems)
@@ -3035,21 +3288,27 @@ bool Gcode_postprocessing_system::clearSelectedRotaryEndCutAssignments()
 
     int clearedCount = 0;
 
-    m_processState.beginBatch();
-    for (const std::unique_ptr<CadItem>& entity : m_document.m_entities)
     {
-        if (entity == nullptr)
+        BoundaryPerformanceTimer stateTimer
+            (m_boundaryAssignmentPerformanceReport != nullptr
+                ? &m_boundaryAssignmentPerformanceReport->processStateUpdateMs : nullptr);
+        m_processState.beginBatch();
+        for (const std::unique_ptr<CadItem>& entity : m_document.m_entities)
         {
-            continue;
+            if (entity == nullptr)
+            {
+                continue;
+            }
+            const auto state = m_processState.stateOrDefault(entity->m_entityId);
+            if (pairIds.contains(state.overrideData.boundaryPairId))
+            {
+                m_processState.setBoundary
+                    (entity->m_entityId, cadcam::planning::BoundaryRole::None, -1);
+                ++clearedCount;
+            }
         }
-        const auto state = m_processState.stateOrDefault(entity->m_entityId);
-        if (pairIds.contains(state.overrideData.boundaryPairId))
-        {
-            m_processState.setBoundary(entity->m_entityId, cadcam::planning::BoundaryRole::None, -1);
-            ++clearedCount;
-        }
+        m_processState.endBatch();
     }
-    m_processState.endBatch();
 
     const QString message = QStringLiteral("已清除 %1 个加工断面边界，共 %2 个图元。")
         .arg(pairIds.size())
@@ -3057,27 +3316,40 @@ bool Gcode_postprocessing_system::clearSelectedRotaryEndCutAssignments()
     invalidateProcessOrdersAfterEndCutChange();
     refreshWasteProcessingExclusions();
     ui->openGLWidget->appendCommandMessage(message);
-    ui->openGLWidget->update();
+    updateBoundaryViewer(ui->openGLWidget, m_boundaryAssignmentPerformanceReport);
     statusBar()->showMessage(message, 5000);
     return true;
 }
 
 bool Gcode_postprocessing_system::clearRotaryEndCutAssignments()
 {
+    BoundaryAssignmentPerformanceOperation performance
+    (
+        m_boundaryAssignmentPerformanceReport,
+        QStringLiteral("ClearAllRotaryEndCuts"),
+        static_cast<std::uint64_t>(m_document.m_entities.size()),
+        static_cast<std::uint64_t>(ui->openGLWidget->selectedEntities().size())
+    );
     int clearedCount = 0;
 
-    m_processState.beginBatch();
-    for (const std::unique_ptr<CadItem>& entity : m_document.m_entities)
     {
-        if (entity == nullptr || m_processState.stateOrDefault(entity->m_entityId)
-            .overrideData.boundaryRole == cadcam::planning::BoundaryRole::None)
+        BoundaryPerformanceTimer stateTimer
+            (m_boundaryAssignmentPerformanceReport != nullptr
+                ? &m_boundaryAssignmentPerformanceReport->processStateUpdateMs : nullptr);
+        m_processState.beginBatch();
+        for (const std::unique_ptr<CadItem>& entity : m_document.m_entities)
         {
-            continue;
+            if (entity == nullptr || m_processState.stateOrDefault(entity->m_entityId)
+                .overrideData.boundaryRole == cadcam::planning::BoundaryRole::None)
+            {
+                continue;
+            }
+            m_processState.setBoundary
+                (entity->m_entityId, cadcam::planning::BoundaryRole::None, -1);
+            ++clearedCount;
         }
-        m_processState.setBoundary(entity->m_entityId, cadcam::planning::BoundaryRole::None, -1);
-        ++clearedCount;
+        m_processState.endBatch();
     }
-    m_processState.endBatch();
 
     if (clearedCount == 0)
     {
@@ -3089,7 +3361,7 @@ bool Gcode_postprocessing_system::clearRotaryEndCutAssignments()
     invalidateProcessOrdersAfterEndCutChange();
     refreshWasteProcessingExclusions();
     ui->openGLWidget->appendCommandMessage(message);
-    ui->openGLWidget->update();
+    updateBoundaryViewer(ui->openGLWidget, m_boundaryAssignmentPerformanceReport);
     statusBar()->showMessage(message, 5000);
     return true;
 }
@@ -3101,10 +3373,18 @@ void Gcode_postprocessing_system::invalidateProcessOrdersAfterEndCutChange()
 
 void Gcode_postprocessing_system::invalidateCurrentProcessPlan()
 {
-    m_currentProcessPlan.reset();
-    m_processPresentation.reset();
+    {
+        BoundaryPerformanceTimer stateTimer
+            (m_boundaryAssignmentPerformanceReport != nullptr
+                ? &m_boundaryAssignmentPerformanceReport->processStateUpdateMs : nullptr);
+        m_currentProcessPlan.reset();
+        m_processPresentation.reset();
+    }
     if (ui != nullptr && ui->openGLWidget != nullptr)
     {
+        BoundaryPerformanceTimer viewerTimer
+            (m_boundaryAssignmentPerformanceReport != nullptr
+                ? &m_boundaryAssignmentPerformanceReport->viewerRefreshMs : nullptr);
         ui->openGLWidget->setProcessPresentation(nullptr);
         ui->openGLWidget->update();
     }
@@ -3422,6 +3702,9 @@ void Gcode_postprocessing_system::handleProcessUnitMoveToBackRequest
 
 int Gcode_postprocessing_system::refreshWasteProcessingExclusions()
 {
+    BoundaryPerformanceTimer wasteRefreshTimer
+        (m_boundaryAssignmentPerformanceReport != nullptr
+            ? &m_boundaryAssignmentPerformanceReport->wasteRefreshMs : nullptr);
     struct BoundaryGroup
     {
         cadcam::planning::BoundaryRole role = cadcam::planning::BoundaryRole::None;
@@ -3455,6 +3738,15 @@ int Gcode_postprocessing_system::refreshWasteProcessingExclusions()
         group.items.push_back(entity.get());
     }
 
+    if (m_boundaryAssignmentPerformanceReport != nullptr)
+    {
+        m_boundaryAssignmentPerformanceReport->boundaryGroupCount = std::max
+        (
+            m_boundaryAssignmentPerformanceReport->boundaryGroupCount,
+            static_cast<std::uint64_t>(boundaryGroups.size())
+        );
+    }
+
     struct BoundaryPosition
     {
         cadcam::planning::BoundaryRole role = cadcam::planning::BoundaryRole::None;
@@ -3470,12 +3762,13 @@ int Gcode_postprocessing_system::refreshWasteProcessingExclusions()
         Q_UNUSED(key);
         BoundaryPosition boundary;
         boundary.role = group.role;
-        boundary.analysis = RotaryCutBoundaryAnalyzer::analyze
+        boundary.analysis = analyzeBoundary
         (
             group.items,
             sceneItems,
             m_rotaryTubeSectionModel,
-            kEndCutConnectionTolerance
+            kEndCutConnectionTolerance,
+            m_boundaryAssignmentPerformanceReport
         );
 
         if (!boundary.analysis.valid || boundary.analysis.orderedPath.isEmpty())
@@ -3492,62 +3785,83 @@ int Gcode_postprocessing_system::refreshWasteProcessingExclusions()
         boundaries.push_back(std::move(boundary));
     }
 
-    std::sort
-    (
-        boundaries.begin(),
-        boundaries.end(),
-        [](const BoundaryPosition& left, const BoundaryPosition& right)
-        {
-            return left.centerX < right.centerX;
-        }
-    );
-
     bool boundariesHaveStableOrder = true;
-
-    for (size_t boundaryIndex = 1; boundaryIndex < boundaries.size() && boundariesHaveStableOrder; ++boundaryIndex)
     {
-        const BoundaryPosition& leftBoundary = boundaries[boundaryIndex - 1];
-        const BoundaryPosition& rightBoundary = boundaries[boundaryIndex];
-
-        if (RotaryCutBoundaryAnalyzer::boundariesIntersect
+        BoundaryPerformanceTimer orderingTimer
+            (m_boundaryAssignmentPerformanceReport != nullptr
+                ? &m_boundaryAssignmentPerformanceReport->boundaryOrderingMs : nullptr);
+        std::sort
         (
-            leftBoundary.analysis,
-            rightBoundary.analysis,
-            kEndCutConnectionTolerance
-        ))
-        {
-            boundariesHaveStableOrder = false;
-            break;
-        }
+            boundaries.begin(),
+            boundaries.end(),
+            [](const BoundaryPosition& left, const BoundaryPosition& right)
+            {
+                return left.centerX < right.centerX;
+            }
+        );
 
-        for (const QVector3D& point : rightBoundary.analysis.orderedPath)
+        for (size_t boundaryIndex = 1;
+            boundaryIndex < boundaries.size() && boundariesHaveStableOrder;
+            ++boundaryIndex)
         {
-            const RotaryBoundarySide side = RotaryCutBoundaryAnalyzer::classifyPointRelativeToBoundary
+            const BoundaryPosition& leftBoundary = boundaries[boundaryIndex - 1];
+            const BoundaryPosition& rightBoundary = boundaries[boundaryIndex];
+
+            if (RotaryCutBoundaryAnalyzer::boundariesIntersect
             (
                 leftBoundary.analysis,
-                point,
+                rightBoundary.analysis,
                 kEndCutConnectionTolerance
-            );
-
-            if (side != RotaryBoundarySide::After && side != RotaryBoundarySide::OnBoundary)
+            ))
             {
                 boundariesHaveStableOrder = false;
                 break;
             }
-        }
 
-        for (const QVector3D& point : leftBoundary.analysis.orderedPath)
-        {
-            const RotaryBoundarySide side = RotaryCutBoundaryAnalyzer::classifyPointRelativeToBoundary
-            (
-                rightBoundary.analysis,
-                point,
-                kEndCutConnectionTolerance
-            );
-
-            if (side != RotaryBoundarySide::Before && side != RotaryBoundarySide::OnBoundary)
             {
-                boundariesHaveStableOrder = false;
+                BoundaryPerformanceTimer classificationTimer
+                    (m_boundaryAssignmentPerformanceReport != nullptr
+                        ? &m_boundaryAssignmentPerformanceReport->pointClassificationMs
+                        : nullptr);
+                for (const QVector3D& point : rightBoundary.analysis.orderedPath)
+                {
+                    if (m_boundaryAssignmentPerformanceReport != nullptr)
+                    {
+                        ++m_boundaryAssignmentPerformanceReport->classificationCallCount;
+                        ++m_boundaryAssignmentPerformanceReport->samplePointCount;
+                    }
+                    const RotaryBoundarySide side =
+                        RotaryCutBoundaryAnalyzer::classifyPointRelativeToBoundary
+                        (leftBoundary.analysis, point, kEndCutConnectionTolerance);
+                    if (side != RotaryBoundarySide::After
+                        && side != RotaryBoundarySide::OnBoundary)
+                    {
+                        boundariesHaveStableOrder = false;
+                        break;
+                    }
+                }
+
+                for (const QVector3D& point : leftBoundary.analysis.orderedPath)
+                {
+                    if (m_boundaryAssignmentPerformanceReport != nullptr)
+                    {
+                        ++m_boundaryAssignmentPerformanceReport->classificationCallCount;
+                        ++m_boundaryAssignmentPerformanceReport->samplePointCount;
+                    }
+                    const RotaryBoundarySide side =
+                        RotaryCutBoundaryAnalyzer::classifyPointRelativeToBoundary
+                        (rightBoundary.analysis, point, kEndCutConnectionTolerance);
+                    if (side != RotaryBoundarySide::Before
+                        && side != RotaryBoundarySide::OnBoundary)
+                    {
+                        boundariesHaveStableOrder = false;
+                        break;
+                    }
+                }
+            }
+
+            if (!boundariesHaveStableOrder)
+            {
                 break;
             }
         }
@@ -3580,7 +3894,16 @@ int Gcode_postprocessing_system::refreshWasteProcessingExclusions()
             continue;
         }
 
-        entity->rebuildRawPathPoints3D();
+        {
+            BoundaryPerformanceTimer pathTimer
+                (m_boundaryAssignmentPerformanceReport != nullptr
+                    ? &m_boundaryAssignmentPerformanceReport->pathRebuildMs : nullptr);
+            entity->rebuildRawPathPoints3D();
+            if (m_boundaryAssignmentPerformanceReport != nullptr)
+            {
+                ++m_boundaryAssignmentPerformanceReport->rebuiltPathCount;
+            }
+        }
 
         if (entity->rawPathPoints3D().empty())
         {
@@ -3589,47 +3912,59 @@ int Gcode_postprocessing_system::refreshWasteProcessingExclusions()
 
         size_t intervalIndex = boundaries.size();
         bool crossesBoundary = false;
-
-        for (size_t boundaryIndex = 0; boundaryIndex < boundaries.size(); ++boundaryIndex)
+        if (m_boundaryAssignmentPerformanceReport != nullptr)
         {
-            bool hasPointBefore = false;
-            bool hasPointAfter = false;
+            ++m_boundaryAssignmentPerformanceReport->classifiedEntityCount;
+        }
 
-            for (const RawPathPoint3D& rawPoint : entity->rawPathPoints3D())
+        {
+            BoundaryPerformanceTimer classificationTimer
+                (m_boundaryAssignmentPerformanceReport != nullptr
+                    ? &m_boundaryAssignmentPerformanceReport->pointClassificationMs : nullptr);
+            for (size_t boundaryIndex = 0; boundaryIndex < boundaries.size(); ++boundaryIndex)
             {
-                const QVector3D point
-                (
-                    static_cast<float>(rawPoint.x),
-                    static_cast<float>(rawPoint.y),
-                    static_cast<float>(rawPoint.z)
-                );
-                const RotaryBoundarySide side = RotaryCutBoundaryAnalyzer::classifyPointRelativeToBoundary
-                (
-                    boundaries[boundaryIndex].analysis,
-                    point,
-                    kEndCutConnectionTolerance
-                );
+                bool hasPointBefore = false;
+                bool hasPointAfter = false;
 
-                if (side == RotaryBoundarySide::Ambiguous)
+                for (const RawPathPoint3D& rawPoint : entity->rawPathPoints3D())
+                {
+                    if (m_boundaryAssignmentPerformanceReport != nullptr)
+                    {
+                        ++m_boundaryAssignmentPerformanceReport->classificationCallCount;
+                        ++m_boundaryAssignmentPerformanceReport->samplePointCount;
+                    }
+                    const QVector3D point
+                    (
+                        static_cast<float>(rawPoint.x),
+                        static_cast<float>(rawPoint.y),
+                        static_cast<float>(rawPoint.z)
+                    );
+                    const RotaryBoundarySide side =
+                        RotaryCutBoundaryAnalyzer::classifyPointRelativeToBoundary
+                        (boundaries[boundaryIndex].analysis, point,
+                            kEndCutConnectionTolerance);
+
+                    if (side == RotaryBoundarySide::Ambiguous)
+                    {
+                        crossesBoundary = true;
+                        break;
+                    }
+
+                    hasPointBefore = hasPointBefore || side == RotaryBoundarySide::Before;
+                    hasPointAfter = hasPointAfter || side == RotaryBoundarySide::After;
+                }
+
+                if (crossesBoundary || (hasPointBefore && hasPointAfter))
                 {
                     crossesBoundary = true;
                     break;
                 }
 
-                hasPointBefore = hasPointBefore || side == RotaryBoundarySide::Before;
-                hasPointAfter = hasPointAfter || side == RotaryBoundarySide::After;
-            }
-
-            if (crossesBoundary || (hasPointBefore && hasPointAfter))
-            {
-                crossesBoundary = true;
-                break;
-            }
-
-            if (!hasPointAfter)
-            {
-                intervalIndex = boundaryIndex;
-                break;
+                if (!hasPointAfter)
+                {
+                    intervalIndex = boundaryIndex;
+                    break;
+                }
             }
         }
 

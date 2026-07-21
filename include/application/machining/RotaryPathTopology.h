@@ -7,6 +7,7 @@
 #include <QVector3D>
 
 #include <map>
+#include <functional>
 #include <optional>
 #include <vector>
 
@@ -43,7 +44,8 @@ public:
     RotaryPathTopology
     (
         const QVector<CadItem*>& items,
-        const RotaryPathTopologyTolerance& tolerance
+        const RotaryPathTopologyTolerance& tolerance,
+        const std::function<void(double)>& pathRebuildObserver = {}
     );
 
     const QVector<RotaryPathTopologyRecord>& records() const;

@@ -4,6 +4,8 @@
 #include "cad/items/CadItem.h"
 #include "compatibility/legacy/LegacyCadItemPathBridge.h"
 
+#include <QElapsedTimer>
+
 #include <cmath>
 #include <set>
 
@@ -115,7 +117,8 @@ LegacyCadItemTopologyAdapter::convert
 (
     const QVector<CadItem*>& items,
     const cadcam::topology::PathTopologyTolerance& tolerance,
-    const OperationContext& context
+    const OperationContext& context,
+    const std::function<void(double)>& pathRebuildObserver
 ) const
 {
     OperationResult<TopologyInput> result;
@@ -158,7 +161,14 @@ LegacyCadItemTopologyAdapter::convert
             continue;
         }
 
+        QElapsedTimer pathRebuildTimer;
+        pathRebuildTimer.start();
         item->rebuildRawPathPoints3D();
+        if (pathRebuildObserver)
+        {
+            pathRebuildObserver
+                (static_cast<double>(pathRebuildTimer.nsecsElapsed()) / 1000000.0);
+        }
         const std::vector<RawPathPoint3D>& rawPath = item->rawPathPoints3D();
 
         cadcam::geometry::SamplingPolicy endpointPolicy =

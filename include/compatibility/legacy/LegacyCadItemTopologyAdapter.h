@@ -4,6 +4,8 @@
 
 #include <QVector>
 
+#include <functional>
+
 class CadItem;
 
 class LegacyCadItemTopologyAdapter
@@ -13,6 +15,7 @@ public:
     (
         const QVector<CadItem*>& items,
         const cadcam::topology::PathTopologyTolerance& tolerance,
-        const OperationContext& context
+        const OperationContext& context,
+        const std::function<void(double)>& pathRebuildObserver = {}
     ) const;
 };

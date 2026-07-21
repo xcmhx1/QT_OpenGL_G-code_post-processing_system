@@ -14,6 +14,7 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QDockWidget>
+#include <QElapsedTimer>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QInputDialog>
@@ -1944,8 +1945,16 @@ void Gcode_postprocessing_system::syncToolPanelState()
 
 void Gcode_postprocessing_system::syncMachiningSettingsState()
 {
+    QElapsedTimer performanceTimer;
+    const bool measurePerformance = m_boundaryAssignmentPerformanceReport != nullptr;
+    if (measurePerformance) performanceTimer.start();
     if (m_machiningSettingsWidget == nullptr)
     {
+        if (measurePerformance)
+        {
+            m_boundaryAssignmentPerformanceReport->settingsSyncMs +=
+                static_cast<double>(performanceTimer.nsecsElapsed()) / 1000000.0;
+        }
         return;
     }
 
@@ -2006,6 +2015,11 @@ void Gcode_postprocessing_system::syncMachiningSettingsState()
 
     m_machiningSettingsWidget->setRotaryEndCutCount(rotaryEndCutIds.size());
     m_machiningSettingsWidget->setInternalPathCount(internalPathCount);
+    if (measurePerformance)
+    {
+        m_boundaryAssignmentPerformanceReport->settingsSyncMs +=
+            static_cast<double>(performanceTimer.nsecsElapsed()) / 1000000.0;
+    }
 }
 
 void Gcode_postprocessing_system::applyDefaultDrawingProperties()

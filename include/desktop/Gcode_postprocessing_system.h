@@ -19,6 +19,7 @@
 #include <QtGlobal>
 #include <QMap>
 
+#include <cstdint>
 #include <optional>
 
 #include "ui_Gcode_postprocessing_system.h"
@@ -31,6 +32,30 @@ class QAction;
 class QDockWidget;
 class MachiningSettingsWidget;
 enum class CadHelpSection;
+
+struct BoundaryAssignmentPerformanceReport
+{
+    QString operation;
+    double totalMs = 0.0;
+    double selectionExpansionMs = 0.0;
+    double boundaryAnalysisMs = 0.0;
+    double boundaryOrderingMs = 0.0;
+    double wasteRefreshMs = 0.0;
+    double pathRebuildMs = 0.0;
+    double pointClassificationMs = 0.0;
+    double processStateUpdateMs = 0.0;
+    double viewerRefreshMs = 0.0;
+    double settingsSyncMs = 0.0;
+    std::uint64_t documentEntityCount = 0U;
+    std::uint64_t selectedEntityCount = 0U;
+    std::uint64_t boundaryGroupCount = 0U;
+    std::uint64_t analyzedBoundaryCount = 0U;
+    std::uint64_t rebuiltPathCount = 0U;
+    std::uint64_t reusedPathCount = 0U;
+    std::uint64_t classifiedEntityCount = 0U;
+    std::uint64_t classificationCallCount = 0U;
+    std::uint64_t samplePointCount = 0U;
+};
 
 class Gcode_postprocessing_system : public QMainWindow
 {
@@ -211,6 +236,7 @@ private:
     cadcam::process::DocumentProcessState m_processState;
     std::optional<cadcam::planning::ProcessPlan> m_currentProcessPlan;
     std::optional<cadcam::process::ProcessPresentationSnapshot> m_processPresentation;
+    BoundaryAssignmentPerformanceReport* m_boundaryAssignmentPerformanceReport = nullptr;
     QString m_currentLayerName = QStringLiteral("0");
     QColor m_currentColor = QColor(Qt::white);
     int m_currentColorIndex = 256;

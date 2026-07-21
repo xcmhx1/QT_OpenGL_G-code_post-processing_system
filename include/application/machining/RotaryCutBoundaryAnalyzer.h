@@ -7,6 +7,8 @@
 #include <QVector3D>
 #include <QString>
 
+#include <functional>
+
 class CadItem;
 struct RotaryTubeSectionModel;
 
@@ -71,7 +73,8 @@ public:
         const QVector<CadItem*>& candidateItems,
         const QVector<CadItem*>& sceneItems,
         const RotaryTubeSectionModel& sectionModel,
-        double connectionTolerance = 1.0
+        double connectionTolerance = 1.0,
+        const std::function<void(double)>& pathRebuildObserver = {}
     );
 
     static RotaryBoundarySide classifyPointRelativeToBoundary

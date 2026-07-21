@@ -89,7 +89,8 @@ QString describeRotaryPathItems(const QVector<CadItem*>& items)
 RotaryPathTopology::RotaryPathTopology
 (
     const QVector<CadItem*>& items,
-    const RotaryPathTopologyTolerance& tolerance
+    const RotaryPathTopologyTolerance& tolerance,
+    const std::function<void(double)>& pathRebuildObserver
 )
     : m_context(createOperationContext(QStringLiteral("BuildRotaryPathTopology")))
 {
@@ -104,7 +105,7 @@ RotaryPathTopology::RotaryPathTopology
 
     LegacyCadItemTopologyAdapter adapter;
     OperationResult<cadcam::topology::TopologyInput> adapted =
-        adapter.convert(items, tolerance, m_context);
+        adapter.convert(items, tolerance, m_context, pathRebuildObserver);
     m_diagnostics += adapted.diagnostics;
     if (!adapted.succeeded() || !adapted.value.has_value())
     {
