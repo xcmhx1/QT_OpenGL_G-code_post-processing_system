@@ -26,10 +26,11 @@
 | 字段 | 含义 |
 | --- | --- |
 | `totalMs` | 从用户操作入口到操作返回的总耗时 |
-| `selectionExpansionMs` | 选择集过滤、拓扑构建、相连图元扩展和候选验证耗时 |
+| `selectionExpansionMs` | 相连图元扩展和候选验证耗时 |
 | `boundaryAnalysisMs` | `RotaryCutBoundaryAnalyzer::analyze()` 的累计耗时 |
 | `boundaryOrderingMs` | 闭环提取、断面排序及相邻断面顺序验证耗时 |
 | `wasteRefreshMs` | `refreshWasteProcessingExclusions()` 的累计耗时 |
+| `topologyBuildMs` | 本次操作构建全场景拓扑的累计耗时 |
 | `pathRebuildMs` | 实际调用 `rebuildRawPathPoints3D()` 的累计耗时 |
 | `pointClassificationMs` | 批量调用 `classifyPointRelativeToBoundary()` 的累计耗时 |
 | `processStateUpdateMs` | 断面状态批量更新及当前计划失效耗时 |
@@ -47,14 +48,17 @@
 | `selectedEntityCount` | 操作开始时的选中图元数 |
 | `boundaryGroupCount` | 废面刷新阶段收集到的加工断面和废面组数量 |
 | `analyzedBoundaryCount` | 本次操作调用断面分析器的次数 |
+| `topologyBuildCount` | 本次操作实际构建全场景拓扑的次数，不包含闭环提取 |
+| `topologyReuseCount` | 候选扩展、断面分析和废面刷新复用已构建拓扑的次数 |
 | `rebuiltPathCount` | 实际执行路径重建的次数 |
 | `reusedPathCount` | 直接复用既有加工路径的次数 |
 | `classifiedEntityCount` | 废面区间判断实际处理的普通图元数 |
 | `classificationCallCount` | 点相对断面分类函数的调用次数 |
 | `samplePointCount` | 送入点分类的采样点总数 |
 
-当前相关生产路径会显式重建路径，未引入缓存复用，因此 `reusedPathCount` 通常为 `0`。
-若 `rebuiltPathCount` 明显大于 `documentEntityCount`，说明同一次操作中存在重复的全场景或局部路径重建。
+加工断面指定、重新指定和自动识别在单次操作内复用同一个全场景拓扑。
+正常情况下 `topologyBuildCount` 为 `1`，`rebuiltPathCount` 接近本次过滤后的场景图元数；
+废面刷新直接复用拓扑记录中的路径点，并计入 `reusedPathCount`。
 若 `classificationCallCount` 随断面数和采样点数成倍增长，应结合 `pointClassificationMs` 判断点分类是否为主要热点。
 
 ## 5. 日志格式
@@ -62,12 +66,23 @@
 日志使用单行固定字段，例如：
 
 ```text
-[Performance][BoundaryAssignment] operation=AssignRotaryEndCut totalMs=3012.000 selectionExpansionMs=184.000 boundaryAnalysisMs=176.000 boundaryOrderingMs=92.000 wasteRefreshMs=2750.000 pathRebuildMs=1260.000 pointClassificationMs=1420.000 processStateUpdateMs=0.300 viewerRefreshMs=0.120 settingsSyncMs=0.900 documentEntityCount=846 selectedEntityCount=1 boundaryGroupCount=4 analyzedBoundaryCount=5 rebuiltPathCount=5076 reusedPathCount=0 classifiedEntityCount=814 classificationCallCount=152340 samplePointCount=152340
+[Performance][BoundaryAssignment] operation=AssignRotaryEndCut totalMs=318.000 selectionExpansionMs=42.000 boundaryAnalysisMs=96.000 boundaryOrderingMs=35.000 wasteRefreshMs=172.000 topologyBuildMs=31.000 pathRebuildMs=1.700 pointClassificationMs=121.000 processStateUpdateMs=0.300 viewerRefreshMs=0.120 settingsSyncMs=0.900 documentEntityCount=100 selectedEntityCount=1 boundaryGroupCount=4 analyzedBoundaryCount=5 topologyBuildCount=1 topologyReuseCount=7 rebuiltPathCount=100 reusedPathCount=68 classifiedEntityCount=68 classificationCallCount=12840 samplePointCount=12840
 ```
 
 示例数值只用于说明字段格式，实际热点必须以目标 DXF 在 Release 构建中的输出为准。
 
-## 6. 当前边界
+## 6. 操作级拓扑快照
 
-本阶段只建立测量能力。当前未实施路径缓存、增量断面更新、异步计算或采样调整。
-后续优化应先收集目标文件的完整汇总日志，再根据 `totalMs`、阶段耗时和调用规模确定修改位置。
+操作入口按当前内部线和加工断面状态过滤一次场景图元，随后完成一次兼容适配和一次
+`RotaryPathTopology` 构建。快照只保存本次操作的文档内容版本、连接容差、过滤后图元集合和拓扑对象。
+
+候选连通扩展、每个加工断面分析以及废面刷新共享该快照。废面刷新中的普通图元分类读取拓扑记录中的路径点，
+不会再次调用图元路径重建。没有外部快照的独立刷新入口会在函数内部构建一次局部快照。
+
+快照不写入 `CadDocument` 或主窗口状态，不跨用户操作和文档内容版本复用，也不保存加工断面角色或 Waste 结果。
+加工状态可以在同一操作中更新，但几何内容版本变化后必须重新构建快照。
+
+## 7. 当前边界
+
+当前只复用单次加工断面操作内的拓扑，不提供跨操作缓存、增量断面更新或异步计算，也未调整采样和点分类算法。
+后续优化仍应以目标文件的完整汇总日志为依据。

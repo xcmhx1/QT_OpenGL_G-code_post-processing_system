@@ -176,13 +176,24 @@ RotaryCutBoundaryAnalysis RotaryCutBoundaryAnalyzer::analyze
     const std::function<void(double)>& pathRebuildObserver
 )
 {
-    RotaryCutBoundaryAnalysis analysis;
     const RotaryPathTopology topology
     (
         sceneItems,
         RotaryPathTopologyTolerance::fromConnectionTolerance(connectionTolerance),
         pathRebuildObserver
     );
+    return analyze(candidateItems, topology, sectionModel, connectionTolerance);
+}
+
+RotaryCutBoundaryAnalysis RotaryCutBoundaryAnalyzer::analyze
+(
+    const QVector<CadItem*>& candidateItems,
+    const RotaryPathTopology& topology,
+    const RotaryTubeSectionModel& sectionModel,
+    double connectionTolerance
+)
+{
+    RotaryCutBoundaryAnalysis analysis;
     const RotaryPathLoopResult loop = topology.extractBestLoop(candidateItems, candidateItems);
     const OperationContext context = createOperationContext(QStringLiteral("AnalyzeRotaryCutBoundary"));
     analysis.maximumJoinGap = loop.maximumJoinGap;

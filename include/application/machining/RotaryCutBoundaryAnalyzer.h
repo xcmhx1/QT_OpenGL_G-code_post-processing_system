@@ -10,6 +10,7 @@
 #include <functional>
 
 class CadItem;
+class RotaryPathTopology;
 struct RotaryTubeSectionModel;
 
 using TubeCutResult = cadcam::machining::TubeCutResult;
@@ -75,6 +76,14 @@ public:
         const RotaryTubeSectionModel& sectionModel,
         double connectionTolerance = 1.0,
         const std::function<void(double)>& pathRebuildObserver = {}
+    );
+
+    static RotaryCutBoundaryAnalysis analyze
+    (
+        const QVector<CadItem*>& candidateItems,
+        const RotaryPathTopology& topology,
+        const RotaryTubeSectionModel& sectionModel,
+        double connectionTolerance = 1.0
     );
 
     static RotaryBoundarySide classifyPointRelativeToBoundary

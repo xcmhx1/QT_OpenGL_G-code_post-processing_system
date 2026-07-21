@@ -10,6 +10,7 @@
 #include "ui/widgets/CadToolPanelWidget.h"
 #include "application/export/GGenerator.h"
 #include "application/machining/RotaryTubeGeometryAnalyzer.h"
+#include "application/machining/RotaryPathTopology.h"
 #include "infrastructure/config/GProfile.h"
 #include "core/planning/ProcessPlan.h"
 #include "application/process/DocumentProcessState.h"
@@ -41,6 +42,7 @@ struct BoundaryAssignmentPerformanceReport
     double boundaryAnalysisMs = 0.0;
     double boundaryOrderingMs = 0.0;
     double wasteRefreshMs = 0.0;
+    double topologyBuildMs = 0.0;
     double pathRebuildMs = 0.0;
     double pointClassificationMs = 0.0;
     double processStateUpdateMs = 0.0;
@@ -50,6 +52,8 @@ struct BoundaryAssignmentPerformanceReport
     std::uint64_t selectedEntityCount = 0U;
     std::uint64_t boundaryGroupCount = 0U;
     std::uint64_t analyzedBoundaryCount = 0U;
+    std::uint64_t topologyBuildCount = 0U;
+    std::uint64_t topologyReuseCount = 0U;
     std::uint64_t rebuiltPathCount = 0U;
     std::uint64_t reusedPathCount = 0U;
     std::uint64_t classifiedEntityCount = 0U;
@@ -179,7 +183,15 @@ private:
     bool assignSelectedWasteEndCut();
     bool clearSelectedRotaryEndCutAssignments();
     bool clearRotaryEndCutAssignments();
-    QVector<CadItem*> expandedSelectedRotaryEndCut(QString* errorMessage = nullptr) const;
+    OperationResult<RotaryBoundaryOperationGeometry> buildRotaryBoundaryOperationGeometry
+    (
+        const QVector<CadItem*>& requiredItems = {}
+    ) const;
+    QVector<CadItem*> expandedSelectedRotaryEndCut
+    (
+        const RotaryBoundaryOperationGeometry& geometry,
+        QString* errorMessage = nullptr
+    ) const;
     bool recognizeRotaryTubeSection(bool interactive = true);
     bool setRotaryTubeSectionUserCenter
         (std::optional<cadcam::geometry::Vector2d> center);
@@ -191,6 +203,8 @@ private:
     bool clearAllMachiningFaceAndLineAssignments();
     void showMachiningContextMenu(const QPoint& globalPos);
     int refreshWasteProcessingExclusions();
+    int refreshWasteProcessingExclusions
+        (const RotaryBoundaryOperationGeometry& geometry);
     void invalidateProcessOrdersAfterEndCutChange();
     void invalidateCurrentProcessPlan();
     void handleProcessUnitMoveToBackRequest

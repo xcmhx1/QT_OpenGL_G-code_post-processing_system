@@ -107,11 +107,12 @@ namespace
             (
                 "[Performance][BoundaryAssignment] operation=%1 totalMs=%2 "
                 "selectionExpansionMs=%3 boundaryAnalysisMs=%4 boundaryOrderingMs=%5 "
-                "wasteRefreshMs=%6 pathRebuildMs=%7 pointClassificationMs=%8 "
-                "processStateUpdateMs=%9 viewerRefreshMs=%10 settingsSyncMs=%11 "
-                "documentEntityCount=%12 selectedEntityCount=%13 boundaryGroupCount=%14 "
-                "analyzedBoundaryCount=%15 rebuiltPathCount=%16 reusedPathCount=%17 "
-                "classifiedEntityCount=%18 classificationCallCount=%19 samplePointCount=%20"
+                "wasteRefreshMs=%6 topologyBuildMs=%7 pathRebuildMs=%8 "
+                "pointClassificationMs=%9 processStateUpdateMs=%10 viewerRefreshMs=%11 "
+                "settingsSyncMs=%12 documentEntityCount=%13 selectedEntityCount=%14 "
+                "boundaryGroupCount=%15 analyzedBoundaryCount=%16 topologyBuildCount=%17 "
+                "topologyReuseCount=%18 rebuiltPathCount=%19 reusedPathCount=%20 "
+                "classifiedEntityCount=%21 classificationCallCount=%22 samplePointCount=%23"
             )
                 .arg(report.operation)
                 .arg(report.totalMs, 0, 'f', 3)
@@ -119,6 +120,7 @@ namespace
                 .arg(report.boundaryAnalysisMs, 0, 'f', 3)
                 .arg(report.boundaryOrderingMs, 0, 'f', 3)
                 .arg(report.wasteRefreshMs, 0, 'f', 3)
+                .arg(report.topologyBuildMs, 0, 'f', 3)
                 .arg(report.pathRebuildMs, 0, 'f', 3)
                 .arg(report.pointClassificationMs, 0, 'f', 3)
                 .arg(report.processStateUpdateMs, 0, 'f', 3)
@@ -128,6 +130,8 @@ namespace
                 .arg(static_cast<qulonglong>(report.selectedEntityCount))
                 .arg(static_cast<qulonglong>(report.boundaryGroupCount))
                 .arg(static_cast<qulonglong>(report.analyzedBoundaryCount))
+                .arg(static_cast<qulonglong>(report.topologyBuildCount))
+                .arg(static_cast<qulonglong>(report.topologyReuseCount))
                 .arg(static_cast<qulonglong>(report.rebuiltPathCount))
                 .arg(static_cast<qulonglong>(report.reusedPathCount))
                 .arg(static_cast<qulonglong>(report.classifiedEntityCount))
@@ -154,10 +158,23 @@ namespace
         };
     }
 
+    QString firstDiagnosticMessage(const QVector<Diagnostic>& diagnostics)
+    {
+        for (const Diagnostic& diagnostic : diagnostics)
+        {
+            if (isErrorSeverity(diagnostic.severity))
+            {
+                return !diagnostic.userMessage.isEmpty()
+                    ? diagnostic.userMessage : diagnostic.technicalDetail;
+            }
+        }
+        return diagnostics.isEmpty() ? QString() : diagnostics.front().technicalDetail;
+    }
+
     RotaryCutBoundaryAnalysis analyzeBoundary
     (
         const QVector<CadItem*>& candidateItems,
-        const QVector<CadItem*>& sceneItems,
+        const RotaryPathTopology& topology,
         const RotaryTubeSectionModel& sectionModel,
         double connectionTolerance,
         BoundaryAssignmentPerformanceReport* report
@@ -165,14 +182,17 @@ namespace
     {
         BoundaryPerformanceTimer timer
             (report != nullptr ? &report->boundaryAnalysisMs : nullptr);
-        if (report != nullptr) ++report->analyzedBoundaryCount;
+        if (report != nullptr)
+        {
+            ++report->analyzedBoundaryCount;
+            ++report->topologyReuseCount;
+        }
         return RotaryCutBoundaryAnalyzer::analyze
         (
             candidateItems,
-            sceneItems,
+            topology,
             sectionModel,
-            connectionTolerance,
-            pathRebuildObserver(report)
+            connectionTolerance
         );
     }
 
@@ -2457,7 +2477,88 @@ bool Gcode_postprocessing_system::sortEntitiesByCurrentMode
     );
 }
 
-QVector<CadItem*> Gcode_postprocessing_system::expandedSelectedRotaryEndCut(QString* errorMessage) const
+OperationResult<RotaryBoundaryOperationGeometry>
+Gcode_postprocessing_system::buildRotaryBoundaryOperationGeometry
+(
+    const QVector<CadItem*>& requiredItems
+) const
+{
+    OperationResult<RotaryBoundaryOperationGeometry> result;
+    RotaryBoundaryOperationGeometry geometry;
+    geometry.documentRevision = m_document.contentRevision();
+    geometry.connectionTolerance = kEndCutConnectionTolerance;
+    geometry.sceneItems.reserve(static_cast<qsizetype>(m_document.m_entities.size()));
+
+    const QSet<CadItem*> requiredSet(requiredItems.begin(), requiredItems.end());
+    for (const std::unique_ptr<CadItem>& entity : m_document.m_entities)
+    {
+        if (entity == nullptr)
+        {
+            continue;
+        }
+        const auto processState = m_processState.stateOrDefault(entity->m_entityId);
+        if (!processState.effectiveInternalExclusion()
+            || processState.overrideData.boundaryRole != cadcam::planning::BoundaryRole::None
+            || requiredSet.contains(entity.get()))
+        {
+            geometry.sceneItems.push_back(entity.get());
+        }
+    }
+
+    {
+        BoundaryPerformanceTimer topologyTimer
+            (m_boundaryAssignmentPerformanceReport != nullptr
+                ? &m_boundaryAssignmentPerformanceReport->topologyBuildMs : nullptr);
+        if (m_boundaryAssignmentPerformanceReport != nullptr)
+        {
+            ++m_boundaryAssignmentPerformanceReport->topologyBuildCount;
+        }
+        geometry.topology = std::make_unique<RotaryPathTopology>
+        (
+            geometry.sceneItems,
+            RotaryPathTopologyTolerance::fromConnectionTolerance
+                (geometry.connectionTolerance),
+            pathRebuildObserver(m_boundaryAssignmentPerformanceReport)
+        );
+    }
+
+    if (geometry.documentRevision != m_document.contentRevision())
+    {
+        result.status = OperationStatus::Conflict;
+        Diagnostic diagnostic;
+        diagnostic.code = DiagnosticCode::TopologyBuildFailure;
+        diagnostic.severity = DiagnosticSeverity::Error;
+        diagnostic.component = QStringLiteral("BoundaryAssignment");
+        diagnostic.operation = QStringLiteral("BuildOperationGeometry");
+        diagnostic.stage = QStringLiteral("RevisionValidation");
+        diagnostic.userMessage = QStringLiteral("文档已发生变化，请重新执行加工断面操作。");
+        diagnostic.technicalDetail = QStringLiteral
+            ("document revision changed while building operation topology");
+        diagnostic.context.insert(QStringLiteral("capturedRevision"),
+            static_cast<qulonglong>(geometry.documentRevision));
+        diagnostic.context.insert(QStringLiteral("currentRevision"),
+            static_cast<qulonglong>(m_document.contentRevision()));
+        result.addDiagnostic(diagnostic);
+        return result;
+    }
+
+    result.status = geometry.topology->status();
+    result.diagnostics = geometry.topology->diagnostics();
+    if (result.status != OperationStatus::Success
+        && result.status != OperationStatus::PartialSuccess)
+    {
+        return result;
+    }
+
+    result.value.emplace(std::move(geometry));
+    return result;
+}
+
+QVector<CadItem*> Gcode_postprocessing_system::expandedSelectedRotaryEndCut
+(
+    const RotaryBoundaryOperationGeometry& geometry,
+    QString* errorMessage
+) const
 {
     BoundaryPerformanceTimer selectionTimer
         (m_boundaryAssignmentPerformanceReport != nullptr
@@ -2474,36 +2575,21 @@ QVector<CadItem*> Gcode_postprocessing_system::expandedSelectedRotaryEndCut(QStr
         return {};
     }
 
-    QVector<CadItem*> sceneItems;
-    sceneItems.reserve(static_cast<qsizetype>(m_document.m_entities.size()));
-
-    for (const std::unique_ptr<CadItem>& entity : m_document.m_entities)
-    {
-        if (entity != nullptr
-            && (!m_processState.stateOrDefault(entity->m_entityId).effectiveInternalExclusion()
-                || selectedItems.contains(entity.get())))
-        {
-            sceneItems.push_back(entity.get());
-        }
-    }
-
     qInfo().noquote() << QStringLiteral("[断面候选] 选择集：%1")
         .arg(describeRotaryPathItems(selectedItems));
     qInfo().noquote() << QStringLiteral("[断面候选] sceneItems 过滤后：%1")
-        .arg(describeRotaryPathItems(sceneItems));
+        .arg(describeRotaryPathItems(geometry.sceneItems));
     QVector<CadItem*> connectedItems;
     RotaryPathLoopResult loop;
     {
         BoundaryPerformanceTimer orderingTimer
             (m_boundaryAssignmentPerformanceReport != nullptr
                 ? &m_boundaryAssignmentPerformanceReport->boundaryOrderingMs : nullptr);
-        const RotaryPathTopology topology
-        (
-            sceneItems,
-            RotaryPathTopologyTolerance::fromConnectionTolerance(kEndCutConnectionTolerance),
-            pathRebuildObserver(m_boundaryAssignmentPerformanceReport)
-        );
-        loop = topology.extractSeededLoop(selectedItems, &connectedItems);
+        if (m_boundaryAssignmentPerformanceReport != nullptr)
+        {
+            ++m_boundaryAssignmentPerformanceReport->topologyReuseCount;
+        }
+        loop = geometry.topology->extractSeededLoop(selectedItems, &connectedItems);
     }
     qInfo().noquote() << QStringLiteral("[断面候选] 连通扩展：%1")
         .arg(describeRotaryPathItems(connectedItems));
@@ -2521,7 +2607,7 @@ QVector<CadItem*> Gcode_postprocessing_system::expandedSelectedRotaryEndCut(QStr
     const RotaryCutBoundaryAnalysis analysis = analyzeBoundary
     (
         loop.usedItems,
-        sceneItems,
+        *geometry.topology,
         m_rotaryTubeSectionModel,
         kEndCutConnectionTolerance,
         m_boundaryAssignmentPerformanceReport
@@ -2554,8 +2640,17 @@ bool Gcode_postprocessing_system::assignSelectedRotaryEndCut()
         static_cast<std::uint64_t>(m_document.m_entities.size()),
         static_cast<std::uint64_t>(ui->openGLWidget->selectedEntities().size())
     );
+    const QVector<CadItem*> selectedItems = ui->openGLWidget->selectedEntities();
+    auto operationGeometry = buildRotaryBoundaryOperationGeometry(selectedItems);
+    if (!operationGeometry.succeeded() || !operationGeometry.value.has_value())
+    {
+        QMessageBox::warning(this, QStringLiteral("指定加工断面"),
+            firstDiagnosticMessage(operationGeometry.diagnostics));
+        return false;
+    }
     QString selectionError;
-    const QVector<CadItem*> expandedItems = expandedSelectedRotaryEndCut(&selectionError);
+    const QVector<CadItem*> expandedItems = expandedSelectedRotaryEndCut
+        (*operationGeometry.value, &selectionError);
 
     if (expandedItems.isEmpty())
     {
@@ -2616,7 +2711,7 @@ bool Gcode_postprocessing_system::assignSelectedRotaryEndCut()
         .arg(expandedItems.size());
 
     invalidateProcessOrdersAfterEndCutChange();
-    refreshWasteProcessingExclusions();
+    refreshWasteProcessingExclusions(*operationGeometry.value);
     ui->openGLWidget->appendCommandMessage(message);
     updateBoundaryViewer(ui->openGLWidget, m_boundaryAssignmentPerformanceReport);
     statusBar()->showMessage(message, 5000);
@@ -2632,8 +2727,17 @@ bool Gcode_postprocessing_system::assignSelectedWasteEndCut()
         static_cast<std::uint64_t>(m_document.m_entities.size()),
         static_cast<std::uint64_t>(ui->openGLWidget->selectedEntities().size())
     );
+    const QVector<CadItem*> selectedItems = ui->openGLWidget->selectedEntities();
+    auto operationGeometry = buildRotaryBoundaryOperationGeometry(selectedItems);
+    if (!operationGeometry.succeeded() || !operationGeometry.value.has_value())
+    {
+        QMessageBox::warning(this, QStringLiteral("指定废面"),
+            firstDiagnosticMessage(operationGeometry.diagnostics));
+        return false;
+    }
     QString selectionError;
-    const QVector<CadItem*> expandedItems = expandedSelectedRotaryEndCut(&selectionError);
+    const QVector<CadItem*> expandedItems = expandedSelectedRotaryEndCut
+        (*operationGeometry.value, &selectionError);
 
     if (expandedItems.isEmpty())
     {
@@ -2684,7 +2788,7 @@ bool Gcode_postprocessing_system::assignSelectedWasteEndCut()
     }
 
     invalidateProcessOrdersAfterEndCutChange();
-    const int excludedCount = refreshWasteProcessingExclusions();
+    const int excludedCount = refreshWasteProcessingExclusions(*operationGeometry.value);
     const QString message = QStringLiteral("已指定废弃面 W%1，共识别 %2 个相连图元，已通过方管周向分离验证；当前废弃区共排除 %3 个图元。")
         .arg(wasteId + 1)
         .arg(expandedItems.size())
@@ -2982,8 +3086,16 @@ bool Gcode_postprocessing_system::toggleSelectedRotaryEndCutAssignment()
         return clearSelectedRotaryEndCutAssignments();
     }
 
+    auto operationGeometry = buildRotaryBoundaryOperationGeometry(selectedItems);
+    if (!operationGeometry.succeeded() || !operationGeometry.value.has_value())
+    {
+        QMessageBox::warning(this, QStringLiteral("加工断面指定"),
+            firstDiagnosticMessage(operationGeometry.diagnostics));
+        return false;
+    }
     QString errorMessage;
-    const QVector<CadItem*> boundaryItems = expandedSelectedRotaryEndCut(&errorMessage);
+    const QVector<CadItem*> boundaryItems = expandedSelectedRotaryEndCut
+        (*operationGeometry.value, &errorMessage);
 
     if (boundaryItems.isEmpty())
     {
@@ -3017,7 +3129,7 @@ bool Gcode_postprocessing_system::toggleSelectedRotaryEndCutAssignment()
     }
 
     invalidateProcessOrdersAfterEndCutChange();
-    refreshWasteProcessingExclusions();
+    refreshWasteProcessingExclusions(*operationGeometry.value);
     const QString message = QStringLiteral("已指定加工断面 %1，共 %2 个图元。")
         .arg(nextBoundaryId + 1)
         .arg(boundaryItems.size());
@@ -3036,18 +3148,15 @@ bool Gcode_postprocessing_system::recognizeAllRotaryEndCuts(bool interactive)
         static_cast<std::uint64_t>(m_document.m_entities.size()),
         static_cast<std::uint64_t>(ui->openGLWidget->selectedEntities().size())
     );
-    QVector<CadItem*> documentItems;
-    QVector<CadItem*> sceneItems;
-
-    for (const std::unique_ptr<CadItem>& entity : m_document.m_entities)
+    auto operationGeometry = buildRotaryBoundaryOperationGeometry();
+    if (!operationGeometry.succeeded() || !operationGeometry.value.has_value())
     {
-        if (entity != nullptr && !m_processState.stateOrDefault(entity->m_entityId)
-            .effectiveInternalExclusion())
-        {
-            documentItems.push_back(entity.get());
-            sceneItems.push_back(entity.get());
-        }
+        const QString message = firstDiagnosticMessage(operationGeometry.diagnostics);
+        ui->openGLWidget->appendCommandMessage(message);
+        statusBar()->showMessage(message, 5000);
+        return false;
     }
+    const QVector<CadItem*>& documentItems = operationGeometry.value->sceneItems;
 
     if (documentItems.isEmpty())
     {
@@ -3064,19 +3173,7 @@ bool Gcode_postprocessing_system::recognizeAllRotaryEndCuts(bool interactive)
     }
 
     qInfo().noquote() << QStringLiteral("[断面候选] sceneItems 过滤后：%1")
-        .arg(describeRotaryPathItems(sceneItems));
-    std::optional<RotaryPathTopology> topology;
-    {
-        BoundaryPerformanceTimer orderingTimer
-            (m_boundaryAssignmentPerformanceReport != nullptr
-                ? &m_boundaryAssignmentPerformanceReport->boundaryOrderingMs : nullptr);
-        topology.emplace
-        (
-            sceneItems,
-            RotaryPathTopologyTolerance::fromConnectionTolerance(kEndCutConnectionTolerance),
-            pathRebuildObserver(m_boundaryAssignmentPerformanceReport)
-        );
-    }
+        .arg(describeRotaryPathItems(operationGeometry.value->sceneItems));
     int nextBoundaryId = 0;
 
     for (CadItem* item : documentItems)
@@ -3108,7 +3205,12 @@ bool Gcode_postprocessing_system::recognizeAllRotaryEndCuts(bool interactive)
             BoundaryPerformanceTimer orderingTimer
                 (m_boundaryAssignmentPerformanceReport != nullptr
                     ? &m_boundaryAssignmentPerformanceReport->boundaryOrderingMs : nullptr);
-            loop = topology->extractSeededLoop(seedItems, &connectedItems);
+            if (m_boundaryAssignmentPerformanceReport != nullptr)
+            {
+                ++m_boundaryAssignmentPerformanceReport->topologyReuseCount;
+            }
+            loop = operationGeometry.value->topology->extractSeededLoop
+                (seedItems, &connectedItems);
         }
 
         if (!loop.valid || loop.usedItems.isEmpty())
@@ -3141,7 +3243,7 @@ bool Gcode_postprocessing_system::recognizeAllRotaryEndCuts(bool interactive)
         const RotaryCutBoundaryAnalysis analysis = analyzeBoundary
         (
             loop.usedItems,
-            sceneItems,
+            *operationGeometry.value->topology,
             m_rotaryTubeSectionModel,
             kEndCutConnectionTolerance,
             m_boundaryAssignmentPerformanceReport
@@ -3181,7 +3283,7 @@ bool Gcode_postprocessing_system::recognizeAllRotaryEndCuts(bool interactive)
     if (recognizedCount > 0)
     {
         invalidateProcessOrdersAfterEndCutChange();
-        refreshWasteProcessingExclusions();
+        refreshWasteProcessingExclusions(*operationGeometry.value);
     }
 
     ui->openGLWidget->appendCommandMessage(message);
@@ -3702,9 +3804,51 @@ void Gcode_postprocessing_system::handleProcessUnitMoveToBackRequest
 
 int Gcode_postprocessing_system::refreshWasteProcessingExclusions()
 {
+    const bool hasBoundary = std::any_of
+    (
+        m_document.m_entities.begin(), m_document.m_entities.end(),
+        [this](const std::unique_ptr<CadItem>& entity)
+        {
+            if (entity == nullptr) return false;
+            const auto state = m_processState.stateOrDefault(entity->m_entityId);
+            return state.overrideData.boundaryRole != cadcam::planning::BoundaryRole::None
+                && state.overrideData.boundaryPairId >= 0;
+        }
+    );
+    if (!hasBoundary)
+    {
+        syncMachiningSettingsState();
+        return 0;
+    }
+
+    auto operationGeometry = buildRotaryBoundaryOperationGeometry();
+    if (!operationGeometry.succeeded() || !operationGeometry.value.has_value())
+    {
+        syncMachiningSettingsState();
+        int excludedCount = 0;
+        for (const std::unique_ptr<CadItem>& entity : m_document.m_entities)
+        {
+            if (entity != nullptr && m_processState.stateOrDefault(entity->m_entityId)
+                .overrideData.boundaryRole == cadcam::planning::BoundaryRole::Waste)
+            {
+                ++excludedCount;
+            }
+        }
+        return excludedCount;
+    }
+    return refreshWasteProcessingExclusions(*operationGeometry.value);
+}
+
+int Gcode_postprocessing_system::refreshWasteProcessingExclusions
+    (const RotaryBoundaryOperationGeometry& geometry)
+{
     BoundaryPerformanceTimer wasteRefreshTimer
         (m_boundaryAssignmentPerformanceReport != nullptr
             ? &m_boundaryAssignmentPerformanceReport->wasteRefreshMs : nullptr);
+    if (m_boundaryAssignmentPerformanceReport != nullptr)
+    {
+        ++m_boundaryAssignmentPerformanceReport->topologyReuseCount;
+    }
     struct BoundaryGroup
     {
         cadcam::planning::BoundaryRole role = cadcam::planning::BoundaryRole::None;
@@ -3712,10 +3856,7 @@ int Gcode_postprocessing_system::refreshWasteProcessingExclusions()
     };
 
     std::map<int, BoundaryGroup> boundaryGroups;
-    QVector<CadItem*> sceneItems;
-    sceneItems.reserve(static_cast<qsizetype>(m_document.m_entities.size()));
-
-    for (const std::unique_ptr<CadItem>& entity : m_document.m_entities)
+    for (CadItem* entity : geometry.sceneItems)
     {
         if (entity == nullptr)
         {
@@ -3723,7 +3864,6 @@ int Gcode_postprocessing_system::refreshWasteProcessingExclusions()
         }
 
         const auto state = m_processState.stateOrDefault(entity->m_entityId);
-        sceneItems.push_back(entity.get());
 
         if (state.overrideData.boundaryRole == cadcam::planning::BoundaryRole::None
             || state.overrideData.boundaryPairId < 0)
@@ -3735,7 +3875,7 @@ int Gcode_postprocessing_system::refreshWasteProcessingExclusions()
         const int key = state.overrideData.boundaryPairId * 4 + roleIndex;
         BoundaryGroup& group = boundaryGroups[key];
         group.role = state.overrideData.boundaryRole;
-        group.items.push_back(entity.get());
+        group.items.push_back(entity);
     }
 
     if (m_boundaryAssignmentPerformanceReport != nullptr)
@@ -3765,7 +3905,7 @@ int Gcode_postprocessing_system::refreshWasteProcessingExclusions()
         boundary.analysis = analyzeBoundary
         (
             group.items,
-            sceneItems,
+            *geometry.topology,
             m_rotaryTubeSectionModel,
             kEndCutConnectionTolerance,
             m_boundaryAssignmentPerformanceReport
@@ -3873,8 +4013,16 @@ int Gcode_postprocessing_system::refreshWasteProcessingExclusions()
     }
 
     int excludedCount = 0;
+    QHash<CadItem*, const RotaryPathTopologyRecord*> topologyRecordByItem;
+    for (const RotaryPathTopologyRecord& record : geometry.topology->records())
+    {
+        if (record.sourceItem != nullptr)
+        {
+            topologyRecordByItem.insert(record.sourceItem, &record);
+        }
+    }
 
-    for (const std::unique_ptr<CadItem>& entity : m_document.m_entities)
+    for (CadItem* entity : geometry.sceneItems)
     {
         if (entity == nullptr)
         {
@@ -3894,20 +4042,16 @@ int Gcode_postprocessing_system::refreshWasteProcessingExclusions()
             continue;
         }
 
-        {
-            BoundaryPerformanceTimer pathTimer
-                (m_boundaryAssignmentPerformanceReport != nullptr
-                    ? &m_boundaryAssignmentPerformanceReport->pathRebuildMs : nullptr);
-            entity->rebuildRawPathPoints3D();
-            if (m_boundaryAssignmentPerformanceReport != nullptr)
-            {
-                ++m_boundaryAssignmentPerformanceReport->rebuiltPathCount;
-            }
-        }
-
-        if (entity->rawPathPoints3D().empty())
+        const auto topologyRecord = topologyRecordByItem.constFind(entity);
+        if (topologyRecord == topologyRecordByItem.cend()
+            || (*topologyRecord)->points.isEmpty())
         {
             continue;
+        }
+        const QVector<QVector3D>& pathPoints = (*topologyRecord)->points;
+        if (m_boundaryAssignmentPerformanceReport != nullptr)
+        {
+            ++m_boundaryAssignmentPerformanceReport->reusedPathCount;
         }
 
         size_t intervalIndex = boundaries.size();
@@ -3926,19 +4070,13 @@ int Gcode_postprocessing_system::refreshWasteProcessingExclusions()
                 bool hasPointBefore = false;
                 bool hasPointAfter = false;
 
-                for (const RawPathPoint3D& rawPoint : entity->rawPathPoints3D())
+                for (const QVector3D& point : pathPoints)
                 {
                     if (m_boundaryAssignmentPerformanceReport != nullptr)
                     {
                         ++m_boundaryAssignmentPerformanceReport->classificationCallCount;
                         ++m_boundaryAssignmentPerformanceReport->samplePointCount;
                     }
-                    const QVector3D point
-                    (
-                        static_cast<float>(rawPoint.x),
-                        static_cast<float>(rawPoint.y),
-                        static_cast<float>(rawPoint.z)
-                    );
                     const RotaryBoundarySide side =
                         RotaryCutBoundaryAnalyzer::classifyPointRelativeToBoundary
                         (boundaries[boundaryIndex].analysis, point,

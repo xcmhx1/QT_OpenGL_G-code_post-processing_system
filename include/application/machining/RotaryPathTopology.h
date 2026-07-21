@@ -7,7 +7,9 @@
 #include <QVector3D>
 
 #include <map>
+#include <cstdint>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <vector>
 
@@ -82,6 +84,14 @@ private:
     mutable OperationStatus m_status = OperationStatus::InternalError;
     mutable QVector<Diagnostic> m_diagnostics;
     OperationContext m_context;
+};
+
+struct RotaryBoundaryOperationGeometry
+{
+    std::uint64_t documentRevision = 0U;
+    double connectionTolerance = 0.0;
+    QVector<CadItem*> sceneItems;
+    std::unique_ptr<RotaryPathTopology> topology;
 };
 
 QString describeRotaryPathItems(const QVector<CadItem*>& items);
