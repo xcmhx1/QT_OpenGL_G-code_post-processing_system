@@ -10,6 +10,20 @@
 
 namespace cadcam::machining
 {
+    enum class TubeSurfaceRegion
+    {
+        Top,
+        TopRightCorner,
+        Right,
+        BottomRightCorner,
+        Bottom,
+        BottomLeftCorner,
+        Left,
+        TopLeftCorner,
+        Mixed,
+        Unknown
+    };
+
     struct TubeCornerGeometry
     {
         geometry::Vector2d center;

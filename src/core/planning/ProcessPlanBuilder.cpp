@@ -5,6 +5,7 @@
 #include <QStringList>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <limits>
 #include <map>
@@ -97,6 +98,63 @@ namespace cadcam::planning
             bool valid = false;
             double perimeterPosition = 0.0;
             double distance = std::numeric_limits<double>::max();
+        };
+
+        struct SectionBounds
+        {
+            bool valid = false;
+            double minimumY = 0.0;
+            double maximumY = 0.0;
+            double minimumZ = 0.0;
+            double maximumZ = 0.0;
+        };
+
+        struct ProcessSurfaceFootprint
+        {
+            machining::TubeSurfaceRegion dominantRegion =
+                machining::TubeSurfaceRegion::Unknown;
+            machining::TubeSurfaceRegion entryRegion =
+                machining::TubeSurfaceRegion::Unknown;
+            machining::TubeSurfaceRegion exitRegion =
+                machining::TubeSurfaceRegion::Unknown;
+            double minimumX = 0.0;
+            double maximumX = 0.0;
+            double anchorX = 0.0;
+            double minimumPerimeterPosition = 0.0;
+            double maximumPerimeterPosition = 0.0;
+        };
+
+        struct SurfaceSweepState
+        {
+            machining::TubeSurfaceRegion currentRegion =
+                machining::TubeSurfaceRegion::Unknown;
+            int perimeterDirection = 0;
+            int longitudinalDirection = 0;
+            double currentX = 0.0;
+            double currentPerimeterPosition = 0.0;
+            bool initialized = false;
+        };
+
+        struct SurfaceSweepReport
+        {
+            int partitionId = -1;
+            machining::TubeSurfaceRegion initialRegion =
+                machining::TubeSurfaceRegion::Unknown;
+            int perimeterDirection = 0;
+            int longitudinalDirection = 0;
+            int selectedUnitCount = 0;
+            int regionTransitionCount = 0;
+            int backtrackCount = 0;
+            double longitudinalBacktrackDistance = 0.0;
+            QStringList selectedUnits;
+            bool active = false;
+        };
+
+        struct SchedulingCandidate
+        {
+            GroupTraversal traversal;
+            ProcessSurfaceFootprint footprint;
+            std::optional<ClosedLoopTraversalReport> closedLoopReport;
         };
 
         double distance(const Vector3d& left, const Vector3d& right)
@@ -283,6 +341,257 @@ namespace cadcam::planning
                 }
             }
             return best;
+        }
+
+        QString surfaceRegionName(machining::TubeSurfaceRegion region)
+        {
+            using Region = machining::TubeSurfaceRegion;
+            switch (region)
+            {
+            case Region::Top: return QStringLiteral("Top");
+            case Region::TopRightCorner: return QStringLiteral("TopRightCorner");
+            case Region::Right: return QStringLiteral("Right");
+            case Region::BottomRightCorner: return QStringLiteral("BottomRightCorner");
+            case Region::Bottom: return QStringLiteral("Bottom");
+            case Region::BottomLeftCorner: return QStringLiteral("BottomLeftCorner");
+            case Region::Left: return QStringLiteral("Left");
+            case Region::TopLeftCorner: return QStringLiteral("TopLeftCorner");
+            case Region::Mixed: return QStringLiteral("Mixed");
+            case Region::Unknown: return QStringLiteral("Unknown");
+            }
+            return QStringLiteral("Unknown");
+        }
+
+        int surfaceRegionIndex(machining::TubeSurfaceRegion region)
+        {
+            using Region = machining::TubeSurfaceRegion;
+            switch (region)
+            {
+            case Region::Top: return 0;
+            case Region::TopRightCorner: return 1;
+            case Region::Right: return 2;
+            case Region::BottomRightCorner: return 3;
+            case Region::Bottom: return 4;
+            case Region::BottomLeftCorner: return 5;
+            case Region::Left: return 6;
+            case Region::TopLeftCorner: return 7;
+            case Region::Mixed:
+            case Region::Unknown: return -1;
+            }
+            return -1;
+        }
+
+        machining::TubeSurfaceRegion surfaceRegionAt(int index)
+        {
+            using Region = machining::TubeSurfaceRegion;
+            static constexpr std::array<Region, 8> regions
+            {{
+                Region::Top,
+                Region::TopRightCorner,
+                Region::Right,
+                Region::BottomRightCorner,
+                Region::Bottom,
+                Region::BottomLeftCorner,
+                Region::Left,
+                Region::TopLeftCorner
+            }};
+            const int wrapped = ((index % 8) + 8) % 8;
+            return regions[static_cast<std::size_t>(wrapped)];
+        }
+
+        SectionBounds sectionBounds(const machining::TubeSectionGeometry& section)
+        {
+            SectionBounds bounds;
+            if (section.boundary.empty()) return bounds;
+            bounds.valid = true;
+            bounds.minimumY = bounds.maximumY = section.boundary.front().x;
+            bounds.minimumZ = bounds.maximumZ = section.boundary.front().y;
+            for (const Vector2d& point : section.boundary)
+            {
+                if (!std::isfinite(point.x) || !std::isfinite(point.y))
+                    return SectionBounds{};
+                bounds.minimumY = std::min(bounds.minimumY, point.x);
+                bounds.maximumY = std::max(bounds.maximumY, point.x);
+                bounds.minimumZ = std::min(bounds.minimumZ, point.y);
+                bounds.maximumZ = std::max(bounds.maximumZ, point.y);
+            }
+            return bounds;
+        }
+
+        double surfaceClassificationTolerance
+        (
+            const machining::TubeSectionGeometry& section
+        )
+        {
+            const double maximumDimension = std::max
+                (std::abs(section.yLength), std::abs(section.zWidth));
+            return std::max({ kCalculationEpsilon, 1.0e-6,
+                maximumDimension * 1.0e-8 });
+        }
+
+        machining::TubeSurfaceRegion cornerRegion
+        (
+            const machining::TubeCornerGeometry& corner
+        )
+        {
+            using Region = machining::TubeSurfaceRegion;
+            if (corner.yDirection > 0 && corner.zDirection > 0)
+                return Region::TopRightCorner;
+            if (corner.yDirection > 0 && corner.zDirection < 0)
+                return Region::BottomRightCorner;
+            if (corner.yDirection < 0 && corner.zDirection < 0)
+                return Region::BottomLeftCorner;
+            if (corner.yDirection < 0 && corner.zDirection > 0)
+                return Region::TopLeftCorner;
+            return Region::Unknown;
+        }
+
+        const machining::TubeCornerGeometry* matchingTubeCorner
+        (
+            const Vector3d& point,
+            const machining::TubeSectionModel& section
+        )
+        {
+            for (const auto& corner : section.corners)
+            {
+                if (!std::isfinite(corner.radius) || corner.radius <= 0.0) continue;
+                const double tolerance = std::max(0.01, corner.radius * 0.01);
+                const double dy = point.y - corner.center.x;
+                const double dz = point.z - corner.center.y;
+                if (dy * corner.yDirection < -tolerance
+                    || dz * corner.zDirection < -tolerance) continue;
+                if (std::abs(std::hypot(dy, dz) - corner.radius) <= tolerance)
+                    return &corner;
+            }
+            return nullptr;
+        }
+
+        std::optional<machining::TubeSurfaceRegion> flatRegionForPoints
+        (
+            const std::vector<Vector3d>& points,
+            const SectionBounds& bounds,
+            double tolerance
+        )
+        {
+            using Region = machining::TubeSurfaceRegion;
+            if (points.empty() || !bounds.valid) return std::nullopt;
+            struct Candidate
+            {
+                Region region = Region::Unknown;
+                double maximumDistance = 0.0;
+                double averageDistance = 0.0;
+            };
+            const std::array<std::pair<Region, double>, 4> planes
+            {{
+                { Region::Top, bounds.maximumZ },
+                { Region::Right, bounds.maximumY },
+                { Region::Bottom, bounds.minimumZ },
+                { Region::Left, bounds.minimumY }
+            }};
+            std::vector<Candidate> candidates;
+            for (const auto& [region, coordinate] : planes)
+            {
+                double maximumDistance = 0.0;
+                double totalDistance = 0.0;
+                for (const Vector3d& point : points)
+                {
+                    const double value = region == Region::Top || region == Region::Bottom
+                        ? point.z : point.y;
+                    const double candidateDistance = std::abs(value - coordinate);
+                    maximumDistance = std::max(maximumDistance, candidateDistance);
+                    totalDistance += candidateDistance;
+                }
+                if (maximumDistance <= tolerance)
+                {
+                    candidates.push_back
+                    ({ region, maximumDistance,
+                        totalDistance / static_cast<double>(points.size()) });
+                }
+            }
+            if (candidates.empty()) return std::nullopt;
+            std::sort(candidates.begin(), candidates.end(), [](const Candidate& left,
+                const Candidate& right)
+            {
+                if (std::abs(left.maximumDistance - right.maximumDistance)
+                    > kCalculationEpsilon)
+                    return left.maximumDistance < right.maximumDistance;
+                if (std::abs(left.averageDistance - right.averageDistance)
+                    > kCalculationEpsilon)
+                    return left.averageDistance < right.averageDistance;
+                return surfaceRegionIndex(left.region) < surfaceRegionIndex(right.region);
+            });
+            if (candidates.size() == 1U) return candidates.front().region;
+            if (candidates[0].maximumDistance
+                    < candidates[1].maximumDistance - kCalculationEpsilon
+                || (std::abs(candidates[0].maximumDistance
+                        - candidates[1].maximumDistance) <= kCalculationEpsilon
+                    && candidates[0].averageDistance
+                        < candidates[1].averageDistance - kCalculationEpsilon))
+                return candidates.front().region;
+            return std::nullopt;
+        }
+
+        std::optional<machining::TubeSurfaceRegion> cornerRegionForPoints
+        (
+            const std::vector<Vector3d>& points,
+            const machining::TubeSectionModel& section
+        )
+        {
+            if (points.empty()) return std::nullopt;
+            const machining::TubeCornerGeometry* selected = nullptr;
+            for (const Vector3d& point : points)
+            {
+                const auto* corner = matchingTubeCorner(point, section);
+                if (corner == nullptr || (selected != nullptr && selected != corner))
+                    return std::nullopt;
+                selected = corner;
+            }
+            if (selected == nullptr) return std::nullopt;
+            const auto region = cornerRegion(*selected);
+            return surfaceRegionIndex(region) >= 0
+                ? std::optional<machining::TubeSurfaceRegion>(region) : std::nullopt;
+        }
+
+        machining::TubeSurfaceRegion classifySurfacePoints
+        (
+            const std::vector<Vector3d>& points,
+            const machining::TubeSectionModel& section,
+            const SectionBounds& bounds,
+            double tolerance
+        )
+        {
+            if (const auto flat = flatRegionForPoints(points, bounds, tolerance))
+                return *flat;
+            if (const auto corner = cornerRegionForPoints(points, section))
+                return *corner;
+            return points.empty() ? machining::TubeSurfaceRegion::Unknown
+                : machining::TubeSurfaceRegion::Mixed;
+        }
+
+        machining::TubeSurfaceRegion classifySurfacePoint
+        (
+            const Vector3d& point,
+            const machining::TubeSectionModel& section,
+            const SectionBounds& bounds,
+            double tolerance
+        )
+        {
+            if (const auto* corner = matchingTubeCorner(point, section))
+            {
+                const auto region = cornerRegion(*corner);
+                if (surfaceRegionIndex(region) >= 0) return region;
+            }
+            const std::vector<Vector3d> singlePoint{ point };
+            if (const auto flat = flatRegionForPoints(singlePoint, bounds, tolerance))
+                return *flat;
+            return machining::TubeSurfaceRegion::Unknown;
+        }
+
+        double wrappedPerimeterDelta(double from, double to, double perimeter)
+        {
+            if (!std::isfinite(from) || !std::isfinite(to)
+                || !std::isfinite(perimeter) || perimeter <= 0.0) return 0.0;
+            return std::remainder(to - from, perimeter);
         }
 
         BoundarySide classifyPoint
@@ -582,6 +891,174 @@ namespace cadcam::planning
                 std::reverse(points.begin(), points.end());
             }
             return points;
+        }
+
+        machining::TubeSurfaceRegion directedEndpointRegion
+        (
+            const DirectedEntity& directed,
+            bool entry,
+            const machining::TubeSectionModel& section,
+            const SectionBounds& bounds,
+            double tolerance
+        )
+        {
+            const std::vector<Vector3d> points = directedPoints
+                (*directed.entity, directed.reverseRelativeToInput);
+            if (points.size() >= 2U)
+            {
+                const Vector3d& endpoint = entry ? points.front() : points.back();
+                for (std::size_t offset = 1U; offset < points.size(); ++offset)
+                {
+                    const Vector3d& neighbor = entry
+                        ? points[offset] : points[points.size() - 1U - offset];
+                    if (distance(endpoint, neighbor) <= kCalculationEpsilon) continue;
+                    const Vector3d middle
+                    {
+                        (endpoint.x + neighbor.x) * 0.5,
+                        (endpoint.y + neighbor.y) * 0.5,
+                        (endpoint.z + neighbor.z) * 0.5
+                    };
+                    const auto region = classifySurfacePoints
+                        ({ endpoint, middle, neighbor }, section, bounds, tolerance);
+                    if (region != machining::TubeSurfaceRegion::Unknown) return region;
+                    break;
+                }
+            }
+            return classifySurfacePoint
+                (entry ? directed.start : directed.end, section, bounds, tolerance);
+        }
+
+        ProcessSurfaceFootprint buildSurfaceFootprint
+        (
+            const ProcessGroup& group,
+            const std::unordered_map<EntityId, const PlanningEntity*>& entities,
+            const machining::TubeSectionModel& section,
+            const SectionBounds& bounds,
+            const std::vector<double>& cumulative,
+            double tolerance
+        )
+        {
+            ProcessSurfaceFootprint footprint;
+            std::vector<Vector3d> points;
+            std::vector<double> xCoordinates;
+            std::vector<double> perimeterPositions;
+            const PlanningEntity* firstEntity = nullptr;
+            for (const EntityId entityId : group.entityIds)
+            {
+                const auto found = entities.find(entityId);
+                if (found == entities.end() || found->second == nullptr) continue;
+                const PlanningEntity& entity = *found->second;
+                if (firstEntity == nullptr
+                    || entity.sourceIndex < firstEntity->sourceIndex
+                    || (entity.sourceIndex == firstEntity->sourceIndex
+                        && entity.entityId < firstEntity->entityId))
+                    firstEntity = &entity;
+                for (const auto& vertex : entity.path.vertices)
+                {
+                    const Vector3d& point = vertex.position;
+                    if (!std::isfinite(point.x) || !std::isfinite(point.y)
+                        || !std::isfinite(point.z)) continue;
+                    points.push_back(point);
+                    xCoordinates.push_back(point.x);
+                    const SectionProjection projection = projectToSection
+                        ({ point.y, point.z }, section.geometry, cumulative);
+                    if (projection.valid) perimeterPositions.push_back
+                        (projection.perimeterPosition);
+                }
+            }
+            if (points.empty()) return footprint;
+
+            footprint.dominantRegion = group.kind == ProcessGroupKind::BreakBoundary
+                    || group.kind == ProcessGroupKind::WasteBoundary
+                ? machining::TubeSurfaceRegion::Mixed
+                : classifySurfacePoints(points, section, bounds, tolerance);
+            std::sort(xCoordinates.begin(), xCoordinates.end());
+            footprint.minimumX = xCoordinates.front();
+            footprint.maximumX = xCoordinates.back();
+            const std::size_t middle = xCoordinates.size() / 2U;
+            footprint.anchorX = xCoordinates.size() % 2U == 0U
+                ? (xCoordinates[middle - 1U] + xCoordinates[middle]) * 0.5
+                : xCoordinates[middle];
+            if (!perimeterPositions.empty())
+            {
+                const auto extrema = std::minmax_element
+                    (perimeterPositions.begin(), perimeterPositions.end());
+                footprint.minimumPerimeterPosition = *extrema.first;
+                footprint.maximumPerimeterPosition = *extrema.second;
+            }
+            if (surfaceRegionIndex(footprint.dominantRegion) >= 0)
+            {
+                footprint.entryRegion = footprint.dominantRegion;
+                footprint.exitRegion = footprint.dominantRegion;
+            }
+            else if (firstEntity != nullptr && !firstEntity->path.vertices.empty())
+            {
+                const Vector3d& first = firstEntity->path.vertices.front().position;
+                const Vector3d& last = firstEntity->path.vertices.back().position;
+                footprint.entryRegion = classifySurfacePoint
+                    (first, section, bounds, tolerance);
+                footprint.exitRegion = classifySurfacePoint
+                    (last, section, bounds, tolerance);
+            }
+            return footprint;
+        }
+
+        ProcessSurfaceFootprint footprintForTraversal
+        (
+            ProcessSurfaceFootprint footprint,
+            const GroupTraversal& traversal,
+            const machining::TubeSectionModel& section,
+            const SectionBounds& bounds,
+            double tolerance
+        )
+        {
+            if (surfaceRegionIndex(footprint.dominantRegion) >= 0)
+            {
+                footprint.entryRegion = footprint.dominantRegion;
+                footprint.exitRegion = footprint.dominantRegion;
+                return footprint;
+            }
+            if (!traversal.entities.empty())
+            {
+                footprint.entryRegion = directedEndpointRegion
+                    (traversal.entities.front(), true, section, bounds, tolerance);
+                footprint.exitRegion = directedEndpointRegion
+                    (traversal.entities.back(), false, section, bounds, tolerance);
+            }
+            return footprint;
+        }
+
+        int traversalPerimeterDirection
+        (
+            const GroupTraversal& traversal,
+            const machining::TubeSectionModel& section,
+            const std::vector<double>& cumulative,
+            double tolerance
+        )
+        {
+            if (traversal.entities.empty() || section.geometry.perimeter <= 0.0) return 0;
+            const DirectedEntity& last = traversal.entities.back();
+            const std::vector<Vector3d> points = directedPoints
+                (*last.entity, last.reverseRelativeToInput);
+            if (points.size() < 2U) return 0;
+            const Vector3d& endpoint = points.back();
+            for (std::size_t offset = 1U; offset < points.size(); ++offset)
+            {
+                const Vector3d& previous = points[points.size() - 1U - offset];
+                if (distance(previous, endpoint) <= kCalculationEpsilon) continue;
+                const SectionProjection from = projectToSection
+                    ({ previous.y, previous.z }, section.geometry, cumulative);
+                const SectionProjection to = projectToSection
+                    ({ endpoint.y, endpoint.z }, section.geometry, cumulative);
+                if (!from.valid || !to.valid) return 0;
+                const double delta = wrappedPerimeterDelta
+                    (from.perimeterPosition, to.perimeterPosition,
+                        section.geometry.perimeter);
+                if (delta > tolerance) return 1;
+                if (delta < -tolerance) return -1;
+                return 0;
+            }
+            return 0;
         }
 
         bool directionAllowed(const PlanningEntity& entity, bool reverse, bool allowReverse)
@@ -935,6 +1412,67 @@ namespace cadcam::planning
             return leftReverse < rightReverse;
         }
 
+        bool surfaceSweepCandidateLess
+        (
+            const SchedulingCandidate& left,
+            const SchedulingCandidate& right,
+            const SurfaceSweepState& state,
+            double tolerance
+        )
+        {
+            const double leftDelta = left.footprint.anchorX - state.currentX;
+            const double rightDelta = right.footprint.anchorX - state.currentX;
+            const bool leftForward = state.longitudinalDirection >= 0
+                ? leftDelta >= -tolerance : leftDelta <= tolerance;
+            const bool rightForward = state.longitudinalDirection >= 0
+                ? rightDelta >= -tolerance : rightDelta <= tolerance;
+            if (leftForward != rightForward) return leftForward;
+
+            const double leftBacktrack = leftForward ? 0.0 : std::abs(leftDelta);
+            const double rightBacktrack = rightForward ? 0.0 : std::abs(rightDelta);
+            if (std::abs(leftBacktrack - rightBacktrack) > kCalculationEpsilon)
+                return leftBacktrack < rightBacktrack;
+            if (std::abs(std::abs(leftDelta) - std::abs(rightDelta))
+                > kCalculationEpsilon)
+                return std::abs(leftDelta) < std::abs(rightDelta);
+            if (std::abs(left.traversal.rotationCost - right.traversal.rotationCost)
+                > kCalculationEpsilon)
+                return left.traversal.rotationCost < right.traversal.rotationCost;
+            if (left.traversal.entryAxisReversalCount
+                != right.traversal.entryAxisReversalCount)
+                return left.traversal.entryAxisReversalCount
+                    < right.traversal.entryAxisReversalCount;
+            if (std::abs(left.traversal.entryTangentCost
+                    - right.traversal.entryTangentCost) > kCalculationEpsilon)
+                return left.traversal.entryTangentCost
+                    < right.traversal.entryTangentCost;
+            if (std::abs(left.traversal.movementDistance
+                    - right.traversal.movementDistance) > kCalculationEpsilon)
+                return left.traversal.movementDistance
+                    < right.traversal.movementDistance;
+            if (left.traversal.stableSourceIndex != right.traversal.stableSourceIndex)
+                return left.traversal.stableSourceIndex
+                    < right.traversal.stableSourceIndex;
+            if (left.traversal.stableEntityId != right.traversal.stableEntityId)
+                return left.traversal.stableEntityId
+                    < right.traversal.stableEntityId;
+            return traversalLess(left.traversal, right.traversal,
+                ProcessOrderingStrategy::NearestNext);
+        }
+
+        bool footprintUsesRegion
+        (
+            const ProcessSurfaceFootprint& footprint,
+            machining::TubeSurfaceRegion region,
+            bool allowMixed
+        )
+        {
+            if (footprint.dominantRegion == region) return true;
+            return allowMixed
+                && footprint.dominantRegion == machining::TubeSurfaceRegion::Mixed
+                && footprint.entryRegion == region;
+        }
+
         QVariantMap closedLoopDiagnosticValues(const ClosedLoopTraversalReport& report)
         {
             auto entityIdsText = [](const std::vector<EntityId>& entityIds)
@@ -965,6 +1503,43 @@ namespace cadcam::planning
             values.insert(QStringLiteral("status"), report.status);
             values.insert(QStringLiteral("failureReason"), report.failureReason);
             return values;
+        }
+
+        Diagnostic surfaceSweepDiagnostic
+        (
+            const OperationContext& context,
+            const SurfaceSweepReport& report
+        )
+        {
+            QVariantMap values;
+            values.insert(QStringLiteral("surfaceSweepSummary"), true);
+            values.insert(QStringLiteral("partitionId"), report.partitionId);
+            values.insert(QStringLiteral("initialRegion"),
+                surfaceRegionName(report.initialRegion));
+            values.insert(QStringLiteral("perimeterDirection"),
+                report.perimeterDirection);
+            values.insert(QStringLiteral("longitudinalDirection"),
+                report.longitudinalDirection);
+            values.insert(QStringLiteral("selectedUnits"),
+                report.selectedUnits.join(QLatin1Char(',')));
+            values.insert(QStringLiteral("selectedUnitCount"),
+                report.selectedUnitCount);
+            values.insert(QStringLiteral("regionTransitions"),
+                report.regionTransitionCount);
+            values.insert(QStringLiteral("backtrackCount"),
+                report.backtrackCount);
+            values.insert(QStringLiteral("longitudinalBacktrackDistance"),
+                report.longitudinalBacktrackDistance);
+            values.insert(QStringLiteral("status"), QStringLiteral("Success"));
+            return planningDiagnostic
+            (
+                context,
+                DiagnosticCode::ProcessPlanningSurfaceSweepSummary,
+                QStringLiteral("四轴按面扫描分区已完成。"),
+                QStringLiteral("LazyRotation surface sweep partition completed."),
+                values,
+                DiagnosticSeverity::Info
+            );
         }
 
         class ClosedLoopTraversalBuilder
@@ -1514,6 +2089,7 @@ namespace cadcam::planning
         }
 
         std::optional<machining::TubeSectionGeometry> planningSection;
+        std::optional<machining::TubeSectionModel> surfaceSweepSection;
         if (input.tubeSection.has_value())
         {
             auto preparedSection = TubeCutBoundaryClassifier::prepareSection
@@ -1532,7 +2108,21 @@ namespace cadcam::planning
                 return result;
             }
             planningSection = std::move(*preparedSection.value);
+            surfaceSweepSection = *input.tubeSection;
+            surfaceSweepSection->geometry = *planningSection;
         }
+        const bool surfaceSweepEnabled = policy.sortIntent
+                == ProcessSortIntent::RebuildSequence
+            && policy.orderingStrategy == ProcessOrderingStrategy::LazyRotation
+            && surfaceSweepSection.has_value();
+        const SectionBounds sweepSectionBounds = surfaceSweepEnabled
+            ? sectionBounds(surfaceSweepSection->geometry) : SectionBounds{};
+        const std::vector<double> sweepSectionCumulative = surfaceSweepEnabled
+            ? cumulativeSectionLengths(surfaceSweepSection->geometry)
+            : std::vector<double>{};
+        const double sweepSurfaceTolerance = surfaceSweepEnabled
+            ? surfaceClassificationTolerance(surfaceSweepSection->geometry)
+            : 0.0;
 
         ProcessPlan plan;
         plan.contentRevision = input.contentRevision;
@@ -1756,6 +2346,24 @@ namespace cadcam::planning
         std::unordered_set<int> excludedGroups;
         for (const ProcessGroup& group : plan.groups)
             if (group.kind == ProcessGroupKind::WasteBoundary) excludedGroups.insert(group.groupId);
+
+        std::unordered_map<int, ProcessSurfaceFootprint> surfaceFootprints;
+        if (surfaceSweepEnabled)
+        {
+            surfaceFootprints.reserve(plan.groups.size());
+            for (const ProcessGroup& group : plan.groups)
+            {
+                surfaceFootprints.emplace
+                (
+                    group.groupId,
+                    buildSurfaceFootprint
+                    (
+                        group, entities, *surfaceSweepSection, sweepSectionBounds,
+                        sweepSectionCumulative, sweepSurfaceTolerance
+                    )
+                );
+            }
+        }
 
         std::vector<std::vector<int>> boundarySuccessors(boundaries.size());
         std::vector<int> boundaryIndegree(boundaries.size(), 0);
@@ -2005,6 +2613,9 @@ namespace cadcam::planning
 
         std::unordered_set<int> scheduled;
         QVector<Diagnostic> closedLoopDiagnostics;
+        QVector<Diagnostic> surfaceSweepDiagnostics;
+        SurfaceSweepState surfaceSweepState;
+        SurfaceSweepReport surfaceSweepReport;
         Vector3d currentPosition = policy.initialPosition;
         int processOrder = 0;
         while (scheduled.size() < schedulable.size())
@@ -2026,12 +2637,12 @@ namespace cadcam::planning
                 );
             }
 
-            std::optional<GroupTraversal> selected;
-            std::optional<ClosedLoopTraversalReport> selectedClosedLoopReport;
             const bool initialSelection = scheduled.empty();
             const ProcessOrderingStrategy selectionStrategy = initialSelection
                 ? ProcessOrderingStrategy::NearestNext
                 : policy.orderingStrategy;
+            std::vector<SchedulingCandidate> candidates;
+            candidates.reserve(eligible.size());
             for (const int groupId : eligible)
             {
                 const ProcessGroup& group = plan.groups[static_cast<std::size_t>(groupId)];
@@ -2048,10 +2659,7 @@ namespace cadcam::planning
                         static_cast<int>(eligible.size()), static_cast<int>(plan.groups.size()),
                         static_cast<int>(plan.assignments.size()),
                         static_cast<int>(plan.exclusions.size()), -1, -1, initialSelection,
-                        selected.has_value() ? &*selected : nullptr,
-                        selected.has_value()
-                            ? plan.groups[static_cast<std::size_t>(selected->groupId)].kind
-                            : group.kind
+                        nullptr, group.kind
                     );
                     if (candidateClosedLoopReport.groupId >= 0)
                     {
@@ -2078,16 +2686,25 @@ namespace cadcam::planning
                         values
                     );
                 }
-                if (!selected.has_value() || traversalLess(*candidate, *selected, selectionStrategy))
+                ProcessSurfaceFootprint footprint;
+                if (surfaceSweepEnabled)
                 {
-                    selected = std::move(candidate);
-                    selectedClosedLoopReport = candidateClosedLoopReport.groupId >= 0
-                        ? std::optional<ClosedLoopTraversalReport>
-                            (std::move(candidateClosedLoopReport))
-                        : std::nullopt;
+                    const auto found = surfaceFootprints.find(groupId);
+                    if (found != surfaceFootprints.end()) footprint = footprintForTraversal
+                    (
+                        found->second, *candidate, *surfaceSweepSection,
+                        sweepSectionBounds, sweepSurfaceTolerance
+                    );
                 }
+                SchedulingCandidate schedulingCandidate;
+                schedulingCandidate.traversal = std::move(*candidate);
+                schedulingCandidate.footprint = footprint;
+                if (candidateClosedLoopReport.groupId >= 0)
+                    schedulingCandidate.closedLoopReport =
+                        std::move(candidateClosedLoopReport);
+                candidates.push_back(std::move(schedulingCandidate));
             }
-            if (!selected.has_value())
+            if (candidates.empty())
             {
                 return failure<ProcessPlan>
                 (
@@ -2101,7 +2718,97 @@ namespace cadcam::planning
                 );
             }
 
-            const ProcessGroup& selectedGroup = plan.groups[static_cast<std::size_t>(selected->groupId)];
+            std::vector<std::size_t> selectable;
+            selectable.reserve(candidates.size());
+            bool regionTransitionForSelection = false;
+            if (surfaceSweepEnabled && !initialSelection
+                && surfaceSweepState.initialized)
+            {
+                for (std::size_t index = 0; index < candidates.size(); ++index)
+                {
+                    const ProcessGroup& group = plan.groups[static_cast<std::size_t>
+                        (candidates[index].traversal.groupId)];
+                    if (group.kind == ProcessGroupKind::BreakBoundary)
+                        selectable.push_back(index);
+                }
+
+                if (selectable.empty())
+                {
+                    for (std::size_t index = 0; index < candidates.size(); ++index)
+                    {
+                        if (candidates[index].footprint.dominantRegion
+                            == surfaceSweepState.currentRegion)
+                            selectable.push_back(index);
+                    }
+                }
+                if (selectable.empty())
+                {
+                    for (std::size_t index = 0; index < candidates.size(); ++index)
+                    {
+                        if (footprintUsesRegion(candidates[index].footprint,
+                            surfaceSweepState.currentRegion, true))
+                            selectable.push_back(index);
+                    }
+                }
+                if (selectable.empty())
+                {
+                    const int currentRegionIndex = surfaceRegionIndex
+                        (surfaceSweepState.currentRegion);
+                    const int direction = surfaceSweepState.perimeterDirection == 0
+                        ? 1 : surfaceSweepState.perimeterDirection;
+                    for (int step = 1; step <= 8 && selectable.empty(); ++step)
+                    {
+                        const auto nextRegion = surfaceRegionAt
+                            ((currentRegionIndex >= 0 ? currentRegionIndex : 0)
+                                + direction * step);
+                        for (std::size_t index = 0; index < candidates.size(); ++index)
+                        {
+                            if (candidates[index].footprint.dominantRegion == nextRegion)
+                                selectable.push_back(index);
+                        }
+                        if (selectable.empty())
+                        {
+                            for (std::size_t index = 0; index < candidates.size(); ++index)
+                            {
+                                if (footprintUsesRegion(candidates[index].footprint,
+                                    nextRegion, true))
+                                    selectable.push_back(index);
+                            }
+                        }
+                        if (!selectable.empty())
+                        {
+                            surfaceSweepState.currentRegion = nextRegion;
+                            regionTransitionForSelection = true;
+                        }
+                    }
+                }
+            }
+            if (selectable.empty())
+            {
+                for (std::size_t index = 0; index < candidates.size(); ++index)
+                    selectable.push_back(index);
+            }
+
+            std::size_t selectedIndex = selectable.front();
+            for (std::size_t offset = 1; offset < selectable.size(); ++offset)
+            {
+                const std::size_t candidateIndex = selectable[offset];
+                const bool replace = surfaceSweepEnabled && !initialSelection
+                        && surfaceSweepState.initialized
+                    ? surfaceSweepCandidateLess(candidates[candidateIndex],
+                        candidates[selectedIndex], surfaceSweepState,
+                        sweepSurfaceTolerance)
+                    : traversalLess(candidates[candidateIndex].traversal,
+                        candidates[selectedIndex].traversal, selectionStrategy);
+                if (replace) selectedIndex = candidateIndex;
+            }
+            SchedulingCandidate selectedCandidate =
+                std::move(candidates[selectedIndex]);
+            GroupTraversal& selected = selectedCandidate.traversal;
+            std::optional<ClosedLoopTraversalReport>& selectedClosedLoopReport =
+                selectedCandidate.closedLoopReport;
+
+            const ProcessGroup& selectedGroup = plan.groups[static_cast<std::size_t>(selected.groupId)];
             const bool continuous = selectedGroup.kind == ProcessGroupKind::ConnectedChain
                 || selectedGroup.kind == ProcessGroupKind::ClosedLoop
                 || selectedGroup.kind == ProcessGroupKind::BreakBoundary;
@@ -2110,13 +2817,13 @@ namespace cadcam::planning
             processUnit.key.memberEntityIds = selectedGroup.entityIds;
             std::sort(processUnit.key.memberEntityIds.begin(), processUnit.key.memberEntityIds.end());
             processUnit.closed = selectedGroup.closed;
-            processUnit.orderedMemberEntityIds.reserve(selected->entities.size());
-            for (const DirectedEntity& directed : selected->entities)
+            processUnit.orderedMemberEntityIds.reserve(selected.entities.size());
+            for (const DirectedEntity& directed : selected.entities)
                 processUnit.orderedMemberEntityIds.push_back(directed.entity->entityId);
             const int processUnitIndex = static_cast<int>(plan.processUnits.size());
             plan.processUnits.push_back(processUnit);
             plan.processUnitSequence.units.push_back(processUnit.key);
-            for (const DirectedEntity& directed : selected->entities)
+            for (const DirectedEntity& directed : selected.entities)
             {
                 ProcessAssignment assignment;
                 assignment.entityId = directed.entity->entityId;
@@ -2127,7 +2834,8 @@ namespace cadcam::planning
                 assignment.startParameter = directed.selectedStartParameter;
                 plan.assignments.push_back(assignment);
             }
-            currentPosition = selected->end;
+            const double previousSweepX = surfaceSweepState.currentX;
+            currentPosition = selected.end;
             if (selectedClosedLoopReport.has_value())
             {
                 closedLoopDiagnostics.push_back(planningDiagnostic
@@ -2140,9 +2848,185 @@ namespace cadcam::planning
                     DiagnosticSeverity::Info
                 ));
             }
-            scheduled.insert(selected->groupId);
-            for (const int successor : successors[selected->groupId]) --indegree[successor];
+            scheduled.insert(selected.groupId);
+            for (const int successor : successors[selected.groupId]) --indegree[successor];
+
+            if (surfaceSweepEnabled)
+            {
+                const auto updatePerimeterPosition = [&]()
+                {
+                    const SectionProjection projection = projectToSection
+                    (
+                        { selected.end.y, selected.end.z },
+                        surfaceSweepSection->geometry,
+                        sweepSectionCumulative
+                    );
+                    if (projection.valid)
+                        surfaceSweepState.currentPerimeterPosition =
+                            projection.perimeterPosition;
+                };
+
+                if (selectedGroup.kind == ProcessGroupKind::BreakBoundary)
+                {
+                    if (surfaceSweepReport.active)
+                        surfaceSweepDiagnostics.push_back
+                            (surfaceSweepDiagnostic(context, surfaceSweepReport));
+
+                    int partitionId = selectedGroup.groupId;
+                    for (const BoundaryData& boundary : boundaries)
+                    {
+                        if (boundary.groupId == selectedGroup.groupId)
+                        {
+                            partitionId = boundary.pairId;
+                            break;
+                        }
+                    }
+                    surfaceSweepState.currentRegion =
+                        selectedCandidate.footprint.exitRegion;
+                    if (surfaceRegionIndex(surfaceSweepState.currentRegion) < 0)
+                        surfaceSweepState.currentRegion = classifySurfacePoint
+                        (
+                            selected.end, *surfaceSweepSection,
+                            sweepSectionBounds, sweepSurfaceTolerance
+                        );
+                    const int exitDirection = traversalPerimeterDirection
+                    (
+                        selected, *surfaceSweepSection,
+                        sweepSectionCumulative, sweepSurfaceTolerance
+                    );
+                    if (exitDirection != 0)
+                        surfaceSweepState.perimeterDirection = exitDirection;
+                    else if (surfaceSweepState.perimeterDirection == 0)
+                        surfaceSweepState.perimeterDirection = 1;
+
+                    bool hasPositiveX = false;
+                    bool hasNegativeX = false;
+                    double nearestPositiveX = std::numeric_limits<double>::max();
+                    double nearestNegativeX = std::numeric_limits<double>::max();
+                    for (const int groupId : schedulable)
+                    {
+                        if (scheduled.find(groupId) != scheduled.end()
+                            || indegree[groupId] != 0) continue;
+                        const ProcessGroup& nextGroup = plan.groups
+                            [static_cast<std::size_t>(groupId)];
+                        if (nextGroup.kind == ProcessGroupKind::BreakBoundary
+                            || nextGroup.kind == ProcessGroupKind::WasteBoundary) continue;
+                        const auto footprint = surfaceFootprints.find(groupId);
+                        if (footprint == surfaceFootprints.end()) continue;
+                        const double delta = footprint->second.anchorX - selected.end.x;
+                        if (delta > sweepSurfaceTolerance)
+                        {
+                            hasPositiveX = true;
+                            nearestPositiveX = std::min(nearestPositiveX, delta);
+                        }
+                        else if (delta < -sweepSurfaceTolerance)
+                        {
+                            hasNegativeX = true;
+                            nearestNegativeX = std::min(nearestNegativeX, -delta);
+                        }
+                    }
+                    if (hasPositiveX != hasNegativeX)
+                        surfaceSweepState.longitudinalDirection = hasPositiveX ? 1 : -1;
+                    else if (hasPositiveX && hasNegativeX)
+                        surfaceSweepState.longitudinalDirection =
+                            nearestPositiveX <= nearestNegativeX ? 1 : -1;
+                    else
+                        surfaceSweepState.longitudinalDirection = 1;
+                    surfaceSweepState.currentX = selected.end.x;
+                    updatePerimeterPosition();
+                    surfaceSweepState.initialized = true;
+
+                    surfaceSweepReport = SurfaceSweepReport{};
+                    surfaceSweepReport.partitionId = partitionId;
+                    surfaceSweepReport.initialRegion = surfaceSweepState.currentRegion;
+                    surfaceSweepReport.perimeterDirection =
+                        surfaceSweepState.perimeterDirection;
+                    surfaceSweepReport.longitudinalDirection =
+                        surfaceSweepState.longitudinalDirection;
+                    surfaceSweepReport.active = true;
+                }
+                else
+                {
+                    const bool hadSweepState = surfaceSweepState.initialized;
+                    if (!surfaceSweepState.initialized)
+                    {
+                        surfaceSweepState.currentRegion =
+                            selectedCandidate.footprint.exitRegion;
+                        if (surfaceRegionIndex(surfaceSweepState.currentRegion) < 0)
+                            surfaceSweepState.currentRegion = classifySurfacePoint
+                            (
+                                selected.end, *surfaceSweepSection,
+                                sweepSectionBounds, sweepSurfaceTolerance
+                            );
+                        surfaceSweepState.perimeterDirection = traversalPerimeterDirection
+                        (
+                            selected, *surfaceSweepSection,
+                            sweepSectionCumulative, sweepSurfaceTolerance
+                        );
+                        if (surfaceSweepState.perimeterDirection == 0)
+                            surfaceSweepState.perimeterDirection = 1;
+                        const double longitudinalTravel = selected.end.x - selected.start.x;
+                        surfaceSweepState.longitudinalDirection =
+                            longitudinalTravel < -sweepSurfaceTolerance ? -1 : 1;
+                        surfaceSweepState.initialized = true;
+                        surfaceSweepReport.partitionId = 0;
+                        surfaceSweepReport.initialRegion = surfaceSweepState.currentRegion;
+                        surfaceSweepReport.perimeterDirection =
+                            surfaceSweepState.perimeterDirection;
+                        surfaceSweepReport.longitudinalDirection =
+                            surfaceSweepState.longitudinalDirection;
+                        surfaceSweepReport.active = true;
+                    }
+
+                    if (surfaceSweepReport.active)
+                    {
+                        if (regionTransitionForSelection)
+                            ++surfaceSweepReport.regionTransitionCount;
+                        const double anchorDelta = selectedCandidate.footprint.anchorX
+                            - previousSweepX;
+                        const bool backtrack = hadSweepState
+                            && (surfaceSweepState.longitudinalDirection >= 0
+                                ? anchorDelta < -sweepSurfaceTolerance
+                                : anchorDelta > sweepSurfaceTolerance);
+                        if (backtrack)
+                        {
+                            ++surfaceSweepReport.backtrackCount;
+                            surfaceSweepReport.longitudinalBacktrackDistance +=
+                                std::abs(anchorDelta);
+                        }
+                        QStringList memberIds;
+                        for (const EntityId entityId : processUnit.key.memberEntityIds)
+                            memberIds.push_back(QString::number(entityId));
+                        surfaceSweepReport.selectedUnits.push_back
+                        (
+                            QStringLiteral("[%1]:%2@%3#%4")
+                                .arg(memberIds.join(QLatin1Char('+')))
+                                .arg(surfaceRegionName
+                                    (selectedCandidate.footprint.dominantRegion))
+                                .arg(selectedCandidate.footprint.anchorX, 0, 'f', 3)
+                                .arg(processUnitIndex + 1)
+                        );
+                        ++surfaceSweepReport.selectedUnitCount;
+                    }
+
+                    const auto previousRegion = surfaceSweepState.currentRegion;
+                    const auto exitRegion = selectedCandidate.footprint.exitRegion;
+                    if (surfaceRegionIndex(exitRegion) >= 0)
+                        surfaceSweepState.currentRegion = exitRegion;
+                    if (surfaceSweepReport.active && !regionTransitionForSelection
+                        && surfaceRegionIndex(previousRegion) >= 0
+                        && surfaceRegionIndex(surfaceSweepState.currentRegion) >= 0
+                        && previousRegion != surfaceSweepState.currentRegion)
+                        ++surfaceSweepReport.regionTransitionCount;
+                    surfaceSweepState.currentX = selected.end.x;
+                    updatePerimeterPosition();
+                }
+            }
         }
+
+        if (surfaceSweepReport.active)
+            surfaceSweepDiagnostics.push_back
+                (surfaceSweepDiagnostic(context, surfaceSweepReport));
 
         std::unordered_set<EntityId> assignedIds;
         std::unordered_set<EntityId> excludedIds;
@@ -2351,6 +3235,7 @@ namespace cadcam::planning
         result.status = OperationStatus::Success;
         result.value = std::move(plan);
         result.mergeDiagnostics(closedLoopDiagnostics);
+        result.mergeDiagnostics(surfaceSweepDiagnostics);
         return result;
     }
 }

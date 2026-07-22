@@ -109,6 +109,7 @@ enum class DiagnosticCode
     ProcessPlanningPrecedenceCycle,
     ProcessPlanningGroupBuildFailed,
     ProcessPlanningClosedLoopSummary,
+    ProcessPlanningSurfaceSweepSummary,
     ProcessPlanningDirectionFailed,
     ProcessPlanningOrderingFailed,
     ProcessPlanningInvariantViolation,

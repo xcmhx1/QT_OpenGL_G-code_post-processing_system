@@ -91,6 +91,7 @@ QString diagnosticCodeName(DiagnosticCode code)
     case DiagnosticCode::ProcessPlanningPrecedenceCycle: return QStringLiteral("ProcessPlanningPrecedenceCycle");
     case DiagnosticCode::ProcessPlanningGroupBuildFailed: return QStringLiteral("ProcessPlanningGroupBuildFailed");
     case DiagnosticCode::ProcessPlanningClosedLoopSummary: return QStringLiteral("ProcessPlanningClosedLoopSummary");
+    case DiagnosticCode::ProcessPlanningSurfaceSweepSummary: return QStringLiteral("ProcessPlanningSurfaceSweepSummary");
     case DiagnosticCode::ProcessPlanningDirectionFailed: return QStringLiteral("ProcessPlanningDirectionFailed");
     case DiagnosticCode::ProcessPlanningOrderingFailed: return QStringLiteral("ProcessPlanningOrderingFailed");
     case DiagnosticCode::ProcessPlanningInvariantViolation: return QStringLiteral("ProcessPlanningInvariantViolation");

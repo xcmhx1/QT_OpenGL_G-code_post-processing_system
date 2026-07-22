@@ -252,6 +252,31 @@ namespace
                     .arg(values.value(QStringLiteral("status"), QStringLiteral("Failed")).toString());
         }
     }
+
+    void logSurfaceSweepPlanningSummaries(const QVector<Diagnostic>& diagnostics)
+    {
+        for (const Diagnostic& diagnostic : diagnostics)
+        {
+            if (!diagnostic.context.value(QStringLiteral("surfaceSweepSummary")).toBool())
+                continue;
+            const QVariantMap& values = diagnostic.context;
+            qInfo().noquote()
+                << QStringLiteral("[ProcessPlanning][SurfaceSweep] partitionId=%1 initialRegion=%2 perimeterDirection=%3 longitudinalDirection=%4 selectedUnits=%5 selectedUnitCount=%6 regionTransitions=%7 backtrackCount=%8 longitudinalBacktrackDistance=%9 status=%10")
+                    .arg(values.value(QStringLiteral("partitionId"), -1).toInt())
+                    .arg(values.value(QStringLiteral("initialRegion"),
+                        QStringLiteral("Unknown")).toString())
+                    .arg(values.value(QStringLiteral("perimeterDirection"), 0).toInt())
+                    .arg(values.value(QStringLiteral("longitudinalDirection"), 0).toInt())
+                    .arg(values.value(QStringLiteral("selectedUnits")).toString())
+                    .arg(values.value(QStringLiteral("selectedUnitCount"), 0).toInt())
+                    .arg(values.value(QStringLiteral("regionTransitions"), 0).toInt())
+                    .arg(values.value(QStringLiteral("backtrackCount"), 0).toInt())
+                    .arg(values.value(QStringLiteral("longitudinalBacktrackDistance"), 0.0).toDouble(),
+                        0, 'f', 3)
+                    .arg(values.value(QStringLiteral("status"),
+                        QStringLiteral("Unknown")).toString());
+        }
+    }
 }
 
 OperationResult<cadcam::planning::ProcessPlan> ProcessPlanningService::buildPlanarPlan
@@ -337,6 +362,7 @@ OperationResult<cadcam::planning::ProcessPlan> ProcessPlanningService::buildRota
     auto result = cadcam::planning::ProcessPlanBuilder::build
         (*capture.value, policy, context);
     logClosedLoopPlanningSummaries(result.diagnostics);
+    logSurfaceSweepPlanningSummaries(result.diagnostics);
     result.mergeDiagnostics(capture.diagnostics);
     if (result.succeeded() && result.value.has_value()
         && policy.sortIntent == cadcam::planning::ProcessSortIntent::PreserveCurrentSequence
