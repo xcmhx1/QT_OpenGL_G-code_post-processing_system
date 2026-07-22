@@ -2,6 +2,8 @@
 
 #include "core/machining/TubeCutBoundary.h"
 
+#include <QStringList>
+
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -71,6 +73,23 @@ namespace cadcam::planning
             double entryTangentCost = 0.0;
             std::size_t stableSourceIndex = 0;
             EntityId stableEntityId = 0;
+        };
+
+        struct ClosedLoopTraversalReport
+        {
+            int groupId = -1;
+            std::vector<EntityId> memberEntityIds;
+            int memberCount = 0;
+            int nodeCount = 0;
+            int connectedComponentCount = 0;
+            int branchNodeCount = 0;
+            int invalidDegreeNodeCount = 0;
+            int candidateCount = 0;
+            std::vector<EntityId> selectedOrder;
+            std::vector<bool> selectedReverse;
+            bool simpleLoopValid = false;
+            QString status = QStringLiteral("Failed");
+            QString failureReason;
         };
 
         struct SectionProjection
@@ -916,6 +935,353 @@ namespace cadcam::planning
             return leftReverse < rightReverse;
         }
 
+        QVariantMap closedLoopDiagnosticValues(const ClosedLoopTraversalReport& report)
+        {
+            auto entityIdsText = [](const std::vector<EntityId>& entityIds)
+            {
+                QStringList values;
+                values.reserve(static_cast<qsizetype>(entityIds.size()));
+                for (const EntityId entityId : entityIds)
+                    values.push_back(QString::number(entityId));
+                return values.join(QLatin1Char(','));
+            };
+            QStringList reverseValues;
+            reverseValues.reserve(static_cast<qsizetype>(report.selectedReverse.size()));
+            for (const bool reverse : report.selectedReverse)
+                reverseValues.push_back(reverse ? QStringLiteral("1") : QStringLiteral("0"));
+
+            QVariantMap values;
+            values.insert(QStringLiteral("closedLoopSummary"), true);
+            values.insert(QStringLiteral("groupId"), report.groupId);
+            values.insert(QStringLiteral("memberCount"), report.memberCount);
+            values.insert(QStringLiteral("memberEntityIds"), entityIdsText(report.memberEntityIds));
+            values.insert(QStringLiteral("nodeCount"), report.nodeCount);
+            values.insert(QStringLiteral("connectedComponentCount"), report.connectedComponentCount);
+            values.insert(QStringLiteral("branchNodeCount"), report.branchNodeCount);
+            values.insert(QStringLiteral("invalidDegreeNodeCount"), report.invalidDegreeNodeCount);
+            values.insert(QStringLiteral("candidateCount"), report.candidateCount);
+            values.insert(QStringLiteral("selectedOrder"), entityIdsText(report.selectedOrder));
+            values.insert(QStringLiteral("selectedReverse"), reverseValues.join(QLatin1Char(',')));
+            values.insert(QStringLiteral("status"), report.status);
+            values.insert(QStringLiteral("failureReason"), report.failureReason);
+            return values;
+        }
+
+        class ClosedLoopTraversalBuilder
+        {
+        public:
+            struct Result
+            {
+                std::optional<GroupTraversal> traversal;
+                ClosedLoopTraversalReport report;
+            };
+
+            static Result build
+            (
+                const ProcessGroup& group,
+                const std::unordered_map<EntityId, const PlanningEntity*>& entities,
+                const Vector3d& currentPosition,
+                const ProcessPlanningPolicy& policy,
+                const std::optional<machining::TubeSectionModel>& section,
+                const std::optional<Vector2d>& tubeCenter,
+                ProcessOrderingStrategy selectionStrategy
+            )
+            {
+                Result result;
+                result.report.groupId = group.groupId;
+                result.report.memberEntityIds = group.entityIds;
+                std::sort(result.report.memberEntityIds.begin(), result.report.memberEntityIds.end());
+                result.report.memberCount = static_cast<int>(group.entityIds.size());
+
+                struct Edge
+                {
+                    const PlanningEntity* entity = nullptr;
+                    Vector3d sourceStart;
+                    Vector3d sourceEnd;
+                    int startNode = -1;
+                    int endNode = -1;
+                };
+                std::vector<Edge> edges;
+                edges.reserve(group.entityIds.size());
+                std::set<EntityId> uniqueIds;
+                for (const EntityId entityId : group.entityIds)
+                {
+                    const auto found = entities.find(entityId);
+                    if (found == entities.end() || found->second == nullptr
+                        || !uniqueIds.insert(entityId).second)
+                    {
+                        result.report.failureReason = QStringLiteral("Closed-loop member is missing or duplicated.");
+                        return result;
+                    }
+                    const PlanningEntity& entity = *found->second;
+                    if (entity.path.closed || entity.path.vertices.size() < 2U)
+                    {
+                        result.report.failureReason = entity.path.closed
+                            ? QStringLiteral("Multi-entity closed loop contains a semantically closed member.")
+                            : QStringLiteral("Closed-loop member has fewer than two path points.");
+                        return result;
+                    }
+                    const Vector3d sourceStart = entity.path.vertices.front().position;
+                    const Vector3d sourceEnd = entity.path.vertices.back().position;
+                    if (!std::isfinite(sourceStart.x) || !std::isfinite(sourceStart.y)
+                        || !std::isfinite(sourceStart.z) || !std::isfinite(sourceEnd.x)
+                        || !std::isfinite(sourceEnd.y) || !std::isfinite(sourceEnd.z))
+                    {
+                        result.report.failureReason = QStringLiteral("Closed-loop member endpoint is not finite.");
+                        return result;
+                    }
+                    edges.push_back({ &entity, sourceStart, sourceEnd });
+                }
+                std::sort(edges.begin(), edges.end(), [](const Edge& left, const Edge& right)
+                {
+                    if (left.entity->sourceIndex != right.entity->sourceIndex)
+                        return left.entity->sourceIndex < right.entity->sourceIndex;
+                    return left.entity->entityId < right.entity->entityId;
+                });
+
+                const std::size_t endpointCount = edges.size() * 2U;
+                std::vector<std::size_t> parents(endpointCount);
+                for (std::size_t index = 0; index < endpointCount; ++index) parents[index] = index;
+                const auto findRoot = [&parents](std::size_t value)
+                {
+                    std::size_t root = value;
+                    while (parents[root] != root) root = parents[root];
+                    while (parents[value] != value)
+                    {
+                        const std::size_t next = parents[value];
+                        parents[value] = root;
+                        value = next;
+                    }
+                    return root;
+                };
+                const auto endpoint = [&edges](std::size_t index) -> const Vector3d&
+                {
+                    const Edge& edge = edges[index / 2U];
+                    return index % 2U == 0U ? edge.sourceStart : edge.sourceEnd;
+                };
+                for (std::size_t left = 0; left < endpointCount; ++left)
+                {
+                    for (std::size_t right = left + 1U; right < endpointCount; ++right)
+                    {
+                        if (distance(endpoint(left), endpoint(right)) > policy.connectionTolerance) continue;
+                        const std::size_t leftRoot = findRoot(left);
+                        const std::size_t rightRoot = findRoot(right);
+                        if (leftRoot != rightRoot) parents[rightRoot] = leftRoot;
+                    }
+                }
+
+                std::map<std::size_t, int> nodeByRoot;
+                for (std::size_t edgeIndex = 0; edgeIndex < edges.size(); ++edgeIndex)
+                {
+                    const std::size_t startRoot = findRoot(edgeIndex * 2U);
+                    const std::size_t endRoot = findRoot(edgeIndex * 2U + 1U);
+                    const auto nodeFor = [&nodeByRoot](std::size_t root)
+                    {
+                        const auto inserted = nodeByRoot.emplace
+                            (root, static_cast<int>(nodeByRoot.size()));
+                        return inserted.first->second;
+                    };
+                    edges[edgeIndex].startNode = nodeFor(startRoot);
+                    edges[edgeIndex].endNode = nodeFor(endRoot);
+                }
+                result.report.nodeCount = static_cast<int>(nodeByRoot.size());
+
+                std::vector<std::vector<std::size_t>> adjacency(nodeByRoot.size());
+                for (std::size_t edgeIndex = 0; edgeIndex < edges.size(); ++edgeIndex)
+                {
+                    adjacency[static_cast<std::size_t>(edges[edgeIndex].startNode)].push_back(edgeIndex);
+                    adjacency[static_cast<std::size_t>(edges[edgeIndex].endNode)].push_back(edgeIndex);
+                }
+                for (const auto& incidentEdges : adjacency)
+                {
+                    if (incidentEdges.size() > 2U) ++result.report.branchNodeCount;
+                    if (incidentEdges.size() != 2U) ++result.report.invalidDegreeNodeCount;
+                }
+
+                std::vector<bool> visitedNodes(adjacency.size(), false);
+                for (std::size_t node = 0; node < adjacency.size(); ++node)
+                {
+                    if (visitedNodes[node] || adjacency[node].empty()) continue;
+                    ++result.report.connectedComponentCount;
+                    std::vector<std::size_t> pending{ node };
+                    visitedNodes[node] = true;
+                    while (!pending.empty())
+                    {
+                        const std::size_t currentNode = pending.back();
+                        pending.pop_back();
+                        for (const std::size_t edgeIndex : adjacency[currentNode])
+                        {
+                            const Edge& edge = edges[edgeIndex];
+                            const std::size_t nextNode = static_cast<std::size_t>
+                                (edge.startNode == static_cast<int>(currentNode)
+                                    ? edge.endNode : edge.startNode);
+                            if (!visitedNodes[nextNode])
+                            {
+                                visitedNodes[nextNode] = true;
+                                pending.push_back(nextNode);
+                            }
+                        }
+                    }
+                }
+
+                result.report.simpleLoopValid = result.report.connectedComponentCount == 1
+                    && result.report.branchNodeCount == 0
+                    && result.report.invalidDegreeNodeCount == 0
+                    && edges.size() == adjacency.size();
+                if (!result.report.simpleLoopValid)
+                {
+                    result.report.failureReason = QStringLiteral("Closed-loop endpoint graph is not one simple cycle.");
+                    return result;
+                }
+
+                std::optional<GroupTraversal> best;
+                int bestStartEndpoint = -1;
+                int bestLoopDirection = -1;
+                for (std::size_t startEdgeIndex = 0; startEdgeIndex < edges.size(); ++startEdgeIndex)
+                {
+                    for (const bool startReverse : { false, true })
+                    {
+                        const Edge& startEdge = edges[startEdgeIndex];
+                        if (!directionAllowed(*startEdge.entity, startReverse, policy.allowReverse)) continue;
+
+                        GroupTraversal candidate;
+                        candidate.groupId = group.groupId;
+                        std::vector<bool> used(edges.size(), false);
+                        int currentNode = startReverse ? startEdge.endNode : startEdge.startNode;
+                        const int initialNode = currentNode;
+                        Vector3d previousEnd;
+                        bool hasPreviousEnd = false;
+                        Vector3d firstNextPoint;
+                        bool candidateValid = true;
+
+                        for (std::size_t step = 0; step < edges.size(); ++step)
+                        {
+                            std::vector<std::size_t> unusedIncident;
+                            for (const std::size_t edgeIndex : adjacency[static_cast<std::size_t>(currentNode)])
+                            {
+                                if (!used[edgeIndex]
+                                    && std::find(unusedIncident.begin(), unusedIncident.end(), edgeIndex)
+                                        == unusedIncident.end())
+                                    unusedIncident.push_back(edgeIndex);
+                            }
+                            const std::size_t edgeIndex = step == 0U
+                                ? startEdgeIndex
+                                : unusedIncident.size() == 1U
+                                    ? unusedIncident.front() : edges.size();
+                            if (edgeIndex >= edges.size() || used[edgeIndex])
+                            {
+                                candidateValid = false;
+                                break;
+                            }
+
+                            const Edge& edge = edges[edgeIndex];
+                            const bool reverse = edge.endNode == currentNode;
+                            if ((edge.startNode != currentNode && edge.endNode != currentNode)
+                                || !directionAllowed(*edge.entity, reverse, policy.allowReverse))
+                            {
+                                candidateValid = false;
+                                break;
+                            }
+                            std::vector<Vector3d> points = directedPoints(*edge.entity, reverse);
+                            if (points.size() < 2U
+                                || (hasPreviousEnd
+                                    && distance(previousEnd, points.front()) > policy.connectionTolerance))
+                            {
+                                candidateValid = false;
+                                break;
+                            }
+                            const double threshold = entryThreshold(policy.connectionTolerance);
+                            const auto nextPoint = std::find_if
+                            (
+                                points.cbegin() + 1,
+                                points.cend(),
+                                [&points, threshold](const Vector3d& point)
+                                { return distance(points.front(), point) > threshold; }
+                            );
+                            if (nextPoint == points.cend())
+                            {
+                                candidateValid = false;
+                                break;
+                            }
+
+                            DirectedEntity directed;
+                            directed.entity = edge.entity;
+                            directed.reverseRelativeToInput = reverse;
+                            directed.selectedStartParameter = edge.entity->startParameter;
+                            directed.start = points.front();
+                            directed.end = points.back();
+                            candidate.entities.push_back(directed);
+                            if (step == 0U) firstNextPoint = *nextPoint;
+                            previousEnd = directed.end;
+                            hasPreviousEnd = true;
+                            used[edgeIndex] = true;
+                            currentNode = reverse ? edge.startNode : edge.endNode;
+                        }
+
+                        if (!candidateValid || currentNode != initialNode
+                            || candidate.entities.size() != edges.size()) continue;
+                        candidate.start = candidate.entities.front().start;
+                        if (distance(candidate.entities.back().end, candidate.start)
+                            > policy.connectionTolerance) continue;
+                        candidate.end = candidate.start;
+                        scoreEntrySmoothness
+                        (
+                            candidate.entities.front(), currentPosition, firstNextPoint,
+                            tubeCenter, policy.connectionTolerance
+                        );
+                        candidate.entryAxisReversalCount =
+                            candidate.entities.front().entryAxisReversalCount;
+                        candidate.entryTangentCost = candidate.entities.front().entryTangentCost;
+                        candidate.stableSourceIndex = candidate.entities.front().entity->sourceIndex;
+                        candidate.stableEntityId = candidate.entities.front().entity->entityId;
+                        scoreTraversal(candidate, currentPosition, section);
+                        ++result.report.candidateCount;
+
+                        const int startEndpoint = startReverse ? 1 : 0;
+                        const int loopDirection = startReverse ? 1 : 0;
+                        const auto stableLess = [&candidate, startEndpoint, loopDirection,
+                            &best, bestStartEndpoint, bestLoopDirection, selectionStrategy]()
+                        {
+                            if (!best.has_value()) return true;
+                            if (traversalLess(candidate, *best, selectionStrategy)) return true;
+                            if (traversalLess(*best, candidate, selectionStrategy)) return false;
+                            if (startEndpoint != bestStartEndpoint)
+                                return startEndpoint < bestStartEndpoint;
+                            if (loopDirection != bestLoopDirection)
+                                return loopDirection < bestLoopDirection;
+                            std::vector<EntityId> candidateOrder;
+                            std::vector<EntityId> bestOrder;
+                            for (const DirectedEntity& directed : candidate.entities)
+                                candidateOrder.push_back(directed.entity->entityId);
+                            for (const DirectedEntity& directed : best->entities)
+                                bestOrder.push_back(directed.entity->entityId);
+                            return candidateOrder < bestOrder;
+                        };
+                        if (stableLess())
+                        {
+                            best = std::move(candidate);
+                            bestStartEndpoint = startEndpoint;
+                            bestLoopDirection = loopDirection;
+                        }
+                    }
+                }
+
+                if (!best.has_value())
+                {
+                    result.report.failureReason = QStringLiteral("No complete loop traversal satisfies member direction constraints.");
+                    return result;
+                }
+                result.report.status = QStringLiteral("Success");
+                for (const DirectedEntity& directed : best->entities)
+                {
+                    result.report.selectedOrder.push_back(directed.entity->entityId);
+                    result.report.selectedReverse.push_back(directed.reverseRelativeToInput);
+                }
+                result.traversal = std::move(best);
+                return result;
+            }
+        };
+
         std::optional<GroupTraversal> bestTraversal
         (
             const ProcessGroup& group,
@@ -924,9 +1290,11 @@ namespace cadcam::planning
             const ProcessPlanningPolicy& policy,
             const std::optional<machining::TubeSectionModel>& section,
             const std::optional<Vector2d>& tubeCenter,
-            ProcessOrderingStrategy selectionStrategy
+            ProcessOrderingStrategy selectionStrategy,
+            ClosedLoopTraversalReport* closedLoopReport = nullptr
         )
         {
+            if (closedLoopReport != nullptr) *closedLoopReport = ClosedLoopTraversalReport{};
             if (group.entityIds.size() == 1U)
             {
                 const auto found = entities.find(group.entityIds.front());
@@ -960,6 +1328,17 @@ namespace cadcam::planning
                 }
             }
 
+            if (group.kind == ProcessGroupKind::ClosedLoop && group.entityIds.size() > 1U)
+            {
+                auto closedLoop = ClosedLoopTraversalBuilder::build
+                (
+                    group, entities, currentPosition, policy, section,
+                    tubeCenter, selectionStrategy
+                );
+                if (closedLoopReport != nullptr) *closedLoopReport = std::move(closedLoop.report);
+                return std::move(closedLoop.traversal);
+            }
+
             std::optional<GroupTraversal> best;
             for (const EntityId entityId : group.entityIds)
             {
@@ -987,6 +1366,102 @@ namespace cadcam::planning
             std::sort(left.begin(), left.end());
             std::sort(right.begin(), right.end());
             return left == right;
+        }
+
+        struct ClosedLoopValidationFailure
+        {
+            int groupId = -1;
+            EntityId previousEntityId = 0;
+            EntityId currentEntityId = 0;
+            double joinGap = 0.0;
+            QString reason;
+        };
+
+        bool validateMultiEntityClosedLoopUnits
+        (
+            const ProcessPlan& plan,
+            const std::unordered_map<EntityId, const PlanningEntity*>& entities,
+            double connectionTolerance,
+            ClosedLoopValidationFailure& failure
+        )
+        {
+            std::map<EntityId, const ProcessAssignment*> assignments;
+            for (const ProcessAssignment& assignment : plan.assignments)
+                assignments.emplace(assignment.entityId, &assignment);
+
+            for (const ProcessGroup& group : plan.groups)
+            {
+                if (group.kind != ProcessGroupKind::ClosedLoop
+                    || group.entityIds.size() <= 1U) continue;
+                std::vector<EntityId> key = group.entityIds;
+                std::sort(key.begin(), key.end());
+                const auto unit = std::find_if
+                (
+                    plan.processUnits.cbegin(), plan.processUnits.cend(),
+                    [&key](const ProcessUnit& candidate)
+                    { return candidate.key.memberEntityIds == key; }
+                );
+                if (unit == plan.processUnits.cend()
+                    || unit->orderedMemberEntityIds.size() != group.entityIds.size())
+                {
+                    failure.groupId = group.groupId;
+                    failure.reason = QStringLiteral("Closed-loop ProcessUnit is missing or incomplete.");
+                    return false;
+                }
+
+                Vector3d firstStart;
+                Vector3d previousEnd;
+                EntityId previousEntityId = 0;
+                bool first = true;
+                for (const EntityId entityId : unit->orderedMemberEntityIds)
+                {
+                    const auto entity = entities.find(entityId);
+                    const auto assignment = assignments.find(entityId);
+                    if (entity == entities.end() || assignment == assignments.end()
+                        || entity->second == nullptr || entity->second->path.closed)
+                    {
+                        failure.groupId = group.groupId;
+                        failure.currentEntityId = entityId;
+                        failure.reason = QStringLiteral("Closed-loop member or assignment is invalid.");
+                        return false;
+                    }
+                    const std::vector<Vector3d> points = directedPoints
+                        (*entity->second, assignment->second->reverse);
+                    if (points.size() < 2U)
+                    {
+                        failure.groupId = group.groupId;
+                        failure.currentEntityId = entityId;
+                        failure.reason = QStringLiteral("Closed-loop member has no physical endpoints.");
+                        return false;
+                    }
+                    if (first)
+                    {
+                        firstStart = points.front();
+                        first = false;
+                    }
+                    else
+                    {
+                        const double gap = distance(previousEnd, points.front());
+                        if (gap > connectionTolerance)
+                        {
+                            failure = { group.groupId, previousEntityId, entityId, gap,
+                                QStringLiteral("Adjacent closed-loop members are not physically connected.") };
+                            return false;
+                        }
+                    }
+                    previousEnd = points.back();
+                    previousEntityId = entityId;
+                }
+                const double closureGap = distance(previousEnd, firstStart);
+                if (closureGap > connectionTolerance)
+                {
+                    failure = { group.groupId, previousEntityId,
+                        unit->orderedMemberEntityIds.front(), closureGap,
+                        QStringLiteral("Closed-loop traversal does not return to its physical start.") };
+                    return false;
+                }
+            }
+            return true;
         }
     }
 
@@ -1529,6 +2004,7 @@ namespace cadcam::planning
         }
 
         std::unordered_set<int> scheduled;
+        QVector<Diagnostic> closedLoopDiagnostics;
         Vector3d currentPosition = policy.initialPosition;
         int processOrder = 0;
         while (scheduled.size() < schedulable.size())
@@ -1551,6 +2027,7 @@ namespace cadcam::planning
             }
 
             std::optional<GroupTraversal> selected;
+            std::optional<ClosedLoopTraversalReport> selectedClosedLoopReport;
             const bool initialSelection = scheduled.empty();
             const ProcessOrderingStrategy selectionStrategy = initialSelection
                 ? ProcessOrderingStrategy::NearestNext
@@ -1558,27 +2035,57 @@ namespace cadcam::planning
             for (const int groupId : eligible)
             {
                 const ProcessGroup& group = plan.groups[static_cast<std::size_t>(groupId)];
+                ClosedLoopTraversalReport candidateClosedLoopReport;
                 auto candidate = bestTraversal
                     (group, entities, currentPosition, policy, input.tubeSection,
-                        input.tubeSectionCenter, selectionStrategy);
+                        input.tubeSectionCenter, selectionStrategy, &candidateClosedLoopReport);
                 if (!candidate.has_value())
                 {
+                    QVariantMap values = diagnosticValues
+                    (
+                        input, policy, 0U, 0U, -1, groupId, -1, -1,
+                        static_cast<int>(schedulable.size() - scheduled.size()),
+                        static_cast<int>(eligible.size()), static_cast<int>(plan.groups.size()),
+                        static_cast<int>(plan.assignments.size()),
+                        static_cast<int>(plan.exclusions.size()), -1, -1, initialSelection,
+                        selected.has_value() ? &*selected : nullptr,
+                        selected.has_value()
+                            ? plan.groups[static_cast<std::size_t>(selected->groupId)].kind
+                            : group.kind
+                    );
+                    if (candidateClosedLoopReport.groupId >= 0)
+                    {
+                        const QVariantMap closedLoopValues =
+                            closedLoopDiagnosticValues(candidateClosedLoopReport);
+                        for (auto iterator = closedLoopValues.cbegin();
+                            iterator != closedLoopValues.cend(); ++iterator)
+                            values.insert(iterator.key(), iterator.value());
+                    }
                     return failure<ProcessPlan>
                     (
-                        OperationStatus::Failed, context, DiagnosticCode::ProcessPlanningDirectionFailed,
-                        QStringLiteral("连续加工组无法建立有效入口和加工方向。"), QStringLiteral("No connected traversal covers every group entity."),
-                        diagnosticValues(input, policy, 0U, 0U, -1, groupId, -1, -1,
-                            static_cast<int>(schedulable.size() - scheduled.size()), static_cast<int>(eligible.size()),
-                            static_cast<int>(plan.groups.size()), static_cast<int>(plan.assignments.size()),
-                            static_cast<int>(plan.exclusions.size()), -1, -1, initialSelection,
-                            selected.has_value() ? &*selected : nullptr,
-                            selected.has_value()
-                                ? plan.groups[static_cast<std::size_t>(selected->groupId)].kind
-                                : group.kind)
+                        OperationStatus::Failed, context,
+                        candidateClosedLoopReport.groupId >= 0
+                            && !candidateClosedLoopReport.simpleLoopValid
+                            ? DiagnosticCode::ProcessPlanningGroupBuildFailed
+                            : DiagnosticCode::ProcessPlanningDirectionFailed,
+                        candidateClosedLoopReport.groupId >= 0
+                            && !candidateClosedLoopReport.simpleLoopValid
+                            ? QStringLiteral("多图元闭合加工单元不是唯一简单环，无法生成加工计划。")
+                            : QStringLiteral("连续加工组无法建立有效入口和加工方向。"),
+                        candidateClosedLoopReport.groupId >= 0
+                            ? candidateClosedLoopReport.failureReason
+                            : QStringLiteral("No connected traversal covers every group entity."),
+                        values
                     );
                 }
                 if (!selected.has_value() || traversalLess(*candidate, *selected, selectionStrategy))
+                {
                     selected = std::move(candidate);
+                    selectedClosedLoopReport = candidateClosedLoopReport.groupId >= 0
+                        ? std::optional<ClosedLoopTraversalReport>
+                            (std::move(candidateClosedLoopReport))
+                        : std::nullopt;
+                }
             }
             if (!selected.has_value())
             {
@@ -1621,6 +2128,18 @@ namespace cadcam::planning
                 plan.assignments.push_back(assignment);
             }
             currentPosition = selected->end;
+            if (selectedClosedLoopReport.has_value())
+            {
+                closedLoopDiagnostics.push_back(planningDiagnostic
+                (
+                    context,
+                    DiagnosticCode::ProcessPlanningClosedLoopSummary,
+                    QStringLiteral("多图元闭合加工单元已建立确定遍历。"),
+                    QStringLiteral("Closed-loop traversal selected from complete loop candidates."),
+                    closedLoopDiagnosticValues(*selectedClosedLoopReport),
+                    DiagnosticSeverity::Info
+                ));
+            }
             scheduled.insert(selected->groupId);
             for (const int successor : successors[selected->groupId]) --indegree[successor];
         }
@@ -1678,6 +2197,25 @@ namespace cadcam::planning
                 QStringLiteral("加工单元成员、顺序或分配关系校验失败。"),
                 QStringLiteral("ProcessUnit structure is inconsistent with assignments or sequence."),
                 diagnosticValues(input, policy)
+            );
+        }
+        ClosedLoopValidationFailure closedLoopFailure;
+        if (!validateMultiEntityClosedLoopUnits
+            (plan, entities, policy.connectionTolerance, closedLoopFailure))
+        {
+            QVariantMap values = diagnosticValues
+                (input, policy, closedLoopFailure.currentEntityId, 0U, -1,
+                    closedLoopFailure.groupId);
+            values.insert(QStringLiteral("previousEntityId"),
+                QVariant::fromValue<qulonglong>(closedLoopFailure.previousEntityId));
+            values.insert(QStringLiteral("joinGap"), closedLoopFailure.joinGap);
+            values.insert(QStringLiteral("connectionTolerance"), policy.connectionTolerance);
+            return failure<ProcessPlan>
+            (
+                OperationStatus::InternalError, context,
+                DiagnosticCode::ProcessPlanningInvariantViolation,
+                QStringLiteral("多图元闭合加工单元的最终遍历不连续。"),
+                closedLoopFailure.reason, values
             );
         }
         for (const ProcessExclusion& exclusion : plan.exclusions)
@@ -1812,6 +2350,7 @@ namespace cadcam::planning
         OperationResult<ProcessPlan> result;
         result.status = OperationStatus::Success;
         result.value = std::move(plan);
+        result.mergeDiagnostics(closedLoopDiagnostics);
         return result;
     }
 }

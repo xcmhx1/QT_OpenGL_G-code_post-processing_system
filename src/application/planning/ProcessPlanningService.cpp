@@ -5,6 +5,8 @@
 #include "core/planning/PlanarProcessPlanBuilder.h"
 #include "core/planning/ProcessPlanBuilder.h"
 
+#include <QDebug>
+
 #include <limits>
 #include <cmath>
 #include <map>
@@ -230,6 +232,26 @@ namespace
         diagnostic.correlationId = context.correlationId;
         return diagnostic;
     }
+
+    void logClosedLoopPlanningSummaries(const QVector<Diagnostic>& diagnostics)
+    {
+        for (const Diagnostic& diagnostic : diagnostics)
+        {
+            if (!diagnostic.context.value(QStringLiteral("closedLoopSummary")).toBool()) continue;
+            const QVariantMap& values = diagnostic.context;
+            qInfo().noquote()
+                << QStringLiteral("[ProcessPlanning][ClosedLoop] groupId=%1 memberCount=%2 memberEntityIds=%3 nodeCount=%4 branchNodeCount=%5 candidateCount=%6 selectedOrder=%7 selectedReverse=%8 status=%9")
+                    .arg(values.value(QStringLiteral("groupId"), -1).toInt())
+                    .arg(values.value(QStringLiteral("memberCount"), 0).toInt())
+                    .arg(values.value(QStringLiteral("memberEntityIds")).toString())
+                    .arg(values.value(QStringLiteral("nodeCount"), 0).toInt())
+                    .arg(values.value(QStringLiteral("branchNodeCount"), 0).toInt())
+                    .arg(values.value(QStringLiteral("candidateCount"), 0).toInt())
+                    .arg(values.value(QStringLiteral("selectedOrder")).toString())
+                    .arg(values.value(QStringLiteral("selectedReverse")).toString())
+                    .arg(values.value(QStringLiteral("status"), QStringLiteral("Failed")).toString());
+        }
+    }
 }
 
 OperationResult<cadcam::planning::ProcessPlan> ProcessPlanningService::buildPlanarPlan
@@ -314,6 +336,7 @@ OperationResult<cadcam::planning::ProcessPlan> ProcessPlanningService::buildRota
     }
     auto result = cadcam::planning::ProcessPlanBuilder::build
         (*capture.value, policy, context);
+    logClosedLoopPlanningSummaries(result.diagnostics);
     result.mergeDiagnostics(capture.diagnostics);
     if (result.succeeded() && result.value.has_value()
         && policy.sortIntent == cadcam::planning::ProcessSortIntent::PreserveCurrentSequence
