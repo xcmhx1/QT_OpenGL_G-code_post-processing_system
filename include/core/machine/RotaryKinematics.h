@@ -6,10 +6,16 @@
 
 namespace cadcam::machine
 {
+    struct RotaryKinematicsResult
+    {
+        std::vector<MachinePose4D> poses;
+        RotarySurfaceSummary surface;
+    };
+
     class RotaryKinematics
     {
     public:
-        static OperationResult<std::vector<MachinePose4D>> transform
+        static OperationResult<RotaryKinematicsResult> transform
         (
             const geometry::Path3D& path,
             const RotaryMachinePolicy& policy,

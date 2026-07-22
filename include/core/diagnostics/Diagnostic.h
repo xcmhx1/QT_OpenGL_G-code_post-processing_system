@@ -129,6 +129,7 @@ enum class DiagnosticCode
     MachineTrajectoryGeometryCompileFailed,
     MachineTrajectoryInvalidPath,
     RotaryKinematicsFailed,
+    RotarySurfaceClassificationFailed,
     RotaryCenterInvalid,
     RotaryCornerGeometryInvalid,
     MachineTrajectoryContinuityFailure,

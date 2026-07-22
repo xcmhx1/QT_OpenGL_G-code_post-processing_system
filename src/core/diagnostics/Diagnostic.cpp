@@ -111,6 +111,7 @@ QString diagnosticCodeName(DiagnosticCode code)
     case DiagnosticCode::MachineTrajectoryGeometryCompileFailed: return QStringLiteral("MachineTrajectoryGeometryCompileFailed");
     case DiagnosticCode::MachineTrajectoryInvalidPath: return QStringLiteral("MachineTrajectoryInvalidPath");
     case DiagnosticCode::RotaryKinematicsFailed: return QStringLiteral("RotaryKinematicsFailed");
+    case DiagnosticCode::RotarySurfaceClassificationFailed: return QStringLiteral("RotarySurfaceClassificationFailed");
     case DiagnosticCode::RotaryCenterInvalid: return QStringLiteral("RotaryCenterInvalid");
     case DiagnosticCode::RotaryCornerGeometryInvalid: return QStringLiteral("RotaryCornerGeometryInvalid");
     case DiagnosticCode::MachineTrajectoryContinuityFailure: return QStringLiteral("MachineTrajectoryContinuityFailure");

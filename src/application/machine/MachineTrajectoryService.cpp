@@ -6,6 +6,8 @@
 #include "core/machine/RotaryTrajectoryBuilder.h"
 #include "drw_entities.h"
 
+#include <QDebug>
+
 #include <algorithm>
 #include <cmath>
 #include <map>
@@ -13,6 +15,60 @@
 
 namespace
 {
+    QString surfaceRegionName(cadcam::machine::RotarySurfaceRegion region)
+    {
+        using cadcam::machine::RotarySurfaceRegion;
+        switch (region)
+        {
+        case RotarySurfaceRegion::Top: return QStringLiteral("Top");
+        case RotarySurfaceRegion::Right: return QStringLiteral("Right");
+        case RotarySurfaceRegion::Bottom: return QStringLiteral("Bottom");
+        case RotarySurfaceRegion::Left: return QStringLiteral("Left");
+        case RotarySurfaceRegion::Corner: return QStringLiteral("Corner");
+        case RotarySurfaceRegion::Radial: return QStringLiteral("Radial");
+        case RotarySurfaceRegion::Unknown: return QStringLiteral("Unknown");
+        }
+        return QStringLiteral("Unknown");
+    }
+
+    QString sourceKindName(cadcam::geometry::SourceGeometryKind kind)
+    {
+        using cadcam::geometry::SourceGeometryKind;
+        switch (kind)
+        {
+        case SourceGeometryKind::Point: return QStringLiteral("Point");
+        case SourceGeometryKind::Line: return QStringLiteral("Line");
+        case SourceGeometryKind::Arc: return QStringLiteral("Arc");
+        case SourceGeometryKind::Circle: return QStringLiteral("Circle");
+        case SourceGeometryKind::Ellipse: return QStringLiteral("Ellipse");
+        case SourceGeometryKind::Polyline: return QStringLiteral("Polyline");
+        case SourceGeometryKind::Spline: return QStringLiteral("Spline");
+        case SourceGeometryKind::Unknown: return QStringLiteral("Unknown");
+        }
+        return QStringLiteral("Unknown");
+    }
+
+    void logSurfaceSummaries(const cadcam::machine::MachineTrajectory& trajectory)
+    {
+        for (const auto& summary : trajectory.surfaceSummaries)
+        {
+            qInfo().noquote()
+                << QStringLiteral("[RotaryKinematics][Surface] entityId=%1 processGroupId=%2 sourceKind=%3 pointCount=%4 ySpan=%5 zSpan=%6 classification=%7 surfaceTolerance=%8 rawAStart=%9 rawAEnd=%10 alignedAStart=%11 alignedAEnd=%12")
+                    .arg(summary.entityId)
+                    .arg(summary.processGroupId)
+                    .arg(sourceKindName(summary.sourceKind))
+                    .arg(summary.pointCount)
+                    .arg(summary.ySpan, 0, 'g', 15)
+                    .arg(summary.zSpan, 0, 'g', 15)
+                    .arg(surfaceRegionName(summary.classification))
+                    .arg(summary.surfaceTolerance, 0, 'g', 15)
+                    .arg(summary.rawAStart, 0, 'g', 15)
+                    .arg(summary.rawAEnd, 0, 'g', 15)
+                    .arg(summary.alignedAStart, 0, 'g', 15)
+                    .arg(summary.alignedAEnd, 0, 'g', 15);
+        }
+    }
+
     cadcam::geometry::SamplingPolicy productionSamplingPolicy(int dxfType)
     {
         cadcam::geometry::SamplingPolicy policy;
@@ -256,6 +312,24 @@ OperationResult<cadcam::machine::MachineTrajectory> MachineTrajectoryService::bu
         policy.tubeCenterY = (minimumY + maximumY) * 0.5;
         policy.tubeCenterZ = (minimumZ + maximumZ) * 0.5;
     }
+    policy.surfaceClassificationTolerance = std::max(policy.numericalEpsilon, 1.0e-6);
+    if (tubeSection.has_value() && !tubeSection->geometry.boundary.empty())
+    {
+        double minimumY = tubeSection->geometry.boundary.front().x;
+        double maximumY = minimumY;
+        double minimumZ = tubeSection->geometry.boundary.front().y;
+        double maximumZ = minimumZ;
+        for (const auto& point : tubeSection->geometry.boundary)
+        {
+            minimumY = std::min(minimumY, point.x);
+            maximumY = std::max(maximumY, point.x);
+            minimumZ = std::min(minimumZ, point.y);
+            maximumZ = std::max(maximumZ, point.y);
+        }
+        const double maximumDimension = std::max(maximumY - minimumY, maximumZ - minimumZ);
+        policy.surfaceClassificationTolerance = std::max
+            (policy.surfaceClassificationTolerance, maximumDimension * 1.0e-8);
+    }
     if (!std::isfinite(policy.tubeCenterY) || !std::isfinite(policy.tubeCenterZ)
         || !std::isfinite(policy.rotaryAxisY) || !std::isfinite(policy.rotaryAxisZ))
     {
@@ -269,5 +343,6 @@ OperationResult<cadcam::machine::MachineTrajectory> MachineTrajectoryService::bu
     result.mergeDiagnostics(built);
     result.status = built.status;
     result.value = std::move(built.value);
+    if (result.value.has_value()) logSurfaceSummaries(*result.value);
     return result;
 }

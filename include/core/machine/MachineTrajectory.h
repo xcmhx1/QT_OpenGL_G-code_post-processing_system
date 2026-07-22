@@ -11,6 +11,7 @@
 namespace cadcam::machine
 {
     enum class MachineMoveKind { Rapid, Cutting, CuttingConnection, Overcut };
+    enum class RotarySurfaceRegion { Top, Right, Bottom, Left, Corner, Radial, Unknown };
 
     struct MachinePose4D
     {
@@ -45,6 +46,22 @@ namespace cadcam::machine
         std::vector<MachineMove> overcutMoves;
     };
 
+    struct RotarySurfaceSummary
+    {
+        geometry::EntityId entityId = 0;
+        int processGroupId = -1;
+        geometry::SourceGeometryKind sourceKind = geometry::SourceGeometryKind::Unknown;
+        std::size_t pointCount = 0;
+        double ySpan = 0.0;
+        double zSpan = 0.0;
+        RotarySurfaceRegion classification = RotarySurfaceRegion::Unknown;
+        double surfaceTolerance = 0.0;
+        double rawAStart = 0.0;
+        double rawAEnd = 0.0;
+        double alignedAStart = 0.0;
+        double alignedAEnd = 0.0;
+    };
+
     struct RotaryTrajectoryContext
     {
         double rotaryAxisY = 0.0;
@@ -66,6 +83,7 @@ namespace cadcam::machine
         std::uint64_t processStateRevision = 0;
         RotaryTrajectoryContext rotaryContext;
         std::vector<EntityTrajectory> entities;
+        std::vector<RotarySurfaceSummary> surfaceSummaries;
     };
 
     struct TrajectoryEntityInput
@@ -98,6 +116,7 @@ namespace cadcam::machine
         double overcutDistance = 2.0;
         double continuousConnectionTolerance = 1.0;
         double numericalEpsilon = 1.0e-5;
+        double surfaceClassificationTolerance = 1.0e-5;
     };
 
     struct RotaryTrajectoryInput

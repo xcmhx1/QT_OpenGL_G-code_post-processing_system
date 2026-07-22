@@ -32,6 +32,16 @@ namespace cadcam::machine
             );
         }
 
+        double machinePositionDistance(const MachinePose4D& left, const MachinePose4D& right)
+        {
+            return std::sqrt
+            (
+                (left.x - right.x) * (left.x - right.x)
+                + (left.y - right.y) * (left.y - right.y)
+                + (left.z - right.z) * (left.z - right.z)
+            );
+        }
+
         Diagnostic diagnostic
         (
             DiagnosticCode code,
@@ -112,7 +122,9 @@ namespace cadcam::machine
             || !std::isfinite(policy.safeRadialClearance) || policy.safeRadialClearance < 0.0
             || !std::isfinite(policy.continuousConnectionTolerance)
             || policy.continuousConnectionTolerance <= 0.0
-            || !std::isfinite(policy.numericalEpsilon) || policy.numericalEpsilon <= 0.0)
+            || !std::isfinite(policy.numericalEpsilon) || policy.numericalEpsilon <= 0.0
+            || !std::isfinite(policy.surfaceClassificationTolerance)
+            || policy.surfaceClassificationTolerance <= 0.0)
         {
             result.status = OperationStatus::InvalidInput;
             result.addDiagnostic(diagnostic(DiagnosticCode::MachineTrajectoryInputInvalid,
@@ -219,6 +231,8 @@ namespace cadcam::machine
 
         std::vector<std::vector<MachinePose4D>> posesByEntity;
         posesByEntity.reserve(input.entities.size());
+        std::vector<RotarySurfaceSummary> surfaceSummaries;
+        surfaceSummaries.reserve(input.entities.size());
         for (const auto& entity : input.entities)
         {
             auto transformed = RotaryKinematics::transform
@@ -229,7 +243,9 @@ namespace cadcam::machine
                 result.status = OperationStatus::Failed;
                 return result;
             }
-            posesByEntity.push_back(std::move(*transformed.value));
+            transformed.value->surface.processGroupId = entity.processGroupId;
+            posesByEntity.push_back(std::move(transformed.value->poses));
+            surfaceSummaries.push_back(std::move(transformed.value->surface));
         }
 
         trajectory.entities.reserve(input.entities.size());
@@ -250,6 +266,8 @@ namespace cadcam::machine
                 while (poses.front().aDegrees + offset - previousPose.aDegrees < -180.0) offset += 360.0;
                 for (auto& pose : poses) pose.aDegrees += offset;
             }
+            surfaceSummaries[index].alignedAStart = poses.front().aDegrees;
+            surfaceSummaries[index].alignedAEnd = poses.back().aDegrees;
             const double connectionDistance = index > 0
                 ? sourceDistance(input.entities[index - 1].path.vertices.back().position,
                                  inputEntity.path.vertices.front().position)
@@ -263,6 +281,36 @@ namespace cadcam::machine
                 value.context.insert(QStringLiteral("connectionDistance"), connectionDistance);
                 result.addDiagnostic(value);
                 return result;
+            }
+            if (sameGroup)
+            {
+                const MachinePose4D& previousEnd = posesByEntity[index - 1U].back();
+                const MachinePose4D& nextStart = poses.front();
+                const double machineDistance = machinePositionDistance(previousEnd, nextStart);
+                const double angleDifference = std::abs(nextStart.aDegrees - previousEnd.aDegrees);
+                if (machineDistance > policy.continuousConnectionTolerance
+                    || angleDifference > 180.0 + policy.numericalEpsilon)
+                {
+                    result.status = OperationStatus::Failed;
+                    Diagnostic value = diagnostic
+                    (
+                        DiagnosticCode::MachineTrajectoryContinuityFailure,
+                        DiagnosticSeverity::Error,
+                        QStringLiteral("连续加工组的源路径相连，但机床轨迹端点不连续。"),
+                        taskContext.operationContext,
+                        &inputEntity
+                    );
+                    value.context.insert(QStringLiteral("previousEntityId"),
+                        QVariant::fromValue<qulonglong>(input.entities[index - 1U].entityId));
+                    value.context.insert(QStringLiteral("nextEntityId"),
+                        QVariant::fromValue<qulonglong>(inputEntity.entityId));
+                    value.context.insert(QStringLiteral("sourceConnectionDistance"), connectionDistance);
+                    value.context.insert(QStringLiteral("machineConnectionDistance"), machineDistance);
+                    value.context.insert(QStringLiteral("previousA"), previousEnd.aDegrees);
+                    value.context.insert(QStringLiteral("nextA"), nextStart.aDegrees);
+                    result.addDiagnostic(value);
+                    return result;
+                }
             }
 
             EntityTrajectory entity;
@@ -417,6 +465,8 @@ namespace cadcam::machine
             previousPose = finalPose(trajectory.entities.back(), poses.back());
             hasPrevious = true;
         }
+
+        trajectory.surfaceSummaries = std::move(surfaceSummaries);
 
         for (const auto& entity : trajectory.entities)
         {
