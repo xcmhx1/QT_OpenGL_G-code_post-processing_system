@@ -19,77 +19,32 @@
 
 using namespace CadEditerWorkflowInternal;
 
-class ProcessUnitSequenceCommand final : public CadEditer::EditCommand
+class CallbackEditCommand final : public CadEditer::EditCommand
 {
 public:
-    ProcessUnitSequenceCommand
+    CallbackEditCommand
     (
-        cadcam::planning::ProcessUnitSequence before,
-        cadcam::planning::ProcessUnitSequence after,
-        CadEditer::ProcessUnitSequenceApply apply
+        std::function<bool()> execute,
+        std::function<bool()> undo
     )
-        : m_before(std::move(before))
-        , m_after(std::move(after))
-        , m_apply(std::move(apply))
+        : m_execute(std::move(execute))
+        , m_undo(std::move(undo))
     {
     }
 
     bool execute() override
     {
-        return m_apply != nullptr && m_apply(m_after);
+        return m_execute != nullptr && m_execute();
     }
 
     bool undo() override
     {
-        return m_apply != nullptr && m_apply(m_before);
+        return m_undo != nullptr && m_undo();
     }
 
 private:
-    cadcam::planning::ProcessUnitSequence m_before;
-    cadcam::planning::ProcessUnitSequence m_after;
-    CadEditer::ProcessUnitSequenceApply m_apply;
-};
-
-class ProcessUnitTraversalCommand final : public CadEditer::EditCommand
-{
-public:
-    ProcessUnitTraversalCommand
-    (
-        cadcam::planning::ProcessUnitKey key,
-        cadcam::process::ProcessUnitTraversalOverride beforeTraversal,
-        std::optional<cadcam::process::ProcessUnitTraversalOverride> beforeStored,
-        cadcam::process::ProcessUnitTraversalOverride afterTraversal,
-        std::optional<cadcam::process::ProcessUnitTraversalOverride> afterStored,
-        CadEditer::ProcessUnitTraversalApply apply
-    )
-        : m_key(std::move(key))
-        , m_beforeTraversal(std::move(beforeTraversal))
-        , m_beforeStored(std::move(beforeStored))
-        , m_afterTraversal(std::move(afterTraversal))
-        , m_afterStored(std::move(afterStored))
-        , m_apply(std::move(apply))
-    {
-    }
-
-    bool execute() override
-    {
-        return m_apply != nullptr
-            && m_apply(m_key, m_afterTraversal, m_afterStored);
-    }
-
-    bool undo() override
-    {
-        return m_apply != nullptr
-            && m_apply(m_key, m_beforeTraversal, m_beforeStored);
-    }
-
-private:
-    cadcam::planning::ProcessUnitKey m_key;
-    cadcam::process::ProcessUnitTraversalOverride m_beforeTraversal;
-    std::optional<cadcam::process::ProcessUnitTraversalOverride> m_beforeStored;
-    cadcam::process::ProcessUnitTraversalOverride m_afterTraversal;
-    std::optional<cadcam::process::ProcessUnitTraversalOverride> m_afterStored;
-    CadEditer::ProcessUnitTraversalApply m_apply;
+    std::function<bool()> m_execute;
+    std::function<bool()> m_undo;
 };
 
 // 添加实体命令：
@@ -2024,46 +1979,19 @@ bool CadEditer::handleGripEditing
     return false;
 }
 
-// 将完整加工单元序列作为一个可撤销命令应用。
-bool CadEditer::changeProcessUnitSequence
+bool CadEditer::executeUndoableAction
 (
-    const cadcam::planning::ProcessUnitSequence& before,
-    const cadcam::planning::ProcessUnitSequence& after,
-    ProcessUnitSequenceApply apply
+    std::function<bool()> execute,
+    std::function<bool()> undo
 )
 {
-    if (before.units == after.units || apply == nullptr)
+    if (execute == nullptr || undo == nullptr || m_document == nullptr)
     {
         return false;
     }
 
-    return executeCommand(std::make_unique<ProcessUnitSequenceCommand>
-        (before, after, std::move(apply)));
-}
-
-// 将加工单元整组遍历反向作为一个可撤销命令应用。
-bool CadEditer::changeProcessUnitTraversal
-(
-    const cadcam::planning::ProcessUnitKey& key,
-    const cadcam::process::ProcessUnitTraversalOverride& beforeTraversal,
-    const std::optional<cadcam::process::ProcessUnitTraversalOverride>& beforeStored,
-    const cadcam::process::ProcessUnitTraversalOverride& afterTraversal,
-    const std::optional<cadcam::process::ProcessUnitTraversalOverride>& afterStored,
-    ProcessUnitTraversalApply apply
-)
-{
-    if (!cadcam::planning::validProcessUnitKey(key)
-        || beforeTraversal == afterTraversal || apply == nullptr) return false;
-
-    return executeCommand(std::make_unique<ProcessUnitTraversalCommand>
-    (
-        key,
-        beforeTraversal,
-        beforeStored,
-        afterTraversal,
-        afterStored,
-        std::move(apply)
-    ));
+    return executeCommand(std::make_unique<CallbackEditCommand>
+        (std::move(execute), std::move(undo)));
 }
 
 // 执行命令并压入 Undo 栈

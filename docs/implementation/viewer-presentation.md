@@ -97,8 +97,8 @@ Ctrl 单击时，Viewer 将当前选中图元的稳定 `EntityId` 映射到展�
 - `src/application/process/ProcessPresentationSnapshot.cpp`：校验计划并生成单元级和逐图元展示数据。
 - `include/application/process/ProcessPresentationSnapshot.h`：定义单元级与逐图元展示快照。
 - `include/core/planning/ProcessPlan.h`：定义加工单元、单元序列和逐图元 assignment。
-- `src/desktop/Gcode_postprocessing_system_SortActions.cpp`：校验连续选中范围，原子更新单元序列、计划和展示结果。
-- `src/cad/editing/CadEditer_CommandActions.cpp`：保存块内移尾和整组反向前后状态并接入 Undo/Redo。
+- `src/desktop/Gcode_postprocessing_system_SortActions.cpp`：校验连续选中范围，按值保存加工状态前后快照，并构造原子更新回调。
+- `src/cad/editing/CadEditer_CommandActions.cpp`：通过通用回调命令把加工交互接入 CAD 共用的 Undo/Redo 栈，不解释加工单元类型。
 
 ## 当前实现差异
 
@@ -110,6 +110,7 @@ Ctrl 单击时，Viewer 将当前选中图元的稳定 `EntityId` 映射到展�
 | 顺序状态 | 标签读取 `unitOrder`，不读取逐图元 `processOrder` | Viewer 读取单元序列位置 | 已实现 |
 | 排序意图 | 普通排序保留匹配单元相对顺序，智能排序重建序列 | Viewer 不参与排序决策 | 已实现，Viewer 未修改排序 |
 | 点击交互 | 单击选择全部成员；Ctrl 单击执行连续块内移尾；双击编号或箭头整组反向 | 单元级顺序与方向交互 | 已实现并支持 Undo/Redo |
+| 交互历史 | Desktop/Application 构造块内移尾和整组反向的执行、撤销回调，`CadEditer` 只维护统一历史顺序 | Viewer 不保存业务状态，CAD 层不拥有加工命令类型 | 已迁移到通用历史入口 |
 | 方向箭头 | 每个 `ProcessUnitPresentation` 只使用首执行成员生成一个箭头 | 一单元一起点方向箭头 | 已实现 |
 | 失效刷新 | 展示随有效 `ProcessPlan` 创建或清除 | 序列编号与有效计划一致 | 当前仍不在计划失效期间单独展示序列 |
 

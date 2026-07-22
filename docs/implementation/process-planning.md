@@ -160,7 +160,8 @@ Application 的 `DocumentProcessState` 持有当前 `ProcessUnitSequence`。Core
 - 人工块内移尾在候选计划通过单元结构和 Break 约束校验后才更新 `DocumentProcessState`，然后将计划重新绑定到新 revision 并重建展示快照。
 - 普通排序在单元顺序稳定后应用按 `ProcessUnitKey` 保存的单元遍历覆盖；智能排序不读取该覆盖，也不删除用户状态。
 - 整组反向倒序 `orderedMemberEntityIds`、取反每个 assignment 的 `reverse`，并保留原 `startParameter`；单元在 `ProcessUnitSequence` 中的位置不变。
-- Undo/Redo 复用同一重排和发布路径，分别应用命令保存的修改前、修改后完整序列。
+- 块内移尾和整组反向由 Desktop/Application 按值保存修改前后状态并构造执行、撤销回调；回调复用同一计划校验和原子发布路径。
+- 加工状态回调提交到 `CadEditer` 通用历史入口，与 CAD 编辑共用同一 Undo/Redo 时间顺序；失败命令不会迁移到另一历史栈。
 - 展示快照按加工单元保存 `unitOrder` 和成员身份，同时保留逐图元方向、起点、连续组和排除原因。
 - 单元加工编号只由 `ProcessUnitSequence` 的位置 `+1` 产生，不存入成员图元。
 - Viewer 顺序标签只读取单元展示项；逐图元 `processOrder` 继续仅服务轨迹和 NC。
@@ -169,7 +170,7 @@ Application 的 `DocumentProcessState` 持有当前 `ProcessUnitSequence`。Core
 
 - `src/desktop/Gcode_postprocessing_system_SortActions.cpp`：提供排序 UI 入口、策略选择和计划保存。
 - `src/application/planning/ProcessPlanningService.cpp`：组织文档捕获、核心规划和 revision 复核。
-- `src/cad/editing/CadEditer_CommandActions.cpp`：将块内移尾和整组反向分别作为单个可撤销命令保存。
+- `src/cad/editing/CadEditer_CommandActions.cpp`：提供不包含加工业务类型的回调命令，并接入统一 Undo/Redo 栈。
 - `src/application/planning/DocumentProcessPlanningAdapter.cpp`：将生产文档和加工状态转换为规划值对象。
 - `src/core/planning/PlanarProcessPlanBuilder.cpp`：构建三轴最近距离加工计划。
 - `src/core/planning/ProcessPlanBuilder.cpp`：构建四轴分组、断面约束和排序计划。
@@ -187,6 +188,7 @@ Application 的 `DocumentProcessState` 持有当前 `ProcessUnitSequence`。Core
 | 智能排序替换 | 智能结果不匹配旧序列，直接更新唯一 `ProcessUnitSequence` | 智能结果直接替换当前序列 | 已实现 |
 | 单元编号 | 单元编号由序列位置产生，Viewer 每个单元显示一个标签；assignment 保留逐图元执行顺序 | 一个加工单元一个显示编号 | 已实现 |
 | 单元交互 | 标签单击选择全部成员，Ctrl 单击执行连续块内移尾，双击标签或箭头执行整组反向 | 支持单元级交互 | 已实现并支持 Undo/Redo |
+| 历史边界 | Application 保存加工状态前后值并提交通用回调命令；CAD 与加工操作共用一个历史栈 | CAD 层不拥有加工单元人工编辑类型 | 块内移尾和整组反向已迁移；删除和替换命令仍暂时依赖 `DocumentProcessState` |
 | 配置失效层级 | 当前配置切换会清除整个计划 | 仅排序配置变化应使计划失效；运动和文本配置应分别影响下游 | 当前失效范围比概要设计更保守 |
 | 首组懒旋转 | 首个加工组固定按最近距离选择 | 懒旋转工艺强调减少 A 轴往复 | 首组不使用旋转代价，后续组才使用 |
 

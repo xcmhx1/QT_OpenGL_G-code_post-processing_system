@@ -77,6 +77,7 @@ bool CadEditer::undo()
 
     if (!command->undo())
     {
+        m_undoStack.push_back(std::move(command));
         return false;
     }
 
@@ -100,6 +101,7 @@ bool CadEditer::redo()
 
     if (!command->execute())
     {
+        m_redoStack.push_back(std::move(command));
         return false;
     }
 

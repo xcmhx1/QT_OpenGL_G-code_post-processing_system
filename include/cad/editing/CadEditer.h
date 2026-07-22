@@ -58,31 +58,11 @@ public:
     // @return 如果重做成功返回 true，否则返回 false
     bool redo();
 
-    using ProcessUnitSequenceApply = std::function<bool
-        (const cadcam::planning::ProcessUnitSequence&)>;
-
-    bool changeProcessUnitSequence
+    // 执行不依赖 CAD 业务类型的可撤销操作，并接入统一历史栈。
+    bool executeUndoableAction
     (
-        const cadcam::planning::ProcessUnitSequence& before,
-        const cadcam::planning::ProcessUnitSequence& after,
-        ProcessUnitSequenceApply apply
-    );
-
-    using ProcessUnitTraversalApply = std::function<bool
-    (
-        const cadcam::planning::ProcessUnitKey&,
-        const cadcam::process::ProcessUnitTraversalOverride&,
-        const std::optional<cadcam::process::ProcessUnitTraversalOverride>&
-    )>;
-
-    bool changeProcessUnitTraversal
-    (
-        const cadcam::planning::ProcessUnitKey& key,
-        const cadcam::process::ProcessUnitTraversalOverride& beforeTraversal,
-        const std::optional<cadcam::process::ProcessUnitTraversalOverride>& beforeStored,
-        const cadcam::process::ProcessUnitTraversalOverride& afterTraversal,
-        const std::optional<cadcam::process::ProcessUnitTraversalOverride>& afterStored,
-        ProcessUnitTraversalApply apply
+        std::function<bool()> execute,
+        std::function<bool()> undo
     );
 
     // 处理左键点击驱动的绘图或编辑逻辑

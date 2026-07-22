@@ -3717,25 +3717,27 @@ void Gcode_postprocessing_system::handleProcessUnitReverseRequest
     const std::optional<cadcam::process::ProcessUnitTraversalOverride> afterStored =
         afterTraversal;
 
-    const bool applied = m_editer.changeProcessUnitTraversal
+    const auto applyTraversal = [this, announce, unitKey]
     (
-        unitKey,
-        beforeTraversal,
-        beforeStored,
-        afterTraversal,
-        afterStored,
-        [this, announce]
-        (
-            const cadcam::planning::ProcessUnitKey& key,
-            const cadcam::process::ProcessUnitTraversalOverride& traversal,
-            const std::optional<cadcam::process::ProcessUnitTraversalOverride>& stored
-        )
+        const cadcam::process::ProcessUnitTraversalOverride& traversal,
+        const std::optional<cadcam::process::ProcessUnitTraversalOverride>& stored
+    )
+    {
+        QString errorMessage;
+        const bool success = applyProcessUnitTraversalToCurrentPlan
+            (unitKey, traversal, stored, &errorMessage);
+        if (!success) announce(errorMessage);
+        return success;
+    };
+    const bool applied = m_editer.executeUndoableAction
+    (
+        [applyTraversal, afterTraversal, afterStored]()
         {
-            QString errorMessage;
-            const bool success = applyProcessUnitTraversalToCurrentPlan
-                (key, traversal, stored, &errorMessage);
-            if (!success) announce(errorMessage);
-            return success;
+            return applyTraversal(afterTraversal, afterStored);
+        },
+        [applyTraversal, beforeTraversal, beforeStored]()
+        {
+            return applyTraversal(beforeTraversal, beforeStored);
         }
     );
     if (applied)
@@ -3808,17 +3810,24 @@ void Gcode_postprocessing_system::handleProcessUnitMoveToBackRequest
     after.units.insert(after.units.begin() + static_cast<std::ptrdiff_t>(rangeLast), moved);
     ++after.revision;
 
-    const bool applied = m_editer.changeProcessUnitSequence
+    const auto applySequence = [this, announce]
+        (const cadcam::planning::ProcessUnitSequence& requested)
+    {
+        QString errorMessage;
+        const bool success = applyProcessUnitSequenceToCurrentPlan
+            (requested, &errorMessage);
+        if (!success) announce(errorMessage);
+        return success;
+    };
+    const bool applied = m_editer.executeUndoableAction
     (
-        before,
-        after,
-        [this, announce](const cadcam::planning::ProcessUnitSequence& requested)
+        [applySequence, after]()
         {
-            QString errorMessage;
-            const bool success = applyProcessUnitSequenceToCurrentPlan
-                (requested, &errorMessage);
-            if (!success) announce(errorMessage);
-            return success;
+            return applySequence(after);
+        },
+        [applySequence, before]()
+        {
+            return applySequence(before);
         }
     );
     if (!applied)
