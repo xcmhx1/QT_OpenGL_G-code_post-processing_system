@@ -147,6 +147,11 @@ Application 的 `DocumentProcessState` 持有当前 `ProcessUnitSequence`。Core
 - 三轴当前使用最近距离计划，方向偏好会约束正向或反向候选。
 - 四轴可按配置选择最近距离或懒旋转策略；懒旋转在后续选择中考虑 A 轴旋转代价。
 - 四轴第一次组选择仍使用最近距离，再对后续组应用配置的排序策略。
+- 四轴单图元闭合圆和完整椭圆的 Auto 起点在规划输入中保持为空，不再等同于 `π/2`；`π/2` 仅保留为几何编译器没有最终计划参数时的独立默认值。
+- 规划器直接使用现有 `Path3D` 顶点，把每个顶点的 `sourceParameter` 与允许的正反方向组合为候选，不增加采样点。人工起点存在时仅保留当前路径首点，人工方向继续限制允许候选。
+- 圆和完整椭圆的入口候选比较定位运动与首个非退化切削段：统计 X/A 轴入口反向数量，并以近似机床运动向量的夹角形成切线连续代价。没有有效截面中心时仅判断 X 轴反向，切线代价使用三维源路径向量。
+- `LazyRotation` 依次比较旋转代价、表面代价、入口轴反向数、切线代价、移动距离及稳定身份；`NearestNext` 依次比较移动距离、入口轴反向数、切线代价及稳定身份。最终再按起点参数和方向稳定消歧。
+- 自动选出的入口参数和方向仅写入当前 `ProcessAssignment`，不回写 `DocumentProcessState`。
 - 三轴由拓扑分量和连续遍历直接形成 `ProcessUnit`，四轴由现有 `ProcessGroup` 和 directed traversal 形成 `ProcessUnit`；Waste 排除组不进入加工单元序列。
 - `ProcessUnitKey` 使用组内全部稳定 `EntityId` 的升序集合，`orderedMemberEntityIds` 使用最终实际加工遍历顺序。
 - 每个逐图元 assignment 通过 `processUnitIndex` 关联唯一加工单元，并继续按执行顺序保持连续且唯一。

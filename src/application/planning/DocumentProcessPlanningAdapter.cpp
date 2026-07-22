@@ -281,8 +281,6 @@ DocumentProcessPlanningAdapter::captureRotary
             if (path.succeeded() && path.value.has_value())
             {
                 entity.path = std::move(*path.value);
-                entity.startParameter = effectiveStartParameter
-                    (entity.startParameter, entity.sourceKind, entity.path.closed);
                 if (supportsProcessPath(entity.sourceKind)
                     && hasUsablePath(entity.path, topologyTolerance.minimumEdgeLength))
                 {

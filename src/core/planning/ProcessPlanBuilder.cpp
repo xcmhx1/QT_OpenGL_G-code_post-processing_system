@@ -51,8 +51,11 @@ namespace cadcam::planning
         {
             const PlanningEntity* entity = nullptr;
             bool reverseRelativeToInput = false;
+            std::optional<double> selectedStartParameter;
             Vector3d start;
             Vector3d end;
+            int entryAxisReversalCount = 0;
+            double entryTangentCost = 0.0;
         };
 
         struct GroupTraversal
@@ -64,6 +67,8 @@ namespace cadcam::planning
             double movementDistance = 0.0;
             double rotationCost = 0.0;
             int surfaceCost = 0;
+            int entryAxisReversalCount = 0;
+            double entryTangentCost = 0.0;
             std::size_t stableSourceIndex = 0;
             EntityId stableEntityId = 0;
         };
@@ -627,6 +632,7 @@ namespace cadcam::planning
                 DirectedEntity directed;
                 directed.entity = selected;
                 directed.reverseRelativeToInput = selectedReverse;
+                directed.selectedStartParameter = selected->startParameter;
                 directed.start = selectedPoints.front();
                 directed.end = selectedPoints.back();
                 traversal.entities.push_back(directed);
@@ -640,6 +646,9 @@ namespace cadcam::planning
             if (group.closed && distance(traversal.end, traversal.start) > tolerance) return std::nullopt;
             if (group.closed) traversal.end = traversal.start;
             traversal.movementDistance = distance(currentPosition, traversal.start);
+            traversal.entryAxisReversalCount =
+                traversal.entities.front().entryAxisReversalCount;
+            traversal.entryTangentCost = traversal.entities.front().entryTangentCost;
             traversal.stableSourceIndex = traversal.entities.front().entity->sourceIndex;
             traversal.stableEntityId = traversal.entities.front().entity->entityId;
             return traversal;
@@ -678,6 +687,190 @@ namespace cadcam::planning
             traversal.surfaceCost = std::min(rawDifference, 4 - rawDifference);
         }
 
+        double entryThreshold(double connectionTolerance)
+        {
+            return std::max(kCalculationEpsilon, connectionTolerance * 1.0e-6);
+        }
+
+        std::optional<double> rotaryTravelLength
+        (
+            const Vector3d& start,
+            const Vector3d& end,
+            const Vector2d& center,
+            double threshold
+        )
+        {
+            const double startRadius = std::hypot(start.y - center.x, start.z - center.y);
+            const double endRadius = std::hypot(end.y - center.x, end.z - center.y);
+            const double localRadius = (startRadius + endRadius) * 0.5;
+            if (!std::isfinite(localRadius) || localRadius <= threshold) return std::nullopt;
+
+            const double startAngle = std::atan2(start.z - center.y, start.y - center.x);
+            const double endAngle = std::atan2(end.z - center.y, end.y - center.x);
+            const double angleDelta = std::remainder
+                (endAngle - startAngle, 2.0 * 3.14159265358979323846);
+            const double travel = localRadius * angleDelta;
+            return std::isfinite(travel) ? std::optional<double>(travel) : std::nullopt;
+        }
+
+        void scoreEntrySmoothness
+        (
+            DirectedEntity& directed,
+            const Vector3d& currentPosition,
+            const Vector3d& nextPoint,
+            const std::optional<Vector2d>& tubeCenter,
+            double connectionTolerance
+        )
+        {
+            const double threshold = entryThreshold(connectionTolerance);
+            const double approachDx = directed.start.x - currentPosition.x;
+            const double cutDx = nextPoint.x - directed.start.x;
+            if (std::abs(approachDx) > threshold && std::abs(cutDx) > threshold
+                && approachDx * cutDx < 0.0)
+            {
+                ++directed.entryAxisReversalCount;
+            }
+
+            if (tubeCenter.has_value()
+                && std::isfinite(tubeCenter->x) && std::isfinite(tubeCenter->y))
+            {
+                const std::optional<double> approachRotary = rotaryTravelLength
+                    (currentPosition, directed.start, *tubeCenter, threshold);
+                const std::optional<double> cutRotary = rotaryTravelLength
+                    (directed.start, nextPoint, *tubeCenter, threshold);
+                if (approachRotary.has_value() && cutRotary.has_value()
+                    && std::abs(*approachRotary) > threshold
+                    && std::abs(*cutRotary) > threshold
+                    && *approachRotary * *cutRotary < 0.0)
+                {
+                    ++directed.entryAxisReversalCount;
+                }
+
+                const double approachA = approachRotary.value_or(0.0);
+                const double cutA = cutRotary.value_or(0.0);
+                const double approachLength = std::hypot(approachDx, approachA);
+                const double cutLength = std::hypot(cutDx, cutA);
+                if (approachLength > threshold && cutLength > threshold)
+                {
+                    const double dotValue = (approachDx * cutDx + approachA * cutA)
+                        / (approachLength * cutLength);
+                    directed.entryTangentCost = std::clamp(1.0 - dotValue, 0.0, 2.0);
+                }
+                return;
+            }
+
+            const Vector3d approach
+            {
+                directed.start.x - currentPosition.x,
+                directed.start.y - currentPosition.y,
+                directed.start.z - currentPosition.z
+            };
+            const Vector3d cut
+            {
+                nextPoint.x - directed.start.x,
+                nextPoint.y - directed.start.y,
+                nextPoint.z - directed.start.z
+            };
+            const double approachLength = std::sqrt
+                (approach.x * approach.x + approach.y * approach.y + approach.z * approach.z);
+            const double cutLength = std::sqrt
+                (cut.x * cut.x + cut.y * cut.y + cut.z * cut.z);
+            if (approachLength > threshold && cutLength > threshold)
+            {
+                const double dotValue = (approach.x * cut.x + approach.y * cut.y
+                    + approach.z * cut.z) / (approachLength * cutLength);
+                directed.entryTangentCost = std::clamp(1.0 - dotValue, 0.0, 2.0);
+            }
+        }
+
+        bool isSingleClosedEntryOptimizedCurve
+        (
+            const ProcessGroup& group,
+            const PlanningEntity& entity
+        )
+        {
+            return group.entityIds.size() == 1U && entity.path.closed
+                && (entity.sourceKind == geometry::SourceGeometryKind::Circle
+                    || entity.sourceKind == geometry::SourceGeometryKind::Ellipse);
+        }
+
+        std::optional<GroupTraversal> buildSingleClosedCurveTraversal
+        (
+            const ProcessGroup& group,
+            const PlanningEntity& entity,
+            const Vector3d& currentPosition,
+            bool reverse,
+            std::size_t startIndex,
+            double connectionTolerance,
+            const std::optional<machining::TubeSectionModel>& section,
+            const std::optional<Vector2d>& tubeCenter
+        )
+        {
+            const std::size_t pointCount = entity.path.vertices.size();
+            if (pointCount < 2U || startIndex >= pointCount) return std::nullopt;
+
+            std::vector<Vector3d> points;
+            points.reserve(pointCount);
+            for (std::size_t offset = 0U; offset < pointCount; ++offset)
+            {
+                const std::size_t index = reverse
+                    ? (startIndex + pointCount - offset) % pointCount
+                    : (startIndex + offset) % pointCount;
+                points.push_back(entity.path.vertices[index].position);
+            }
+
+            const double threshold = entryThreshold(connectionTolerance);
+            const auto next = std::find_if
+            (
+                points.cbegin() + 1,
+                points.cend(),
+                [&points, threshold](const Vector3d& point)
+                {
+                    return distance(points.front(), point) > threshold;
+                }
+            );
+            if (next == points.cend()) return std::nullopt;
+
+            const std::optional<double> selectedStartParameter = entity.startParameter.has_value()
+                ? entity.startParameter
+                : std::optional<double>(entity.path.vertices[startIndex].sourceParameter);
+            if (!selectedStartParameter.has_value()
+                || !std::isfinite(*selectedStartParameter)) return std::nullopt;
+
+            DirectedEntity directed;
+            directed.entity = &entity;
+            directed.reverseRelativeToInput = reverse;
+            directed.selectedStartParameter = selectedStartParameter;
+            directed.start = points.front();
+            directed.end = points.front();
+            scoreEntrySmoothness
+                (directed, currentPosition, *next, tubeCenter, connectionTolerance);
+
+            GroupTraversal traversal;
+            traversal.groupId = group.groupId;
+            traversal.entities.push_back(directed);
+            traversal.start = directed.start;
+            traversal.end = directed.end;
+            traversal.entryAxisReversalCount = directed.entryAxisReversalCount;
+            traversal.entryTangentCost = directed.entryTangentCost;
+            traversal.stableSourceIndex = entity.sourceIndex;
+            traversal.stableEntityId = entity.entityId;
+            scoreTraversal(traversal, currentPosition, section);
+            return traversal;
+        }
+
+        bool selectedStartParameterLess
+        (
+            const std::optional<double>& left,
+            const std::optional<double>& right
+        )
+        {
+            if (left.has_value() != right.has_value()) return !left.has_value();
+            if (!left.has_value()) return false;
+            if (std::abs(*left - *right) > kCalculationEpsilon) return *left < *right;
+            return false;
+        }
+
         bool traversalLess
         (
             const GroupTraversal& left,
@@ -690,12 +883,37 @@ namespace cadcam::planning
                 if (std::abs(left.rotationCost - right.rotationCost) > kCalculationEpsilon)
                     return left.rotationCost < right.rotationCost;
                 if (left.surfaceCost != right.surfaceCost) return left.surfaceCost < right.surfaceCost;
+                if (left.entryAxisReversalCount != right.entryAxisReversalCount)
+                    return left.entryAxisReversalCount < right.entryAxisReversalCount;
+                if (std::abs(left.entryTangentCost - right.entryTangentCost) > kCalculationEpsilon)
+                    return left.entryTangentCost < right.entryTangentCost;
+                if (std::abs(left.movementDistance - right.movementDistance) > kCalculationEpsilon)
+                    return left.movementDistance < right.movementDistance;
             }
-            if (std::abs(left.movementDistance - right.movementDistance) > kCalculationEpsilon)
-                return left.movementDistance < right.movementDistance;
+            else
+            {
+                if (std::abs(left.movementDistance - right.movementDistance) > kCalculationEpsilon)
+                    return left.movementDistance < right.movementDistance;
+                if (left.entryAxisReversalCount != right.entryAxisReversalCount)
+                    return left.entryAxisReversalCount < right.entryAxisReversalCount;
+                if (std::abs(left.entryTangentCost - right.entryTangentCost) > kCalculationEpsilon)
+                    return left.entryTangentCost < right.entryTangentCost;
+            }
             if (left.stableSourceIndex != right.stableSourceIndex)
                 return left.stableSourceIndex < right.stableSourceIndex;
-            return left.stableEntityId < right.stableEntityId;
+            if (left.stableEntityId != right.stableEntityId)
+                return left.stableEntityId < right.stableEntityId;
+            const std::optional<double> leftStart = left.entities.empty()
+                ? std::nullopt : left.entities.front().selectedStartParameter;
+            const std::optional<double> rightStart = right.entities.empty()
+                ? std::nullopt : right.entities.front().selectedStartParameter;
+            if (selectedStartParameterLess(leftStart, rightStart)) return true;
+            if (selectedStartParameterLess(rightStart, leftStart)) return false;
+            const bool leftReverse = !left.entities.empty()
+                && left.entities.front().reverseRelativeToInput;
+            const bool rightReverse = !right.entities.empty()
+                && right.entities.front().reverseRelativeToInput;
+            return leftReverse < rightReverse;
         }
 
         std::optional<GroupTraversal> bestTraversal
@@ -705,9 +923,43 @@ namespace cadcam::planning
             const Vector3d& currentPosition,
             const ProcessPlanningPolicy& policy,
             const std::optional<machining::TubeSectionModel>& section,
+            const std::optional<Vector2d>& tubeCenter,
             ProcessOrderingStrategy selectionStrategy
         )
         {
+            if (group.entityIds.size() == 1U)
+            {
+                const auto found = entities.find(group.entityIds.front());
+                if (found == entities.end()) return std::nullopt;
+                const PlanningEntity& entity = *found->second;
+                if (isSingleClosedEntryOptimizedCurve(group, entity))
+                {
+                    std::optional<GroupTraversal> best;
+                    const std::size_t startCandidateCount = entity.startParameter.has_value()
+                        ? 1U : entity.path.vertices.size();
+                    for (std::size_t startIndex = 0U;
+                        startIndex < startCandidateCount; ++startIndex)
+                    {
+                        for (const bool reverse : { false, true })
+                        {
+                            if (!directionAllowed(entity, reverse, policy.allowReverse)) continue;
+                            auto candidate = buildSingleClosedCurveTraversal
+                            (
+                                group, entity, currentPosition, reverse, startIndex,
+                                policy.connectionTolerance, section, tubeCenter
+                            );
+                            if (!candidate.has_value()) continue;
+                            if (!best.has_value()
+                                || traversalLess(*candidate, *best, selectionStrategy))
+                            {
+                                best = std::move(candidate);
+                            }
+                        }
+                    }
+                    return best;
+                }
+            }
+
             std::optional<GroupTraversal> best;
             for (const EntityId entityId : group.entityIds)
             {
@@ -1307,7 +1559,8 @@ namespace cadcam::planning
             {
                 const ProcessGroup& group = plan.groups[static_cast<std::size_t>(groupId)];
                 auto candidate = bestTraversal
-                    (group, entities, currentPosition, policy, input.tubeSection, selectionStrategy);
+                    (group, entities, currentPosition, policy, input.tubeSection,
+                        input.tubeSectionCenter, selectionStrategy);
                 if (!candidate.has_value())
                 {
                     return failure<ProcessPlan>
@@ -1364,7 +1617,7 @@ namespace cadcam::planning
                 assignment.processUnitIndex = processUnitIndex;
                 assignment.continuousGroupId = continuousGroupId;
                 assignment.reverse = directed.reverseRelativeToInput;
-                assignment.startParameter = directed.entity->startParameter;
+                assignment.startParameter = directed.selectedStartParameter;
                 plan.assignments.push_back(assignment);
             }
             currentPosition = selected->end;
