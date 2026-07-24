@@ -2,10 +2,12 @@
 
 #include "cad/document/CadDocument.h"
 #include "application/planning/DocumentProcessPlanningAdapter.h"
+#include "core/machining/TubeSectionProjector.h"
 #include "core/planning/PlanarProcessPlanBuilder.h"
 #include "core/planning/ProcessPlanBuilder.h"
 
 #include <QDebug>
+#include <QStringList>
 
 #include <limits>
 #include <cmath>
@@ -21,6 +23,16 @@ namespace
     using cadcam::planning::ProcessUnit;
     using cadcam::planning::ProcessUnitKey;
     using cadcam::planning::ProcessUnitSequence;
+
+    struct Zone16SummaryReport
+    {
+        int unitCount = 0;
+        int singleZoneUnitCount = 0;
+        int multiZoneUnitCount = 0;
+        int uncertainUnitCount = 0;
+        int zeroMaskUnitCount = 0;
+        QString status = QStringLiteral("Success");
+    };
 
     bool satisfiesPrecedenceConstraints(const ProcessPlan& plan)
     {
@@ -233,6 +245,264 @@ namespace
         return diagnostic;
     }
 
+    cadcam::geometry::Path3D finalProfilePath
+    (
+        const cadcam::planning::PlanningEntity& entity,
+        const ProcessAssignment& assignment
+    )
+    {
+        cadcam::geometry::Path3D path = entity.path;
+        if (path.closed && assignment.startParameter.has_value()
+            && path.vertices.size() > 1U)
+        {
+            const double parameter = *assignment.startParameter;
+            const auto start = std::min_element
+            (
+                path.vertices.begin(), path.vertices.end(),
+                [parameter](const cadcam::geometry::PathVertex3D& left,
+                    const cadcam::geometry::PathVertex3D& right)
+                {
+                    return std::abs(left.sourceParameter - parameter)
+                        < std::abs(right.sourceParameter - parameter);
+                }
+            );
+            std::rotate(path.vertices.begin(), start, path.vertices.end());
+        }
+        if (assignment.reverse && path.vertices.size() > 1U)
+        {
+            if (path.closed)
+                std::reverse(path.vertices.begin() + 1, path.vertices.end());
+            else
+                std::reverse(path.vertices.begin(), path.vertices.end());
+        }
+        return path;
+    }
+
+    QString processUnitKeyText(const ProcessUnitKey& key)
+    {
+        QStringList values;
+        values.reserve(static_cast<qsizetype>(key.memberEntityIds.size()));
+        for (const EntityId entityId : key.memberEntityIds)
+            values.push_back(QString::number(entityId));
+        return values.join(QLatin1Char('+'));
+    }
+
+    int setBitCount(cadcam::machining::TubeZoneMask mask)
+    {
+        int count = 0;
+        while (mask != 0U)
+        {
+            count += static_cast<int>(mask & 1U);
+            mask = static_cast<cadcam::machining::TubeZoneMask>(mask >> 1U);
+        }
+        return count;
+    }
+
+    Diagnostic zone16ProfileDiagnostic
+    (
+        const OperationContext& context,
+        const ProcessUnit& unit,
+        int groupId,
+        const cadcam::machining::ProcessUnitZoneProfile* profile,
+        const QString& status,
+        const QString& detail
+    )
+    {
+        QStringList zones;
+        QStringList xSpans;
+        const cadcam::machining::TubeZoneMask mask = profile != nullptr
+            ? profile->occupancyMask : 0U;
+        if (profile != nullptr)
+        {
+            for (std::size_t index = 0U;
+                index < cadcam::machining::kTubeZone16Count; ++index)
+            {
+                const auto zone = static_cast<cadcam::machining::TubeZone16>(index);
+                const auto& span = profile->zoneSpans[index];
+                if (!span.occupied) continue;
+                const QString name = cadcam::machining::tubeZoneName(zone);
+                zones.push_back(name);
+                xSpans.push_back(QStringLiteral("%1:[%2,%3]")
+                    .arg(name)
+                    .arg(span.minimumX, 0, 'f', 6)
+                    .arg(span.maximumX, 0, 'f', 6));
+            }
+        }
+
+        const QString maskDigits = QStringLiteral("%1")
+            .arg(mask, 4, 16, QLatin1Char('0')).toUpper();
+        Diagnostic diagnostic;
+        diagnostic.code = DiagnosticCode::ProcessPlanningZone16Profile;
+        diagnostic.severity = profile != nullptr && !profile->uncertain
+            ? DiagnosticSeverity::Info : DiagnosticSeverity::Warning;
+        diagnostic.component = QStringLiteral("ProcessPlanningService");
+        diagnostic.operation = context.operationName;
+        diagnostic.stage = QStringLiteral("build-zone16-profile");
+        diagnostic.userMessage = profile != nullptr
+            ? QStringLiteral("加工单元 16 区位画像已生成。")
+            : QStringLiteral("加工单元 16 区位画像生成失败。");
+        diagnostic.technicalDetail = detail;
+        diagnostic.correlationId = context.correlationId;
+        diagnostic.groupId = groupId;
+        diagnostic.context.insert(QStringLiteral("zone16Profile"), true);
+        diagnostic.context.insert(QStringLiteral("unitKey"), processUnitKeyText(unit.key));
+        diagnostic.context.insert(QStringLiteral("groupId"), groupId);
+        diagnostic.context.insert(QStringLiteral("mask"),
+            QStringLiteral("0x%1").arg(maskDigits));
+        diagnostic.context.insert(QStringLiteral("zones"), zones.join(QLatin1Char(',')));
+        diagnostic.context.insert(QStringLiteral("entryZone"), profile != nullptr
+            ? cadcam::machining::tubeZoneName(profile->entryZone)
+            : QStringLiteral("Unknown"));
+        diagnostic.context.insert(QStringLiteral("exitZone"), profile != nullptr
+            ? cadcam::machining::tubeZoneName(profile->exitZone)
+            : QStringLiteral("Unknown"));
+        diagnostic.context.insert(QStringLiteral("entryPerimeter"), profile != nullptr
+            ? profile->entryPerimeterPosition : 0.0);
+        diagnostic.context.insert(QStringLiteral("exitPerimeter"), profile != nullptr
+            ? profile->exitPerimeterPosition : 0.0);
+        diagnostic.context.insert(QStringLiteral("xSpans"),
+            xSpans.join(QLatin1Char(';')));
+        diagnostic.context.insert(QStringLiteral("maximumShellDeviation"),
+            profile != nullptr ? profile->maximumShellDeviation : 0.0);
+        diagnostic.context.insert(QStringLiteral("averageShellDeviation"),
+            profile != nullptr ? profile->averageShellDeviation : 0.0);
+        diagnostic.context.insert(QStringLiteral("uncertain"),
+            profile == nullptr || profile->uncertain);
+        diagnostic.context.insert(QStringLiteral("status"), status);
+        return diagnostic;
+    }
+
+    Diagnostic zone16SummaryDiagnostic
+    (
+        const OperationContext& context,
+        const Zone16SummaryReport& report
+    )
+    {
+        Diagnostic diagnostic;
+        diagnostic.code = DiagnosticCode::ProcessPlanningZone16Summary;
+        diagnostic.severity = report.uncertainUnitCount == 0
+                && report.zeroMaskUnitCount == 0
+            ? DiagnosticSeverity::Info : DiagnosticSeverity::Warning;
+        diagnostic.component = QStringLiteral("ProcessPlanningService");
+        diagnostic.operation = context.operationName;
+        diagnostic.stage = QStringLiteral("summarize-zone16-profiles");
+        diagnostic.userMessage = QStringLiteral("四轴加工单元 16 区位画像汇总已完成。");
+        diagnostic.technicalDetail =
+            QStringLiteral("Zone16 profiles are diagnostic-only and do not affect scheduling.");
+        diagnostic.correlationId = context.correlationId;
+        diagnostic.context.insert(QStringLiteral("zone16Summary"), true);
+        diagnostic.context.insert(QStringLiteral("unitCount"), report.unitCount);
+        diagnostic.context.insert(QStringLiteral("singleZoneUnitCount"),
+            report.singleZoneUnitCount);
+        diagnostic.context.insert(QStringLiteral("multiZoneUnitCount"),
+            report.multiZoneUnitCount);
+        diagnostic.context.insert(QStringLiteral("uncertainUnitCount"),
+            report.uncertainUnitCount);
+        diagnostic.context.insert(QStringLiteral("zeroMaskUnitCount"),
+            report.zeroMaskUnitCount);
+        diagnostic.context.insert(QStringLiteral("status"), report.status);
+        return diagnostic;
+    }
+
+    void appendZone16PlanningDiagnostics
+    (
+        OperationResult<ProcessPlan>& result,
+        const cadcam::planning::ProcessPlanningInput& input,
+        const OperationContext& context
+    )
+    {
+        if (!result.succeeded() || !result.value.has_value()) return;
+
+        Zone16SummaryReport summary;
+        if (!input.tubeSection.has_value())
+        {
+            summary.status = QStringLiteral("SkippedNoSection");
+            result.addDiagnostic(zone16SummaryDiagnostic(context, summary));
+            return;
+        }
+
+        const auto& section = *input.tubeSection;
+        const double projectionTolerance = std::max(1.0e-5,
+            std::max(section.geometry.yLength, section.geometry.zWidth) * 1.0e-6);
+        std::map<EntityId, const cadcam::planning::PlanningEntity*> entities;
+        for (const auto& entity : input.entities)
+            entities.emplace(entity.entityId, &entity);
+        std::map<EntityId, const ProcessAssignment*> assignments;
+        for (const ProcessAssignment& assignment : result.value->assignments)
+            assignments.emplace(assignment.entityId, &assignment);
+        std::map<EntityId, int> groupIds;
+        for (const ProcessGroup& group : result.value->groups)
+            for (const EntityId entityId : group.entityIds)
+                groupIds.emplace(entityId, group.groupId);
+
+        for (const ProcessUnit& unit : result.value->processUnits)
+        {
+            ++summary.unitCount;
+            std::vector<cadcam::geometry::Path3D> paths;
+            paths.reserve(unit.orderedMemberEntityIds.size());
+            bool complete = true;
+            int groupId = -1;
+            for (const EntityId entityId : unit.orderedMemberEntityIds)
+            {
+                const auto entity = entities.find(entityId);
+                const auto assignment = assignments.find(entityId);
+                const auto group = groupIds.find(entityId);
+                if (entity == entities.end() || assignment == assignments.end()
+                    || group == groupIds.end())
+                {
+                    complete = false;
+                    break;
+                }
+                if (groupId < 0) groupId = group->second;
+                else if (groupId != group->second)
+                {
+                    complete = false;
+                    break;
+                }
+                paths.push_back(finalProfilePath(*entity->second, *assignment->second));
+            }
+
+            OperationResult<cadcam::machining::ProcessUnitZoneProfile> profileResult;
+            if (complete && !paths.empty())
+            {
+                profileResult = cadcam::machining::TubeSectionProjector::buildProfile
+                    (section, paths, unit.closed, projectionTolerance, context);
+            }
+            const auto* profile = profileResult.value.has_value()
+                ? &*profileResult.value : nullptr;
+            QString status = QStringLiteral("Success");
+            QString detail = QStringLiteral("Zone16 profile completed.");
+            if (profile == nullptr)
+            {
+                status = QStringLiteral("Failed");
+                detail = !complete
+                    ? QStringLiteral("Final ProcessUnit members could not be mapped to one planning group.")
+                    : profileResult.diagnostics.isEmpty()
+                        ? QStringLiteral("Zone16 profile did not return a value.")
+                        : profileResult.diagnostics.front().technicalDetail;
+                ++summary.zeroMaskUnitCount;
+                ++summary.uncertainUnitCount;
+                summary.status = QStringLiteral("PartialSuccess");
+            }
+            else
+            {
+                const int occupiedZoneCount = setBitCount(profile->occupancyMask);
+                if (occupiedZoneCount == 0) ++summary.zeroMaskUnitCount;
+                else if (occupiedZoneCount == 1) ++summary.singleZoneUnitCount;
+                else ++summary.multiZoneUnitCount;
+                if (profile->uncertain) ++summary.uncertainUnitCount;
+                if (profile->uncertain || occupiedZoneCount == 0)
+                {
+                    status = QStringLiteral("PartialSuccess");
+                    summary.status = QStringLiteral("PartialSuccess");
+                }
+            }
+            result.addDiagnostic(zone16ProfileDiagnostic
+                (context, unit, groupId, profile, status, detail));
+        }
+        result.addDiagnostic(zone16SummaryDiagnostic(context, summary));
+    }
+
     void logClosedLoopPlanningSummaries(const QVector<Diagnostic>& diagnostics)
     {
         for (const Diagnostic& diagnostic : diagnostics)
@@ -275,6 +545,53 @@ namespace
                         0, 'f', 3)
                     .arg(values.value(QStringLiteral("status"),
                         QStringLiteral("Unknown")).toString());
+        }
+    }
+
+    void logZone16PlanningSummaries(const QVector<Diagnostic>& diagnostics)
+    {
+        for (const Diagnostic& diagnostic : diagnostics)
+        {
+            const QVariantMap& values = diagnostic.context;
+            if (values.value(QStringLiteral("zone16Profile")).toBool())
+            {
+                qInfo().noquote()
+                    << QStringLiteral("[ProcessPlanning][Zone16Profile] unitKey=%1 groupId=%2 mask=%3 zones=%4 entryZone=%5 exitZone=%6 entryPerimeter=%7 exitPerimeter=%8 xSpans=%9 maximumShellDeviation=%10 averageShellDeviation=%11 uncertain=%12 status=%13")
+                        .arg(values.value(QStringLiteral("unitKey")).toString())
+                        .arg(values.value(QStringLiteral("groupId"), -1).toInt())
+                        .arg(values.value(QStringLiteral("mask"),
+                            QStringLiteral("0x0000")).toString())
+                        .arg(values.value(QStringLiteral("zones")).toString())
+                        .arg(values.value(QStringLiteral("entryZone"),
+                            QStringLiteral("Unknown")).toString())
+                        .arg(values.value(QStringLiteral("exitZone"),
+                            QStringLiteral("Unknown")).toString())
+                        .arg(values.value(QStringLiteral("entryPerimeter"), 0.0)
+                            .toDouble(), 0, 'f', 6)
+                        .arg(values.value(QStringLiteral("exitPerimeter"), 0.0)
+                            .toDouble(), 0, 'f', 6)
+                        .arg(values.value(QStringLiteral("xSpans")).toString())
+                        .arg(values.value(QStringLiteral("maximumShellDeviation"),
+                            0.0).toDouble(), 0, 'f', 9)
+                        .arg(values.value(QStringLiteral("averageShellDeviation"),
+                            0.0).toDouble(), 0, 'f', 9)
+                        .arg(values.value(QStringLiteral("uncertain")).toBool()
+                            ? QStringLiteral("true") : QStringLiteral("false"))
+                        .arg(values.value(QStringLiteral("status"),
+                            QStringLiteral("Unknown")).toString());
+            }
+            else if (values.value(QStringLiteral("zone16Summary")).toBool())
+            {
+                qInfo().noquote()
+                    << QStringLiteral("[ProcessPlanning][Zone16Summary] unitCount=%1 singleZoneUnitCount=%2 multiZoneUnitCount=%3 uncertainUnitCount=%4 zeroMaskUnitCount=%5 status=%6")
+                        .arg(values.value(QStringLiteral("unitCount"), 0).toInt())
+                        .arg(values.value(QStringLiteral("singleZoneUnitCount"), 0).toInt())
+                        .arg(values.value(QStringLiteral("multiZoneUnitCount"), 0).toInt())
+                        .arg(values.value(QStringLiteral("uncertainUnitCount"), 0).toInt())
+                        .arg(values.value(QStringLiteral("zeroMaskUnitCount"), 0).toInt())
+                        .arg(values.value(QStringLiteral("status"),
+                            QStringLiteral("Unknown")).toString());
+            }
         }
     }
 }
@@ -395,6 +712,8 @@ OperationResult<cadcam::planning::ProcessPlan> ProcessPlanningService::buildRota
         diagnostic.correlationId = context.correlationId;
         result.addDiagnostic(diagnostic);
     }
+    appendZone16PlanningDiagnostics(result, *capture.value, context);
+    logZone16PlanningSummaries(result.diagnostics);
     return result;
 }
 

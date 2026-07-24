@@ -92,6 +92,8 @@ QString diagnosticCodeName(DiagnosticCode code)
     case DiagnosticCode::ProcessPlanningGroupBuildFailed: return QStringLiteral("ProcessPlanningGroupBuildFailed");
     case DiagnosticCode::ProcessPlanningClosedLoopSummary: return QStringLiteral("ProcessPlanningClosedLoopSummary");
     case DiagnosticCode::ProcessPlanningSurfaceSweepSummary: return QStringLiteral("ProcessPlanningSurfaceSweepSummary");
+    case DiagnosticCode::ProcessPlanningZone16Profile: return QStringLiteral("ProcessPlanningZone16Profile");
+    case DiagnosticCode::ProcessPlanningZone16Summary: return QStringLiteral("ProcessPlanningZone16Summary");
     case DiagnosticCode::ProcessPlanningDirectionFailed: return QStringLiteral("ProcessPlanningDirectionFailed");
     case DiagnosticCode::ProcessPlanningOrderingFailed: return QStringLiteral("ProcessPlanningOrderingFailed");
     case DiagnosticCode::ProcessPlanningInvariantViolation: return QStringLiteral("ProcessPlanningInvariantViolation");
@@ -115,6 +117,7 @@ QString diagnosticCodeName(DiagnosticCode code)
     case DiagnosticCode::RotarySurfaceClassificationFailed: return QStringLiteral("RotarySurfaceClassificationFailed");
     case DiagnosticCode::RotaryCenterInvalid: return QStringLiteral("RotaryCenterInvalid");
     case DiagnosticCode::RotaryCornerGeometryInvalid: return QStringLiteral("RotaryCornerGeometryInvalid");
+    case DiagnosticCode::TubeSectionProjectionFailed: return QStringLiteral("TubeSectionProjectionFailed");
     case DiagnosticCode::MachineTrajectoryContinuityFailure: return QStringLiteral("MachineTrajectoryContinuityFailure");
     case DiagnosticCode::MachineTrajectorySafeMoveFailed: return QStringLiteral("MachineTrajectorySafeMoveFailed");
     case DiagnosticCode::MachineTrajectoryOvercutFailed: return QStringLiteral("MachineTrajectoryOvercutFailed");

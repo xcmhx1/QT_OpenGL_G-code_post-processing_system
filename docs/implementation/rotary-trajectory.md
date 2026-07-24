@@ -28,6 +28,7 @@
 - `RotaryTrajectoryInput`：实体路径、计划分组、revision 和可选截面。
 - `RotaryMachinePolicy`：旋转轴、截面中心、安全距离、Z 修正、过切和角度策略。
 - `RotarySurfaceRegion`：轨迹构建期间使用的顶、右、底、左、圆角、径向或未知表面分类。
+- `TubeZone16`：规划完成后的诊断区位模型，按四个平面、四个圆角和八条分界母线描述单元经过范围；当前不作为运动学输入。
 - `MachinePose4D`：单个 XYZ/A 机床姿态。
 - `MachineMove`：快速、切削、连续切削连接或过切运动。
 - `MachineTrajectory`：轨迹实体、revision 和旋转安全上下文。
@@ -87,6 +88,7 @@ Rotary4Axis ProcessPlan
 
 - 每条路径使用计划确定的 `reverse` 和 `startParameter` 重新编译，轨迹不重新排序。
 - 智能懒旋转计划可按有效方管截面把加工单元组织为平面、相邻圆角和下一平面的阶段序列，并在每个区域内按 X 方向扫描。该顺序已经固化在 `ProcessPlan` 中，轨迹层只消费最终 assignment，不再次进行表面调度。
+- 规划完成后会基于最终单元遍历生成 16 区位画像。画像使用最近理想壳层投影记录跨面、跨圆角、分界母线接触和 X 范围，仅输出诊断，不替换 `RotaryKinematics` 的生产表面分类。
 - 规划阶段使用 Break 断面的真实遍历出口初始化临时表面扫描状态；扫描状态不进入 `DocumentProcessState`、轨迹或 NC。圆角只在当前平面没有剩余合法单元后作为显式过渡区域参与全局调度。
 - 单图元闭合圆和完整椭圆的自动入口由规划器联合确定；轨迹服务使用 Assignment 中的最终起点参数和方向重新编译同一源几何，不再次选择入口。
 - 多图元闭合加工单元由规划阶段提供经过简单环验证的成员顺序和逐成员方向；轨迹层按该顺序连续编译，不重新执行最近端点选择。
@@ -112,6 +114,7 @@ Rotary4Axis ProcessPlan
 - `src/application/machine/MachineTrajectoryService.cpp`：校验计划并把文档几何和配置组装为轨迹输入。
 - `src/core/machine/RotaryKinematics.cpp`：将 `Path3D` 转换为连续 XYZ/A 姿态。
 - `src/core/machine/RotaryTrajectoryBuilder.cpp`：组织安全移动、连续切削、闭合和过切。
+- `src/core/machining/TubeSectionProjector.cpp`：提供规划阶段使用的 16 区位投影与诊断画像，不生成机床姿态。
 - `include/core/machine/MachineTrajectory.h`：定义四轴轨迹、运动和旋转上下文。
 - `include/infrastructure/config/GProfile.h`：定义当前四轴运动配置来源。
 - `src/application/nc/NcProgramService.cpp`：在四轴 NC 生产链中调用轨迹服务。

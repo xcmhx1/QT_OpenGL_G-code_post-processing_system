@@ -34,6 +34,8 @@
 - `ProcessUnitKey`：仅表达单元身份，成员稳定 `EntityId` 保持升序、唯一和非空。
 - `ProcessUnitSequence`：保存当前单元身份顺序和序列 revision，编号由位置 `+1` 得到。
 - `ProcessUnitPresentation`：把单元身份、序列位置、成员执行顺序和首成员锚点投影给 Viewer。
+- `TubeZone16` 与 `TubeZoneMask`：按顺时针定义顶面、右上圆角、右面、右下圆角、底面、左下圆角、左面、左上圆角及八条相邻分界母线。
+- `ProcessUnitZoneProfile`：记录一个最终加工单元经过的全部截面区位、各区位 X 范围、入口出口区位和壳层偏差。
 - `ProcessPlan`：保存模式、排序策略、revision、加工单元、单元序列、分组、约束、逐图元分配和排除项。
 
 ## 当前生产数据流
@@ -88,6 +90,19 @@ CadDocument + DocumentProcessState + 可选 TubeSectionModel
 → ProcessGroup 转换为 ProcessUnit
 → Rotary4Axis ProcessPlan
 ```
+
+四轴区位诊断链：
+
+```text
+最终 ProcessPlan
++ 最终单元成员顺序、方向和起点
++ 有效 TubeSectionModel
+→ TubeSectionProjector
+→ ProcessUnitZoneProfile
+→ Zone16Profile / Zone16Summary 诊断日志
+```
+
+区位画像在普通排序的序列保留和人工遍历覆盖完成后计算，不写入 `DocumentProcessState` 或 `ProcessPlan`。
 
 当前普通排序的单元状态链：
 
@@ -179,6 +194,11 @@ Application 的 `DocumentProcessState` 持有当前 `ProcessUnitSequence`。Core
 - 展示快照按加工单元保存 `unitOrder` 和成员身份，同时保留逐图元方向、起点、连续组和排除原因。
 - 单元加工编号只由 `ProcessUnitSequence` 的位置 `+1` 产生，不存入成员图元。
 - Viewer 顺序标签只读取单元展示项；逐图元 `processOrder` 继续仅服务轨迹和 NC。
+- 16 区位掩码表达加工单元实际经过的全部区位，不选择单一主区位。顺时针顺序固定为 `TopFace → TopToTopRightBoundary → TopRightCorner → TopRightToRightBoundary → RightFace → RightToBottomRightBoundary → BottomRightCorner → BottomRightToBottomBoundary → BottomFace → BottomToBottomLeftBoundary → BottomLeftCorner → BottomLeftToLeftBoundary → LeftFace → LeftToTopLeftBoundary → TopLeftCorner → TopLeftToTopBoundary`。
+- 区位画像按最终 `Path3D` 线段计算；端点、线段中点和必要的临时细分共同识别跨区路径。临时细分只存在于分类过程，不修改生产路径或采样策略。
+- 平面和圆角只有累计非零投影长度超过数值阈值才形成强占用；路径穿越、沿线运行或稳定端点接触可直接标记相应分界母线。
+- 圆弧、椭圆和样条允许在独立投影容差内投影到理想方管壳层，原始路径保持不变；画像记录最大、平均壳层偏差，并把接近容差边缘或无法可靠消歧的结果标记为不确定。
+- 16 区位画像当前仅用于诊断。生产 `LazyRotation` 继续读取原有 `ProcessSurfaceFootprint`，区位画像失败、零掩码或不确定均不改变加工单元、assignment 或排序结果。
 
 ## 相关源码
 
@@ -188,6 +208,7 @@ Application 的 `DocumentProcessState` 持有当前 `ProcessUnitSequence`。Core
 - `src/application/planning/DocumentProcessPlanningAdapter.cpp`：将生产文档和加工状态转换为规划值对象。
 - `src/core/planning/PlanarProcessPlanBuilder.cpp`：构建三轴最近距离加工计划。
 - `src/core/planning/ProcessPlanBuilder.cpp`：构建四轴分组、断面约束和排序计划。
+- `src/core/machining/TubeSectionProjector.cpp`：将 YZ 点投影到四个平面、四个圆角和八条分界母线，并生成加工单元区位画像。
 - `include/core/planning/ProcessPlan.h`：定义计划、分配、分组、排除和 revision。
 - `src/application/process/ProcessPresentationSnapshot.cpp`：将有效计划转换为 Viewer 展示数据。
 
