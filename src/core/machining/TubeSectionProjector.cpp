@@ -58,6 +58,9 @@ namespace cadcam::machining
         {
             ProcessUnitZoneProfile profile;
             std::array<bool, kTubeZone16Count> spanInitialized{};
+            std::array<double, kTubeZone16Count> reliableProjectedLengths{};
+            std::array<TubeZoneSpan, kTubeZone16Count> reliableSpans;
+            std::array<bool, kTubeZone16Count> reliableSpanInitialized{};
             double weightedDeviation = 0.0;
             double weightedLength = 0.0;
             double sampledDeviation = 0.0;
@@ -503,6 +506,10 @@ namespace cadcam::machining
                 QVariant::fromValue<qulonglong>(pathCount));
             diagnostic.context.insert(QStringLiteral("occupancyMask"),
                 profile != nullptr ? static_cast<int>(profile->occupancyMask) : 0);
+            diagnostic.context.insert(QStringLiteral("certainMask"),
+                profile != nullptr ? static_cast<int>(profile->certainMask) : 0);
+            diagnostic.context.insert(QStringLiteral("possibleMask"),
+                profile != nullptr ? static_cast<int>(profile->possibleMask) : 0);
             diagnostic.context.insert(QStringLiteral("uncertain"),
                 profile != nullptr && profile->uncertain);
             return diagnostic;
@@ -510,12 +517,7 @@ namespace cadcam::machining
 
         std::size_t zoneIndex(TubeZone16 zone)
         {
-            return static_cast<std::size_t>(static_cast<std::uint8_t>(zone));
-        }
-
-        bool boundaryZone(TubeZone16 zone)
-        {
-            return (zoneIndex(zone) % 2U) == 1U;
+            return tubeZoneIndex(zone);
         }
 
         void recordZone
@@ -525,7 +527,8 @@ namespace cadcam::machining
             double minimumX,
             double maximumX,
             double projectedLength,
-            double shellDeviation
+            double shellDeviation,
+            bool reliable
         )
         {
             const std::size_t index = zoneIndex(zone);
@@ -545,10 +548,32 @@ namespace cadcam::machining
             span.maximumShellDeviation = std::max
                 (span.maximumShellDeviation, std::max(0.0, shellDeviation));
             ++span.contributingSegmentCount;
-            if (boundaryZone(zone))
+            accumulator.profile.possibleMask |= tubeZoneBit(zone);
+            if (reliable)
             {
-                span.occupied = true;
-                accumulator.profile.occupancyMask |= tubeZoneBit(zone);
+                accumulator.reliableProjectedLengths[index] +=
+                    std::max(0.0, projectedLength);
+                TubeZoneSpan& reliableSpan =
+                    accumulator.reliableSpans[index];
+                if (!accumulator.reliableSpanInitialized[index])
+                {
+                    reliableSpan.minimumX = std::min(minimumX, maximumX);
+                    reliableSpan.maximumX = std::max(minimumX, maximumX);
+                    accumulator.reliableSpanInitialized[index] = true;
+                }
+                else
+                {
+                    reliableSpan.minimumX = std::min(reliableSpan.minimumX,
+                        std::min(minimumX, maximumX));
+                    reliableSpan.maximumX = std::max(reliableSpan.maximumX,
+                        std::max(minimumX, maximumX));
+                }
+                reliableSpan.projectedLength +=
+                    std::max(0.0, projectedLength);
+                reliableSpan.maximumShellDeviation = std::max
+                    (reliableSpan.maximumShellDeviation,
+                        std::max(0.0, shellDeviation));
+                ++reliableSpan.contributingSegmentCount;
             }
         }
 
@@ -575,7 +600,7 @@ namespace cadcam::machining
                 if ((current % 2) == 1)
                 {
                     recordZone(accumulator, static_cast<TubeZone16>(current),
-                        x, x, 0.0, shellDeviation);
+                        x, x, 0.0, shellDeviation, false);
                 }
             }
         }
@@ -599,6 +624,7 @@ namespace cadcam::machining
             const TubeSectionProjection& startProjection,
             const TubeSectionProjection& middleProjection,
             const TubeSectionProjection& endProjection,
+            double projectionTolerance,
             double minimumSegmentLength
         )
         {
@@ -637,18 +663,26 @@ namespace cadcam::machining
 
             if (startProjection.valid && startProjection.onBoundary)
                 recordZone(accumulator, startProjection.zone, start.x, start.x,
-                    0.0, startProjection.absoluteDistanceToShell);
+                    0.0, startProjection.absoluteDistanceToShell, false);
             if (endProjection.valid && endProjection.onBoundary)
                 recordZone(accumulator, endProjection.zone, end.x, end.x,
-                    0.0, endProjection.absoluteDistanceToShell);
+                    0.0, endProjection.absoluteDistanceToShell, false);
 
             const TubeSectionProjection* mainProjection = middleProjection.valid
                 ? &middleProjection : startProjection.valid
                     ? &startProjection : endProjection.valid ? &endProjection : nullptr;
             if (mainProjection != nullptr)
             {
+                const bool reliable = startProjection.valid
+                    && middleProjection.valid && endProjection.valid
+                    && !startProjection.ambiguous && !middleProjection.ambiguous
+                    && !endProjection.ambiguous
+                    && startProjection.confidence >= 0.5
+                    && middleProjection.confidence >= 0.5
+                    && endProjection.confidence >= 0.5
+                    && shellDeviation <= projectionTolerance * 0.8;
                 recordZone(accumulator, mainProjection->zone, start.x, end.x,
-                    projectedLength, shellDeviation);
+                    projectedLength, shellDeviation, reliable);
                 if (!accumulator.hasEntry)
                 {
                     accumulator.profile.entryZone = mainProjection->zone;
@@ -728,7 +762,8 @@ namespace cadcam::machining
             }
 
             accumulateLeaf(accumulator, layout, start, end, startProjection,
-                middleProjection, endProjection, minimumSegmentLength);
+                middleProjection, endProjection, projectionTolerance,
+                minimumSegmentLength);
         }
     }
 
@@ -866,15 +901,20 @@ namespace cadcam::machining
         {
             TubeZoneSpan& span = accumulator.profile.zoneSpans[index];
             const TubeZone16 zone = static_cast<TubeZone16>(index);
-            if (!boundaryZone(zone)
-                && span.projectedLength > strongOccupancyThreshold)
+            span.occupied = accumulator.spanInitialized[index];
+            if (span.occupied)
+                accumulator.profile.possibleMask |= tubeZoneBit(zone);
+            if (accumulator.reliableProjectedLengths[index]
+                > strongOccupancyThreshold)
             {
+                accumulator.profile.certainMask |= tubeZoneBit(zone);
+                span = accumulator.reliableSpans[index];
                 span.occupied = true;
-                accumulator.profile.occupancyMask |= tubeZoneBit(zone);
             }
-            if (!span.occupied)
-                accumulator.profile.occupancyMask &= ~tubeZoneBit(zone);
         }
+        accumulator.profile.possibleMask |= accumulator.profile.certainMask;
+        accumulator.profile.occupancyMask = accumulator.profile.certainMask
+            | accumulator.profile.possibleMask;
 
         accumulator.profile.averageShellDeviation =
             accumulator.weightedLength > 0.0
@@ -884,7 +924,8 @@ namespace cadcam::machining
                     / static_cast<double>(accumulator.sampledDeviationCount)
                 : 0.0;
         if (!accumulator.hasEntry || !accumulator.hasExit
-            || accumulator.profile.occupancyMask == 0U)
+            || accumulator.profile.possibleMask == 0U
+            || accumulator.profile.certainMask == 0U)
         {
             accumulator.uncertain = true;
         }

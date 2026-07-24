@@ -312,6 +312,10 @@ namespace
         QStringList xSpans;
         const cadcam::machining::TubeZoneMask mask = profile != nullptr
             ? profile->occupancyMask : 0U;
+        const cadcam::machining::TubeZoneMask certainMask = profile != nullptr
+            ? profile->certainMask : 0U;
+        const cadcam::machining::TubeZoneMask possibleMask = profile != nullptr
+            ? profile->possibleMask : 0U;
         if (profile != nullptr)
         {
             for (std::size_t index = 0U;
@@ -331,6 +335,10 @@ namespace
 
         const QString maskDigits = QStringLiteral("%1")
             .arg(mask, 4, 16, QLatin1Char('0')).toUpper();
+        const QString certainMaskDigits = QStringLiteral("%1")
+            .arg(certainMask, 4, 16, QLatin1Char('0')).toUpper();
+        const QString possibleMaskDigits = QStringLiteral("%1")
+            .arg(possibleMask, 4, 16, QLatin1Char('0')).toUpper();
         Diagnostic diagnostic;
         diagnostic.code = DiagnosticCode::ProcessPlanningZone16Profile;
         diagnostic.severity = profile != nullptr && !profile->uncertain
@@ -349,6 +357,10 @@ namespace
         diagnostic.context.insert(QStringLiteral("groupId"), groupId);
         diagnostic.context.insert(QStringLiteral("mask"),
             QStringLiteral("0x%1").arg(maskDigits));
+        diagnostic.context.insert(QStringLiteral("certainMask"),
+            QStringLiteral("0x%1").arg(certainMaskDigits));
+        diagnostic.context.insert(QStringLiteral("possibleMask"),
+            QStringLiteral("0x%1").arg(possibleMaskDigits));
         diagnostic.context.insert(QStringLiteral("zones"), zones.join(QLatin1Char(',')));
         diagnostic.context.insert(QStringLiteral("entryZone"), profile != nullptr
             ? cadcam::machining::tubeZoneName(profile->entryZone)
@@ -388,7 +400,7 @@ namespace
         diagnostic.stage = QStringLiteral("summarize-zone16-profiles");
         diagnostic.userMessage = QStringLiteral("四轴加工单元 16 区位画像汇总已完成。");
         diagnostic.technicalDetail =
-            QStringLiteral("Zone16 profiles are diagnostic-only and do not affect scheduling.");
+            QStringLiteral("Zone16 profile summary reflects final ProcessUnit traversal.");
         diagnostic.correlationId = context.correlationId;
         diagnostic.context.insert(QStringLiteral("zone16Summary"), true);
         diagnostic.context.insert(QStringLiteral("unitCount"), report.unitCount);
@@ -486,7 +498,7 @@ namespace
             }
             else
             {
-                const int occupiedZoneCount = setBitCount(profile->occupancyMask);
+                const int occupiedZoneCount = setBitCount(profile->certainMask);
                 if (occupiedZoneCount == 0) ++summary.zeroMaskUnitCount;
                 else if (occupiedZoneCount == 1) ++summary.singleZoneUnitCount;
                 else ++summary.multiZoneUnitCount;
@@ -523,28 +535,38 @@ namespace
         }
     }
 
-    void logSurfaceSweepPlanningSummaries(const QVector<Diagnostic>& diagnostics)
+    void logZone16SweepPlanningSummaries(const QVector<Diagnostic>& diagnostics)
     {
         for (const Diagnostic& diagnostic : diagnostics)
         {
-            if (!diagnostic.context.value(QStringLiteral("surfaceSweepSummary")).toBool())
+            if (!diagnostic.context.value(QStringLiteral("zone16SweepSummary")).toBool())
                 continue;
             const QVariantMap& values = diagnostic.context;
             qInfo().noquote()
-                << QStringLiteral("[ProcessPlanning][SurfaceSweep] partitionId=%1 initialRegion=%2 perimeterDirection=%3 longitudinalDirection=%4 selectedUnits=%5 selectedUnitCount=%6 regionTransitions=%7 backtrackCount=%8 longitudinalBacktrackDistance=%9 status=%10")
+                << QStringLiteral("[ProcessPlanning][Zone16Sweep] partitionId=%1 initialZone=%2 perimeterDirection=%3 longitudinalDirection=%4 partitionMinimumX=%5 partitionMaximumX=%6 processedUnitCount=%7 zoneTransitions=%8 backtrackCount=%9 status=%10")
                     .arg(values.value(QStringLiteral("partitionId"), -1).toInt())
-                    .arg(values.value(QStringLiteral("initialRegion"),
+                    .arg(values.value(QStringLiteral("initialZone"),
                         QStringLiteral("Unknown")).toString())
-                    .arg(values.value(QStringLiteral("perimeterDirection"), 0).toInt())
-                    .arg(values.value(QStringLiteral("longitudinalDirection"), 0).toInt())
-                    .arg(values.value(QStringLiteral("selectedUnits")).toString())
-                    .arg(values.value(QStringLiteral("selectedUnitCount"), 0).toInt())
-                    .arg(values.value(QStringLiteral("regionTransitions"), 0).toInt())
+                    .arg(values.value(QStringLiteral("perimeterDirection"),
+                        QStringLiteral("Clockwise")).toString())
+                    .arg(values.value(QStringLiteral("longitudinalDirection"), 1).toInt())
+                    .arg(values.value(QStringLiteral("partitionMinimumX"), 0.0)
+                        .toDouble(), 0, 'f', 6)
+                    .arg(values.value(QStringLiteral("partitionMaximumX"), 0.0)
+                        .toDouble(), 0, 'f', 6)
+                    .arg(values.value(QStringLiteral("processedUnitCount"), 0).toInt())
+                    .arg(values.value(QStringLiteral("zoneTransitions"), 0).toInt())
                     .arg(values.value(QStringLiteral("backtrackCount"), 0).toInt())
-                    .arg(values.value(QStringLiteral("longitudinalBacktrackDistance"), 0.0).toDouble(),
-                        0, 'f', 3)
                     .arg(values.value(QStringLiteral("status"),
                         QStringLiteral("Unknown")).toString());
+            const QStringList selectedUnits =
+                values.value(QStringLiteral("selectedUnits")).toStringList();
+            for (const QString& selectedUnit : selectedUnits)
+            {
+                qInfo().noquote()
+                    << QStringLiteral("[ProcessPlanning][Zone16SweepUnit] %1")
+                        .arg(selectedUnit);
+            }
         }
     }
 
@@ -556,10 +578,14 @@ namespace
             if (values.value(QStringLiteral("zone16Profile")).toBool())
             {
                 qInfo().noquote()
-                    << QStringLiteral("[ProcessPlanning][Zone16Profile] unitKey=%1 groupId=%2 mask=%3 zones=%4 entryZone=%5 exitZone=%6 entryPerimeter=%7 exitPerimeter=%8 xSpans=%9 maximumShellDeviation=%10 averageShellDeviation=%11 uncertain=%12 status=%13")
+                    << QStringLiteral("[ProcessPlanning][Zone16Profile] unitKey=%1 groupId=%2 mask=%3 certainMask=%4 possibleMask=%5 zones=%6 entryZone=%7 exitZone=%8 entryPerimeter=%9 exitPerimeter=%10 xSpans=%11 maximumShellDeviation=%12 averageShellDeviation=%13 uncertain=%14 status=%15")
                         .arg(values.value(QStringLiteral("unitKey")).toString())
                         .arg(values.value(QStringLiteral("groupId"), -1).toInt())
                         .arg(values.value(QStringLiteral("mask"),
+                            QStringLiteral("0x0000")).toString())
+                        .arg(values.value(QStringLiteral("certainMask"),
+                            QStringLiteral("0x0000")).toString())
+                        .arg(values.value(QStringLiteral("possibleMask"),
                             QStringLiteral("0x0000")).toString())
                         .arg(values.value(QStringLiteral("zones")).toString())
                         .arg(values.value(QStringLiteral("entryZone"),
@@ -679,7 +705,7 @@ OperationResult<cadcam::planning::ProcessPlan> ProcessPlanningService::buildRota
     auto result = cadcam::planning::ProcessPlanBuilder::build
         (*capture.value, policy, context);
     logClosedLoopPlanningSummaries(result.diagnostics);
-    logSurfaceSweepPlanningSummaries(result.diagnostics);
+    logZone16SweepPlanningSummaries(result.diagnostics);
     result.mergeDiagnostics(capture.diagnostics);
     if (result.succeeded() && result.value.has_value()
         && policy.sortIntent == cadcam::planning::ProcessSortIntent::PreserveCurrentSequence

@@ -1,6 +1,7 @@
 #include "core/planning/ProcessPlanBuilder.h"
 
 #include "core/machining/TubeCutBoundary.h"
+#include "core/machining/TubeSectionProjector.h"
 
 #include <QStringList>
 
@@ -155,6 +156,72 @@ namespace cadcam::planning
             GroupTraversal traversal;
             ProcessSurfaceFootprint footprint;
             std::optional<ClosedLoopTraversalReport> closedLoopReport;
+        };
+
+        struct ProcessGroupZoneProfile
+        {
+            machining::TubeZoneMask certainMask = 0U;
+            machining::TubeZoneMask possibleMask = 0U;
+            std::array<machining::TubeZoneSpan,
+                machining::kTubeZone16Count> zoneSpans;
+            bool closed = false;
+            bool uncertain = false;
+            bool fallbackOwner = false;
+            machining::TubeZone16 fallbackZone =
+                machining::TubeZone16::TopFace;
+        };
+
+        struct ZoneSweepSelection
+        {
+            int groupId = -1;
+            machining::TubeZone16 zone = machining::TubeZone16::TopFace;
+            machining::TubeZoneSpan span;
+            double hitX = 0.0;
+            double frontierBefore = 0.0;
+            bool fallbackOwner = false;
+        };
+
+        struct TubeZoneSweepPartition
+        {
+            int partitionId = -1;
+            double minimumX = 0.0;
+            double maximumX = 0.0;
+            int longitudinalDirection = 1;
+            machining::TubeZone16 initialZone =
+                machining::TubeZone16::TopFace;
+            int perimeterDirection = 1;
+            std::array<std::vector<int>,
+                machining::kTubeZone16Count> zoneBuckets;
+            std::unordered_set<int> groupIds;
+        };
+
+        struct Zone16SweepState
+        {
+            int partitionId = -1;
+            machining::TubeZone16 initialZone =
+                machining::TubeZone16::TopFace;
+            int currentZoneOffset = 0;
+            int longitudinalDirection = 1;
+            double frontierX = 0.0;
+            bool zoneEntered = false;
+            bool active = false;
+        };
+
+        struct Zone16SweepReport
+        {
+            int partitionId = -1;
+            machining::TubeZone16 initialZone =
+                machining::TubeZone16::TopFace;
+            int perimeterDirection = 1;
+            int longitudinalDirection = 1;
+            double partitionMinimumX = 0.0;
+            double partitionMaximumX = 0.0;
+            int processedUnitCount = 0;
+            int zoneTransitionCount = 0;
+            int backtrackCount = 0;
+            QStringList selectedUnits;
+            QString status = QStringLiteral("Success");
+            bool active = false;
         };
 
         double distance(const Vector3d& left, const Vector3d& right)
@@ -893,6 +960,45 @@ namespace cadcam::planning
             return points;
         }
 
+        std::vector<Vector3d> directedTraversalPoints(const DirectedEntity& directed)
+        {
+            if (directed.entity == nullptr) return {};
+            const PlanningEntity& entity = *directed.entity;
+            if (!entity.path.closed || entity.path.vertices.size() < 2U)
+                return directedPoints(entity, directed.reverseRelativeToInput);
+
+            std::size_t startIndex = 0U;
+            if (directed.selectedStartParameter.has_value()
+                && std::isfinite(*directed.selectedStartParameter))
+            {
+                double bestDifference = std::numeric_limits<double>::max();
+                for (std::size_t index = 0U; index < entity.path.vertices.size(); ++index)
+                {
+                    const double difference = std::abs
+                        (entity.path.vertices[index].sourceParameter
+                            - *directed.selectedStartParameter);
+                    if (difference < bestDifference)
+                    {
+                        bestDifference = difference;
+                        startIndex = index;
+                    }
+                }
+            }
+
+            const std::size_t pointCount = entity.path.vertices.size();
+            std::vector<Vector3d> points;
+            points.reserve(pointCount + 1U);
+            for (std::size_t offset = 0U; offset < pointCount; ++offset)
+            {
+                const std::size_t index = directed.reverseRelativeToInput
+                    ? (startIndex + pointCount - offset) % pointCount
+                    : (startIndex + offset) % pointCount;
+                points.push_back(entity.path.vertices[index].position);
+            }
+            points.push_back(points.front());
+            return points;
+        }
+
         machining::TubeSurfaceRegion directedEndpointRegion
         (
             const DirectedEntity& directed,
@@ -1038,8 +1144,7 @@ namespace cadcam::planning
         {
             if (traversal.entities.empty() || section.geometry.perimeter <= 0.0) return 0;
             const DirectedEntity& last = traversal.entities.back();
-            const std::vector<Vector3d> points = directedPoints
-                (*last.entity, last.reverseRelativeToInput);
+            const std::vector<Vector3d> points = directedTraversalPoints(last);
             if (points.size() < 2U) return 0;
             const Vector3d& endpoint = points.back();
             for (std::size_t offset = 1U; offset < points.size(); ++offset)
@@ -1471,6 +1576,198 @@ namespace cadcam::planning
             return allowMixed
                 && footprint.dominantRegion == machining::TubeSurfaceRegion::Mixed
                 && footprint.entryRegion == region;
+        }
+
+        machining::TubeZone16 zoneAtOffset
+        (
+            machining::TubeZone16 initialZone,
+            int offset
+        )
+        {
+            const int initial = static_cast<int>(machining::tubeZoneIndex(initialZone));
+            const int wrapped = (initial + offset
+                + static_cast<int>(machining::kTubeZone16Count))
+                % static_cast<int>(machining::kTubeZone16Count);
+            return static_cast<machining::TubeZone16>(wrapped);
+        }
+
+        QString zoneMaskText(machining::TubeZoneMask mask)
+        {
+            return QStringLiteral("0x%1").arg(static_cast<unsigned int>(mask),
+                4, 16, QLatin1Char('0')).toUpper();
+        }
+
+        QString zoneSpansText(const ProcessGroupZoneProfile& profile)
+        {
+            QStringList spans;
+            for (std::size_t index = 0U;
+                index < machining::kTubeZone16Count; ++index)
+            {
+                const machining::TubeZone16 zone =
+                    static_cast<machining::TubeZone16>(index);
+                if ((profile.possibleMask & machining::tubeZoneBit(zone)) == 0U)
+                    continue;
+                const machining::TubeZoneSpan& span = profile.zoneSpans[index];
+                spans.push_back(QStringLiteral("%1:[%2,%3]")
+                    .arg(machining::tubeZoneName(zone))
+                    .arg(span.minimumX, 0, 'f', 6)
+                    .arg(span.maximumX, 0, 'f', 6));
+            }
+            return spans.join(QLatin1Char(';'));
+        }
+
+        QString processGroupKeyText(const ProcessGroup& group)
+        {
+            std::vector<EntityId> ids = group.entityIds;
+            std::sort(ids.begin(), ids.end());
+            QStringList values;
+            values.reserve(static_cast<qsizetype>(ids.size()));
+            for (const EntityId entityId : ids)
+                values.push_back(QString::number(entityId));
+            return values.join(QLatin1Char('+'));
+        }
+
+        bool processGroupStableLess
+        (
+            const ProcessGroup& left,
+            const ProcessGroup& right
+        )
+        {
+            std::vector<EntityId> leftIds = left.entityIds;
+            std::vector<EntityId> rightIds = right.entityIds;
+            std::sort(leftIds.begin(), leftIds.end());
+            std::sort(rightIds.begin(), rightIds.end());
+            return leftIds < rightIds;
+        }
+
+        std::optional<machining::TubeZone16> fallbackOwnerZone
+        (
+            const ProcessGroupZoneProfile& profile
+        )
+        {
+            std::optional<machining::TubeZone16> selected;
+            double selectedLength = -1.0;
+            bool selectedStrongZone = false;
+            for (std::size_t index = 0U;
+                index < machining::kTubeZone16Count; ++index)
+            {
+                const auto zone = static_cast<machining::TubeZone16>(index);
+                if ((profile.possibleMask & machining::tubeZoneBit(zone)) == 0U)
+                    continue;
+                const bool strongZone = index % 2U == 0U;
+                const double length = profile.zoneSpans[index].projectedLength;
+                if (!selected.has_value()
+                    || (strongZone != selectedStrongZone && strongZone)
+                    || (strongZone == selectedStrongZone
+                        && length > selectedLength + kCalculationEpsilon))
+                {
+                    selected = zone;
+                    selectedLength = length;
+                    selectedStrongZone = strongZone;
+                }
+            }
+            return selected;
+        }
+
+        std::optional<machining::TubeZone16> traversalExitZone
+        (
+            const GroupTraversal& traversal,
+            const machining::TubeSectionModel& section,
+            double projectionTolerance
+        )
+        {
+            if (traversal.entities.empty()) return std::nullopt;
+            const DirectedEntity& directed = traversal.entities.back();
+            if (directed.entity == nullptr) return std::nullopt;
+            const std::vector<Vector3d> points = directedTraversalPoints(directed);
+            for (std::size_t offset = 1U; offset < points.size(); ++offset)
+            {
+                const Vector3d& end = points[points.size() - offset];
+                const Vector3d& start = points[points.size() - offset - 1U];
+                if (distance(start, end) <= kCalculationEpsilon) continue;
+
+                std::array<machining::TubeSectionProjection, 3> samples;
+                for (std::size_t sample = 0U; sample < samples.size(); ++sample)
+                {
+                    const double parameter = 0.25
+                        + static_cast<double>(sample) * 0.25;
+                    const Vector2d yz
+                    {
+                        start.y + (end.y - start.y) * parameter,
+                        start.z + (end.z - start.z) * parameter
+                    };
+                    samples[sample] = machining::TubeSectionProjector::project
+                        (section, yz, projectionTolerance);
+                }
+
+                std::array<int, machining::kTubeZone16Count> counts{};
+                for (const auto& sample : samples)
+                {
+                    if (sample.valid && !sample.ambiguous)
+                        ++counts[machining::tubeZoneIndex(sample.zone)];
+                }
+                int bestCount = 0;
+                std::optional<machining::TubeZone16> bestZone;
+                bool tied = false;
+                for (std::size_t index = 0U; index < counts.size(); ++index)
+                {
+                    if (counts[index] > bestCount)
+                    {
+                        bestCount = counts[index];
+                        bestZone = static_cast<machining::TubeZone16>(index);
+                        tied = false;
+                    }
+                    else if (counts[index] > 0 && counts[index] == bestCount)
+                    {
+                        tied = true;
+                    }
+                }
+                if (bestZone.has_value() && !tied) return bestZone;
+                if (samples[1].valid && !samples[1].ambiguous)
+                    return samples[1].zone;
+                return std::nullopt;
+            }
+            return std::nullopt;
+        }
+
+        Diagnostic zone16SweepDiagnostic
+        (
+            const OperationContext& context,
+            const Zone16SweepReport& report
+        )
+        {
+            QVariantMap values;
+            values.insert(QStringLiteral("zone16SweepSummary"), true);
+            values.insert(QStringLiteral("partitionId"), report.partitionId);
+            values.insert(QStringLiteral("initialZone"),
+                machining::tubeZoneName(report.initialZone));
+            values.insert(QStringLiteral("perimeterDirection"),
+                QStringLiteral("Clockwise"));
+            values.insert(QStringLiteral("longitudinalDirection"),
+                report.longitudinalDirection);
+            values.insert(QStringLiteral("partitionMinimumX"),
+                report.partitionMinimumX);
+            values.insert(QStringLiteral("partitionMaximumX"),
+                report.partitionMaximumX);
+            values.insert(QStringLiteral("processedUnitCount"),
+                report.processedUnitCount);
+            values.insert(QStringLiteral("zoneTransitions"),
+                report.zoneTransitionCount);
+            values.insert(QStringLiteral("backtrackCount"),
+                report.backtrackCount);
+            values.insert(QStringLiteral("selectedUnits"),
+                report.selectedUnits);
+            values.insert(QStringLiteral("status"), report.status);
+            return planningDiagnostic
+            (
+                context,
+                DiagnosticCode::ProcessPlanningZone16SweepSummary,
+                QStringLiteral("四轴 16 区位扫描加工段已完成。"),
+                QStringLiteral("Zone16 sweep partition completed."),
+                values,
+                report.status == QStringLiteral("Success")
+                    ? DiagnosticSeverity::Info : DiagnosticSeverity::Warning
+            );
         }
 
         QVariantMap closedLoopDiagnosticValues(const ClosedLoopTraversalReport& report)
@@ -2111,17 +2408,13 @@ namespace cadcam::planning
             surfaceSweepSection = *input.tubeSection;
             surfaceSweepSection->geometry = *planningSection;
         }
-        const bool surfaceSweepEnabled = policy.sortIntent
+        const bool zone16SweepEnabled = policy.sortIntent
                 == ProcessSortIntent::RebuildSequence
             && policy.orderingStrategy == ProcessOrderingStrategy::LazyRotation
             && surfaceSweepSection.has_value();
-        const SectionBounds sweepSectionBounds = surfaceSweepEnabled
-            ? sectionBounds(surfaceSweepSection->geometry) : SectionBounds{};
-        const std::vector<double> sweepSectionCumulative = surfaceSweepEnabled
-            ? cumulativeSectionLengths(surfaceSweepSection->geometry)
-            : std::vector<double>{};
-        const double sweepSurfaceTolerance = surfaceSweepEnabled
-            ? surfaceClassificationTolerance(surfaceSweepSection->geometry)
+        const double zoneProjectionTolerance = zone16SweepEnabled
+            ? std::max(1.0e-5, std::max(surfaceSweepSection->geometry.yLength,
+                surfaceSweepSection->geometry.zWidth) * 1.0e-6)
             : 0.0;
 
         ProcessPlan plan;
@@ -2347,21 +2640,108 @@ namespace cadcam::planning
         for (const ProcessGroup& group : plan.groups)
             if (group.kind == ProcessGroupKind::WasteBoundary) excludedGroups.insert(group.groupId);
 
-        std::unordered_map<int, ProcessSurfaceFootprint> surfaceFootprints;
-        if (surfaceSweepEnabled)
+        QVector<Diagnostic> zoneSweepDiagnostics;
+        std::unordered_map<int, ProcessGroupZoneProfile> groupZoneProfiles;
+        if (zone16SweepEnabled)
         {
-            surfaceFootprints.reserve(plan.groups.size());
+            groupZoneProfiles.reserve(plan.groups.size());
             for (const ProcessGroup& group : plan.groups)
             {
-                surfaceFootprints.emplace
-                (
-                    group.groupId,
-                    buildSurfaceFootprint
+                if (group.kind == ProcessGroupKind::BreakBoundary
+                    || group.kind == ProcessGroupKind::WasteBoundary)
+                    continue;
+
+                std::vector<geometry::Path3D> paths;
+                paths.reserve(group.entityIds.size());
+                for (const EntityId entityId : group.entityIds)
+                {
+                    paths.push_back(entities.at(entityId)->path);
+                }
+                auto profileResult = machining::TubeSectionProjector::buildProfile
+                    (*surfaceSweepSection, paths, group.closed,
+                        zoneProjectionTolerance, context);
+                if (!profileResult.succeeded() || !profileResult.value.has_value())
+                {
+                    auto failed = failure<ProcessPlan>
                     (
-                        group, entities, *surfaceSweepSection, sweepSectionBounds,
-                        sweepSectionCumulative, sweepSurfaceTolerance
-                    )
-                );
+                        OperationStatus::Failed, context,
+                        DiagnosticCode::ProcessPlanningZoneSweepProfileInvalid,
+                        QStringLiteral("加工单元无法建立可靠的方管 16 区位画像。"),
+                        QStringLiteral("Static ProcessGroup zone profile construction failed."),
+                        diagnosticValues(input, policy, 0U, 0U, -1,
+                            group.groupId)
+                    );
+                    failed.mergeDiagnostics(profileResult.diagnostics);
+                    return failed;
+                }
+                zoneSweepDiagnostics += profileResult.diagnostics;
+
+                const machining::ProcessUnitZoneProfile& sourceProfile =
+                    *profileResult.value;
+                ProcessGroupZoneProfile profile;
+                profile.certainMask = sourceProfile.certainMask;
+                profile.possibleMask = sourceProfile.possibleMask;
+                profile.zoneSpans = sourceProfile.zoneSpans;
+                profile.closed = group.closed;
+                profile.uncertain = sourceProfile.uncertain;
+                if ((profile.certainMask & ~profile.possibleMask) != 0U
+                    || profile.possibleMask == 0U)
+                {
+                    QVariantMap values = diagnosticValues
+                        (input, policy, 0U, 0U, -1, group.groupId);
+                    values.insert(QStringLiteral("unitKey"),
+                        processGroupKeyText(group));
+                    values.insert(QStringLiteral("certainMask"),
+                        zoneMaskText(profile.certainMask));
+                    values.insert(QStringLiteral("possibleMask"),
+                        zoneMaskText(profile.possibleMask));
+                    return failure<ProcessPlan>
+                    (
+                        OperationStatus::Failed, context,
+                        DiagnosticCode::ProcessPlanningZoneSweepProfileInvalid,
+                        QStringLiteral("加工单元没有可用于 16 区位调度的可靠投影。"),
+                        QStringLiteral("certainMask is not a subset of possibleMask, or possibleMask is empty."),
+                        values
+                    );
+                }
+                if (profile.certainMask == 0U)
+                {
+                    const auto fallback = fallbackOwnerZone(profile);
+                    if (!fallback.has_value())
+                    {
+                        return failure<ProcessPlan>
+                        (
+                            OperationStatus::Failed, context,
+                            DiagnosticCode::ProcessPlanningZoneSweepProfileInvalid,
+                            QStringLiteral("加工单元无法确定保守的 16 区位归属。"),
+                            QStringLiteral("possibleMask did not provide a fallback owner."),
+                            diagnosticValues(input, policy, 0U, 0U, -1,
+                                group.groupId)
+                        );
+                    }
+                    profile.fallbackOwner = true;
+                    profile.fallbackZone = *fallback;
+                    QVariantMap values = diagnosticValues
+                        (input, policy, 0U, 0U, -1, group.groupId);
+                    values.insert(QStringLiteral("unitKey"),
+                        processGroupKeyText(group));
+                    values.insert(QStringLiteral("certainMask"),
+                        zoneMaskText(profile.certainMask));
+                    values.insert(QStringLiteral("possibleMask"),
+                        zoneMaskText(profile.possibleMask));
+                    values.insert(QStringLiteral("fallbackZone"),
+                        machining::tubeZoneName(*fallback));
+                    zoneSweepDiagnostics.push_back(planningDiagnostic
+                    (
+                        context,
+                        DiagnosticCode::ProcessPlanningZoneSweepFallbackOwner,
+                        QStringLiteral("加工单元使用保守区位归属参与 16 区位调度。"),
+                        QStringLiteral("certainMask was empty; the strongest possible zone owns scheduling."),
+                        values,
+                        DiagnosticSeverity::Warning
+                    ));
+                }
+                groupZoneProfiles.emplace(group.groupId, std::move(profile));
             }
         }
 
@@ -2600,6 +2980,130 @@ namespace cadcam::planning
             ++indegree[precedence.successorGroupId];
             successors[precedence.predecessorGroupId].push_back(precedence.successorGroupId);
         }
+
+        std::vector<TubeZoneSweepPartition> zoneSweepPartitions;
+        std::unordered_map<int, int> partitionAfterBreakGroup;
+        if (zone16SweepEnabled)
+        {
+            std::vector<std::size_t> orderedBreakBoundaryIndices;
+            for (const int orderedIndex : boundaryOrder)
+            {
+                const std::size_t boundaryIndex =
+                    static_cast<std::size_t>(orderedIndex);
+                if (boundaries[boundaryIndex].role == BoundaryRole::Break)
+                    orderedBreakBoundaryIndices.push_back(boundaryIndex);
+            }
+            zoneSweepPartitions.resize(orderedBreakBoundaryIndices.size() + 1U);
+            std::vector<bool> partitionBoundsInitialized
+                (zoneSweepPartitions.size(), false);
+            for (std::size_t partitionIndex = 0U;
+                partitionIndex < zoneSweepPartitions.size(); ++partitionIndex)
+            {
+                zoneSweepPartitions[partitionIndex].partitionId =
+                    static_cast<int>(partitionIndex);
+            }
+            for (std::size_t breakIndex = 0U;
+                breakIndex < orderedBreakBoundaryIndices.size(); ++breakIndex)
+            {
+                partitionAfterBreakGroup.emplace
+                (
+                    boundaries[orderedBreakBoundaryIndices[breakIndex]].groupId,
+                    static_cast<int>(breakIndex + 1U)
+                );
+            }
+
+            for (const ProcessGroup& group : plan.groups)
+            {
+                if (group.kind == ProcessGroupKind::BreakBoundary
+                    || group.kind == ProcessGroupKind::WasteBoundary
+                    || excludedGroups.find(group.groupId) != excludedGroups.end())
+                    continue;
+                const auto sides = groupBoundarySides.find(group.groupId);
+                if (sides == groupBoundarySides.end()
+                    || groupZoneProfiles.find(group.groupId)
+                        == groupZoneProfiles.end())
+                {
+                    return failure<ProcessPlan>
+                    (
+                        OperationStatus::Failed, context,
+                        DiagnosticCode::ProcessPlanningZoneSweepProfileInvalid,
+                        QStringLiteral("加工单元缺少 16 区位加工段数据。"),
+                        QStringLiteral("Zone16 partition input is missing group side or profile data."),
+                        diagnosticValues(input, policy, 0U, 0U, -1,
+                            group.groupId)
+                    );
+                }
+
+                std::size_t partitionIndex = 0U;
+                for (const std::size_t boundaryIndex :
+                    orderedBreakBoundaryIndices)
+                {
+                    if (sides->second[boundaryIndex] == BoundarySide::Right)
+                        ++partitionIndex;
+                }
+                if (partitionIndex >= zoneSweepPartitions.size())
+                {
+                    return failure<ProcessPlan>
+                    (
+                        OperationStatus::InternalError, context,
+                        DiagnosticCode::ProcessPlanningInvariantViolation,
+                        QStringLiteral("加工单元无法映射到有效的 16 区位加工段。"),
+                        QStringLiteral("Computed partition index exceeds partition count."),
+                        diagnosticValues(input, policy, 0U, 0U, -1,
+                            group.groupId)
+                    );
+                }
+
+                TubeZoneSweepPartition& partition =
+                    zoneSweepPartitions[partitionIndex];
+                partition.groupIds.insert(group.groupId);
+                const ProcessGroupZoneProfile& profile =
+                    groupZoneProfiles.at(group.groupId);
+                const machining::TubeZoneMask ownerMask =
+                    profile.fallbackOwner
+                    ? machining::tubeZoneBit(profile.fallbackZone)
+                    : profile.certainMask;
+                for (std::size_t zoneIndex = 0U;
+                    zoneIndex < machining::kTubeZone16Count; ++zoneIndex)
+                {
+                    const auto zone =
+                        static_cast<machining::TubeZone16>(zoneIndex);
+                    if ((ownerMask & machining::tubeZoneBit(zone)) == 0U)
+                        continue;
+                    partition.zoneBuckets[zoneIndex].push_back(group.groupId);
+                    const machining::TubeZoneSpan& span =
+                        profile.zoneSpans[zoneIndex];
+                    if (!partitionBoundsInitialized[partitionIndex])
+                    {
+                        partition.minimumX = span.minimumX;
+                        partition.maximumX = span.maximumX;
+                        partitionBoundsInitialized[partitionIndex] = true;
+                    }
+                    else
+                    {
+                        partition.minimumX = std::min
+                            (partition.minimumX, span.minimumX);
+                        partition.maximumX = std::max
+                            (partition.maximumX, span.maximumX);
+                    }
+                }
+            }
+            for (TubeZoneSweepPartition& partition : zoneSweepPartitions)
+            {
+                for (auto& bucket : partition.zoneBuckets)
+                {
+                    std::sort(bucket.begin(), bucket.end(),
+                        [&plan](int left, int right)
+                    {
+                        return processGroupStableLess
+                        (
+                            plan.groups[static_cast<std::size_t>(left)],
+                            plan.groups[static_cast<std::size_t>(right)]
+                        );
+                    });
+                }
+            }
+        }
         if (schedulable.empty())
         {
             return failure<ProcessPlan>
@@ -2613,11 +3117,51 @@ namespace cadcam::planning
 
         std::unordered_set<int> scheduled;
         QVector<Diagnostic> closedLoopDiagnostics;
-        QVector<Diagnostic> surfaceSweepDiagnostics;
-        SurfaceSweepState surfaceSweepState;
-        SurfaceSweepReport surfaceSweepReport;
+        Zone16SweepState zoneSweepState;
+        Zone16SweepReport zoneSweepReport;
         Vector3d currentPosition = policy.initialPosition;
         int processOrder = 0;
+        const auto finishZoneSweepPartition = [&]()
+        {
+            if (zoneSweepReport.active)
+                zoneSweepDiagnostics.push_back
+                    (zone16SweepDiagnostic(context, zoneSweepReport));
+            zoneSweepState = Zone16SweepState{};
+            zoneSweepReport = Zone16SweepReport{};
+        };
+        const auto startZoneSweepPartition =
+            [&](int partitionId, machining::TubeZone16 initialZone) -> bool
+        {
+            if (partitionId < 0
+                || static_cast<std::size_t>(partitionId)
+                    >= zoneSweepPartitions.size())
+                return false;
+            finishZoneSweepPartition();
+            const TubeZoneSweepPartition& partition =
+                zoneSweepPartitions[static_cast<std::size_t>(partitionId)];
+            zoneSweepState.partitionId = partitionId;
+            zoneSweepState.initialZone = initialZone;
+            zoneSweepState.currentZoneOffset = 0;
+            zoneSweepState.longitudinalDirection =
+                partition.longitudinalDirection;
+            zoneSweepState.frontierX =
+                partition.longitudinalDirection >= 0
+                ? partition.minimumX : partition.maximumX;
+            zoneSweepState.zoneEntered = true;
+            zoneSweepState.active = !partition.groupIds.empty();
+
+            zoneSweepReport.partitionId = partitionId;
+            zoneSweepReport.initialZone = initialZone;
+            zoneSweepReport.perimeterDirection = 1;
+            zoneSweepReport.longitudinalDirection =
+                partition.longitudinalDirection;
+            zoneSweepReport.partitionMinimumX = partition.minimumX;
+            zoneSweepReport.partitionMaximumX = partition.maximumX;
+            zoneSweepReport.active = true;
+            if (!zoneSweepState.active)
+                finishZoneSweepPartition();
+            return true;
+        };
         while (scheduled.size() < schedulable.size())
         {
             std::vector<int> eligible;
@@ -2637,13 +3181,221 @@ namespace cadcam::planning
                 );
             }
 
+            if (zone16SweepEnabled && zoneSweepState.active)
+            {
+                const TubeZoneSweepPartition& partition =
+                    zoneSweepPartitions[static_cast<std::size_t>
+                        (zoneSweepState.partitionId)];
+                const bool complete = std::all_of
+                (
+                    partition.groupIds.cbegin(), partition.groupIds.cend(),
+                    [&scheduled](int groupId)
+                    { return scheduled.find(groupId) != scheduled.end(); }
+                );
+                if (complete)
+                {
+                    if (zoneSweepReport.processedUnitCount
+                        != static_cast<int>(partition.groupIds.size()))
+                    {
+                        QVariantMap values = diagnosticValues
+                            (input, policy, 0U, 0U, -1, -1);
+                        values.insert(QStringLiteral("partitionId"),
+                            partition.partitionId);
+                        values.insert(QStringLiteral("processedUnitCount"),
+                            zoneSweepReport.processedUnitCount);
+                        values.insert(QStringLiteral("expectedUnitCount"),
+                            static_cast<int>(partition.groupIds.size()));
+                        return failure<ProcessPlan>
+                        (
+                            OperationStatus::InternalError, context,
+                            DiagnosticCode::ProcessPlanningInvariantViolation,
+                            QStringLiteral("16 区位加工段计数与实际加工单元不一致。"),
+                            QStringLiteral("Zone sweep report did not account for every partition group exactly once."),
+                            values
+                        );
+                    }
+                    finishZoneSweepPartition();
+                }
+            }
+
             const bool initialSelection = scheduled.empty();
             const ProcessOrderingStrategy selectionStrategy = initialSelection
                 ? ProcessOrderingStrategy::NearestNext
                 : policy.orderingStrategy;
+            std::vector<int> candidateGroupIds = eligible;
+            std::unordered_map<int, ZoneSweepSelection> zoneSelections;
+            if (zone16SweepEnabled && zoneSweepState.active)
+            {
+                candidateGroupIds.clear();
+                const TubeZoneSweepPartition& partition =
+                    zoneSweepPartitions[static_cast<std::size_t>
+                        (zoneSweepState.partitionId)];
+                const std::unordered_set<int> eligibleSet
+                    (eligible.cbegin(), eligible.cend());
+                while (zoneSweepState.currentZoneOffset
+                    < static_cast<int>(machining::kTubeZone16Count))
+                {
+                    const machining::TubeZone16 zone = zoneAtOffset
+                        (zoneSweepState.initialZone,
+                            zoneSweepState.currentZoneOffset);
+                    const std::size_t zoneIndex =
+                        machining::tubeZoneIndex(zone);
+                    if (!zoneSweepState.zoneEntered)
+                    {
+                        zoneSweepState.frontierX =
+                            zoneSweepState.longitudinalDirection >= 0
+                            ? partition.minimumX : partition.maximumX;
+                        zoneSweepState.zoneEntered = true;
+                    }
+
+                    std::vector<ZoneSweepSelection> available;
+                    for (const int groupId :
+                        partition.zoneBuckets[zoneIndex])
+                    {
+                        if (scheduled.find(groupId) != scheduled.end()
+                            || eligibleSet.find(groupId) == eligibleSet.end())
+                            continue;
+                        const ProcessGroupZoneProfile& profile =
+                            groupZoneProfiles.at(groupId);
+                        const machining::TubeZoneSpan& span =
+                            profile.zoneSpans[zoneIndex];
+                        const bool behind =
+                            zoneSweepState.longitudinalDirection >= 0
+                            ? span.maximumX < zoneSweepState.frontierX
+                                - zoneProjectionTolerance
+                            : span.minimumX > zoneSweepState.frontierX
+                                + zoneProjectionTolerance;
+                        if (behind)
+                        {
+                            QVariantMap values = diagnosticValues
+                                (input, policy, 0U, 0U, -1, groupId);
+                            values.insert(QStringLiteral("partitionId"),
+                                zoneSweepState.partitionId);
+                            values.insert(QStringLiteral("zone"),
+                                machining::tubeZoneName(zone));
+                            values.insert(QStringLiteral("unitKey"),
+                                processGroupKeyText(plan.groups
+                                    [static_cast<std::size_t>(groupId)]));
+                            values.insert(QStringLiteral("spanMinimumX"),
+                                span.minimumX);
+                            values.insert(QStringLiteral("spanMaximumX"),
+                                span.maximumX);
+                            values.insert(QStringLiteral("frontierX"),
+                                zoneSweepState.frontierX);
+                            values.insert(QStringLiteral("remainingPredecessors"),
+                                indegree[groupId]);
+                            return failure<ProcessPlan>
+                            (
+                                OperationStatus::Failed, context,
+                                DiagnosticCode::ProcessPlanningZoneSweepBacktrackRequired,
+                                QStringLiteral("16 区位扫描发现必须回头的加工单元，已停止排序。"),
+                                QStringLiteral("An eligible unit lies completely behind the monotonic zone frontier."),
+                                values
+                            );
+                        }
+
+                        ZoneSweepSelection selection;
+                        selection.groupId = groupId;
+                        selection.zone = zone;
+                        selection.span = span;
+                        selection.hitX =
+                            zoneSweepState.longitudinalDirection >= 0
+                            ? span.minimumX : span.maximumX;
+                        selection.frontierBefore =
+                            zoneSweepState.frontierX;
+                        selection.fallbackOwner = profile.fallbackOwner;
+                        available.push_back(selection);
+                    }
+
+                    if (!available.empty())
+                    {
+                        std::sort(available.begin(), available.end(),
+                            [&](const ZoneSweepSelection& left,
+                                const ZoneSweepSelection& right)
+                        {
+                            if (std::abs(left.hitX - right.hitX)
+                                > zoneProjectionTolerance)
+                            {
+                                return zoneSweepState.longitudinalDirection >= 0
+                                    ? left.hitX < right.hitX
+                                    : left.hitX > right.hitX;
+                            }
+                            return processGroupStableLess
+                            (
+                                plan.groups[static_cast<std::size_t>(left.groupId)],
+                                plan.groups[static_cast<std::size_t>(right.groupId)]
+                            );
+                        });
+                        const double firstHitX = available.front().hitX;
+                        for (const ZoneSweepSelection& selection : available)
+                        {
+                            if (std::abs(selection.hitX - firstHitX)
+                                > zoneProjectionTolerance)
+                                break;
+                            candidateGroupIds.push_back(selection.groupId);
+                            zoneSelections.emplace
+                                (selection.groupId, selection);
+                        }
+                        break;
+                    }
+
+                    ++zoneSweepState.currentZoneOffset;
+                    ++zoneSweepReport.zoneTransitionCount;
+                    zoneSweepState.zoneEntered = false;
+                }
+
+                if (candidateGroupIds.empty())
+                {
+                    QStringList remainingKeys;
+                    QStringList remainingDetails;
+                    for (const int groupId : partition.groupIds)
+                    {
+                        if (scheduled.find(groupId) == scheduled.end())
+                        {
+                            const QString key = processGroupKeyText
+                                (plan.groups[static_cast<std::size_t>(groupId)]);
+                            remainingKeys.push_back(key);
+                            const ProcessGroupZoneProfile& profile =
+                                groupZoneProfiles.at(groupId);
+                            remainingDetails.push_back
+                            (
+                                QStringLiteral("unitKey=%1|certainMask=%2|possibleMask=%3|zoneSpans=%4|fallbackOwner=%5|remainingPredecessors=%6")
+                                    .arg(key)
+                                    .arg(zoneMaskText(profile.certainMask))
+                                    .arg(zoneMaskText(profile.possibleMask))
+                                    .arg(zoneSpansText(profile))
+                                    .arg(profile.fallbackOwner ? 1 : 0)
+                                    .arg(indegree[groupId])
+                            );
+                        }
+                    }
+                    if (!remainingKeys.empty())
+                    {
+                        QVariantMap values = diagnosticValues
+                            (input, policy, 0U, 0U, -1, -1);
+                        values.insert(QStringLiteral("partitionId"),
+                            zoneSweepState.partitionId);
+                        values.insert(QStringLiteral("remainingUnitKeys"),
+                            remainingKeys.join(QLatin1Char(',')));
+                        values.insert(QStringLiteral("remainingUnits"),
+                            remainingDetails);
+                        return failure<ProcessPlan>
+                        (
+                            OperationStatus::Failed, context,
+                            DiagnosticCode::ProcessPlanningZoneSweepBacktrackRequired,
+                            QStringLiteral("16 区位扫描一圈后仍有未处理加工单元。"),
+                            QStringLiteral("A full zone sweep completed with unscheduled partition groups."),
+                            values
+                        );
+                    }
+                    finishZoneSweepPartition();
+                    candidateGroupIds = eligible;
+                }
+            }
+
             std::vector<SchedulingCandidate> candidates;
-            candidates.reserve(eligible.size());
-            for (const int groupId : eligible)
+            candidates.reserve(candidateGroupIds.size());
+            for (const int groupId : candidateGroupIds)
             {
                 const ProcessGroup& group = plan.groups[static_cast<std::size_t>(groupId)];
                 ClosedLoopTraversalReport candidateClosedLoopReport;
@@ -2686,19 +3438,8 @@ namespace cadcam::planning
                         values
                     );
                 }
-                ProcessSurfaceFootprint footprint;
-                if (surfaceSweepEnabled)
-                {
-                    const auto found = surfaceFootprints.find(groupId);
-                    if (found != surfaceFootprints.end()) footprint = footprintForTraversal
-                    (
-                        found->second, *candidate, *surfaceSweepSection,
-                        sweepSectionBounds, sweepSurfaceTolerance
-                    );
-                }
                 SchedulingCandidate schedulingCandidate;
                 schedulingCandidate.traversal = std::move(*candidate);
-                schedulingCandidate.footprint = footprint;
                 if (candidateClosedLoopReport.groupId >= 0)
                     schedulingCandidate.closedLoopReport =
                         std::move(candidateClosedLoopReport);
@@ -2718,88 +3459,86 @@ namespace cadcam::planning
                 );
             }
 
-            std::vector<std::size_t> selectable;
-            selectable.reserve(candidates.size());
-            bool regionTransitionForSelection = false;
-            if (surfaceSweepEnabled && !initialSelection
-                && surfaceSweepState.initialized)
+            std::size_t selectedIndex = 0U;
+            for (std::size_t candidateIndex = 1U;
+                candidateIndex < candidates.size(); ++candidateIndex)
             {
-                for (std::size_t index = 0; index < candidates.size(); ++index)
+                bool replace = false;
+                const auto leftZone = zoneSelections.find
+                    (candidates[candidateIndex].traversal.groupId);
+                const auto rightZone = zoneSelections.find
+                    (candidates[selectedIndex].traversal.groupId);
+                if (leftZone != zoneSelections.end()
+                    && rightZone != zoneSelections.end())
                 {
-                    const ProcessGroup& group = plan.groups[static_cast<std::size_t>
-                        (candidates[index].traversal.groupId)];
-                    if (group.kind == ProcessGroupKind::BreakBoundary)
-                        selectable.push_back(index);
-                }
-
-                if (selectable.empty())
-                {
-                    for (std::size_t index = 0; index < candidates.size(); ++index)
+                    const ZoneSweepSelection& left = leftZone->second;
+                    const ZoneSweepSelection& right = rightZone->second;
+                    if (std::abs(left.hitX - right.hitX)
+                        > zoneProjectionTolerance)
                     {
-                        if (candidates[index].footprint.dominantRegion
-                            == surfaceSweepState.currentRegion)
-                            selectable.push_back(index);
+                        replace = zoneSweepState.longitudinalDirection >= 0
+                            ? left.hitX < right.hitX
+                            : left.hitX > right.hitX;
+                    }
+                    else
+                    {
+                        const auto intersectsFrontier =
+                            [&](const ZoneSweepSelection& selection)
+                        {
+                            return selection.span.minimumX
+                                    <= selection.frontierBefore
+                                        + zoneProjectionTolerance
+                                && selection.span.maximumX
+                                    >= selection.frontierBefore
+                                        - zoneProjectionTolerance;
+                        };
+                        const bool leftIntersects = intersectsFrontier(left);
+                        const bool rightIntersects = intersectsFrontier(right);
+                        if (leftIntersects != rightIntersects)
+                        {
+                            replace = leftIntersects;
+                        }
+                        else
+                        {
+                            const GroupTraversal& leftTraversal =
+                                candidates[candidateIndex].traversal;
+                            const GroupTraversal& rightTraversal =
+                                candidates[selectedIndex].traversal;
+                            if (std::abs(leftTraversal.movementDistance
+                                - rightTraversal.movementDistance)
+                                > kCalculationEpsilon)
+                                replace = leftTraversal.movementDistance
+                                    < rightTraversal.movementDistance;
+                            else if (leftTraversal.entryAxisReversalCount
+                                != rightTraversal.entryAxisReversalCount)
+                                replace = leftTraversal.entryAxisReversalCount
+                                    < rightTraversal.entryAxisReversalCount;
+                            else if (std::abs(leftTraversal.entryTangentCost
+                                - rightTraversal.entryTangentCost)
+                                > kCalculationEpsilon)
+                                replace = leftTraversal.entryTangentCost
+                                    < rightTraversal.entryTangentCost;
+                            else if (std::abs(leftTraversal.rotationCost
+                                - rightTraversal.rotationCost)
+                                > kCalculationEpsilon)
+                                replace = leftTraversal.rotationCost
+                                    < rightTraversal.rotationCost;
+                            else
+                                replace = processGroupStableLess
+                                (
+                                    plan.groups[static_cast<std::size_t>
+                                        (leftTraversal.groupId)],
+                                    plan.groups[static_cast<std::size_t>
+                                        (rightTraversal.groupId)]
+                                );
+                        }
                     }
                 }
-                if (selectable.empty())
+                else
                 {
-                    for (std::size_t index = 0; index < candidates.size(); ++index)
-                    {
-                        if (footprintUsesRegion(candidates[index].footprint,
-                            surfaceSweepState.currentRegion, true))
-                            selectable.push_back(index);
-                    }
-                }
-                if (selectable.empty())
-                {
-                    const int currentRegionIndex = surfaceRegionIndex
-                        (surfaceSweepState.currentRegion);
-                    const int direction = surfaceSweepState.perimeterDirection == 0
-                        ? 1 : surfaceSweepState.perimeterDirection;
-                    for (int step = 1; step <= 8 && selectable.empty(); ++step)
-                    {
-                        const auto nextRegion = surfaceRegionAt
-                            ((currentRegionIndex >= 0 ? currentRegionIndex : 0)
-                                + direction * step);
-                        for (std::size_t index = 0; index < candidates.size(); ++index)
-                        {
-                            if (candidates[index].footprint.dominantRegion == nextRegion)
-                                selectable.push_back(index);
-                        }
-                        if (selectable.empty())
-                        {
-                            for (std::size_t index = 0; index < candidates.size(); ++index)
-                            {
-                                if (footprintUsesRegion(candidates[index].footprint,
-                                    nextRegion, true))
-                                    selectable.push_back(index);
-                            }
-                        }
-                        if (!selectable.empty())
-                        {
-                            surfaceSweepState.currentRegion = nextRegion;
-                            regionTransitionForSelection = true;
-                        }
-                    }
-                }
-            }
-            if (selectable.empty())
-            {
-                for (std::size_t index = 0; index < candidates.size(); ++index)
-                    selectable.push_back(index);
-            }
-
-            std::size_t selectedIndex = selectable.front();
-            for (std::size_t offset = 1; offset < selectable.size(); ++offset)
-            {
-                const std::size_t candidateIndex = selectable[offset];
-                const bool replace = surfaceSweepEnabled && !initialSelection
-                        && surfaceSweepState.initialized
-                    ? surfaceSweepCandidateLess(candidates[candidateIndex],
-                        candidates[selectedIndex], surfaceSweepState,
-                        sweepSurfaceTolerance)
-                    : traversalLess(candidates[candidateIndex].traversal,
+                    replace = traversalLess(candidates[candidateIndex].traversal,
                         candidates[selectedIndex].traversal, selectionStrategy);
+                }
                 if (replace) selectedIndex = candidateIndex;
             }
             SchedulingCandidate selectedCandidate =
@@ -2834,7 +3573,6 @@ namespace cadcam::planning
                 assignment.startParameter = directed.selectedStartParameter;
                 plan.assignments.push_back(assignment);
             }
-            const double previousSweepX = surfaceSweepState.currentX;
             currentPosition = selected.end;
             if (selectedClosedLoopReport.has_value())
             {
@@ -2851,182 +3589,173 @@ namespace cadcam::planning
             scheduled.insert(selected.groupId);
             for (const int successor : successors[selected.groupId]) --indegree[successor];
 
-            if (surfaceSweepEnabled)
+            if (zone16SweepEnabled)
             {
-                const auto updatePerimeterPosition = [&]()
-                {
-                    const SectionProjection projection = projectToSection
-                    (
-                        { selected.end.y, selected.end.z },
-                        surfaceSweepSection->geometry,
-                        sweepSectionCumulative
-                    );
-                    if (projection.valid)
-                        surfaceSweepState.currentPerimeterPosition =
-                            projection.perimeterPosition;
-                };
-
                 if (selectedGroup.kind == ProcessGroupKind::BreakBoundary)
                 {
-                    if (surfaceSweepReport.active)
-                        surfaceSweepDiagnostics.push_back
-                            (surfaceSweepDiagnostic(context, surfaceSweepReport));
-
-                    int partitionId = selectedGroup.groupId;
-                    for (const BoundaryData& boundary : boundaries)
-                    {
-                        if (boundary.groupId == selectedGroup.groupId)
-                        {
-                            partitionId = boundary.pairId;
-                            break;
-                        }
-                    }
-                    surfaceSweepState.currentRegion =
-                        selectedCandidate.footprint.exitRegion;
-                    if (surfaceRegionIndex(surfaceSweepState.currentRegion) < 0)
-                        surfaceSweepState.currentRegion = classifySurfacePoint
-                        (
-                            selected.end, *surfaceSweepSection,
-                            sweepSectionBounds, sweepSurfaceTolerance
-                        );
-                    const int exitDirection = traversalPerimeterDirection
+                    const auto initialZone = traversalExitZone
                     (
                         selected, *surfaceSweepSection,
-                        sweepSectionCumulative, sweepSurfaceTolerance
+                        zoneProjectionTolerance
                     );
-                    if (exitDirection != 0)
-                        surfaceSweepState.perimeterDirection = exitDirection;
-                    else if (surfaceSweepState.perimeterDirection == 0)
-                        surfaceSweepState.perimeterDirection = 1;
-
-                    bool hasPositiveX = false;
-                    bool hasNegativeX = false;
-                    double nearestPositiveX = std::numeric_limits<double>::max();
-                    double nearestNegativeX = std::numeric_limits<double>::max();
-                    for (const int groupId : schedulable)
+                    const auto partition = partitionAfterBreakGroup.find
+                        (selected.groupId);
+                    if (!initialZone.has_value()
+                        || partition == partitionAfterBreakGroup.end()
+                        || !startZoneSweepPartition
+                            (partition->second, *initialZone))
                     {
-                        if (scheduled.find(groupId) != scheduled.end()
-                            || indegree[groupId] != 0) continue;
-                        const ProcessGroup& nextGroup = plan.groups
-                            [static_cast<std::size_t>(groupId)];
-                        if (nextGroup.kind == ProcessGroupKind::BreakBoundary
-                            || nextGroup.kind == ProcessGroupKind::WasteBoundary) continue;
-                        const auto footprint = surfaceFootprints.find(groupId);
-                        if (footprint == surfaceFootprints.end()) continue;
-                        const double delta = footprint->second.anchorX - selected.end.x;
-                        if (delta > sweepSurfaceTolerance)
-                        {
-                            hasPositiveX = true;
-                            nearestPositiveX = std::min(nearestPositiveX, delta);
-                        }
-                        else if (delta < -sweepSurfaceTolerance)
-                        {
-                            hasNegativeX = true;
-                            nearestNegativeX = std::min(nearestNegativeX, -delta);
-                        }
+                        QVariantMap values = diagnosticValues
+                            (input, policy, 0U, 0U, -1, selected.groupId);
+                        values.insert(QStringLiteral("unitKey"),
+                            processGroupKeyText(selectedGroup));
+                        values.insert(QStringLiteral("nextPartitionId"),
+                            partition != partitionAfterBreakGroup.end()
+                                ? partition->second : -1);
+                        return failure<ProcessPlan>
+                        (
+                            OperationStatus::Failed, context,
+                            DiagnosticCode::ProcessPlanningZoneSweepProfileInvalid,
+                            QStringLiteral("加工断面出口无法初始化下一加工段的 16 区位扫描。"),
+                            QStringLiteral("The final non-degenerate Break segment did not resolve to one TubeZone16."),
+                            values
+                        );
                     }
-                    if (hasPositiveX != hasNegativeX)
-                        surfaceSweepState.longitudinalDirection = hasPositiveX ? 1 : -1;
-                    else if (hasPositiveX && hasNegativeX)
-                        surfaceSweepState.longitudinalDirection =
-                            nearestPositiveX <= nearestNegativeX ? 1 : -1;
-                    else
-                        surfaceSweepState.longitudinalDirection = 1;
-                    surfaceSweepState.currentX = selected.end.x;
-                    updatePerimeterPosition();
-                    surfaceSweepState.initialized = true;
-
-                    surfaceSweepReport = SurfaceSweepReport{};
-                    surfaceSweepReport.partitionId = partitionId;
-                    surfaceSweepReport.initialRegion = surfaceSweepState.currentRegion;
-                    surfaceSweepReport.perimeterDirection =
-                        surfaceSweepState.perimeterDirection;
-                    surfaceSweepReport.longitudinalDirection =
-                        surfaceSweepState.longitudinalDirection;
-                    surfaceSweepReport.active = true;
                 }
                 else
                 {
-                    const bool hadSweepState = surfaceSweepState.initialized;
-                    if (!surfaceSweepState.initialized)
+                    const auto activeSelection =
+                        zoneSelections.find(selected.groupId);
+                    if (!zoneSweepState.active)
                     {
-                        surfaceSweepState.currentRegion =
-                            selectedCandidate.footprint.exitRegion;
-                        if (surfaceRegionIndex(surfaceSweepState.currentRegion) < 0)
-                            surfaceSweepState.currentRegion = classifySurfacePoint
-                            (
-                                selected.end, *surfaceSweepSection,
-                                sweepSectionBounds, sweepSurfaceTolerance
-                            );
-                        surfaceSweepState.perimeterDirection = traversalPerimeterDirection
+                        const auto initialZone = traversalExitZone
                         (
                             selected, *surfaceSweepSection,
-                            sweepSectionCumulative, sweepSurfaceTolerance
+                            zoneProjectionTolerance
                         );
-                        if (surfaceSweepState.perimeterDirection == 0)
-                            surfaceSweepState.perimeterDirection = 1;
-                        const double longitudinalTravel = selected.end.x - selected.start.x;
-                        surfaceSweepState.longitudinalDirection =
-                            longitudinalTravel < -sweepSurfaceTolerance ? -1 : 1;
-                        surfaceSweepState.initialized = true;
-                        surfaceSweepReport.partitionId = 0;
-                        surfaceSweepReport.initialRegion = surfaceSweepState.currentRegion;
-                        surfaceSweepReport.perimeterDirection =
-                            surfaceSweepState.perimeterDirection;
-                        surfaceSweepReport.longitudinalDirection =
-                            surfaceSweepState.longitudinalDirection;
-                        surfaceSweepReport.active = true;
+                        if (!initialZone.has_value()
+                            || !startZoneSweepPartition(0, *initialZone))
+                        {
+                            return failure<ProcessPlan>
+                            (
+                                OperationStatus::Failed, context,
+                                DiagnosticCode::ProcessPlanningZoneSweepProfileInvalid,
+                                QStringLiteral("首个加工单元无法初始化 16 区位扫描。"),
+                                QStringLiteral("The initial traversal exit did not resolve to one TubeZone16."),
+                                diagnosticValues(input, policy, 0U, 0U, -1,
+                                    selected.groupId)
+                            );
+                        }
                     }
 
-                    if (surfaceSweepReport.active)
+                    ZoneSweepSelection selection;
+                    bool selectionAvailable = false;
+                    if (activeSelection != zoneSelections.end())
                     {
-                        if (regionTransitionForSelection)
-                            ++surfaceSweepReport.regionTransitionCount;
-                        const double anchorDelta = selectedCandidate.footprint.anchorX
-                            - previousSweepX;
-                        const bool backtrack = hadSweepState
-                            && (surfaceSweepState.longitudinalDirection >= 0
-                                ? anchorDelta < -sweepSurfaceTolerance
-                                : anchorDelta > sweepSurfaceTolerance);
-                        if (backtrack)
+                        selection = activeSelection->second;
+                        selectionAvailable = true;
+                    }
+                    else if (zoneSweepState.active)
+                    {
+                        const ProcessGroupZoneProfile& profile =
+                            groupZoneProfiles.at(selected.groupId);
+                        const machining::TubeZone16 zone =
+                            zoneSweepState.initialZone;
+                        if ((profile.possibleMask
+                            & machining::tubeZoneBit(zone)) == 0U)
                         {
-                            ++surfaceSweepReport.backtrackCount;
-                            surfaceSweepReport.longitudinalBacktrackDistance +=
-                                std::abs(anchorDelta);
+                            QVariantMap values = diagnosticValues
+                                (input, policy, 0U, 0U, -1, selected.groupId);
+                            values.insert(QStringLiteral("unitKey"),
+                                processGroupKeyText(selectedGroup));
+                            values.insert(QStringLiteral("initialZone"),
+                                machining::tubeZoneName(zone));
+                            values.insert(QStringLiteral("certainMask"),
+                                zoneMaskText(profile.certainMask));
+                            values.insert(QStringLiteral("possibleMask"),
+                                zoneMaskText(profile.possibleMask));
+                            return failure<ProcessPlan>
+                            (
+                                OperationStatus::Failed, context,
+                                DiagnosticCode::ProcessPlanningZoneSweepProfileInvalid,
+                                QStringLiteral("首个加工单元出口区位与静态区位画像不一致。"),
+                                QStringLiteral("The initial traversal exit zone is absent from the static zone profile."),
+                                values
+                            );
                         }
-                        QStringList memberIds;
-                        for (const EntityId entityId : processUnit.key.memberEntityIds)
-                            memberIds.push_back(QString::number(entityId));
-                        surfaceSweepReport.selectedUnits.push_back
+                        if ((profile.possibleMask
+                            & machining::tubeZoneBit(zone)) != 0U)
+                        {
+                            selection.groupId = selected.groupId;
+                            selection.zone = zone;
+                            selection.span = profile.zoneSpans
+                                [machining::tubeZoneIndex(zone)];
+                            selection.hitX =
+                                zoneSweepState.longitudinalDirection >= 0
+                                ? selection.span.minimumX
+                                : selection.span.maximumX;
+                            selection.frontierBefore =
+                                zoneSweepState.frontierX;
+                            selection.fallbackOwner = profile.fallbackOwner;
+                            selectionAvailable = true;
+                        }
+                    }
+
+                    if (selectionAvailable && zoneSweepReport.active)
+                    {
+                        const double frontierAfter =
+                            zoneSweepState.longitudinalDirection >= 0
+                            ? std::max(zoneSweepState.frontierX,
+                                selection.span.maximumX)
+                            : std::min(zoneSweepState.frontierX,
+                                selection.span.minimumX);
+                        const ProcessGroupZoneProfile& profile =
+                            groupZoneProfiles.at(selected.groupId);
+                        zoneSweepReport.selectedUnits.push_back
                         (
-                            QStringLiteral("[%1]:%2@%3#%4")
-                                .arg(memberIds.join(QLatin1Char('+')))
-                                .arg(surfaceRegionName
-                                    (selectedCandidate.footprint.dominantRegion))
-                                .arg(selectedCandidate.footprint.anchorX, 0, 'f', 3)
+                            QStringLiteral("unitKey=%1|zone=%2|certainMask=%3|possibleMask=%4|span=[%5,%6]|hitX=%7|frontierBefore=%8|frontierAfter=%9|startX=%10|endX=%11|fallbackOwner=%12|order=%13")
+                                .arg(processGroupKeyText(selectedGroup))
+                                .arg(machining::tubeZoneName(selection.zone))
+                                .arg(zoneMaskText(profile.certainMask))
+                                .arg(zoneMaskText(profile.possibleMask))
+                                .arg(selection.span.minimumX, 0, 'f', 6)
+                                .arg(selection.span.maximumX, 0, 'f', 6)
+                                .arg(selection.hitX, 0, 'f', 6)
+                                .arg(selection.frontierBefore, 0, 'f', 6)
+                                .arg(frontierAfter, 0, 'f', 6)
+                                .arg(selected.start.x, 0, 'f', 6)
+                                .arg(selected.end.x, 0, 'f', 6)
+                                .arg(selection.fallbackOwner
+                                    ? QStringLiteral("true")
+                                    : QStringLiteral("false"))
                                 .arg(processUnitIndex + 1)
                         );
-                        ++surfaceSweepReport.selectedUnitCount;
+                        zoneSweepState.frontierX = frontierAfter;
+                        ++zoneSweepReport.processedUnitCount;
                     }
-
-                    const auto previousRegion = surfaceSweepState.currentRegion;
-                    const auto exitRegion = selectedCandidate.footprint.exitRegion;
-                    if (surfaceRegionIndex(exitRegion) >= 0)
-                        surfaceSweepState.currentRegion = exitRegion;
-                    if (surfaceSweepReport.active && !regionTransitionForSelection
-                        && surfaceRegionIndex(previousRegion) >= 0
-                        && surfaceRegionIndex(surfaceSweepState.currentRegion) >= 0
-                        && previousRegion != surfaceSweepState.currentRegion)
-                        ++surfaceSweepReport.regionTransitionCount;
-                    surfaceSweepState.currentX = selected.end.x;
-                    updatePerimeterPosition();
                 }
             }
         }
 
-        if (surfaceSweepReport.active)
-            surfaceSweepDiagnostics.push_back
-                (surfaceSweepDiagnostic(context, surfaceSweepReport));
+        if (zone16SweepEnabled && zoneSweepState.active)
+        {
+            const TubeZoneSweepPartition& partition =
+                zoneSweepPartitions[static_cast<std::size_t>
+                    (zoneSweepState.partitionId)];
+            if (zoneSweepReport.processedUnitCount
+                != static_cast<int>(partition.groupIds.size()))
+            {
+                return failure<ProcessPlan>
+                (
+                    OperationStatus::InternalError, context,
+                    DiagnosticCode::ProcessPlanningInvariantViolation,
+                    QStringLiteral("最终 16 区位加工段未完整记录全部加工单元。"),
+                    QStringLiteral("Final zone sweep report count does not match its partition."),
+                    diagnosticValues(input, policy)
+                );
+            }
+        }
+        if (zone16SweepEnabled) finishZoneSweepPartition();
 
         std::unordered_set<EntityId> assignedIds;
         std::unordered_set<EntityId> excludedIds;
@@ -3235,7 +3964,7 @@ namespace cadcam::planning
         result.status = OperationStatus::Success;
         result.value = std::move(plan);
         result.mergeDiagnostics(closedLoopDiagnostics);
-        result.mergeDiagnostics(surfaceSweepDiagnostics);
+        result.mergeDiagnostics(zoneSweepDiagnostics);
         return result;
     }
 }

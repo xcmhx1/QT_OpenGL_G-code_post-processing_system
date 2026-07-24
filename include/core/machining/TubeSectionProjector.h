@@ -43,6 +43,11 @@ namespace cadcam::machining
             (TubeZoneMask{ 1U } << static_cast<std::uint8_t>(zone));
     }
 
+    constexpr std::size_t tubeZoneIndex(TubeZone16 zone)
+    {
+        return static_cast<std::size_t>(static_cast<std::uint8_t>(zone));
+    }
+
     QString tubeZoneName(TubeZone16 zone);
 
     struct TubeSectionProjection
@@ -69,6 +74,8 @@ namespace cadcam::machining
 
     struct ProcessUnitZoneProfile
     {
+        TubeZoneMask certainMask = 0U;
+        TubeZoneMask possibleMask = 0U;
         TubeZoneMask occupancyMask = 0U;
         std::array<TubeZoneSpan, kTubeZone16Count> zoneSpans;
         TubeZone16 entryZone = TubeZone16::TopFace;
