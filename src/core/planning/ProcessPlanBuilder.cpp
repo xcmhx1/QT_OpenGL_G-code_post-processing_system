@@ -270,7 +270,6 @@ namespace cadcam::planning
                 machining::kTubeZone16Count> ellipseMemberIdsByZone;
             bool closed = false;
             bool uncertain = false;
-            bool fallbackOwner = false;
         };
 
         struct ZoneSweepSelection
@@ -281,6 +280,14 @@ namespace cadcam::planning
             double hitX = 0.0;
             double frontierBefore = 0.0;
             bool fallbackOwner = false;
+        };
+
+        struct ZoneSweepOwnership
+        {
+            int groupId = -1;
+            machining::TubeZone16 ownerZone =
+                machining::TubeZone16::TopFace;
+            bool usedPossibleFallback = false;
         };
 
         struct TubeZoneSweepPartition
@@ -295,6 +302,7 @@ namespace cadcam::planning
             std::array<std::vector<int>,
                 machining::kTubeZone16Count> zoneBuckets;
             std::unordered_set<int> groupIds;
+            std::unordered_map<int, ZoneSweepOwnership> ownerships;
         };
 
         struct Zone16SweepState
@@ -307,6 +315,8 @@ namespace cadcam::planning
             double frontierX = 0.0;
             bool zoneEntered = false;
             bool active = false;
+            std::array<bool, machining::kTubeZone16Count> enteredZones{};
+            std::array<bool, machining::kTubeZone16Count> completedZones{};
         };
 
         struct Zone16SweepReport
@@ -1971,6 +1981,41 @@ namespace cadcam::planning
             return static_cast<machining::TubeZone16>(wrapped);
         }
 
+        std::optional<machining::TubeZone16> firstZoneInSweep
+        (
+            machining::TubeZoneMask mask,
+            machining::TubeZone16 initialZone,
+            int perimeterDirection
+        )
+        {
+            for (int offset = 0;
+                offset < static_cast<int>(machining::kTubeZone16Count);
+                ++offset)
+            {
+                const machining::TubeZone16 zone =
+                    zoneAtOffset(initialZone, offset, perimeterDirection);
+                if ((mask & machining::tubeZoneBit(zone)) != 0U)
+                    return zone;
+            }
+            return std::nullopt;
+        }
+
+        bool zoneCompleted
+        (
+            const TubeZoneSweepPartition& partition,
+            machining::TubeZone16 zone,
+            const std::unordered_set<int>& scheduled
+        )
+        {
+            const auto& bucket =
+                partition.zoneBuckets[machining::tubeZoneIndex(zone)];
+            return std::all_of(bucket.cbegin(), bucket.cend(),
+                [&scheduled](int groupId)
+                {
+                    return scheduled.find(groupId) != scheduled.end();
+                });
+        }
+
         QString zoneMaskText(machining::TubeZoneMask mask)
         {
             return QStringLiteral("0x%1").arg(static_cast<unsigned int>(mask),
@@ -2093,7 +2138,9 @@ namespace cadcam::planning
             values.insert(QStringLiteral("initialZone"),
                 machining::tubeZoneName(report.initialZone));
             values.insert(QStringLiteral("perimeterDirection"),
-                QStringLiteral("Clockwise"));
+                report.perimeterDirection >= 0
+                    ? QStringLiteral("Clockwise")
+                    : QStringLiteral("CounterClockwise"));
             values.insert(QStringLiteral("longitudinalDirection"),
                 report.longitudinalDirection);
             values.insert(QStringLiteral("partitionMinimumX"),
@@ -2118,6 +2165,88 @@ namespace cadcam::planning
                 values,
                 report.status == QStringLiteral("Success")
                     ? DiagnosticSeverity::Info : DiagnosticSeverity::Warning
+            );
+        }
+
+        Diagnostic zoneOwnershipDiagnostic
+        (
+            const OperationContext& context,
+            const TubeZoneSweepPartition& partition,
+            const ProcessGroup& group,
+            const ProcessGroupZoneProfile& profile,
+            const ZoneSweepOwnership& ownership
+        )
+        {
+            QVariantMap values;
+            values.insert(QStringLiteral("zoneOwnership"), true);
+            values.insert(QStringLiteral("partitionId"), partition.partitionId);
+            values.insert(QStringLiteral("unitKey"), processGroupKeyText(group));
+            values.insert(QStringLiteral("certainMask"),
+                zoneMaskText(profile.certainMask));
+            values.insert(QStringLiteral("possibleMask"),
+                zoneMaskText(profile.possibleMask));
+            values.insert(QStringLiteral("legalEntryMask"),
+                zoneMaskText(profile.legalEntryMask));
+            values.insert(QStringLiteral("ownerZone"),
+                machining::tubeZoneName(ownership.ownerZone));
+            values.insert(QStringLiteral("usedPossibleFallback"),
+                ownership.usedPossibleFallback);
+            return planningDiagnostic
+            (
+                context,
+                ownership.usedPossibleFallback
+                    ? DiagnosticCode::ProcessPlanningZoneSweepFallbackOwner
+                    : DiagnosticCode::ProcessPlanningZone16SweepSummary,
+                ownership.usedPossibleFallback
+                    ? QStringLiteral("加工单元使用保守区位作为唯一生产归属。")
+                    : QStringLiteral("加工单元已确定唯一生产区位。"),
+                QStringLiteral("A single immutable owner zone was selected for this partition."),
+                values,
+                ownership.usedPossibleFallback
+                    ? DiagnosticSeverity::Warning : DiagnosticSeverity::Info
+            );
+        }
+
+        Diagnostic zonePhaseDiagnostic
+        (
+            const OperationContext& context,
+            const TubeZoneSweepPartition& partition,
+            machining::TubeZone16 zone,
+            const std::unordered_set<int>& scheduled,
+            const QString& event
+        )
+        {
+            const auto& bucket =
+                partition.zoneBuckets[machining::tubeZoneIndex(zone)];
+            const int processedUnitCount = static_cast<int>(std::count_if
+            (
+                bucket.cbegin(), bucket.cend(),
+                [&scheduled](int groupId)
+                {
+                    return scheduled.find(groupId) != scheduled.end();
+                }
+            ));
+            QVariantMap values;
+            values.insert(QStringLiteral("zonePhase"), true);
+            values.insert(QStringLiteral("partitionId"), partition.partitionId);
+            values.insert(QStringLiteral("zone"), machining::tubeZoneName(zone));
+            values.insert(QStringLiteral("event"), event);
+            values.insert(QStringLiteral("ownedUnitCount"),
+                static_cast<int>(bucket.size()));
+            values.insert(QStringLiteral("processedUnitCount"),
+                processedUnitCount);
+            values.insert(QStringLiteral("remainingUnitCount"),
+                static_cast<int>(bucket.size()) - processedUnitCount);
+            return planningDiagnostic
+            (
+                context,
+                DiagnosticCode::ProcessPlanningZone16SweepSummary,
+                event == QStringLiteral("Enter")
+                    ? QStringLiteral("16 区位加工阶段已进入。")
+                    : QStringLiteral("16 区位加工阶段已完成。"),
+                QStringLiteral("Zone phase lifecycle event."),
+                values,
+                DiagnosticSeverity::Info
             );
         }
 
@@ -5368,28 +5497,6 @@ namespace cadcam::planning
                                 group.groupId)
                         );
                     }
-                    profile.fallbackOwner = true;
-                    QVariantMap values = diagnosticValues
-                        (input, policy, 0U, 0U, -1, group.groupId);
-                    values.insert(QStringLiteral("unitKey"),
-                        processGroupKeyText(group));
-                    values.insert(QStringLiteral("certainMask"),
-                        zoneMaskText(profile.certainMask));
-                    values.insert(QStringLiteral("possibleMask"),
-                        zoneMaskText(profile.possibleMask));
-                    values.insert(QStringLiteral("legalEntryMask"),
-                        zoneMaskText(profile.legalEntryMask));
-                    values.insert(QStringLiteral("schedulableMask"),
-                        zoneMaskText(profile.schedulableMask));
-                    zoneSweepDiagnostics.push_back(planningDiagnostic
-                    (
-                        context,
-                        DiagnosticCode::ProcessPlanningZoneSweepFallbackOwner,
-                        QStringLiteral("加工单元使用保守区位归属参与 16 区位调度。"),
-                        QStringLiteral("certainMask had no legal entry; possibleMask supplies conservative entry zones."),
-                        values,
-                        DiagnosticSeverity::Warning
-                    ));
                 }
                 QVariantMap entryValues;
                 entryValues.insert(QStringLiteral("entryZoneProfile"), true);
@@ -5790,16 +5897,15 @@ namespace cadcam::planning
                 partition.groupIds.insert(group.groupId);
                 const ProcessGroupZoneProfile& profile =
                     groupZoneProfiles.at(group.groupId);
-                const machining::TubeZoneMask ownerMask =
+                const machining::TubeZoneMask boundsMask =
                     profile.schedulableMask;
                 for (std::size_t zoneIndex = 0U;
                     zoneIndex < machining::kTubeZone16Count; ++zoneIndex)
                 {
                     const auto zone =
                         static_cast<machining::TubeZone16>(zoneIndex);
-                    if ((ownerMask & machining::tubeZoneBit(zone)) == 0U)
+                    if ((boundsMask & machining::tubeZoneBit(zone)) == 0U)
                         continue;
-                    partition.zoneBuckets[zoneIndex].push_back(group.groupId);
                     const machining::TubeZoneSpan& span =
                         profile.zoneSpans[zoneIndex];
                     if (!partitionBoundsInitialized[partitionIndex])
@@ -5817,21 +5923,6 @@ namespace cadcam::planning
                     }
                 }
             }
-            for (TubeZoneSweepPartition& partition : zoneSweepPartitions)
-            {
-                for (auto& bucket : partition.zoneBuckets)
-                {
-                    std::sort(bucket.begin(), bucket.end(),
-                        [&plan](int left, int right)
-                    {
-                        return processGroupStableLess
-                        (
-                            plan.groups[static_cast<std::size_t>(left)],
-                            plan.groups[static_cast<std::size_t>(right)]
-                        );
-                    });
-                }
-            }
         }
         if (schedulable.empty())
         {
@@ -5845,6 +5936,7 @@ namespace cadcam::planning
         }
 
         std::unordered_set<int> scheduled;
+        std::unordered_map<int, int> schedulingOccurrences;
         QVector<Diagnostic> closedLoopDiagnostics;
         Zone16SweepState zoneSweepState;
         Zone16SweepReport zoneSweepReport;
@@ -5852,24 +5944,248 @@ namespace cadcam::planning
             policy.zone16Sweep.initialZone;
         Vector3d currentPosition = policy.initialPosition;
         int processOrder = 0;
-        const auto finishZoneSweepPartition = [&]()
+        std::vector<bool> startedPartitions(zoneSweepPartitions.size(), false);
+        std::vector<bool> finishedPartitions(zoneSweepPartitions.size(), false);
+        std::optional<OperationResult<ProcessPlan>>
+            zoneSweepLifecycleFailure;
+        const auto setZoneSweepLifecycleFailure =
+            [&](DiagnosticCode code, const QString& userMessage,
+                const QString& technicalDetail, QVariantMap values)
         {
-            if (zoneSweepReport.active)
-                zoneSweepDiagnostics.push_back
-                    (zone16SweepDiagnostic(context, zoneSweepReport));
+            zoneSweepLifecycleFailure = failure<ProcessPlan>
+            (
+                OperationStatus::InternalError, context, code,
+                userMessage, technicalDetail, std::move(values)
+            );
+        };
+        const auto finishZoneSweepPartition = [&]() -> bool
+        {
+            if (!zoneSweepState.active) return true;
+            if (zoneSweepState.partitionId < 0
+                || static_cast<std::size_t>(zoneSweepState.partitionId)
+                    >= zoneSweepPartitions.size())
+            {
+                setZoneSweepLifecycleFailure
+                (
+                    DiagnosticCode::ProcessPlanningInvariantViolation,
+                    QStringLiteral("16 区位加工段状态无效。"),
+                    QStringLiteral("Active zone sweep references an invalid partition."),
+                    diagnosticValues(input, policy)
+                );
+                return false;
+            }
+            const std::size_t partitionIndex =
+                static_cast<std::size_t>(zoneSweepState.partitionId);
+            const TubeZoneSweepPartition& partition =
+                zoneSweepPartitions[partitionIndex];
+            const bool allGroupsScheduled = std::all_of
+            (
+                partition.groupIds.cbegin(), partition.groupIds.cend(),
+                [&scheduled](int groupId)
+                {
+                    return scheduled.find(groupId) != scheduled.end();
+                }
+            );
+            bool pairedPhases = true;
+            for (std::size_t zoneIndex = 0U;
+                zoneIndex < machining::kTubeZone16Count; ++zoneIndex)
+            {
+                if (zoneSweepState.enteredZones[zoneIndex]
+                    != zoneSweepState.completedZones[zoneIndex])
+                {
+                    pairedPhases = false;
+                    break;
+                }
+            }
+            if (!allGroupsScheduled || !pairedPhases
+                || zoneSweepReport.processedUnitCount
+                    != static_cast<int>(partition.groupIds.size())
+                || zoneSweepReport.backtrackCount != 0)
+            {
+                QVariantMap values = diagnosticValues(input, policy);
+                values.insert(QStringLiteral("partitionId"),
+                    zoneSweepState.partitionId);
+                values.insert(QStringLiteral("allGroupsScheduled"),
+                    allGroupsScheduled);
+                values.insert(QStringLiteral("pairedPhases"), pairedPhases);
+                values.insert(QStringLiteral("processedUnitCount"),
+                    zoneSweepReport.processedUnitCount);
+                values.insert(QStringLiteral("expectedUnitCount"),
+                    static_cast<int>(partition.groupIds.size()));
+                values.insert(QStringLiteral("backtrackCount"),
+                    zoneSweepReport.backtrackCount);
+                setZoneSweepLifecycleFailure
+                (
+                    DiagnosticCode::ProcessPlanningZoneIncomplete,
+                    QStringLiteral("16 区位加工段尚未完整完成，不能结束该加工段。"),
+                    QStringLiteral("Partition completion requires every owner group and every entered zone phase to be complete."),
+                    std::move(values)
+                );
+                return false;
+            }
+            if (finishedPartitions[partitionIndex])
+            {
+                QVariantMap values = diagnosticValues(input, policy);
+                values.insert(QStringLiteral("partitionId"),
+                    zoneSweepState.partitionId);
+                setZoneSweepLifecycleFailure
+                (
+                    DiagnosticCode::ProcessPlanningInvariantViolation,
+                    QStringLiteral("16 区位加工段被重复结束。"),
+                    QStringLiteral("A zone sweep partition may finish only once."),
+                    std::move(values)
+                );
+                return false;
+            }
+            finishedPartitions[partitionIndex] = true;
+            zoneSweepDiagnostics.push_back
+                (zone16SweepDiagnostic(context, zoneSweepReport));
             zoneSweepState = Zone16SweepState{};
             zoneSweepReport = Zone16SweepReport{};
+            return true;
         };
         const auto startZoneSweepPartition =
             [&](int partitionId, machining::TubeZone16 initialZone) -> bool
         {
+            zoneSweepLifecycleFailure.reset();
             if (partitionId < 0
                 || static_cast<std::size_t>(partitionId)
                     >= zoneSweepPartitions.size())
                 return false;
-            finishZoneSweepPartition();
-            const TubeZoneSweepPartition& partition =
-                zoneSweepPartitions[static_cast<std::size_t>(partitionId)];
+            const std::size_t partitionIndex =
+                static_cast<std::size_t>(partitionId);
+            if (zoneSweepState.active || startedPartitions[partitionIndex])
+            {
+                QVariantMap values = diagnosticValues(input, policy);
+                values.insert(QStringLiteral("partitionId"), partitionId);
+                values.insert(QStringLiteral("partitionActive"),
+                    zoneSweepState.active);
+                values.insert(QStringLiteral("partitionStarted"),
+                    static_cast<bool>(startedPartitions[partitionIndex]));
+                values.insert(QStringLiteral("partitionFinished"),
+                    static_cast<bool>(finishedPartitions[partitionIndex]));
+                setZoneSweepLifecycleFailure
+                (
+                    zoneSweepState.active
+                        ? DiagnosticCode::ProcessPlanningZoneIncomplete
+                        : DiagnosticCode::ProcessPlanningInvariantViolation,
+                    zoneSweepState.active
+                        ? QStringLiteral("当前 16 区位加工段尚未完成，不能启动其他加工段。")
+                        : QStringLiteral("同一 16 区位加工段不能重复启动。"),
+                    QStringLiteral("A zone sweep partition cannot restart or replace an active partition."),
+                    std::move(values)
+                );
+                return false;
+            }
+
+            TubeZoneSweepPartition& partition =
+                zoneSweepPartitions[partitionIndex];
+            partition.initialZone = initialZone;
+            std::vector<int> orderedGroupIds
+                (partition.groupIds.cbegin(), partition.groupIds.cend());
+            std::sort(orderedGroupIds.begin(), orderedGroupIds.end(),
+                [&plan](int left, int right)
+            {
+                return processGroupStableLess
+                (
+                    plan.groups[static_cast<std::size_t>(left)],
+                    plan.groups[static_cast<std::size_t>(right)]
+                );
+            });
+            for (const int groupId : orderedGroupIds)
+            {
+                const ProcessGroupZoneProfile& profile =
+                    groupZoneProfiles.at(groupId);
+                const machining::TubeZoneMask strongSchedulableMask =
+                    profile.certainMask & profile.legalEntryMask;
+                std::optional<machining::TubeZone16> ownerZone =
+                    firstZoneInSweep(strongSchedulableMask, initialZone,
+                        partition.perimeterDirection);
+                bool usedPossibleFallback = false;
+                if (!ownerZone.has_value())
+                {
+                    const machining::TubeZoneMask fallbackMask =
+                        profile.possibleMask & profile.legalEntryMask;
+                    ownerZone = firstZoneInSweep(fallbackMask, initialZone,
+                        partition.perimeterDirection);
+                    usedPossibleFallback = ownerZone.has_value();
+                }
+                if (!ownerZone.has_value())
+                {
+                    QVariantMap values = diagnosticValues
+                        (input, policy, 0U, 0U, -1, groupId);
+                    values.insert(QStringLiteral("partitionId"), partitionId);
+                    values.insert(QStringLiteral("unitKey"),
+                        processGroupKeyText(plan.groups
+                            [static_cast<std::size_t>(groupId)]));
+                    values.insert(QStringLiteral("certainMask"),
+                        zoneMaskText(profile.certainMask));
+                    values.insert(QStringLiteral("possibleMask"),
+                        zoneMaskText(profile.possibleMask));
+                    values.insert(QStringLiteral("legalEntryMask"),
+                        zoneMaskText(profile.legalEntryMask));
+                    setZoneSweepLifecycleFailure
+                    (
+                        DiagnosticCode::ProcessPlanningZoneSweepProfileInvalid,
+                        QStringLiteral("加工单元没有可用的唯一生产区位。"),
+                        QStringLiteral("Neither the strong nor fallback schedulable mask contains a zone in the partition sweep."),
+                        std::move(values)
+                    );
+                    return false;
+                }
+                ZoneSweepOwnership ownership;
+                ownership.groupId = groupId;
+                ownership.ownerZone = *ownerZone;
+                ownership.usedPossibleFallback = usedPossibleFallback;
+                partition.ownerships.emplace(groupId, ownership);
+                partition.zoneBuckets[machining::tubeZoneIndex(*ownerZone)]
+                    .push_back(groupId);
+                zoneSweepDiagnostics.push_back(zoneOwnershipDiagnostic
+                (
+                    context, partition,
+                    plan.groups[static_cast<std::size_t>(groupId)],
+                    profile, ownership
+                ));
+            }
+            std::unordered_map<int, int> bucketOccurrences;
+            for (auto& bucket : partition.zoneBuckets)
+            {
+                std::sort(bucket.begin(), bucket.end(),
+                    [&plan](int left, int right)
+                {
+                    return processGroupStableLess
+                    (
+                        plan.groups[static_cast<std::size_t>(left)],
+                        plan.groups[static_cast<std::size_t>(right)]
+                    );
+                });
+                for (const int groupId : bucket)
+                    ++bucketOccurrences[groupId];
+            }
+            for (const int groupId : orderedGroupIds)
+            {
+                if (partition.ownerships.count(groupId) != 1U
+                    || bucketOccurrences[groupId] != 1)
+                {
+                    QVariantMap values = diagnosticValues
+                        (input, policy, 0U, 0U, -1, groupId);
+                    values.insert(QStringLiteral("partitionId"), partitionId);
+                    values.insert(QStringLiteral("ownershipCount"),
+                        static_cast<int>(partition.ownerships.count(groupId)));
+                    values.insert(QStringLiteral("bucketOccurrenceCount"),
+                        bucketOccurrences[groupId]);
+                    setZoneSweepLifecycleFailure
+                    (
+                        DiagnosticCode::ProcessPlanningInvariantViolation,
+                        QStringLiteral("加工单元的 16 区位生产归属不唯一。"),
+                        QStringLiteral("Every ordinary group must have one owner and occur in exactly one production bucket."),
+                        std::move(values)
+                    );
+                    return false;
+                }
+            }
+
+            startedPartitions[partitionIndex] = true;
             zoneSweepState.partitionId = partitionId;
             zoneSweepState.initialZone = initialZone;
             zoneSweepState.currentZoneOffset = 0;
@@ -5878,7 +6194,7 @@ namespace cadcam::planning
             zoneSweepState.frontierX =
                 partition.longitudinalDirection >= 0
                 ? partition.minimumX : partition.maximumX;
-            zoneSweepState.zoneEntered = true;
+            zoneSweepState.zoneEntered = false;
             zoneSweepState.active = !partition.groupIds.empty();
 
             zoneSweepReport.partitionId = partitionId;
@@ -5891,8 +6207,71 @@ namespace cadcam::planning
             zoneSweepReport.partitionMaximumX = partition.maximumX;
             zoneSweepReport.active = true;
             if (!zoneSweepState.active)
-                finishZoneSweepPartition();
+            {
+                finishedPartitions[partitionIndex] = true;
+                zoneSweepDiagnostics.push_back
+                    (zone16SweepDiagnostic(context, zoneSweepReport));
+                zoneSweepState = Zone16SweepState{};
+                zoneSweepReport = Zone16SweepReport{};
+            }
             return true;
+        };
+        const auto zoneBlockedFailure =
+            [&](const TubeZoneSweepPartition& partition,
+                machining::TubeZone16 zone)
+                -> OperationResult<ProcessPlan>
+        {
+            QStringList ownedUnitKeys;
+            QStringList unfinishedUnitKeys;
+            QStringList eligibleUnitKeys;
+            QStringList blockedUnitKeys;
+            QStringList remainingPredecessors;
+            const auto& bucket =
+                partition.zoneBuckets[machining::tubeZoneIndex(zone)];
+            for (const int groupId : bucket)
+            {
+                const QString unitKey = processGroupKeyText
+                    (plan.groups[static_cast<std::size_t>(groupId)]);
+                ownedUnitKeys.push_back(unitKey);
+                if (scheduled.find(groupId) != scheduled.end())
+                    continue;
+                unfinishedUnitKeys.push_back(unitKey);
+                if (indegree[groupId] == 0)
+                    eligibleUnitKeys.push_back(unitKey);
+                else
+                    blockedUnitKeys.push_back(unitKey);
+                remainingPredecessors.push_back
+                    (QStringLiteral("%1:%2").arg(unitKey)
+                        .arg(indegree[groupId]));
+            }
+            QVariantMap values = diagnosticValues(input, policy);
+            values.insert(QStringLiteral("zoneBlocked"), true);
+            values.insert(QStringLiteral("partitionId"),
+                partition.partitionId);
+            values.insert(QStringLiteral("zone"),
+                machining::tubeZoneName(zone));
+            values.insert(QStringLiteral("frontierX"),
+                zoneSweepState.frontierX);
+            values.insert(QStringLiteral("ownedUnitKeys"),
+                ownedUnitKeys.join(QLatin1Char(',')));
+            values.insert(QStringLiteral("unfinishedUnitKeys"),
+                unfinishedUnitKeys.join(QLatin1Char(',')));
+            values.insert(QStringLiteral("eligibleUnitKeys"),
+                eligibleUnitKeys.join(QLatin1Char(',')));
+            values.insert(QStringLiteral("blockedUnitKeys"),
+                blockedUnitKeys.join(QLatin1Char(',')));
+            values.insert(QStringLiteral("remainingPredecessors"),
+                remainingPredecessors.join(QLatin1Char(',')));
+            OperationResult<ProcessPlan> blocked = failure<ProcessPlan>
+            (
+                OperationStatus::Failed, context,
+                DiagnosticCode::ProcessPlanningZoneBlockedByPrecedence,
+                QStringLiteral("当前区位仍有未完成加工单元，但其前置约束尚未满足，不能提前切换区位。"),
+                QStringLiteral("The current owner-zone bucket is unfinished and has no eligible unit."),
+                values
+            );
+            blocked.mergeDiagnostics(zoneSweepDiagnostics);
+            return blocked;
         };
         while (scheduled.size() < schedulable.size())
         {
@@ -5902,6 +6281,20 @@ namespace cadcam::planning
             std::sort(eligible.begin(), eligible.end());
             if (eligible.empty())
             {
+                if (zone16SweepEnabled && zoneSweepState.active)
+                {
+                    const TubeZoneSweepPartition& partition =
+                        zoneSweepPartitions[static_cast<std::size_t>
+                            (zoneSweepState.partitionId)];
+                    const machining::TubeZone16 zone = zoneAtOffset
+                    (
+                        zoneSweepState.initialZone,
+                        zoneSweepState.currentZoneOffset,
+                        partition.perimeterDirection
+                    );
+                    if (!zoneCompleted(partition, zone, scheduled))
+                        return zoneBlockedFailure(partition, zone);
+                }
                 return failure<ProcessPlan>
                 (
                     OperationStatus::Failed, context, DiagnosticCode::ProcessPlanningPrecedenceCycle,
@@ -5946,7 +6339,8 @@ namespace cadcam::planning
                             values
                         );
                     }
-                    finishZoneSweepPartition();
+                    if (!finishZoneSweepPartition())
+                        return std::move(*zoneSweepLifecycleFailure);
                 }
             }
 
@@ -5979,6 +6373,8 @@ namespace cadcam::planning
                         if (!startZoneSweepPartition
                             (partition.partitionId, currentSweepZone))
                         {
+                            if (zoneSweepLifecycleFailure.has_value())
+                                return std::move(*zoneSweepLifecycleFailure);
                             return failure<ProcessPlan>
                             (
                                 OperationStatus::Failed, context,
@@ -6021,10 +6417,67 @@ namespace cadcam::planning
                         machining::tubeZoneIndex(zone);
                     if (!zoneSweepState.zoneEntered)
                     {
+                        if (zoneSweepState.enteredZones[zoneIndex])
+                        {
+                            QVariantMap values = diagnosticValues
+                                (input, policy);
+                            values.insert(QStringLiteral("partitionId"),
+                                zoneSweepState.partitionId);
+                            values.insert(QStringLiteral("zone"),
+                                machining::tubeZoneName(zone));
+                            values.insert(QStringLiteral("currentZoneOffset"),
+                                zoneSweepState.currentZoneOffset);
+                            return failure<ProcessPlan>
+                            (
+                                OperationStatus::InternalError, context,
+                                DiagnosticCode::ProcessPlanningZoneReentered,
+                                QStringLiteral("16 区位加工阶段被重复进入。"),
+                                QStringLiteral("A completed or previously entered zone cannot be entered again."),
+                                values
+                            );
+                        }
                         zoneSweepState.frontierX =
                             zoneSweepState.longitudinalDirection >= 0
                             ? partition.minimumX : partition.maximumX;
                         zoneSweepState.zoneEntered = true;
+                        zoneSweepState.enteredZones[zoneIndex] = true;
+                        zoneSweepDiagnostics.push_back(zonePhaseDiagnostic
+                        (
+                            context, partition, zone, scheduled,
+                            QStringLiteral("Enter")
+                        ));
+                    }
+
+                    if (zoneCompleted(partition, zone, scheduled))
+                    {
+                        if (!zoneSweepState.zoneEntered
+                            || zoneSweepState.completedZones[zoneIndex])
+                        {
+                            QVariantMap values = diagnosticValues
+                                (input, policy);
+                            values.insert(QStringLiteral("partitionId"),
+                                zoneSweepState.partitionId);
+                            values.insert(QStringLiteral("zone"),
+                                machining::tubeZoneName(zone));
+                            return failure<ProcessPlan>
+                            (
+                                OperationStatus::InternalError, context,
+                                DiagnosticCode::ProcessPlanningZoneReentered,
+                                QStringLiteral("16 区位加工阶段完成状态重复。"),
+                                QStringLiteral("A zone phase may complete only once after entering."),
+                                values
+                            );
+                        }
+                        zoneSweepState.completedZones[zoneIndex] = true;
+                        zoneSweepDiagnostics.push_back(zonePhaseDiagnostic
+                        (
+                            context, partition, zone, scheduled,
+                            QStringLiteral("Complete")
+                        ));
+                        ++zoneSweepState.currentZoneOffset;
+                        ++zoneSweepReport.zoneTransitionCount;
+                        zoneSweepState.zoneEntered = false;
+                        continue;
                     }
 
                     std::vector<ZoneSweepSelection> available;
@@ -6082,7 +6535,8 @@ namespace cadcam::planning
                             ? span.minimumX : span.maximumX;
                         selection.frontierBefore =
                             zoneSweepState.frontierX;
-                        selection.fallbackOwner = profile.fallbackOwner;
+                        selection.fallbackOwner = partition.ownerships.at
+                            (groupId).usedPossibleFallback;
                         available.push_back(selection);
                     }
 
@@ -6113,58 +6567,24 @@ namespace cadcam::planning
                         break;
                     }
 
-                    ++zoneSweepState.currentZoneOffset;
-                    ++zoneSweepReport.zoneTransitionCount;
-                    zoneSweepState.zoneEntered = false;
+                    return zoneBlockedFailure(partition, zone);
                 }
 
                 if (candidateGroupIds.empty())
                 {
-                    QStringList remainingKeys;
-                    QStringList remainingDetails;
-                    for (const int groupId : partition.groupIds)
-                    {
-                        if (scheduled.find(groupId) == scheduled.end())
-                        {
-                            const QString key = processGroupKeyText
-                                (plan.groups[static_cast<std::size_t>(groupId)]);
-                            remainingKeys.push_back(key);
-                            const ProcessGroupZoneProfile& profile =
-                                groupZoneProfiles.at(groupId);
-                            remainingDetails.push_back
-                            (
-                                QStringLiteral("unitKey=%1|certainMask=%2|possibleMask=%3|legalEntryMask=%4|zoneSpans=%5|fallbackOwner=%6|remainingPredecessors=%7")
-                                    .arg(key)
-                                    .arg(zoneMaskText(profile.certainMask))
-                                    .arg(zoneMaskText(profile.possibleMask))
-                                    .arg(zoneMaskText(profile.legalEntryMask))
-                                    .arg(zoneSpansText(profile))
-                                    .arg(profile.fallbackOwner ? 1 : 0)
-                                    .arg(indegree[groupId])
-                            );
-                        }
-                    }
-                    if (!remainingKeys.empty())
-                    {
-                        QVariantMap values = diagnosticValues
-                            (input, policy, 0U, 0U, -1, -1);
-                        values.insert(QStringLiteral("partitionId"),
-                            zoneSweepState.partitionId);
-                        values.insert(QStringLiteral("remainingUnitKeys"),
-                            remainingKeys.join(QLatin1Char(',')));
-                        values.insert(QStringLiteral("remainingUnits"),
-                            remainingDetails);
-                        return failure<ProcessPlan>
-                        (
-                            OperationStatus::Failed, context,
-                            DiagnosticCode::ProcessPlanningZoneSweepBacktrackRequired,
-                            QStringLiteral("16 区位扫描一圈后仍有未处理加工单元。"),
-                            QStringLiteral("A full zone sweep completed with unscheduled partition groups."),
-                            values
-                        );
-                    }
-                    finishZoneSweepPartition();
-                    candidateGroupIds = eligible;
+                    QVariantMap values = diagnosticValues(input, policy);
+                    values.insert(QStringLiteral("partitionId"),
+                        zoneSweepState.partitionId);
+                    values.insert(QStringLiteral("currentZoneOffset"),
+                        zoneSweepState.currentZoneOffset);
+                    return failure<ProcessPlan>
+                    (
+                        OperationStatus::InternalError, context,
+                        DiagnosticCode::ProcessPlanningZoneIncomplete,
+                        QStringLiteral("16 区位加工段未生成下一加工单元。"),
+                        QStringLiteral("The sweep exhausted its zone phases without completing the active partition."),
+                        values
+                    );
                 }
             }
 
@@ -6438,6 +6858,25 @@ namespace cadcam::planning
             const ProcessGroup& selectedGroup = plan.groups[static_cast<std::size_t>(selected.groupId)];
             const auto scheduledZoneSelection =
                 zoneSelections.find(selected.groupId);
+            if (zone16SweepEnabled
+                && selectedGroup.kind != ProcessGroupKind::BreakBoundary
+                && scheduledZoneSelection == zoneSelections.end())
+            {
+                QVariantMap values = diagnosticValues
+                    (input, policy, 0U, 0U, -1, selected.groupId);
+                values.insert(QStringLiteral("unitKey"),
+                    processGroupKeyText(selectedGroup));
+                values.insert(QStringLiteral("activePartitionId"),
+                    zoneSweepState.partitionId);
+                return failure<ProcessPlan>
+                (
+                    OperationStatus::InternalError, context,
+                    DiagnosticCode::ProcessPlanningInvariantViolation,
+                    QStringLiteral("普通加工单元未经过唯一生产区位桶调度。"),
+                    QStringLiteral("Every ordinary group in a Zone16 sweep must be selected from its owner bucket."),
+                    values
+                );
+            }
             if (scheduledZoneSelection != zoneSelections.end())
             {
                 if (!selected.selectedEntry.has_value()
@@ -6535,8 +6974,68 @@ namespace cadcam::planning
                         : std::nullopt
                     ));
             }
-            scheduled.insert(selected.groupId);
+            if (!scheduled.insert(selected.groupId).second)
+            {
+                return failure<ProcessPlan>
+                (
+                    OperationStatus::InternalError, context,
+                    DiagnosticCode::ProcessPlanningInvariantViolation,
+                    QStringLiteral("加工单元被重复加入加工计划。"),
+                    QStringLiteral("A ProcessGroup may be scheduled exactly once."),
+                    diagnosticValues(input, policy, 0U, 0U, -1,
+                        selected.groupId)
+                );
+            }
+            ++schedulingOccurrences[selected.groupId];
             for (const int successor : successors[selected.groupId]) --indegree[successor];
+
+            if (zone16SweepEnabled && zoneSweepState.active
+                && selectedGroup.kind != ProcessGroupKind::BreakBoundary)
+            {
+                const TubeZoneSweepPartition& partition =
+                    zoneSweepPartitions[static_cast<std::size_t>
+                        (zoneSweepState.partitionId)];
+                const machining::TubeZone16 zone = zoneAtOffset
+                (
+                    zoneSweepState.initialZone,
+                    zoneSweepState.currentZoneOffset,
+                    partition.perimeterDirection
+                );
+                const std::size_t zoneIndex =
+                    machining::tubeZoneIndex(zone);
+                if (zoneCompleted(partition, zone, scheduled))
+                {
+                    if (!zoneSweepState.zoneEntered
+                        || !zoneSweepState.enteredZones[zoneIndex]
+                        || zoneSweepState.completedZones[zoneIndex])
+                    {
+                        QVariantMap values = diagnosticValues
+                            (input, policy, 0U, 0U, -1,
+                                selected.groupId);
+                        values.insert(QStringLiteral("partitionId"),
+                            zoneSweepState.partitionId);
+                        values.insert(QStringLiteral("zone"),
+                            machining::tubeZoneName(zone));
+                        return failure<ProcessPlan>
+                        (
+                            OperationStatus::InternalError, context,
+                            DiagnosticCode::ProcessPlanningZoneIncomplete,
+                            QStringLiteral("16 区位加工阶段完成状态无效。"),
+                            QStringLiteral("The owner-zone bucket completed outside a valid entered phase."),
+                            values
+                        );
+                    }
+                    zoneSweepState.completedZones[zoneIndex] = true;
+                    zoneSweepDiagnostics.push_back(zonePhaseDiagnostic
+                    (
+                        context, partition, zone, scheduled,
+                        QStringLiteral("Complete")
+                    ));
+                    ++zoneSweepState.currentZoneOffset;
+                    ++zoneSweepReport.zoneTransitionCount;
+                    zoneSweepState.zoneEntered = false;
+                }
+            }
 
             if (zone16SweepEnabled)
             {
@@ -6595,6 +7094,8 @@ namespace cadcam::planning
                         (partition->second,
                             *selectedBreakReport->exitZone))
                     {
+                        if (zoneSweepLifecycleFailure.has_value())
+                            return std::move(*zoneSweepLifecycleFailure);
                         QVariantMap values =
                             breakDiagnosticValues(*selectedBreakReport);
                         values.insert(QStringLiteral("nextPartitionId"),
@@ -6626,6 +7127,8 @@ namespace cadcam::planning
                         if (!startZoneSweepPartition
                             (0, currentSweepZone))
                         {
+                            if (zoneSweepLifecycleFailure.has_value())
+                                return std::move(*zoneSweepLifecycleFailure);
                             return failure<ProcessPlan>
                             (
                                 OperationStatus::Failed, context,
@@ -6649,17 +7152,19 @@ namespace cadcam::planning
                     {
                         const ProcessGroupZoneProfile& profile =
                             groupZoneProfiles.at(selected.groupId);
-                        const machining::TubeZone16 zone =
-                            zoneSweepState.initialZone;
-                        if ((profile.schedulableMask
-                            & machining::tubeZoneBit(zone)) == 0U)
+                        const TubeZoneSweepPartition& partition =
+                            zoneSweepPartitions[static_cast<std::size_t>
+                                (zoneSweepState.partitionId)];
+                        const auto ownership =
+                            partition.ownerships.find(selected.groupId);
+                        if (ownership == partition.ownerships.end())
                         {
                             QVariantMap values = diagnosticValues
                                 (input, policy, 0U, 0U, -1, selected.groupId);
                             values.insert(QStringLiteral("unitKey"),
                                 processGroupKeyText(selectedGroup));
-                            values.insert(QStringLiteral("initialZone"),
-                                machining::tubeZoneName(zone));
+                            values.insert(QStringLiteral("partitionId"),
+                                zoneSweepState.partitionId);
                             values.insert(QStringLiteral("certainMask"),
                                 zoneMaskText(profile.certainMask));
                             values.insert(QStringLiteral("possibleMask"),
@@ -6669,28 +7174,60 @@ namespace cadcam::planning
                             return failure<ProcessPlan>
                             (
                                 OperationStatus::Failed, context,
-                                DiagnosticCode::ProcessPlanningZoneSweepProfileInvalid,
-                                QStringLiteral("首个加工单元出口区位与静态区位画像不一致。"),
-                                QStringLiteral("The initial traversal exit zone is absent from the static zone profile."),
+                                DiagnosticCode::ProcessPlanningInvariantViolation,
+                                QStringLiteral("加工单元缺少唯一生产区位归属。"),
+                                QStringLiteral("An ordinary selected group is absent from the partition ownership table."),
                                 values
                             );
                         }
-                        if ((profile.schedulableMask
-                            & machining::tubeZoneBit(zone)) != 0U)
+                        const machining::TubeZone16 zone =
+                            ownership->second.ownerZone;
+                        const machining::TubeZone16 activeZone = zoneAtOffset
+                        (
+                            zoneSweepState.initialZone,
+                            zoneSweepState.currentZoneOffset,
+                            partition.perimeterDirection
+                        );
+                        if (zone != activeZone
+                            || !selected.selectedEntry.has_value()
+                            || selected.selectedEntry->zone != zone)
                         {
-                            selection.groupId = selected.groupId;
-                            selection.zone = zone;
-                            selection.span = profile.zoneSpans
-                                [machining::tubeZoneIndex(zone)];
-                            selection.hitX =
-                                zoneSweepState.longitudinalDirection >= 0
-                                ? selection.span.minimumX
-                                : selection.span.maximumX;
-                            selection.frontierBefore =
-                                zoneSweepState.frontierX;
-                            selection.fallbackOwner = profile.fallbackOwner;
-                            selectionAvailable = true;
+                            QVariantMap values = diagnosticValues
+                                (input, policy, 0U, 0U, -1,
+                                    selected.groupId);
+                            values.insert(QStringLiteral("partitionId"),
+                                zoneSweepState.partitionId);
+                            values.insert(QStringLiteral("ownerZone"),
+                                machining::tubeZoneName(zone));
+                            values.insert(QStringLiteral("activeZone"),
+                                machining::tubeZoneName(activeZone));
+                            values.insert(QStringLiteral("selectedEntryZone"),
+                                selected.selectedEntry.has_value()
+                                ? machining::tubeZoneName
+                                    (selected.selectedEntry->zone)
+                                : QStringLiteral("None"));
+                            return failure<ProcessPlan>
+                            (
+                                OperationStatus::InternalError, context,
+                                DiagnosticCode::ProcessPlanningInvariantViolation,
+                                QStringLiteral("加工单元未从当前唯一生产区位进入。"),
+                                QStringLiteral("Owner zone, active phase, and selected entry zone must match."),
+                                values
+                            );
                         }
+                        selection.groupId = selected.groupId;
+                        selection.zone = zone;
+                        selection.span = profile.zoneSpans
+                            [machining::tubeZoneIndex(zone)];
+                        selection.hitX =
+                            zoneSweepState.longitudinalDirection >= 0
+                            ? selection.span.minimumX
+                            : selection.span.maximumX;
+                        selection.frontierBefore =
+                            zoneSweepState.frontierX;
+                        selection.fallbackOwner =
+                            ownership->second.usedPossibleFallback;
+                        selectionAvailable = true;
                     }
 
                     if (selectionAvailable && zoneSweepReport.active)
@@ -6753,7 +7290,71 @@ namespace cadcam::planning
                 );
             }
         }
-        if (zone16SweepEnabled) finishZoneSweepPartition();
+        if (zone16SweepEnabled && !finishZoneSweepPartition())
+            return std::move(*zoneSweepLifecycleFailure);
+        if (zone16SweepEnabled)
+        {
+            for (std::size_t partitionIndex = 0U;
+                partitionIndex < zoneSweepPartitions.size();
+                ++partitionIndex)
+            {
+                const TubeZoneSweepPartition& partition =
+                    zoneSweepPartitions[partitionIndex];
+                if (partition.groupIds.empty()) continue;
+                std::unordered_map<int, int> bucketOccurrences;
+                for (const auto& bucket : partition.zoneBuckets)
+                {
+                    for (const int groupId : bucket)
+                        ++bucketOccurrences[groupId];
+                }
+                for (const int groupId : partition.groupIds)
+                {
+                    if (partition.ownerships.count(groupId) != 1U
+                        || bucketOccurrences[groupId] != 1
+                        || schedulingOccurrences[groupId] != 1)
+                    {
+                        QVariantMap values = diagnosticValues
+                            (input, policy, 0U, 0U, -1, groupId);
+                        values.insert(QStringLiteral("partitionId"),
+                            static_cast<int>(partitionIndex));
+                        values.insert(QStringLiteral("ownershipCount"),
+                            static_cast<int>
+                                (partition.ownerships.count(groupId)));
+                        values.insert(QStringLiteral("bucketOccurrenceCount"),
+                            bucketOccurrences[groupId]);
+                        values.insert(QStringLiteral("scheduledOccurrenceCount"),
+                            schedulingOccurrences[groupId]);
+                        return failure<ProcessPlan>
+                        (
+                            OperationStatus::InternalError, context,
+                            DiagnosticCode::ProcessPlanningInvariantViolation,
+                            QStringLiteral("16 区位加工单元的归属或调度次数不唯一。"),
+                            QStringLiteral("Every ordinary group must have one owner, one production bucket, and one scheduling occurrence."),
+                            values
+                        );
+                    }
+                }
+                if (!startedPartitions[partitionIndex]
+                    || !finishedPartitions[partitionIndex])
+                {
+                    QVariantMap values = diagnosticValues(input, policy);
+                    values.insert(QStringLiteral("partitionId"),
+                        static_cast<int>(partitionIndex));
+                    values.insert(QStringLiteral("started"),
+                        static_cast<bool>(startedPartitions[partitionIndex]));
+                    values.insert(QStringLiteral("finished"),
+                        static_cast<bool>(finishedPartitions[partitionIndex]));
+                    return failure<ProcessPlan>
+                    (
+                        OperationStatus::InternalError, context,
+                        DiagnosticCode::ProcessPlanningZoneIncomplete,
+                        QStringLiteral("16 区位加工段生命周期未完整结束。"),
+                        QStringLiteral("Every non-empty partition must start and finish exactly once."),
+                        values
+                    );
+                }
+            }
+        }
 
         std::unordered_set<EntityId> assignedIds;
         std::unordered_set<EntityId> excludedIds;

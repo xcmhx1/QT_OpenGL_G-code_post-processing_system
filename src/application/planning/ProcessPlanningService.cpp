@@ -669,9 +669,51 @@ namespace
     {
         for (const Diagnostic& diagnostic : diagnostics)
         {
-            if (!diagnostic.context.value(QStringLiteral("zone16SweepSummary")).toBool())
-                continue;
             const QVariantMap& values = diagnostic.context;
+            if (values.value(QStringLiteral("zoneOwnership")).toBool())
+            {
+                qInfo().noquote()
+                    << QStringLiteral("[ProcessPlanning][ZoneOwnership] partitionId=%1 unitKey=%2 certainMask=%3 possibleMask=%4 legalEntryMask=%5 ownerZone=%6 usedPossibleFallback=%7")
+                        .arg(values.value(QStringLiteral("partitionId"), -1).toInt())
+                        .arg(values.value(QStringLiteral("unitKey")).toString())
+                        .arg(values.value(QStringLiteral("certainMask")).toString())
+                        .arg(values.value(QStringLiteral("possibleMask")).toString())
+                        .arg(values.value(QStringLiteral("legalEntryMask")).toString())
+                        .arg(values.value(QStringLiteral("ownerZone"),
+                            QStringLiteral("Unknown")).toString())
+                        .arg(values.value(QStringLiteral("usedPossibleFallback")).toBool()
+                            ? QStringLiteral("true") : QStringLiteral("false"));
+                continue;
+            }
+            if (values.value(QStringLiteral("zonePhase")).toBool())
+            {
+                qInfo().noquote()
+                    << QStringLiteral("[ProcessPlanning][ZonePhase] partitionId=%1 zone=%2 event=%3 ownedUnitCount=%4 processedUnitCount=%5 remainingUnitCount=%6")
+                        .arg(values.value(QStringLiteral("partitionId"), -1).toInt())
+                        .arg(values.value(QStringLiteral("zone"),
+                            QStringLiteral("Unknown")).toString())
+                        .arg(values.value(QStringLiteral("event")).toString())
+                        .arg(values.value(QStringLiteral("ownedUnitCount"), 0).toInt())
+                        .arg(values.value(QStringLiteral("processedUnitCount"), 0).toInt())
+                        .arg(values.value(QStringLiteral("remainingUnitCount"), 0).toInt());
+                continue;
+            }
+            if (values.value(QStringLiteral("zoneBlocked")).toBool())
+            {
+                qInfo().noquote()
+                    << QStringLiteral("[ProcessPlanning][ZoneBlocked] partitionId=%1 zone=%2 frontierX=%3 unfinishedUnitKeys=%4 blockedUnitKeys=%5 remainingPredecessors=%6")
+                        .arg(values.value(QStringLiteral("partitionId"), -1).toInt())
+                        .arg(values.value(QStringLiteral("zone"),
+                            QStringLiteral("Unknown")).toString())
+                        .arg(values.value(QStringLiteral("frontierX"), 0.0)
+                            .toDouble(), 0, 'f', 6)
+                        .arg(values.value(QStringLiteral("unfinishedUnitKeys")).toString())
+                        .arg(values.value(QStringLiteral("blockedUnitKeys")).toString())
+                        .arg(values.value(QStringLiteral("remainingPredecessors")).toString());
+                continue;
+            }
+            if (!values.value(QStringLiteral("zone16SweepSummary")).toBool())
+                continue;
             qInfo().noquote()
                 << QStringLiteral("[ProcessPlanning][Zone16Sweep] partitionId=%1 initialZone=%2 perimeterDirection=%3 longitudinalDirection=%4 partitionMinimumX=%5 partitionMaximumX=%6 processedUnitCount=%7 zoneTransitions=%8 backtrackCount=%9 status=%10")
                     .arg(values.value(QStringLiteral("partitionId"), -1).toInt())
