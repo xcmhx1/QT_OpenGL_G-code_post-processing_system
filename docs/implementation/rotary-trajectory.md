@@ -90,7 +90,7 @@ Rotary4Axis ProcessPlan
 ## 关键业务规则
 
 - 每条路径使用计划确定的 `reverse` 和 `startParameter` 重新编译，轨迹不重新排序。
-- Break 断面和普通多图元闭环的计划片段使用与普通路径相同的生产采样策略编译完整源 `Path3D`，再按 `sourceParameterBegin`、`sourceParameterEnd` 和方向裁切；内部切点在对应离散线段内插值，不吸附到最近顶点。
+- Break 断面和普通多图元闭环的计划片段使用与普通路径相同的生产采样策略编译完整源 `Path3D`，再按 `sourceParameterBegin`、`sourceParameterEnd` 和方向裁切；普通闭环内部切点仅来自非闭合 `Arc` 或部分 `Ellipse` 成员，在对应参数线段内插值，不吸附到最近顶点。
 - 同一闭环起点成员可以在轨迹执行序列中出现两个互补片段。`ProcessAssignment`、`ProcessUnitKey` 和 Viewer 身份仍只保存一次稳定 `EntityId`；轨迹通过 `sourceProcessOrder` 与 `fragmentOrder` 区分源计划身份和执行位置。
 - `RotaryTrajectoryBuilder` 对片段执行标识进行唯一性校验，并按展开后的片段顺序执行原有源空间和机床空间连续性检查。闭合组回起点和过切基于完整片段序列，不复制完整源图元。
 - NC 构建器按通用轨迹执行块复用源图元元数据，并把块顺序重建为实际执行顺序；NC 与 G-code 层不判断 Break 类型。

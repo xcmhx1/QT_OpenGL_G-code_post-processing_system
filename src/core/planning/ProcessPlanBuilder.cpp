@@ -67,7 +67,8 @@ namespace cadcam::planning
             OpenEndpoint,
             ClosedCurveParameter,
             ClosedLoopConnection,
-            ClosedLoopMemberInterior,
+            ClosedLoopArcInterior,
+            ClosedLoopEllipseInterior,
             BreakZoneMidpoint
         };
 
@@ -78,6 +79,8 @@ namespace cadcam::planning
             ZoneEntryCandidateKind kind =
                 ZoneEntryCandidateKind::OpenEndpoint;
             EntityId entityId = 0;
+            geometry::SourceGeometryKind sourceKind =
+                geometry::SourceGeometryKind::Unknown;
             std::optional<double> sourceParameter;
             bool reverse = false;
             Vector3d entryPosition;
@@ -85,6 +88,7 @@ namespace cadcam::planning
             Vector3d firstCutTangent;
             double entryX = 0.0;
             double confidence = 0.0;
+            double distanceToMemberEndpoint = 0.0;
             double distanceToZoneBoundary = 0.0;
             bool ambiguous = false;
         };
@@ -112,9 +116,15 @@ namespace cadcam::planning
             int entryAxisReversalCount = 0;
             double entryTangentCost = 0.0;
             int entryCandidateCount = 0;
+            int connectionCandidateCount = 0;
+            int arcInteriorCandidateCount = 0;
+            int ellipseInteriorCandidateCount = 0;
+            int curveCandidateRejectedCount = 0;
             int wrongZoneRejectedCount = 0;
             std::size_t stableSourceIndex = 0;
             EntityId stableEntityId = 0;
+            std::vector<EntityId> arcInteriorCandidateEntityIds;
+            std::vector<EntityId> ellipseInteriorCandidateEntityIds;
             std::optional<ZoneEntryCandidate> selectedEntry;
             std::vector<ProcessPathFragment> fragments;
         };
@@ -244,6 +254,8 @@ namespace cadcam::planning
         {
             machining::TubeZoneMask certainMask = 0U;
             machining::TubeZoneMask possibleMask = 0U;
+            machining::TubeZoneMask connectionEntryMask = 0U;
+            machining::TubeZoneMask curveInteriorEntryMask = 0U;
             machining::TubeZoneMask legalEntryMask = 0U;
             machining::TubeZoneMask schedulableMask = 0U;
             std::array<machining::TubeZoneSpan,
@@ -252,6 +264,10 @@ namespace cadcam::planning
                 machining::kTubeZone16Count> entryCandidates;
             std::array<int, machining::kTubeZone16Count>
                 entryCandidateCounts{};
+            std::array<std::vector<EntityId>,
+                machining::kTubeZone16Count> arcMemberIdsByZone;
+            std::array<std::vector<EntityId>,
+                machining::kTubeZone16Count> ellipseMemberIdsByZone;
             bool closed = false;
             bool uncertain = false;
             bool fallbackOwner = false;
@@ -1538,6 +1554,7 @@ namespace cadcam::planning
             bool reverse,
             const Vector3d& entryPosition,
             const Vector3d& firstCutPoint,
+            geometry::SourceGeometryKind sourceKind,
             const machining::TubeSectionModel& section,
             double projectionTolerance
         )
@@ -1599,6 +1616,7 @@ namespace cadcam::planning
             candidate.zone = *reliableZone;
             candidate.kind = kind;
             candidate.entityId = entityId;
+            candidate.sourceKind = sourceKind;
             candidate.sourceParameter = sourceParameter;
             candidate.reverse = reverse;
             candidate.entryPosition = entryPosition;
@@ -1835,6 +1853,13 @@ namespace cadcam::planning
             const ZoneEntryCandidate& rightEntry = *right.selectedEntry;
             if (leftEntry.ambiguous != rightEntry.ambiguous)
                 return !leftEntry.ambiguous;
+            if (std::abs(leftEntry.distanceToMemberEndpoint
+                - rightEntry.distanceToMemberEndpoint)
+                > kCalculationEpsilon)
+            {
+                return leftEntry.distanceToMemberEndpoint
+                    > rightEntry.distanceToMemberEndpoint;
+            }
             if (std::abs(leftEntry.distanceToZoneBoundary
                 - rightEntry.distanceToZoneBoundary) > kCalculationEpsilon)
             {
@@ -2455,7 +2480,8 @@ namespace cadcam::planning
                                 firstDirected.entity->entityId,
                                 entryParameter,
                                 firstDirected.reverseRelativeToInput,
-                                candidate.start, firstNextPoint, *section,
+                                candidate.start, firstNextPoint,
+                                firstDirected.entity->sourceKind, *section,
                                 selection->projectionTolerance
                             );
                             const bool manualStartMatches =
@@ -2790,8 +2816,25 @@ namespace cadcam::planning
             {
                 std::optional<GroupTraversal> traversal;
                 int candidateCount = 0;
+                int arcInteriorCandidateCount = 0;
+                int ellipseInteriorCandidateCount = 0;
+                int curveCandidateRejectedCount = 0;
                 int wrongZoneRejectedCount = 0;
+                std::vector<EntityId> arcCandidateEntityIds;
+                std::vector<EntityId> ellipseCandidateEntityIds;
             };
+
+            static bool ordinaryCurveInteriorEligible
+            (
+                const PlanningEntity& entity
+            )
+            {
+                return !entity.path.closed
+                    && (entity.sourceKind
+                            == geometry::SourceGeometryKind::Arc
+                        || entity.sourceKind
+                            == geometry::SourceGeometryKind::Ellipse);
+            }
 
             static OrdinaryResult buildOrdinary
             (
@@ -2880,21 +2923,34 @@ namespace cadcam::planning
                             continue;
                         }
 
-                        std::vector<double> factors{ 0.5 };
+                        std::vector<double> factors;
                         double accumulated = 0.0;
                         for (const std::size_t segmentIndex :
                             run.segmentIndices)
                         {
                             const BreakSegment& segment =
                                 segments[segmentIndex];
-                            factors.push_back(std::clamp
-                                ((accumulated + segment.length * 0.5)
-                                    / run.length, 0.0, 1.0));
-                            if (accumulated > kCalculationEpsilon)
-                                factors.push_back(std::clamp
-                                    (accumulated / run.length, 0.0, 1.0));
+                            const auto entity = entities.find
+                                (segment.entityId);
+                            if (entity != entities.end()
+                                && entity->second != nullptr
+                                && ordinaryCurveInteriorEligible
+                                    (*entity->second))
+                            {
+                                for (const double segmentFactor :
+                                    { 0.25, 0.5, 0.75 })
+                                {
+                                    factors.push_back(std::clamp
+                                    (
+                                        (accumulated + segment.length
+                                            * segmentFactor) / run.length,
+                                        0.0, 1.0
+                                    ));
+                                }
+                            }
                             accumulated += segment.length;
                         }
+                        if (factors.empty()) continue;
                         std::sort(factors.begin(), factors.end());
                         factors.erase(std::unique(factors.begin(),
                             factors.end(),
@@ -2946,18 +3002,58 @@ namespace cadcam::planning
                             if (!candidate.has_value()
                                 || !fragmentsBuilt)
                             {
+                                ++result.curveCandidateRejectedCount;
                                 continue;
                             }
+                            const auto entryEntityFound = entities.find
+                                (candidate->midpointEntityId);
+                            if (entryEntityFound == entities.end()
+                                || entryEntityFound->second == nullptr
+                                || !ordinaryCurveInteriorEligible
+                                    (*entryEntityFound->second))
+                            {
+                                ++result.curveCandidateRejectedCount;
+                                continue;
+                            }
+                            const PlanningEntity& entryEntity =
+                                *entryEntityFound->second;
+                            const double endpointTolerance = std::max
+                            (
+                                1.0e-8,
+                                selection.projectionTolerance * 1.0e-3
+                            );
+                            const double distanceToMemberEndpoint = std::min
+                            (
+                                distance(candidate->midpoint,
+                                    entryEntity.path.vertices.front()
+                                        .position),
+                                distance(candidate->midpoint,
+                                    entryEntity.path.vertices.back()
+                                        .position)
+                            );
+                            if (distanceToMemberEndpoint
+                                <= endpointTolerance)
+                            {
+                                ++result.curveCandidateRejectedCount;
+                                continue;
+                            }
+                            const ZoneEntryCandidateKind candidateKind =
+                                entryEntity.sourceKind
+                                    == geometry::SourceGeometryKind::Arc
+                                ? ZoneEntryCandidateKind::
+                                    ClosedLoopArcInterior
+                                : ZoneEntryCandidateKind::
+                                    ClosedLoopEllipseInterior;
                             auto entry = classifyZoneEntry
                             (
-                                ZoneEntryCandidateKind::
-                                    ClosedLoopMemberInterior,
+                                candidateKind,
                                 candidate->midpointEntityId,
                                 candidate->midpointSourceParameter,
                                 candidate->traversal.entities.front()
                                     .reverseRelativeToInput,
                                 candidate->midpoint,
                                 candidate->firstCutPoint,
+                                entryEntity.sourceKind,
                                 section,
                                 selection.projectionTolerance
                             );
@@ -2966,15 +3062,30 @@ namespace cadcam::planning
                                     != *selection.requiredEntryZone)
                             {
                                 ++result.wrongZoneRejectedCount;
+                                ++result.curveCandidateRejectedCount;
+                                continue;
+                            }
+                            entry->distanceToMemberEndpoint =
+                                distanceToMemberEndpoint;
+                            if (entry->distanceToZoneBoundary
+                                <= endpointTolerance)
+                            {
+                                ++result.curveCandidateRejectedCount;
                                 continue;
                             }
 
-                            const PlanningEntity* entryEntity =
+                            const PlanningEntity* traversalEntryEntity =
                                 candidate->traversal.entities.front().entity;
-                            if (entryEntity == nullptr) continue;
+                            if (traversalEntryEntity == nullptr)
+                            {
+                                ++result.curveCandidateRejectedCount;
+                                continue;
+                            }
                             const bool manualStartMatches =
-                                !entryEntity->manualStartParameter.has_value()
-                                || std::abs(*entryEntity->manualStartParameter
+                                !traversalEntryEntity
+                                    ->manualStartParameter.has_value()
+                                || std::abs(*traversalEntryEntity
+                                    ->manualStartParameter
                                     - candidate->midpointSourceParameter)
                                     <= 1.0e-10;
                             const bool otherManualStartExists = std::any_of
@@ -2992,6 +3103,7 @@ namespace cadcam::planning
                                 || otherManualStartExists)
                             {
                                 ++result.wrongZoneRejectedCount;
+                                ++result.curveCandidateRejectedCount;
                                 continue;
                             }
 
@@ -3016,6 +3128,19 @@ namespace cadcam::planning
                             scoreTraversal(candidate->traversal,
                                 currentPosition, section);
                             ++result.candidateCount;
+                            if (entryEntity.sourceKind
+                                == geometry::SourceGeometryKind::Arc)
+                            {
+                                ++result.arcInteriorCandidateCount;
+                                result.arcCandidateEntityIds.push_back
+                                    (entryEntity.entityId);
+                            }
+                            else
+                            {
+                                ++result.ellipseInteriorCandidateCount;
+                                result.ellipseCandidateEntityIds.push_back
+                                    (entryEntity.entityId);
+                            }
                             if (!result.traversal.has_value()
                                 || zoneConstrainedTraversalLess
                                 (
@@ -3032,8 +3157,32 @@ namespace cadcam::planning
                 }
                 if (result.traversal.has_value())
                 {
+                    std::sort(result.arcCandidateEntityIds.begin(),
+                        result.arcCandidateEntityIds.end());
+                    result.arcCandidateEntityIds.erase(std::unique
+                    (
+                        result.arcCandidateEntityIds.begin(),
+                        result.arcCandidateEntityIds.end()
+                    ), result.arcCandidateEntityIds.end());
+                    std::sort(result.ellipseCandidateEntityIds.begin(),
+                        result.ellipseCandidateEntityIds.end());
+                    result.ellipseCandidateEntityIds.erase(std::unique
+                    (
+                        result.ellipseCandidateEntityIds.begin(),
+                        result.ellipseCandidateEntityIds.end()
+                    ), result.ellipseCandidateEntityIds.end());
                     result.traversal->entryCandidateCount =
                         result.candidateCount;
+                    result.traversal->arcInteriorCandidateCount =
+                        result.arcInteriorCandidateCount;
+                    result.traversal->ellipseInteriorCandidateCount =
+                        result.ellipseInteriorCandidateCount;
+                    result.traversal->curveCandidateRejectedCount =
+                        result.curveCandidateRejectedCount;
+                    result.traversal->arcInteriorCandidateEntityIds =
+                        result.arcCandidateEntityIds;
+                    result.traversal->ellipseInteriorCandidateEntityIds =
+                        result.ellipseCandidateEntityIds;
                     result.traversal->wrongZoneRejectedCount =
                         result.wrongZoneRejectedCount;
                 }
@@ -3981,10 +4130,36 @@ namespace cadcam::planning
                 return QStringLiteral("ClosedCurveParameter");
             case ZoneEntryCandidateKind::ClosedLoopConnection:
                 return QStringLiteral("ClosedLoopConnection");
-            case ZoneEntryCandidateKind::ClosedLoopMemberInterior:
-                return QStringLiteral("ClosedLoopMemberInterior");
+            case ZoneEntryCandidateKind::ClosedLoopArcInterior:
+                return QStringLiteral("ClosedLoopArcInterior");
+            case ZoneEntryCandidateKind::ClosedLoopEllipseInterior:
+                return QStringLiteral("ClosedLoopEllipseInterior");
             case ZoneEntryCandidateKind::BreakZoneMidpoint:
                 return QStringLiteral("BreakZoneMidpoint");
+            }
+            return QStringLiteral("Unknown");
+        }
+
+        QString planningSourceKindName(geometry::SourceGeometryKind kind)
+        {
+            switch (kind)
+            {
+            case geometry::SourceGeometryKind::Line:
+                return QStringLiteral("Line");
+            case geometry::SourceGeometryKind::Arc:
+                return QStringLiteral("Arc");
+            case geometry::SourceGeometryKind::Circle:
+                return QStringLiteral("Circle");
+            case geometry::SourceGeometryKind::Ellipse:
+                return QStringLiteral("Ellipse");
+            case geometry::SourceGeometryKind::Polyline:
+                return QStringLiteral("Polyline");
+            case geometry::SourceGeometryKind::Spline:
+                return QStringLiteral("Spline");
+            case geometry::SourceGeometryKind::Point:
+                return QStringLiteral("Point");
+            case geometry::SourceGeometryKind::Unknown:
+                return QStringLiteral("Unknown");
             }
             return QStringLiteral("Unknown");
         }
@@ -4011,6 +4186,14 @@ namespace cadcam::planning
             values.insert(QStringLiteral("groupKind"), groupKindName(group.kind));
             values.insert(QStringLiteral("candidateCount"),
                 traversal.entryCandidateCount);
+            values.insert(QStringLiteral("connectionCandidateCount"),
+                traversal.connectionCandidateCount);
+            values.insert(QStringLiteral("arcInteriorCandidateCount"),
+                traversal.arcInteriorCandidateCount);
+            values.insert(QStringLiteral("ellipseInteriorCandidateCount"),
+                traversal.ellipseInteriorCandidateCount);
+            values.insert(QStringLiteral("curveCandidateRejectedCount"),
+                traversal.curveCandidateRejectedCount);
             values.insert(QStringLiteral("wrongZoneRejectedCount"),
                 traversal.wrongZoneRejectedCount);
             values.insert(QStringLiteral("selectedStart"),
@@ -4040,10 +4223,26 @@ namespace cadcam::planning
                 ? entryCandidateKindName
                     (traversal.selectedEntry->kind)
                 : QStringLiteral("Unconstrained"));
+            const bool curveInteriorSelected =
+                traversal.selectedEntry.has_value()
+                && (traversal.selectedEntry->kind
+                        == ZoneEntryCandidateKind::ClosedLoopArcInterior
+                    || traversal.selectedEntry->kind
+                        == ZoneEntryCandidateKind::
+                            ClosedLoopEllipseInterior);
+            values.insert(QStringLiteral("selectionMode"),
+                curveInteriorSelected
+                ? QStringLiteral("CurveInterior")
+                : QStringLiteral("ConnectionFallback"));
             values.insert(QStringLiteral("selectedEntityId"),
                 QVariant::fromValue<qulonglong>
                     (traversal.selectedEntry.has_value()
                     ? traversal.selectedEntry->entityId : 0U));
+            values.insert(QStringLiteral("selectedSourceKind"),
+                traversal.selectedEntry.has_value()
+                ? planningSourceKindName
+                    (traversal.selectedEntry->sourceKind)
+                : QStringLiteral("Unknown"));
             values.insert(QStringLiteral("selectedSourceParameter"),
                 traversal.selectedEntry.has_value()
                     && traversal.selectedEntry->sourceParameter.has_value()
@@ -4059,6 +4258,10 @@ namespace cadcam::planning
             values.insert(QStringLiteral("distanceToZoneBoundary"),
                 traversal.selectedEntry.has_value()
                 ? traversal.selectedEntry->distanceToZoneBoundary
+                : 0.0);
+            values.insert(QStringLiteral("distanceToMemberEndpoint"),
+                traversal.selectedEntry.has_value()
+                ? traversal.selectedEntry->distanceToMemberEndpoint
                 : 0.0);
             values.insert(QStringLiteral("fragmentCount"),
                 static_cast<int>(traversal.fragments.size()));
@@ -4166,7 +4369,7 @@ namespace cadcam::planning
                                         ClosedCurveParameter,
                                     entity.entityId, candidateParameter,
                                     reverse, candidate->start,
-                                    *firstCutPoint, *section,
+                                    *firstCutPoint, entity.sourceKind, *section,
                                     selection->projectionTolerance
                                 );
                                 if (!entry.has_value()
@@ -4253,16 +4456,11 @@ namespace cadcam::planning
                     currentPosition, policy, *section, tubeCenter,
                     selectionStrategy, *selection
                 );
-                std::optional<GroupTraversal> best =
-                    std::move(connectionLoop.traversal);
-                if (interior.traversal.has_value()
-                    && (!best.has_value()
-                        || zoneConstrainedTraversalLess
-                        (*interior.traversal, *best, *selection,
-                            selectionStrategy)))
-                {
-                    best = std::move(interior.traversal);
-                }
+                const bool curveInteriorMode =
+                    interior.traversal.has_value();
+                std::optional<GroupTraversal> best = curveInteriorMode
+                    ? std::move(interior.traversal)
+                    : std::move(connectionLoop.traversal);
                 const int connectionCandidateCount =
                     connectionLoop.report.candidateCount;
                 const int totalCandidateCount =
@@ -4273,6 +4471,18 @@ namespace cadcam::planning
                 if (best.has_value())
                 {
                     best->entryCandidateCount = totalCandidateCount;
+                    best->connectionCandidateCount =
+                        connectionCandidateCount;
+                    best->arcInteriorCandidateCount =
+                        interior.arcInteriorCandidateCount;
+                    best->ellipseInteriorCandidateCount =
+                        interior.ellipseInteriorCandidateCount;
+                    best->curveCandidateRejectedCount =
+                        interior.curveCandidateRejectedCount;
+                    best->arcInteriorCandidateEntityIds =
+                        std::move(interior.arcCandidateEntityIds);
+                    best->ellipseInteriorCandidateEntityIds =
+                        std::move(interior.ellipseCandidateEntityIds);
                     best->wrongZoneRejectedCount =
                         wrongZoneRejectedCount;
                 }
@@ -4375,7 +4585,8 @@ namespace cadcam::planning
                             entryDirected.entity->entityId,
                             entryParameter,
                             entryDirected.reverseRelativeToInput,
-                            candidate->start, *next, *section,
+                            candidate->start, *next,
+                            entryDirected.entity->sourceKind, *section,
                             selection->projectionTolerance
                         );
                         const bool manualStartMatches =
@@ -5072,8 +5283,35 @@ namespace cadcam::planning
                         (*entryTraversal->selectedEntry);
                     profile.entryCandidateCounts[zoneIndex] =
                         entryTraversal->entryCandidateCount;
-                    profile.legalEntryMask |= machining::tubeZoneBit
-                        (static_cast<machining::TubeZone16>(zoneIndex));
+                    const machining::TubeZone16 zone =
+                        static_cast<machining::TubeZone16>(zoneIndex);
+                    const machining::TubeZoneMask zoneBit =
+                        machining::tubeZoneBit(zone);
+                    if (group.kind == ProcessGroupKind::ClosedLoop
+                        && group.entityIds.size() > 1U)
+                    {
+                        if (entryTraversal->connectionCandidateCount > 0)
+                            profile.connectionEntryMask |= zoneBit;
+                        if (entryTraversal->arcInteriorCandidateCount > 0
+                            || entryTraversal
+                                ->ellipseInteriorCandidateCount > 0)
+                        {
+                            profile.curveInteriorEntryMask |= zoneBit;
+                        }
+                        profile.arcMemberIdsByZone[zoneIndex] =
+                            entryTraversal
+                                ->arcInteriorCandidateEntityIds;
+                        profile.ellipseMemberIdsByZone[zoneIndex] =
+                            entryTraversal
+                                ->ellipseInteriorCandidateEntityIds;
+                        profile.legalEntryMask =
+                            profile.connectionEntryMask
+                            | profile.curveInteriorEntryMask;
+                    }
+                    else
+                    {
+                        profile.legalEntryMask |= zoneBit;
+                    }
                 }
                 if ((profile.certainMask & ~profile.possibleMask) != 0U
                     || profile.possibleMask == 0U
@@ -5165,18 +5403,58 @@ namespace cadcam::planning
                     zoneMaskText(profile.possibleMask));
                 entryValues.insert(QStringLiteral("legalEntryMask"),
                     zoneMaskText(profile.legalEntryMask));
+                entryValues.insert(QStringLiteral("connectionEntryMask"),
+                    zoneMaskText(profile.connectionEntryMask));
+                entryValues.insert(QStringLiteral("curveInteriorEntryMask"),
+                    zoneMaskText(profile.curveInteriorEntryMask));
+                QStringList memberSourceKinds;
+                for (const EntityId entityId : group.entityIds)
+                {
+                    const auto entity = entities.find(entityId);
+                    memberSourceKinds.push_back(QStringLiteral("%1:%2")
+                        .arg(entityId)
+                        .arg(entity != entities.end()
+                            && entity->second != nullptr
+                            ? planningSourceKindName
+                                (entity->second->sourceKind)
+                            : QStringLiteral("Missing")));
+                }
+                entryValues.insert(QStringLiteral("memberSourceKinds"),
+                    memberSourceKinds.join(QLatin1Char(',')));
                 QStringList counts;
+                QStringList arcMembers;
+                QStringList ellipseMembers;
                 for (std::size_t zoneIndex = 0U;
                     zoneIndex < machining::kTubeZone16Count;
                     ++zoneIndex)
                 {
+                    const QString zoneName = machining::tubeZoneName
+                        (static_cast<machining::TubeZone16>(zoneIndex));
                     counts.push_back(QStringLiteral("%1:%2")
-                        .arg(machining::tubeZoneName
-                            (static_cast<machining::TubeZone16>(zoneIndex)))
+                        .arg(zoneName)
                         .arg(profile.entryCandidateCounts[zoneIndex]));
+                    auto idsText = [](const std::vector<EntityId>& ids)
+                    {
+                        QStringList values;
+                        for (const EntityId id : ids)
+                            values.push_back(QString::number(id));
+                        return values.join(QLatin1Char(','));
+                    };
+                    arcMembers.push_back(QStringLiteral("%1:%2")
+                        .arg(zoneName)
+                        .arg(idsText
+                            (profile.arcMemberIdsByZone[zoneIndex])));
+                    ellipseMembers.push_back(QStringLiteral("%1:%2")
+                        .arg(zoneName)
+                        .arg(idsText
+                            (profile.ellipseMemberIdsByZone[zoneIndex])));
                 }
                 entryValues.insert(QStringLiteral("candidateCountsByZone"),
                     counts.join(QLatin1Char(',')));
+                entryValues.insert(QStringLiteral("arcMemberIdsByZone"),
+                    arcMembers.join(QLatin1Char(';')));
+                entryValues.insert(QStringLiteral("ellipseMemberIdsByZone"),
+                    ellipseMembers.join(QLatin1Char(';')));
                 zoneSweepDiagnostics.push_back(planningDiagnostic
                 (
                     context,

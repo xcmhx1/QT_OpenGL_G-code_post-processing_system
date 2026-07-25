@@ -609,13 +609,18 @@ namespace
             {
                 const QVariantMap& values = diagnostic.context;
                 qInfo().noquote()
-                    << QStringLiteral("[ProcessPlanning][EntryZoneProfile] unitKey=%1 groupKind=%2 certainMask=%3 possibleMask=%4 legalEntryMask=%5 candidateCountsByZone=%6")
+                    << QStringLiteral("[ProcessPlanning][EntryZoneProfile] unitKey=%1 groupKind=%2 memberSourceKinds=%3 certainMask=%4 possibleMask=%5 connectionEntryMask=%6 curveInteriorEntryMask=%7 legalEntryMask=%8 candidateCountsByZone=%9 arcMemberIdsByZone=%10 ellipseMemberIdsByZone=%11")
                         .arg(values.value(QStringLiteral("unitKey")).toString())
                         .arg(values.value(QStringLiteral("groupKind")).toString())
+                        .arg(values.value(QStringLiteral("memberSourceKinds")).toString())
                         .arg(values.value(QStringLiteral("certainMask")).toString())
                         .arg(values.value(QStringLiteral("possibleMask")).toString())
+                        .arg(values.value(QStringLiteral("connectionEntryMask")).toString())
+                        .arg(values.value(QStringLiteral("curveInteriorEntryMask")).toString())
                         .arg(values.value(QStringLiteral("legalEntryMask")).toString())
-                        .arg(values.value(QStringLiteral("candidateCountsByZone")).toString());
+                        .arg(values.value(QStringLiteral("candidateCountsByZone")).toString())
+                        .arg(values.value(QStringLiteral("arcMemberIdsByZone")).toString())
+                        .arg(values.value(QStringLiteral("ellipseMemberIdsByZone")).toString());
                 continue;
             }
             if (!diagnostic.context.value
@@ -625,20 +630,28 @@ namespace
             }
             const QVariantMap& values = diagnostic.context;
             qInfo().noquote()
-                << QStringLiteral("[ProcessPlanning][EntrySelection] unitKey=%1 scheduledZone=%2 selectedEntryZone=%3 candidateKind=%4 candidateCount=%5 wrongZoneRejectedCount=%6 selectedEntityId=%7 selectedSourceParameter=%8 selectedReverse=%9 entryPosition=%10 firstCutTangent=%11 distanceToZoneBoundary=%12 axisReversalCount=%13 tangentCost=%14 rotationCost=%15 movementDistance=%16 fragmentCount=%17")
+                << QStringLiteral("[ProcessPlanning][EntrySelection] unitKey=%1 scheduledZone=%2 selectedEntryZone=%3 selectionMode=%4 candidateKind=%5 connectionCandidateCount=%6 arcInteriorCandidateCount=%7 ellipseInteriorCandidateCount=%8 curveCandidateRejectedCount=%9 candidateCount=%10 wrongZoneRejectedCount=%11 selectedEntityId=%12 selectedSourceKind=%13 selectedSourceParameter=%14 selectedReverse=%15 entryPosition=%16 firstCutTangent=%17 distanceToMemberEndpoint=%18 distanceToZoneBoundary=%19 axisReversalCount=%20 tangentCost=%21 rotationCost=%22 movementDistance=%23 fragmentCount=%24")
                     .arg(values.value(QStringLiteral("unitKey")).toString())
                     .arg(values.value(QStringLiteral("scheduledZone")).toString())
                     .arg(values.value(QStringLiteral("selectedEntryZone")).toString())
+                    .arg(values.value(QStringLiteral("selectionMode")).toString())
                     .arg(values.value(QStringLiteral("candidateKind")).toString())
+                    .arg(values.value(QStringLiteral("connectionCandidateCount")).toInt())
+                    .arg(values.value(QStringLiteral("arcInteriorCandidateCount")).toInt())
+                    .arg(values.value(QStringLiteral("ellipseInteriorCandidateCount")).toInt())
+                    .arg(values.value(QStringLiteral("curveCandidateRejectedCount")).toInt())
                     .arg(values.value(QStringLiteral("candidateCount")).toInt())
                     .arg(values.value(QStringLiteral("wrongZoneRejectedCount")).toInt())
                     .arg(values.value(QStringLiteral("selectedEntityId")).toULongLong())
+                    .arg(values.value(QStringLiteral("selectedSourceKind")).toString())
                     .arg(values.value(QStringLiteral("selectedSourceParameter"))
                         .toDouble(), 0, 'g', 15)
                     .arg(values.value(QStringLiteral("selectedReverse")).toBool()
                         ? QStringLiteral("true") : QStringLiteral("false"))
                     .arg(values.value(QStringLiteral("entryPosition")).toString())
                     .arg(values.value(QStringLiteral("firstCutTangent")).toString())
+                    .arg(values.value(QStringLiteral("distanceToMemberEndpoint"))
+                        .toDouble(), 0, 'g', 15)
                     .arg(values.value(QStringLiteral("distanceToZoneBoundary"))
                         .toDouble(), 0, 'g', 15)
                     .arg(values.value(QStringLiteral("axisReversalCount")).toInt())
