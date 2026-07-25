@@ -143,6 +143,7 @@ OperationResult<PlanarNcCapture> DocumentPlanarNcInputAdapter::capture
         const auto itemFound = items.find(assignment.entityId);
         const auto sourceFound = sources.find(assignment.entityId);
         if (assignment.processOrder != static_cast<int>(order)
+            || assignment.processUnitIndex < 0
             || assignment.continuousGroupId != -1
             || itemFound == items.end() || sourceFound == sources.end()
             || !referenced.insert(assignment.entityId).second
@@ -173,6 +174,7 @@ OperationResult<PlanarNcCapture> DocumentPlanarNcInputAdapter::capture
         cadcam::nc::PlanarNcEntityInput input;
         input.sourceEntity = *sourceFound->second->sourceEntity;
         input.metadata = std::move(*metadata.value);
+        input.processUnitIndex = assignment.processUnitIndex;
         input.reverse = assignment.reverse;
         input.startParameter = assignment.startParameter;
         capture.entities.push_back(std::move(input));

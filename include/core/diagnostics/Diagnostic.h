@@ -109,6 +109,7 @@ enum class DiagnosticCode
     ProcessPlanningPrecedenceCycle,
     ProcessPlanningGroupBuildFailed,
     ProcessPlanningClosedLoopSummary,
+    ProcessPlanningEntrySelectionSummary,
     ProcessPlanningSurfaceSweepSummary,
     ProcessPlanningZone16Profile,
     ProcessPlanningZone16Summary,

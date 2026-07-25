@@ -573,12 +573,12 @@ namespace
             }
             const QVariantMap& values = diagnostic.context;
             qInfo().noquote()
-                << QStringLiteral("[ProcessPlanning][BreakStart] groupId=%1 boundaryRank=%2 isFirstPlannedUnit=%3 strategy=%4 startZone=%5 startEntityId=%6 startParameter=%7 startPosition=%8 runLength=%9 direction=%10 exitZone=%11 exitConfidence=%12 fragmentCount=%13 status=%14")
+                << QStringLiteral("[ProcessPlanning][BreakStart] groupId=%1 boundaryRank=%2 strategy=%3 preferredStartZone=%4 startZone=%5 startEntityId=%6 startParameter=%7 startPosition=%8 runLength=%9 direction=%10 exitZone=%11 exitConfidence=%12 fragmentCount=%13 midpointFragmentUsed=%14 status=%15")
                     .arg(values.value(QStringLiteral("groupId"), -1).toInt())
                     .arg(values.value(QStringLiteral("boundaryRank"), -1).toInt())
-                    .arg(values.value(QStringLiteral("isFirstPlannedUnit")).toBool()
-                        ? QStringLiteral("true") : QStringLiteral("false"))
                     .arg(values.value(QStringLiteral("strategy")).toString())
+                    .arg(values.value(QStringLiteral("preferredStartZone"),
+                        QStringLiteral("Unknown")).toString())
                     .arg(values.value(QStringLiteral("selectedZone"),
                         QStringLiteral("Unknown")).toString())
                     .arg(values.value(QStringLiteral("selectedEntityId")).toULongLong())
@@ -593,8 +593,40 @@ namespace
                     .arg(values.value(QStringLiteral("exitConfidence"))
                         .toDouble(), 0, 'g', 15)
                     .arg(values.value(QStringLiteral("fragmentCount")).toInt())
+                    .arg(values.value(QStringLiteral("midpointFragmentUsed"))
+                        .toBool() ? 1 : 0)
                     .arg(values.value(QStringLiteral("status"),
                         QStringLiteral("Unknown")).toString());
+        }
+    }
+
+    void logEntrySelectionSummaries(const QVector<Diagnostic>& diagnostics)
+    {
+        for (const Diagnostic& diagnostic : diagnostics)
+        {
+            if (!diagnostic.context.value
+                (QStringLiteral("entrySelectionSummary")).toBool())
+            {
+                continue;
+            }
+            const QVariantMap& values = diagnostic.context;
+            qInfo().noquote()
+                << QStringLiteral("[ProcessPlanning][EntrySelection] unitKey=%1 groupKind=%2 candidateCount=%3 selectedStart=%4 selectedReverse=%5 axisReversalCount=%6 tangentCost=%7 rotationCost=%8 movementDistance=%9 midpointFragmentUsed=%10")
+                    .arg(values.value(QStringLiteral("unitKey")).toString())
+                    .arg(values.value(QStringLiteral("groupKind")).toString())
+                    .arg(values.value(QStringLiteral("candidateCount")).toInt())
+                    .arg(values.value(QStringLiteral("selectedStart")).toString())
+                    .arg(values.value(QStringLiteral("selectedReverse")).toBool()
+                        ? QStringLiteral("true") : QStringLiteral("false"))
+                    .arg(values.value(QStringLiteral("axisReversalCount")).toInt())
+                    .arg(values.value(QStringLiteral("tangentCost"))
+                        .toDouble(), 0, 'g', 15)
+                    .arg(values.value(QStringLiteral("rotationCost"))
+                        .toDouble(), 0, 'g', 15)
+                    .arg(values.value(QStringLiteral("movementDistance"))
+                        .toDouble(), 0, 'g', 15)
+                    .arg(values.value(QStringLiteral("midpointFragmentUsed"))
+                        .toBool() ? 1 : 0);
         }
     }
 
@@ -753,6 +785,18 @@ OperationResult<cadcam::planning::ProcessPlan> ProcessPlanningService::buildRota
     const OperationContext& context
 ) const
 {
+    qInfo().noquote()
+        << QStringLiteral("[ProcessPlanning][Zone16Policy] initialZone=%1 perimeterDirection=%2 longitudinalDirection=%3")
+            .arg(cadcam::machining::tubeZoneName
+                (policy.zone16Sweep.initialZone))
+            .arg(policy.zone16Sweep.perimeterDirection
+                == cadcam::planning::PerimeterSweepDirection::Clockwise
+                ? QStringLiteral("Clockwise")
+                : QStringLiteral("CounterClockwise"))
+            .arg(policy.zone16Sweep.longitudinalDirection
+                == cadcam::planning::LongitudinalSweepDirection::PositiveX
+                ? QStringLiteral("PositiveX")
+                : QStringLiteral("NegativeX"));
     cadcam::topology::PathTopology topology;
     DocumentProcessPlanningAdapter adapter;
     auto capture = adapter.captureRotary
@@ -769,6 +813,7 @@ OperationResult<cadcam::planning::ProcessPlan> ProcessPlanningService::buildRota
         (*capture.value, policy, context);
     logClosedLoopPlanningSummaries(result.diagnostics);
     logBreakStartPlanningSummaries(result.diagnostics);
+    logEntrySelectionSummaries(result.diagnostics);
     logZone16SweepPlanningSummaries(result.diagnostics);
     result.mergeDiagnostics(capture.diagnostics);
     if (result.succeeded() && result.value.has_value()

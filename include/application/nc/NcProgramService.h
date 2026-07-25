@@ -17,6 +17,7 @@ public:
         CadDocument& document,
         const cadcam::process::DocumentProcessState& processState,
         const cadcam::planning::ProcessPlan& processPlan,
+        const GProfileToolClearanceConfig& clearanceConfig,
         const OperationContext& context
     ) const;
 
@@ -27,6 +28,7 @@ public:
         const cadcam::planning::ProcessPlan& processPlan,
         const std::optional<cadcam::machining::TubeSectionModel>& tubeSection,
         const GProfileRotaryAxisConfig& rotaryConfig,
+        const GProfileToolClearanceConfig& clearanceConfig,
         const OperationContext& context,
         const std::optional<cadcam::geometry::Vector2d>& explicitTubeCenter = std::nullopt
     ) const;

@@ -256,6 +256,7 @@ OperationResult<cadcam::machine::MachineTrajectory> MachineTrajectoryService::bu
     const cadcam::planning::ProcessPlan& plan,
     const std::optional<cadcam::machining::TubeSectionModel>& tubeSection,
     const GProfileRotaryAxisConfig& config,
+    const GProfileToolClearanceConfig& clearanceConfig,
     const TaskContext& taskContext,
     const std::optional<cadcam::geometry::Vector2d>& explicitTubeCenter
 ) const
@@ -529,7 +530,10 @@ OperationResult<cadcam::machine::MachineTrajectory> MachineTrajectoryService::bu
     policy.useInitialMachinePoint = config.useInitialMachinePoint;
     policy.initialMachinePoint = { config.initialMachineX, config.initialMachineY, config.initialMachineZ, 0.0 };
     policy.useSafeZBeforeRapid = config.useSafeZBeforeRapid;
-    policy.safeRadialClearance = config.safeZ;
+    policy.clearance.retractClearance =
+        clearanceConfig.retractClearance;
+    policy.clearance.approachClearance =
+        clearanceConfig.approachClearance;
     policy.machiningPlaneZOffset = config.machiningPlaneZOffset;
     policy.overcutDistance = config.overcutDistance;
     if (tubeSection.has_value() && !tubeSection->geometry.boundary.empty())
@@ -586,6 +590,10 @@ OperationResult<cadcam::machine::MachineTrajectory> MachineTrajectoryService::bu
         return result;
     }
 
+    qInfo().noquote()
+        << QStringLiteral("[MachineTrajectory][Clearance] mode=Rotary4Axis retractClearance=%1 approachClearance=%2")
+            .arg(policy.clearance.retractClearance, 0, 'g', 15)
+            .arg(policy.clearance.approachClearance, 0, 'g', 15);
     auto built = machine::RotaryTrajectoryBuilder::build(input, policy, taskContext);
     result.mergeDiagnostics(built);
     result.status = built.status;

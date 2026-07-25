@@ -3,6 +3,7 @@
 #include "core/diagnostics/OperationContext.h"
 #include "core/diagnostics/OperationResult.h"
 #include "core/geometry/GeometryCompiler.h"
+#include "core/machine/MachineTrajectory.h"
 #include "core/nc/NcProgram.h"
 
 #include <cstdint>
@@ -15,6 +16,7 @@ namespace cadcam::nc
     {
         geometry::SourceEntity sourceEntity;
         NcEntityMetadata metadata;
+        int processUnitIndex = -1;
         bool reverse = false;
         std::optional<double> startParameter;
     };
@@ -29,6 +31,7 @@ namespace cadcam::nc
         }
 
         geometry::SamplingPolicy samplingPolicy;
+        machine::ToolClearancePolicy clearance;
         double principalPlaneTolerance = 1.0e-6;
         bool preserveCurrentOutputQuantization = true;
     };

@@ -16,7 +16,7 @@
 
 ## 输入与输出
 
-输入包括当前文档、加工状态、有效四轴计划、可选方管截面、四轴配置和可选显式截面中心。
+输入包括当前文档、加工状态、有效四轴计划、可选方管截面、四轴配置、三轴与四轴共用的安全距离配置和可选显式截面中心。
 计划提供顺序、方向、起点和连续组；几何快照提供不可变源几何。
 输出 `MachineTrajectory`，包含旋转上下文和按实体组织的接近、切削、连接及过切运动。
 输出继续传给 `NcProgramBuilder`，轨迹层不生成 G-code 文本。
@@ -26,7 +26,9 @@
 - `GeometrySourceSnapshot`：在文档线程捕获的精确源几何和稳定实体属性。
 - `TrajectoryEntityInput`：按计划方向、起点或计划片段编译后的 `Path3D`，同时区分源 assignment 顺序和实际执行片段顺序。
 - `RotaryTrajectoryInput`：实体路径、计划分组、revision 和可选截面。
-- `RotaryMachinePolicy`：旋转轴、截面中心、安全距离、Z 修正、过切和角度策略。
+- `ToolClearancePolicy`：三轴和四轴共用的抬刀安全距离与落刀接近距离；抬刀距离必须为正且不小于接近距离。
+- `PlanarTrajectory`：按加工单元边界保存三轴抬刀、转移、接近和落刀姿态，NC 层只负责将这些已确定姿态编码为快速运动。
+- `RotaryMachinePolicy`：旋转轴、截面中心、共享安全距离、Z 修正、过切和角度策略。
 - `RotarySurfaceRegion`：轨迹构建期间使用的顶、右、底、左、圆角、径向或未知表面分类。
 - `TubeZone16`：规划阶段的生产区位模型，按四个平面、四个圆角和八条分界母线描述单元经过范围；轨迹层不读取该模型。
 - `MachinePose4D`：单个 XYZ/A 机床姿态。
@@ -94,7 +96,7 @@ Rotary4Axis ProcessPlan
 - NC 构建器按通用轨迹执行块复用源图元元数据，并把块顺序重建为实际执行顺序；NC 与 G-code 层不判断 Break 类型。
 - 智能懒旋转计划在有效方管截面下使用静态 16 区位画像、Break 分区和每区独立 X 前沿确定加工单元顺序。该顺序已经固化在 `ProcessPlan` 中，轨迹层只消费最终 assignment，不再次进行区位调度。
 - 16 区位画像使用理想壳层投影记录跨面、跨圆角、分界母线接触和 X 范围。它属于规划派生数据，不替换 `RotaryKinematics` 对单条路径的生产表面分类。
-- 规划阶段使用 Break 最终计划片段解析得到的强区位出口初始化下一分区，并按固定顺时针顺序遍历全部 16 区位。区位扫描状态不进入 `DocumentProcessState`、轨迹或 NC。
+- 规划阶段使用 Break 最终计划片段解析得到的强区位出口初始化下一分区，并按当前配置的顺时针或逆时针方向遍历全部 16 区位。区位扫描状态不进入 `DocumentProcessState`、轨迹或 NC。
 - 单图元闭合圆和完整椭圆的自动入口由规划器联合确定；轨迹服务使用 Assignment 中的最终起点参数和方向重新编译同一源几何，不再次选择入口。
 - 多图元闭合加工单元由规划阶段提供经过简单环验证的成员顺序和逐成员方向；轨迹层按该顺序连续编译，不重新执行最近端点选择。
 - 多图元闭环的计划结束位置是经过物理首尾连接验证的真实入口，异常闭环在计划发布前被拒绝，不会把错误结束位置传入后续轨迹。
@@ -108,8 +110,9 @@ Rotary4Axis ProcessPlan
 - 表面分类容差独立于连接容差，取数值误差、`1e-6 mm` 和截面最大尺寸 `1e-8` 倍中的最大值。
 - A 轴偏移、反向和连续角度展开在运动学转换中统一应用。
 - 加工面 Z 修正加入变换后的机床 Z 坐标。
-- 首刀可从配置的初始机床位置进入；组间快速移动可先到安全 Z。
-- 安全机床 Z 当前由截面中心、加工路径最大碰撞半径和离轴额外距离组成。
+- 首刀可从配置的初始机床位置进入；组间快速移动按共享安全距离执行抬刀、平移、接近和落刀。
+- 三轴把抬刀和接近距离解释为加工点的 `+Z` 偏移。四轴在路径完成运动学展开后，把机床 `+Z` 视为当前表面的局部外法向或径向，分别以当前姿态加上抬刀距离和接近距离，不再把所有姿态强制移动到统一全局 Z。
+- `RotaryTrajectoryContext::safeMachineZ` 继续作为碰撞半径诊断值；实际组间安全姿态由每个表面姿态及共享距离逐点派生。
 - 同一连续组内使用切削连接，组间使用快速移动。相邻源路径满足连接容差后，还要校验变换后的机床 XYZ 端点距离和展开后的 A 轴连续性；失败时返回前后实体及两种距离，不继续生成 NC。
 - 闭合组先精确回到组起点，再按原方向执行可选过切；过切不超过一圈总长。
 - 圆和完整椭圆采用新入口后，闭合回起点和过切继续沿重新编译后的同一方向执行。
@@ -120,8 +123,10 @@ Rotary4Axis ProcessPlan
 - `src/core/machine/RotaryKinematics.cpp`：将 `Path3D` 转换为连续 XYZ/A 姿态。
 - `src/core/machine/RotaryTrajectoryBuilder.cpp`：组织安全移动、连续切削、闭合和过切。
 - `src/core/machining/TubeSectionProjector.cpp`：提供规划生产排序使用的静态 16 区位画像，不生成机床姿态。
-- `include/core/machine/MachineTrajectory.h`：定义四轴轨迹、运动和旋转上下文。
+- `include/core/machine/MachineTrajectory.h`：定义共享安全距离、三轴安全移动结果以及四轴轨迹、运动和旋转上下文。
+- `src/core/machine/PlanarTrajectoryBuilder.cpp`：按三轴 `+Z` 语义和加工单元边界生成共享安全距离轨迹。
 - `include/infrastructure/config/GProfile.h`：定义当前四轴运动配置来源。
+- `src/ui/dialogs/GProfileDialog.cpp`：在“运动安全”页签编辑三轴和四轴共用的抬刀与接近距离。
 - `src/application/nc/NcProgramService.cpp`：在四轴 NC 生产链中调用轨迹服务。
 
 ## 当前实现差异

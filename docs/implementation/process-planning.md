@@ -23,13 +23,14 @@
 
 ## 主要数据类型
 
-- `ProcessPlanningPolicy`：四轴连接容差、起始位置、方向许可、闭环原子组和排序策略。
+- `ProcessPlanningPolicy`：四轴连接容差、起始位置、方向许可、闭环原子组、排序策略和 16 区位扫描策略。
+- `Zone16SweepPolicy`：固定 `TopFace` 初始区位，并保存可配置的周向和轴向扫描方向。
 - `PlanarProcessPlanningPolicy`：三轴起始位置、连接容差、数值误差和方向处理选项。
 - `ProcessSortIntent`：以 `PreserveCurrentSequence` 和 `RebuildSequence` 明确区分普通排序与智能排序。
 - `PlanningEntity`：核心规划使用的图元路径、状态、断面角色和来源属性。
 - `ProcessGroup`：单图元、连接链、闭环、Break 断面或 Waste 断面组成的加工组。
 - `ProcessAssignment`：逐图元执行顺序、所属加工单元索引、连续组、方向和起点，继续供轨迹与 NC 使用。
-- `ProcessPathFragment`：仅为需要从开放成员内部起刀的闭合加工单元保存源参数区间和片段执行顺序，不改变图元与加工单元身份。
+- `ProcessPathFragment`：仅为 `BreakBoundary` 从可靠边段中点起刀保存源参数区间和片段执行顺序，不改变图元与加工单元身份。
 - `ProcessExclusion`：内部线、Waste 区间或其他规划排除结果。
 - `ProcessUnit`：保存规范身份、成员实际执行顺序和闭合状态。
 - `ProcessUnitKey`：仅表达单元身份，成员稳定 `EntityId` 保持升序、唯一和非空。
@@ -108,9 +109,12 @@ CadDocument + DocumentProcessState + 可选 TubeSectionModel
 Break 断面入口链：
 
 ```text
+当前 16 区位扫描状态
+→ preferredStartZone
+→
 唯一简单环
 → 两个环绕方向
-→ 强区位连续边段
+→ preferredStartZone 内的可靠连续边段
 → 连续边段三维弧长中点
 → 首成员前半段 + 其他成员 + 首成员后半段
 → 从最终计划片段解析出口强区位
@@ -178,14 +182,16 @@ Application 的 `DocumentProcessState` 持有当前 `ProcessUnitSequence`。Core
 - 四轴可按配置选择最近距离或懒旋转策略。仅在智能重建、懒旋转且存在有效截面时启用 16 区位生产扫描；普通排序、最近距离和无截面四轴保持原流程。
 - 每个普通 `ProcessGroup` 在调度前使用全部成员的原始 `Path3D` 形成静态区位画像。`certainMask` 是生产归属，`possibleMask` 只用于保守候选和诊断；无可靠强归属时可确定一个显式回退区位并记录警告。
 - Break 断面继续由现有工艺屏障划分加工分区。Break 专用遍历器仅在唯一简单环上分析四个平面和四个圆角强区位，八条分界母线不作为首选入口。
-- Break 起刀点取可靠强区位连续边段的三维弧长中点；连续边段可以跨越多个源图元。最左侧 Break 同时是计划首单元时强制选择最长可靠 `TopFace` 边段中点，当前位置距离不参与该选择。
+- 懒旋转扫描的初始工艺区位固定为 `TopFace`，该状态不由首个加工单元或最左断面的偶然位置推导。
+- Break 起刀点取当前扫描区位内可靠连续边段的三维弧长中点；连续边段可以跨越多个源图元。首个 Break 接收当前 `TopFace`，完成闭环后出口仍回到该入口区位，后续继续从当前区位扫描。
 - 开放成员内部起刀通过两个互补 `ProcessPathFragment` 表达：先加工中点到成员出口，绕行其他成员后再加工成员入口到中点。规划发布前按源图元核对片段总弧长，并校验全部片段连续、闭合、无重复和无遗漏。
+- 计划发布校验要求所有 `ProcessPathFragment` 必须属于匹配的 `BreakBoundary` 加工单元；开放普通单元只能从链首或链尾进入，普通多图元闭环只能从现有成员连接点进入。
 - Break 的起点和出口必须属于同一强区位。出口从最终计划片段向落刀点反向累计可靠长度，短分界段和歧义段不作为强出口；仅在强信息不足时允许 possible 区位兜底并记录警告。
 - Break 完成后直接使用片段解析得到的出口区位初始化下一分区，不再根据普通闭环尾成员的偶然末段猜测。出口解析、分区映射和分区启动分别返回结构化诊断。
-- 没有 Break 时，首个单元仍由原入口规则选择，其真实出口用于初始化首分区。
-- 每个分区固定按 16 区位顺时针轮转。一个跨区单元可以进入多个区位桶，但在首次命中时整体加工，成员和闭环内部遍历不会被拆分或重复。
+- 没有 Break 时，首个分区也从策略固定的 `TopFace` 启动。
+- 每个分区按配置选择顺时针或逆时针遍历 16 区位。一个跨区单元可以进入多个区位桶，但在首次命中时整体加工，成员和闭环内部遍历不会被拆分或重复。
 - 每个区位拥有独立 X 前沿。`+X` 扫描使用该区位跨度的 `minimumX` 命中并以 `maximumX` 推进前沿，`-X` 扫描反向处理；进入新区位时从分区边界重新建立前沿。
-- 区位和 X 命中先于组内遍历评分。只有同一区位、同一命中位置的候选才比较入口连续性、旋转代价和稳定身份。
+- 区位和 X 命中先选定整个 `ProcessGroup`，再在该组的合法端点、闭合参数入口或成员连接点中优化入口，不允许入口评分改变区位或 X 顺序。
 - 前沿只允许单调推进。完整落在当前前沿之后的未加工单元会返回结构化回退诊断，不再通过回头扫描掩盖区位画像或分区问题。
 - 四轴单图元闭合圆和完整椭圆的 Auto 起点在规划输入中保持为空，不再等同于 `π/2`；`π/2` 仅保留为几何编译器没有最终计划参数时的独立默认值。
 - 规划器直接使用现有 `Path3D` 顶点，把每个顶点的 `sourceParameter` 与允许的正反方向组合为候选，不增加采样点。人工起点存在时仅保留当前路径首点，人工方向继续限制允许候选。
@@ -194,7 +200,8 @@ Application 的 `DocumentProcessState` 持有当前 `ProcessUnitSequence`。Core
 - 多图元闭环不再使用最近端点贪心拼接。规划器枚举起始成员及其正反入口，沿端点图唯一绕行全部成员，并按完整候选统一比较入口平滑度、旋转、表面和移动代价。
 - 每个闭环成员只允许使用一次，成员方向继续服从人工方向偏好和全局反向许可；含自身闭合成员、分支、孤立边或方向冲突的多图元组直接拒绝，不回退通用遍历。
 - 闭环候选先验证最后成员物理终点可连接到入口，再把组结束位置设置为真实入口。计划发布前再次校验成员集合、Assignment 连续性、相邻物理端点及首尾闭合，失败结果不会更新后续组的当前位置。
-- 不启用智能按面扫描时，`LazyRotation` 继续依次比较旋转代价、表面代价、入口轴反向数、切线代价、移动距离及稳定身份；`NearestNext` 继续依次比较移动距离、入口轴反向数、切线代价及稳定身份。智能按面扫描先完成区域硬过滤和 X 扫描比较，组内遍历仍沿用现有起点参数和方向消歧。
+- 智能懒旋转的普通单元入口依次比较人工起点与方向约束、入口 X/A 轴反向数、切线代价、旋转代价、移动距离和稳定身份。三轴或缺少有效截面中心时，入口切线代价使用 XYZ 源路径向量。
+- `NearestNext` 继续以移动距离为首要比较项；普通排序不启用本次智能平滑入口规则。
 - 自动选出的入口参数和方向仅写入当前 `ProcessAssignment`，不回写 `DocumentProcessState`。
 - 三轴由拓扑分量和连续遍历直接形成 `ProcessUnit`，四轴由现有 `ProcessGroup` 和 directed traversal 形成 `ProcessUnit`；Waste 排除组不进入加工单元序列。
 - `ProcessUnitKey` 使用组内全部稳定 `EntityId` 的升序集合，`orderedMemberEntityIds` 使用最终实际加工遍历顺序。
@@ -214,7 +221,7 @@ Application 的 `DocumentProcessState` 持有当前 `ProcessUnitSequence`。Core
 - 展示快照按加工单元保存 `unitOrder` 和成员身份，同时保留逐图元方向、起点、连续组和排除原因。
 - 单元加工编号只由 `ProcessUnitSequence` 的位置 `+1` 产生，不存入成员图元。
 - Viewer 顺序标签只读取单元展示项；逐图元 `processOrder` 继续仅服务轨迹和 NC。
-- 16 区位掩码表达加工单元实际经过的全部区位，不选择单一主区位。顺时针顺序固定为 `TopFace → TopToTopRightBoundary → TopRightCorner → TopRightToRightBoundary → RightFace → RightToBottomRightBoundary → BottomRightCorner → BottomRightToBottomBoundary → BottomFace → BottomToBottomLeftBoundary → BottomLeftCorner → BottomLeftToLeftBoundary → LeftFace → LeftToTopLeftBoundary → TopLeftCorner → TopLeftToTopBoundary`。
+- 16 区位掩码表达加工单元实际经过的全部区位，不选择单一主区位。默认顺时针顺序为 `TopFace → TopToTopRightBoundary → TopRightCorner → TopRightToRightBoundary → RightFace → RightToBottomRightBoundary → BottomRightCorner → BottomRightToBottomBoundary → BottomFace → BottomToBottomLeftBoundary → BottomLeftCorner → BottomLeftToLeftBoundary → LeftFace → LeftToTopLeftBoundary → TopLeftCorner → TopLeftToTopBoundary`；逆时针按相反方向遍历。
 - 区位画像按最终 `Path3D` 线段计算；端点、线段中点和必要的临时细分共同识别跨区路径。临时细分只存在于分类过程，不修改生产路径或采样策略。
 - 平面和圆角只有累计非零投影长度超过数值阈值才形成强占用；路径穿越、沿线运行或稳定端点接触可直接标记相应分界母线。
 - 圆弧、椭圆和样条允许在独立投影容差内投影到理想方管壳层，原始路径保持不变；画像记录最大、平均壳层偏差，并把接近容差边缘或无法可靠消歧的结果标记为不确定。
@@ -224,6 +231,8 @@ Application 的 `DocumentProcessState` 持有当前 `ProcessUnitSequence`。Core
 
 - `src/desktop/Gcode_postprocessing_system_SortActions.cpp`：提供排序 UI 入口、策略选择和计划保存。
 - `src/application/planning/ProcessPlanningService.cpp`：组织文档捕获、核心规划和 revision 复核。
+- `include/infrastructure/config/GProfile.h`：保存周向、轴向扫描方向及默认值。
+- `src/ui/dialogs/GProfileDialog.cpp`：提供周向和轴向扫描方向配置入口。
 - `src/cad/editing/CadEditer_CommandActions.cpp`：提供不包含加工业务类型的回调命令，并接入统一 Undo/Redo 栈。
 - `src/application/planning/DocumentProcessPlanningAdapter.cpp`：将生产文档和加工状态转换为规划值对象。
 - `src/core/planning/PlanarProcessPlanBuilder.cpp`：构建三轴最近距离加工计划。
@@ -245,7 +254,7 @@ Application 的 `DocumentProcessState` 持有当前 `ProcessUnitSequence`。Core
 | 单元交互 | 标签单击选择全部成员，Ctrl 单击执行连续块内移尾，双击标签或箭头执行整组反向 | 支持单元级交互 | 已实现并支持 Undo/Redo |
 | 历史边界 | Application 保存加工状态前后值并提交通用回调命令；CAD 与加工操作共用一个历史栈 | CAD 层不拥有加工单元人工编辑类型 | 块内移尾和整组反向已迁移；删除和替换命令仍暂时依赖 `DocumentProcessState` |
 | 配置失效层级 | 当前配置切换会清除整个计划 | 仅排序配置变化应使计划失效；运动和文本配置应分别影响下游 | 当前失效范围比概要设计更保守 |
-| 首组懒旋转 | 首个加工组固定按最近距离选择 | 懒旋转工艺强调减少 A 轴往复 | 首组不使用旋转代价，后续组才使用 |
+| 懒旋转初始区位 | 生产策略固定从 `TopFace` 开始，可配置周向顺/逆时针及轴向 `+X/-X` | 初始区位和扫描方向具有明确工艺语义 | 已实现，不再由首单元或最左 Break 反推 |
 
 ## 对应需求与概要设计
 

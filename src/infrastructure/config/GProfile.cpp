@@ -16,6 +16,7 @@ namespace
     constexpr const char* kLayerCodesKey = "layerCodes";
     constexpr const char* kEntityColorCodesKey = "entityColorCodes";
     constexpr const char* kRotaryAxisConfigKey = "rotaryAxisConfig";
+    constexpr const char* kToolClearanceConfigKey = "toolClearanceConfig";
     constexpr const char* kHeaderKey = "header";
     constexpr const char* kFooterKey = "footer";
     constexpr const char* kCommentKey = "comment";
@@ -23,6 +24,10 @@ namespace
     constexpr const char* kCenterZKey = "centerZ";
     constexpr const char* kAAxisOffsetDegreesKey = "aAxisOffsetDegrees";
     constexpr const char* kSafeZKey = "safeZ";
+    constexpr const char* kRetractClearanceKey = "retractClearance";
+    constexpr const char* kApproachClearanceKey = "approachClearance";
+    constexpr const char* kPerimeterSweepDirectionKey = "perimeterSweepDirection";
+    constexpr const char* kLongitudinalSweepDirectionKey = "longitudinalSweepDirection";
     constexpr const char* kMachiningPlaneZOffsetKey = "machiningPlaneZOffset";
     constexpr const char* kOvercutDistanceKey = "overcutDistance";
     constexpr const char* kLazyRotationProcessingKey = "lazyRotationProcessing";
@@ -123,13 +128,33 @@ GProfileCodeBlock GProfileCodeBlock::fromJson(const QJsonObject& object)
     return codeBlock;
 }
 
+QJsonObject GProfileToolClearanceConfig::toJson() const
+{
+    QJsonObject object;
+    object.insert(kRetractClearanceKey, retractClearance);
+    object.insert(kApproachClearanceKey, approachClearance);
+    return object;
+}
+
+GProfileToolClearanceConfig GProfileToolClearanceConfig::fromJson
+(
+    const QJsonObject& object
+)
+{
+    GProfileToolClearanceConfig config;
+    config.retractClearance = object.value(kRetractClearanceKey)
+        .toDouble(config.retractClearance);
+    config.approachClearance = object.value(kApproachClearanceKey)
+        .toDouble(config.approachClearance);
+    return config;
+}
+
 QJsonObject GProfileRotaryAxisConfig::toJson() const
 {
     QJsonObject object;
     object.insert(kCenterYKey, centerY);
     object.insert(kCenterZKey, centerZ);
     object.insert(kAAxisOffsetDegreesKey, aAxisOffsetDegrees);
-    object.insert(kSafeZKey, safeZ);
     object.insert(kMachiningPlaneZOffsetKey, machiningPlaneZOffset);
     object.insert(kOvercutDistanceKey, overcutDistance);
     object.insert(kLazyRotationProcessingKey, lazyRotationProcessing);
@@ -140,6 +165,16 @@ QJsonObject GProfileRotaryAxisConfig::toJson() const
     object.insert(kInitialMachineXKey, initialMachineX);
     object.insert(kInitialMachineYKey, initialMachineY);
     object.insert(kInitialMachineZKey, initialMachineZ);
+    object.insert(kPerimeterSweepDirectionKey,
+        perimeterSweepDirection
+            == GProfilePerimeterSweepDirection::Clockwise
+            ? QStringLiteral("Clockwise")
+            : QStringLiteral("CounterClockwise"));
+    object.insert(kLongitudinalSweepDirectionKey,
+        longitudinalSweepDirection
+            == GProfileLongitudinalSweepDirection::PositiveX
+            ? QStringLiteral("PositiveX")
+            : QStringLiteral("NegativeX"));
     return object;
 }
 
@@ -149,7 +184,6 @@ GProfileRotaryAxisConfig GProfileRotaryAxisConfig::fromJson(const QJsonObject& o
     config.centerY = object.value(kCenterYKey).toDouble(config.centerY);
     config.centerZ = object.value(kCenterZKey).toDouble(config.centerZ);
     config.aAxisOffsetDegrees = object.value(kAAxisOffsetDegreesKey).toDouble(config.aAxisOffsetDegrees);
-    config.safeZ = object.value(kSafeZKey).toDouble(config.safeZ);
     config.machiningPlaneZOffset = object.value(kMachiningPlaneZOffsetKey).toDouble(config.machiningPlaneZOffset);
     config.overcutDistance = std::clamp
     (
@@ -166,6 +200,16 @@ GProfileRotaryAxisConfig GProfileRotaryAxisConfig::fromJson(const QJsonObject& o
     config.initialMachineX = object.value(kInitialMachineXKey).toDouble(config.initialMachineX);
     config.initialMachineY = object.value(kInitialMachineYKey).toDouble(config.initialMachineY);
     config.initialMachineZ = object.value(kInitialMachineZKey).toDouble(config.initialMachineZ);
+    config.perimeterSweepDirection =
+        object.value(kPerimeterSweepDirectionKey).toString()
+            == QStringLiteral("CounterClockwise")
+        ? GProfilePerimeterSweepDirection::CounterClockwise
+        : GProfilePerimeterSweepDirection::Clockwise;
+    config.longitudinalSweepDirection =
+        object.value(kLongitudinalSweepDirectionKey).toString()
+            == QStringLiteral("NegativeX")
+        ? GProfileLongitudinalSweepDirection::NegativeX
+        : GProfileLongitudinalSweepDirection::PositiveX;
     return config;
 }
 
@@ -264,7 +308,22 @@ GProfile GProfile::loadFromFile(const QString& filePath, QString* errorMessage)
         profile.m_entityColorCodes.insert(normalizeColorKey(it.key()), GProfileCodeBlock::fromJson(it.value().toObject()));
     }
 
-    profile.m_rotaryAxisConfig = GProfileRotaryAxisConfig::fromJson(rootObject.value(kRotaryAxisConfigKey).toObject());
+    const QJsonObject rotaryObject =
+        rootObject.value(kRotaryAxisConfigKey).toObject();
+    profile.m_rotaryAxisConfig =
+        GProfileRotaryAxisConfig::fromJson(rotaryObject);
+    if (rootObject.contains(kToolClearanceConfigKey))
+    {
+        profile.m_toolClearanceConfig =
+            GProfileToolClearanceConfig::fromJson
+                (rootObject.value(kToolClearanceConfigKey).toObject());
+    }
+    else
+    {
+        profile.m_toolClearanceConfig.retractClearance =
+            rotaryObject.value(kSafeZKey).toDouble
+                (profile.m_toolClearanceConfig.retractClearance);
+    }
 
     if (errorMessage != nullptr)
     {
@@ -307,6 +366,8 @@ bool GProfile::saveToFile(const QString& filePath, QString* errorMessage) const
 
     rootObject.insert(kEntityColorCodesKey, entityColorObject);
     rootObject.insert(kRotaryAxisConfigKey, m_rotaryAxisConfig.toJson());
+    rootObject.insert(kToolClearanceConfigKey,
+        m_toolClearanceConfig.toJson());
 
     QFile file(filePath);
 
@@ -350,6 +411,7 @@ void GProfile::clear()
     m_layerCodes.clear();
     m_entityColorCodes.clear();
     m_rotaryAxisConfig = GProfileRotaryAxisConfig();
+    m_toolClearanceConfig = GProfileToolClearanceConfig();
 }
 
 void GProfile::setProfileName(const QString& profileName)
@@ -502,6 +564,19 @@ void GProfile::setRotaryAxisConfig(const GProfileRotaryAxisConfig& config)
 const GProfileRotaryAxisConfig& GProfile::rotaryAxisConfig() const
 {
     return m_rotaryAxisConfig;
+}
+
+void GProfile::setToolClearanceConfig
+(
+    const GProfileToolClearanceConfig& config
+)
+{
+    m_toolClearanceConfig = config;
+}
+
+const GProfileToolClearanceConfig& GProfile::toolClearanceConfig() const
+{
+    return m_toolClearanceConfig;
 }
 
 QString GProfile::normalizeEntityTypeKey(const QString& entityType)

@@ -562,6 +562,9 @@
     <ClCompile Include="src\core\machine\RotaryTrajectoryBuilder.cpp">
       <Filter>Source Files\core\machine</Filter>
     </ClCompile>
+    <ClCompile Include="src\core\machine\PlanarTrajectoryBuilder.cpp">
+      <Filter>Source Files\core\machine</Filter>
+    </ClCompile>
     <ClCompile Include="src\core\planning\ProcessPlanBuilder.cpp">
       <Filter>Source Files\core\planning</Filter>
     </ClCompile>
@@ -817,6 +820,9 @@
       <Filter>Header Files\core\machining</Filter>
     </ClInclude>
     <ClInclude Include="include\core\machine\MachineTrajectory.h">
+      <Filter>Header Files\core\machine</Filter>
+    </ClInclude>
+    <ClInclude Include="include\core\machine\PlanarTrajectoryBuilder.h">
       <Filter>Header Files\core\machine</Filter>
     </ClInclude>
     <ClInclude Include="include\core\machine\RotaryKinematics.h">

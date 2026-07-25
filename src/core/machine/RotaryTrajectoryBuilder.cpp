@@ -75,10 +75,14 @@ namespace cadcam::machine
             return { kind, pose, entity.entityId, entity.processGroupId };
         }
 
-        MachinePose4D safePose(const MachinePose4D& pose, double safeZ)
+        MachinePose4D clearancePose
+        (
+            const MachinePose4D& pose,
+            double outwardDistance
+        )
         {
             MachinePose4D result = pose;
-            result.z = std::max(result.z, safeZ);
+            result.z += outwardDistance;
             return result;
         }
 
@@ -119,7 +123,12 @@ namespace cadcam::machine
         if (input.entities.empty() || input.contentRevision == 0
             || !std::isfinite(policy.rotaryAxisY) || !std::isfinite(policy.rotaryAxisZ)
             || !std::isfinite(policy.tubeCenterY) || !std::isfinite(policy.tubeCenterZ)
-            || !std::isfinite(policy.safeRadialClearance) || policy.safeRadialClearance < 0.0
+            || !std::isfinite(policy.clearance.retractClearance)
+            || policy.clearance.retractClearance <= 0.0
+            || !std::isfinite(policy.clearance.approachClearance)
+            || policy.clearance.approachClearance < 0.0
+            || policy.clearance.retractClearance
+                < policy.clearance.approachClearance
             || !std::isfinite(policy.continuousConnectionTolerance)
             || policy.continuousConnectionTolerance <= 0.0
             || !std::isfinite(policy.numericalEpsilon) || policy.numericalEpsilon <= 0.0
@@ -257,7 +266,8 @@ namespace cadcam::machine
                                vertex.position.z - policy.tubeCenterZ)
                 );
         trajectory.rotaryContext.safeMachineZ = policy.tubeCenterZ
-            + trajectory.rotaryContext.maximumCollisionRadius + policy.safeRadialClearance;
+            + trajectory.rotaryContext.maximumCollisionRadius
+            + policy.clearance.retractClearance;
 
         std::vector<std::vector<MachinePose4D>> posesByEntity;
         posesByEntity.reserve(input.entities.size());
@@ -367,25 +377,35 @@ namespace cadcam::machine
                     if (poseDistance(initial, first) > policy.numericalEpsilon)
                         entity.approachMoves.push_back(move(MachineMoveKind::Rapid, initial, inputEntity));
                 }
-                if (policy.useSafeZBeforeRapid && trajectory.rotaryContext.safeMachineZ > first.z + policy.numericalEpsilon)
+                if (policy.useSafeZBeforeRapid)
                 {
-                    const MachinePose4D safe = safePose(first, trajectory.rotaryContext.safeMachineZ);
+                    const MachinePose4D safe = clearancePose
+                        (first, policy.clearance.retractClearance);
+                    const MachinePose4D approach = clearancePose
+                        (first, policy.clearance.approachClearance);
                     entity.approachMoves.push_back(move(MachineMoveKind::Rapid, safe, inputEntity));
-                    if (poseDistance(safe, first) > policy.numericalEpsilon)
+                    if (poseDistance(safe, approach) > policy.numericalEpsilon)
+                        entity.approachMoves.push_back(move(MachineMoveKind::Rapid, approach, inputEntity));
+                    if (poseDistance(approach, first) > policy.numericalEpsilon)
                         entity.approachMoves.push_back(move(MachineMoveKind::Rapid, first, inputEntity));
                 }
                 else entity.approachMoves.push_back(move(MachineMoveKind::Rapid, first, inputEntity));
             }
             else if (!sameGroup)
             {
-                if (policy.useSafeZBeforeRapid
-                    && trajectory.rotaryContext.safeMachineZ > std::min(previousPose.z, first.z) + policy.numericalEpsilon)
+                if (policy.useSafeZBeforeRapid)
                 {
-                    const MachinePose4D departure = safePose(previousPose, trajectory.rotaryContext.safeMachineZ);
-                    const MachinePose4D approach = safePose(first, trajectory.rotaryContext.safeMachineZ);
+                    const MachinePose4D departure = clearancePose
+                        (previousPose, policy.clearance.retractClearance);
+                    const MachinePose4D transfer = clearancePose
+                        (first, policy.clearance.retractClearance);
+                    const MachinePose4D approach = clearancePose
+                        (first, policy.clearance.approachClearance);
                     if (poseDistance(previousPose, departure) > policy.numericalEpsilon)
                         entity.approachMoves.push_back(move(MachineMoveKind::Rapid, departure, inputEntity));
-                    if (poseDistance(departure, approach) > policy.numericalEpsilon)
+                    if (poseDistance(departure, transfer) > policy.numericalEpsilon)
+                        entity.approachMoves.push_back(move(MachineMoveKind::Rapid, transfer, inputEntity));
+                    if (poseDistance(transfer, approach) > policy.numericalEpsilon)
                         entity.approachMoves.push_back(move(MachineMoveKind::Rapid, approach, inputEntity));
                     if (poseDistance(approach, first) > policy.numericalEpsilon)
                         entity.approachMoves.push_back(move(MachineMoveKind::Rapid, first, inputEntity));

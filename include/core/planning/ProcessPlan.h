@@ -2,6 +2,7 @@
 
 #include "core/geometry/Path3D.h"
 #include "core/machining/TubeSection.h"
+#include "core/machining/TubeSectionProjector.h"
 #include "core/topology/PathTopology.h"
 
 #include <algorithm>
@@ -22,10 +23,21 @@ namespace cadcam::planning
     enum class ProcessPlanMode { Planar3Axis, Rotary4Axis };
     enum class ProcessOrderingStrategy { NearestNext, LazyRotation };
     enum class ProcessSortIntent { PreserveCurrentSequence, RebuildSequence };
+    enum class PerimeterSweepDirection { Clockwise, CounterClockwise };
+    enum class LongitudinalSweepDirection { PositiveX, NegativeX };
     enum class BoundaryRole { None, Break, Waste };
     enum class ProcessGroupKind { SingleEntity, ConnectedChain, ClosedLoop, BreakBoundary, WasteBoundary };
     enum class ProcessExclusionReason { Hidden, UserDisabled, InternalGeometry, WasteRegion, UnsupportedGeometry, InvalidPath };
     enum class BoundarySide { Left, OnBoundary, Right, Mixed, Indeterminate };
+
+    struct Zone16SweepPolicy
+    {
+        machining::TubeZone16 initialZone = machining::TubeZone16::TopFace;
+        PerimeterSweepDirection perimeterDirection =
+            PerimeterSweepDirection::Clockwise;
+        LongitudinalSweepDirection longitudinalDirection =
+            LongitudinalSweepDirection::PositiveX;
+    };
 
     struct ProcessPlanningPolicy
     {
@@ -35,6 +47,7 @@ namespace cadcam::planning
         bool allowReverse = true;
         bool preserveClosedLoopsAsAtomicGroups = true;
         geometry::Vector3d initialPosition{ 0.0, 0.0, 500.0 };
+        Zone16SweepPolicy zone16Sweep;
     };
 
     struct PlanningEntity
@@ -231,6 +244,22 @@ namespace cadcam::planning
         {
             auto& fragments = fragmentsByUnit[unitIndex];
             if (fragments.empty()) continue;
+            const ProcessUnit& unit = plan.processUnits[unitIndex];
+            const auto matchingBreak = std::find_if
+            (
+                plan.groups.cbegin(), plan.groups.cend(),
+                [&unit](const ProcessGroup& group)
+                {
+                    if (group.kind != ProcessGroupKind::BreakBoundary)
+                        return false;
+                    std::vector<geometry::EntityId> groupIds = group.entityIds;
+                    std::sort(groupIds.begin(), groupIds.end());
+                    groupIds.erase(std::unique(groupIds.begin(), groupIds.end()),
+                        groupIds.end());
+                    return groupIds == unit.key.memberEntityIds;
+                }
+            );
+            if (matchingBreak == plan.groups.cend()) return false;
             std::sort(fragments.begin(), fragments.end(),
                 [](const ProcessPathFragment* left, const ProcessPathFragment* right)
                 {

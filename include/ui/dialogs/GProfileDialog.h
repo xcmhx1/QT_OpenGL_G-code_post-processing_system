@@ -87,10 +87,13 @@ private:
     QPlainTextEdit* m_fileHeaderEdit = nullptr;
     QPlainTextEdit* m_fileFooterEdit = nullptr;
     QPlainTextEdit* m_fileCommentEdit = nullptr;
-    QDoubleSpinBox* m_rotaryClearanceSpinBox = nullptr;
+    QDoubleSpinBox* m_retractClearanceSpinBox = nullptr;
+    QDoubleSpinBox* m_approachClearanceSpinBox = nullptr;
     QDoubleSpinBox* m_rotaryPlaneZOffsetSpinBox = nullptr;
     QDoubleSpinBox* m_rotaryOvercutDistanceSpinBox = nullptr;
     QCheckBox* m_lazyRotationProcessingCheckBox = nullptr;
+    QComboBox* m_perimeterSweepDirectionComboBox = nullptr;
+    QComboBox* m_longitudinalSweepDirectionComboBox = nullptr;
 
     QListWidget* m_entityTypeListWidget = nullptr;
     QPlainTextEdit* m_entityTypeHeaderEdit = nullptr;

@@ -17,6 +17,7 @@ public:
         const cadcam::planning::ProcessPlan& plan,
         const std::optional<cadcam::machining::TubeSectionModel>& tubeSection,
         const GProfileRotaryAxisConfig& config,
+        const GProfileToolClearanceConfig& clearanceConfig,
         const TaskContext& context,
         const std::optional<cadcam::geometry::Vector2d>& explicitTubeCenter = std::nullopt
     ) const;

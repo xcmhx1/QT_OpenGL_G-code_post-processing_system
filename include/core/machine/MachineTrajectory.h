@@ -103,6 +103,32 @@ namespace cadcam::machine
         geometry::Path3D path;
     };
 
+    struct ToolClearancePolicy
+    {
+        double retractClearance = 5.0;
+        double approachClearance = 0.0;
+    };
+
+    struct PlanarTrajectoryEntityInput
+    {
+        geometry::EntityId entityId = 0;
+        int processGroupId = -1;
+        int processUnitIndex = -1;
+        geometry::Vector3d cutStart;
+        geometry::Vector3d cutEnd;
+    };
+
+    struct PlanarEntityTrajectory
+    {
+        geometry::EntityId entityId = 0;
+        std::vector<MachinePose4D> approachPoses;
+    };
+
+    struct PlanarTrajectory
+    {
+        std::vector<PlanarEntityTrajectory> entities;
+    };
+
     struct RotaryMachinePolicy
     {
         double rotaryAxisY = 0.0;
@@ -115,7 +141,7 @@ namespace cadcam::machine
         bool useInitialMachinePoint = false;
         MachinePose4D initialMachinePoint;
         bool useSafeZBeforeRapid = true;
-        double safeRadialClearance = 5.0;
+        ToolClearancePolicy clearance;
         double machiningPlaneZOffset = 0.0;
         double overcutDistance = 2.0;
         double continuousConnectionTolerance = 1.0;

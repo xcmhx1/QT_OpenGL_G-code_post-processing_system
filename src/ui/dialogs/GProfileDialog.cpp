@@ -408,6 +408,34 @@ void GProfileDialog::buildUi()
     colorLayout->addWidget(colorEditorPanel, 1);
     tabWidget->addTab(colorTab, QStringLiteral("颜色规则"));
 
+    QWidget* safetyTab = new QWidget(tabWidget);
+    QVBoxLayout* safetyLayout = new QVBoxLayout(safetyTab);
+    safetyLayout->setContentsMargins(8, 8, 8, 8);
+    safetyLayout->setSpacing(8);
+    QFormLayout* safetyFormLayout = new QFormLayout();
+    safetyFormLayout->setContentsMargins(0, 0, 0, 0);
+    safetyFormLayout->setSpacing(8);
+
+    m_retractClearanceSpinBox = new QDoubleSpinBox(safetyTab);
+    m_retractClearanceSpinBox->setDecimals(3);
+    m_retractClearanceSpinBox->setRange(0.001, 1000000.0);
+    m_retractClearanceSpinBox->setSingleStep(1.0);
+    m_retractClearanceSpinBox->setSuffix(QStringLiteral(" mm"));
+    safetyFormLayout->addRow(QStringLiteral("抬刀安全距离"),
+        m_retractClearanceSpinBox);
+
+    m_approachClearanceSpinBox = new QDoubleSpinBox(safetyTab);
+    m_approachClearanceSpinBox->setDecimals(3);
+    m_approachClearanceSpinBox->setRange(0.0, 1000000.0);
+    m_approachClearanceSpinBox->setSingleStep(0.1);
+    m_approachClearanceSpinBox->setSuffix(QStringLiteral(" mm"));
+    safetyFormLayout->addRow(QStringLiteral("落刀接近距离"),
+        m_approachClearanceSpinBox);
+
+    safetyLayout->addLayout(safetyFormLayout);
+    safetyLayout->addStretch(1);
+    tabWidget->addTab(safetyTab, QStringLiteral("运动安全"));
+
     QWidget* rotaryTab = new QWidget(tabWidget);
     QVBoxLayout* rotaryLayout = new QVBoxLayout(rotaryTab);
     rotaryLayout->setContentsMargins(8, 8, 8, 8);
@@ -416,12 +444,6 @@ void GProfileDialog::buildUi()
     QFormLayout* rotaryFormLayout = new QFormLayout();
     rotaryFormLayout->setContentsMargins(0, 0, 0, 0);
     rotaryFormLayout->setSpacing(8);
-
-    m_rotaryClearanceSpinBox = new QDoubleSpinBox(rotaryTab);
-    m_rotaryClearanceSpinBox->setDecimals(3);
-    m_rotaryClearanceSpinBox->setRange(0.0, 1000000.0);
-    m_rotaryClearanceSpinBox->setSingleStep(1.0);
-    rotaryFormLayout->addRow(QStringLiteral("离轴额外距离"), m_rotaryClearanceSpinBox);
 
     m_rotaryPlaneZOffsetSpinBox = new QDoubleSpinBox(rotaryTab);
     m_rotaryPlaneZOffsetSpinBox->setDecimals(3);
@@ -441,6 +463,22 @@ void GProfileDialog::buildUi()
         (QStringLiteral("仅改变当前满足中断切面约束的加工组选择策略；默认关闭。"));
     rotaryFormLayout->addRow(QString(), m_lazyRotationProcessingCheckBox);
 
+    m_perimeterSweepDirectionComboBox = new QComboBox(rotaryTab);
+    m_perimeterSweepDirectionComboBox->addItem(QStringLiteral("顺时针"),
+        static_cast<int>(GProfilePerimeterSweepDirection::Clockwise));
+    m_perimeterSweepDirectionComboBox->addItem(QStringLiteral("逆时针"),
+        static_cast<int>(GProfilePerimeterSweepDirection::CounterClockwise));
+    rotaryFormLayout->addRow(QStringLiteral("周向扫描方向"),
+        m_perimeterSweepDirectionComboBox);
+
+    m_longitudinalSweepDirectionComboBox = new QComboBox(rotaryTab);
+    m_longitudinalSweepDirectionComboBox->addItem(QStringLiteral("+X"),
+        static_cast<int>(GProfileLongitudinalSweepDirection::PositiveX));
+    m_longitudinalSweepDirectionComboBox->addItem(QStringLiteral("-X"),
+        static_cast<int>(GProfileLongitudinalSweepDirection::NegativeX));
+    rotaryFormLayout->addRow(QStringLiteral("轴向扫描方向"),
+        m_longitudinalSweepDirectionComboBox);
+
     rotaryLayout->addLayout(rotaryFormLayout);
     rotaryLayout->addStretch(1);
     tabWidget->addTab(rotaryTab, QStringLiteral("四轴加工"));
@@ -454,6 +492,13 @@ void GProfileDialog::buildUi()
     connect(reset4AxisButton, &QPushButton::clicked, this, [this]() { resetToDefaultRotaryProfile(); });
     connect(m_buttonBox, &QDialogButtonBox::accepted, this, &GProfileDialog::accept);
     connect(m_buttonBox, &QDialogButtonBox::rejected, this, &GProfileDialog::reject);
+    connect(m_retractClearanceSpinBox,
+        qOverload<double>(&QDoubleSpinBox::valueChanged), this,
+        [this](double value)
+        {
+            if (m_approachClearanceSpinBox != nullptr)
+                m_approachClearanceSpinBox->setMaximum(value);
+        });
 
     connect
     (
@@ -619,11 +664,26 @@ void GProfileDialog::applyProfile(const GProfile& profile)
     setBlockText(m_fileHeaderEdit, profile.fileCode().header);
     setBlockText(m_fileFooterEdit, profile.fileCode().footer);
     setBlockText(m_fileCommentEdit, profile.fileCode().comment);
-    m_rotaryClearanceSpinBox->setValue(profile.rotaryAxisConfig().safeZ);
+    m_retractClearanceSpinBox->setValue
+        (profile.toolClearanceConfig().retractClearance);
+    m_approachClearanceSpinBox->setMaximum
+        (profile.toolClearanceConfig().retractClearance);
+    m_approachClearanceSpinBox->setValue
+        (profile.toolClearanceConfig().approachClearance);
     m_rotaryPlaneZOffsetSpinBox->setValue(profile.rotaryAxisConfig().machiningPlaneZOffset);
     m_rotaryOvercutDistanceSpinBox->setValue(profile.rotaryAxisConfig().overcutDistance);
     m_lazyRotationProcessingCheckBox->setChecked
         (profile.rotaryAxisConfig().lazyRotationProcessing);
+    m_perimeterSweepDirectionComboBox->setCurrentIndex
+    (
+        profile.rotaryAxisConfig().perimeterSweepDirection
+            == GProfilePerimeterSweepDirection::Clockwise ? 0 : 1
+    );
+    m_longitudinalSweepDirectionComboBox->setCurrentIndex
+    (
+        profile.rotaryAxisConfig().longitudinalSweepDirection
+            == GProfileLongitudinalSweepDirection::PositiveX ? 0 : 1
+    );
 
     refreshEntityTypeList();
     refreshLayerRuleList();
@@ -635,7 +695,14 @@ GProfile GProfileDialog::collectProfile() const
 {
     GProfile profile;
     GProfileRotaryAxisConfig rotaryConfig = m_profile.rotaryAxisConfig();
-    rotaryConfig.safeZ = m_rotaryClearanceSpinBox != nullptr ? m_rotaryClearanceSpinBox->value() : rotaryConfig.safeZ;
+    GProfileToolClearanceConfig clearanceConfig =
+        m_profile.toolClearanceConfig();
+    clearanceConfig.retractClearance = m_retractClearanceSpinBox != nullptr
+        ? m_retractClearanceSpinBox->value()
+        : clearanceConfig.retractClearance;
+    clearanceConfig.approachClearance = m_approachClearanceSpinBox != nullptr
+        ? m_approachClearanceSpinBox->value()
+        : clearanceConfig.approachClearance;
     rotaryConfig.machiningPlaneZOffset = m_rotaryPlaneZOffsetSpinBox != nullptr
         ? m_rotaryPlaneZOffsetSpinBox->value()
         : rotaryConfig.machiningPlaneZOffset;
@@ -645,7 +712,20 @@ GProfile GProfileDialog::collectProfile() const
     rotaryConfig.lazyRotationProcessing = m_lazyRotationProcessingCheckBox != nullptr
         ? m_lazyRotationProcessingCheckBox->isChecked()
         : rotaryConfig.lazyRotationProcessing;
+    if (m_perimeterSweepDirectionComboBox != nullptr)
+    {
+        rotaryConfig.perimeterSweepDirection =
+            static_cast<GProfilePerimeterSweepDirection>
+                (m_perimeterSweepDirectionComboBox->currentData().toInt());
+    }
+    if (m_longitudinalSweepDirectionComboBox != nullptr)
+    {
+        rotaryConfig.longitudinalSweepDirection =
+            static_cast<GProfileLongitudinalSweepDirection>
+                (m_longitudinalSweepDirectionComboBox->currentData().toInt());
+    }
     profile.setRotaryAxisConfig(rotaryConfig);
+    profile.setToolClearanceConfig(clearanceConfig);
     profile.setProfileName(m_profileNameEdit->text().trimmed());
     profile.setFileCode
     (

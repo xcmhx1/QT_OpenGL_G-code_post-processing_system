@@ -1,4 +1,5 @@
 #include "core/nc/PlanarNcProgramBuilder.h"
+#include "core/machine/PlanarTrajectoryBuilder.h"
 
 #include <algorithm>
 #include <cmath>
@@ -131,6 +132,71 @@ namespace cadcam::nc
             axes.y = point.y;
             if (includeZ) axes.z = point.z;
             return axes;
+        }
+
+        geometry::Vector3d resolvedPosition
+        (
+            const geometry::Vector3d& fallback,
+            const NcAxisWords& axes
+        )
+        {
+            return
+            {
+                axes.x.value_or(fallback.x),
+                axes.y.value_or(fallback.y),
+                axes.z.value_or(fallback.z)
+            };
+        }
+
+        NcMotion rapidAt
+        (
+            const NcMotion& prototype,
+            const geometry::Vector3d& position
+        )
+        {
+            NcMotion rapid = prototype;
+            rapid.kind = NcMotionKind::Rapid;
+            rapid.sourceKind = NcSourceMoveKind::Rapid;
+            rapid.axes = pointAxes(position, true);
+            return rapid;
+        }
+
+        geometry::Vector3d finalCutPosition
+        (
+            const NcEntityBlock& block
+        )
+        {
+            const geometry::Vector3d cutStart = resolvedPosition
+                ({ 0.0, 0.0, 0.0 }, block.motions.front().axes);
+            geometry::Vector3d finalPosition = cutStart;
+            for (std::size_t index = 1U; index < block.motions.size(); ++index)
+            {
+                if (block.motions[index].sourceKind != NcSourceMoveKind::Rapid)
+                    finalPosition = resolvedPosition
+                        (finalPosition, block.motions[index].axes);
+            }
+            return finalPosition;
+        }
+
+        void applyPlanarTrajectory
+        (
+            NcEntityBlock& block,
+            const machine::PlanarEntityTrajectory& trajectory
+        )
+        {
+            const NcMotion prototype = block.motions.front();
+            std::vector<NcMotion> motions;
+            motions.reserve
+                (trajectory.approachPoses.size() + block.motions.size());
+            for (const machine::MachinePose4D& pose :
+                trajectory.approachPoses)
+            {
+                motions.push_back(rapidAt
+                    (prototype, { pose.x, pose.y, pose.z }));
+            }
+            motions.insert(motions.end(), block.motions.cbegin() + 1,
+                block.motions.cend());
+            block.motions = std::move(motions);
         }
 
         bool appendCompiledPath
@@ -346,12 +412,16 @@ namespace cadcam::nc
         program.processStateRevision = processStateRevision;
         program.mode = NcProgramMode::Planar3Axis;
         bool skipped = false;
+        std::vector<machine::PlanarTrajectoryEntityInput> trajectoryInput;
+        trajectoryInput.reserve(entities.size());
         for (const PlanarNcEntityInput& input : entities)
         {
             NcEntityBlock block;
             block.metadata = input.metadata;
             bool built = false;
-            if (input.sourceEntity.id != input.metadata.entityId || input.sourceEntity.id == 0)
+            if (input.sourceEntity.id != input.metadata.entityId
+                || input.sourceEntity.id == 0
+                || input.processUnitIndex < 0)
             {
                 result.addDiagnostic(planarDiagnostic(DiagnosticCode::PlanarNcInvariantViolation,
                     DiagnosticSeverity::Warning, QStringLiteral("图元编号与 NC 元数据不一致，已跳过。"),
@@ -450,8 +520,31 @@ namespace cadcam::nc
                 skipped = true;
                 continue;
             }
+            machine::PlanarTrajectoryEntityInput trajectoryEntity;
+            trajectoryEntity.entityId = input.metadata.entityId;
+            trajectoryEntity.processGroupId = input.metadata.processGroupId;
+            trajectoryEntity.processUnitIndex = input.processUnitIndex;
+            trajectoryEntity.cutStart = resolvedPosition
+                ({ 0.0, 0.0, 0.0 }, block.motions.front().axes);
+            trajectoryEntity.cutEnd = finalCutPosition(block);
+            trajectoryInput.push_back(trajectoryEntity);
             block.metadata.processOrder = static_cast<int>(program.entities.size());
             program.entities.push_back(std::move(block));
+        }
+        auto trajectory = machine::PlanarTrajectoryBuilder::build
+            (trajectoryInput, policy.clearance, context);
+        result.mergeDiagnostics(trajectory);
+        if (!trajectory.succeeded() || !trajectory.value.has_value()
+            || trajectory.value->entities.size() != program.entities.size())
+        {
+            result.status = trajectory.succeeded()
+                ? OperationStatus::InternalError : trajectory.status;
+            return result;
+        }
+        for (std::size_t index = 0; index < program.entities.size(); ++index)
+        {
+            applyPlanarTrajectory
+                (program.entities[index], trajectory.value->entities[index]);
         }
 
         if (program.entities.empty())

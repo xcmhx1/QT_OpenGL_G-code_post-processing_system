@@ -15,12 +15,32 @@ struct GProfileCodeBlock
     static GProfileCodeBlock fromJson(const QJsonObject& object);
 };
 
+struct GProfileToolClearanceConfig
+{
+    double retractClearance = 5.0;
+    double approachClearance = 0.0;
+
+    QJsonObject toJson() const;
+    static GProfileToolClearanceConfig fromJson(const QJsonObject& object);
+};
+
+enum class GProfilePerimeterSweepDirection
+{
+    Clockwise,
+    CounterClockwise
+};
+
+enum class GProfileLongitudinalSweepDirection
+{
+    PositiveX,
+    NegativeX
+};
+
 struct GProfileRotaryAxisConfig
 {
     double centerY = 0.0;
     double centerZ = 0.0;
     double aAxisOffsetDegrees = 0.0;
-    double safeZ = 5.0; // 四轴离轴额外距离
     double machiningPlaneZOffset = 0.0; // 相对实时加工平面的 Z 修正
     double overcutDistance = 2.0; // 闭合路径沿原方向继续加工的距离
     bool lazyRotationProcessing = false;
@@ -28,6 +48,10 @@ struct GProfileRotaryAxisConfig
     bool keepContinuousAngle = true;
     bool useSafeZBeforeRapid = true;
     bool useInitialMachinePoint = false;
+    GProfilePerimeterSweepDirection perimeterSweepDirection =
+        GProfilePerimeterSweepDirection::Clockwise;
+    GProfileLongitudinalSweepDirection longitudinalSweepDirection =
+        GProfileLongitudinalSweepDirection::PositiveX;
     double initialMachineX = 0.0;
     double initialMachineY = 0.0;
     double initialMachineZ = 0.0;
@@ -79,6 +103,8 @@ public:
 
     void setRotaryAxisConfig(const GProfileRotaryAxisConfig& config);
     const GProfileRotaryAxisConfig& rotaryAxisConfig() const;
+    void setToolClearanceConfig(const GProfileToolClearanceConfig& config);
+    const GProfileToolClearanceConfig& toolClearanceConfig() const;
 
     static QString normalizeEntityTypeKey(const QString& entityType);
     static QString normalizeLayerKey(const QString& layerName);
@@ -93,4 +119,5 @@ private:
     QMap<QString, GProfileCodeBlock> m_layerCodes;
     QMap<QString, GProfileCodeBlock> m_entityColorCodes;
     GProfileRotaryAxisConfig m_rotaryAxisConfig;
+    GProfileToolClearanceConfig m_toolClearanceConfig;
 };

@@ -73,6 +73,7 @@ namespace cadcam::planning
             int surfaceCost = 0;
             int entryAxisReversalCount = 0;
             double entryTangentCost = 0.0;
+            int entryCandidateCount = 0;
             std::size_t stableSourceIndex = 0;
             EntityId stableEntityId = 0;
         };
@@ -161,8 +162,9 @@ namespace cadcam::planning
                 int groupId = -1;
                 int boundaryRank = -1;
                 int boundaryPairId = -1;
-                bool firstPlannedUnit = false;
                 bool forcedTopMidpoint = false;
+                machining::TubeZone16 preferredStartZone =
+                    machining::TubeZone16::TopFace;
                 int candidateRunCount = 0;
                 QString candidateRuns;
                 machining::TubeZone16 startZone =
@@ -1519,13 +1521,13 @@ namespace cadcam::planning
         {
             if (strategy == ProcessOrderingStrategy::LazyRotation)
             {
-                if (std::abs(left.rotationCost - right.rotationCost) > kCalculationEpsilon)
-                    return left.rotationCost < right.rotationCost;
-                if (left.surfaceCost != right.surfaceCost) return left.surfaceCost < right.surfaceCost;
                 if (left.entryAxisReversalCount != right.entryAxisReversalCount)
                     return left.entryAxisReversalCount < right.entryAxisReversalCount;
                 if (std::abs(left.entryTangentCost - right.entryTangentCost) > kCalculationEpsilon)
                     return left.entryTangentCost < right.entryTangentCost;
+                if (std::abs(left.rotationCost - right.rotationCost) > kCalculationEpsilon)
+                    return left.rotationCost < right.rotationCost;
+                if (left.surfaceCost != right.surfaceCost) return left.surfaceCost < right.surfaceCost;
                 if (std::abs(left.movementDistance - right.movementDistance) > kCalculationEpsilon)
                     return left.movementDistance < right.movementDistance;
             }
@@ -1619,11 +1621,12 @@ namespace cadcam::planning
         machining::TubeZone16 zoneAtOffset
         (
             machining::TubeZone16 initialZone,
-            int offset
+            int offset,
+            int perimeterDirection
         )
         {
             const int initial = static_cast<int>(machining::tubeZoneIndex(initialZone));
-            const int wrapped = (initial + offset
+            const int wrapped = (initial + offset * perimeterDirection
                 + static_cast<int>(machining::kTubeZone16Count))
                 % static_cast<int>(machining::kTubeZone16Count);
             return static_cast<machining::TubeZone16>(wrapped);
@@ -2213,15 +2216,15 @@ namespace cadcam::planning
                 ProcessOrderingStrategy selectionStrategy,
                 double projectionTolerance,
                 int boundaryRank,
-                bool firstPlannedUnit
+                machining::TubeZone16 preferredStartZone
             )
             {
                 Result result;
                 result.report.groupId = group.groupId;
                 result.report.boundaryRank = boundaryRank;
-                result.report.firstPlannedUnit = firstPlannedUnit;
+                result.report.preferredStartZone = preferredStartZone;
                 result.report.forcedTopMidpoint =
-                    boundaryRank == 0 && firstPlannedUnit;
+                    preferredStartZone == machining::TubeZone16::TopFace;
                 if (!group.entityIds.empty())
                 {
                     const auto found = entities.find(group.entityIds.front());
@@ -2296,8 +2299,7 @@ namespace cadcam::planning
                     {
                         runDescriptions.push_back(describeRun(run));
                         if (!run.strongZone
-                            || (result.report.forcedTopMidpoint
-                                && run.zone != machining::TubeZone16::TopFace))
+                            || run.zone != result.report.preferredStartZone)
                         {
                             continue;
                         }
@@ -2331,9 +2333,7 @@ namespace cadcam::planning
                     if (!midpointLocated)
                     {
                         result.report.failureReason =
-                            result.report.forcedTopMidpoint
-                            ? QStringLiteral("No reliable TopFace run has an interior arc-length midpoint.")
-                            : QStringLiteral("No reliable strong-zone run has an interior arc-length midpoint.");
+                            QStringLiteral("No reliable run in the preferred sweep zone has an interior arc-length midpoint.");
                         result.report.failureCode =
                             DiagnosticCode::ProcessPlanningBreakMidpointCandidateMissing;
                     }
@@ -3242,10 +3242,10 @@ namespace cadcam::planning
             values.insert(QStringLiteral("boundaryRank"), report.boundaryRank);
             values.insert(QStringLiteral("boundaryPairId"),
                 report.boundaryPairId);
-            values.insert(QStringLiteral("isFirstPlannedUnit"),
-                report.firstPlannedUnit);
             values.insert(QStringLiteral("forcedTopMidpoint"),
                 report.forcedTopMidpoint);
+            values.insert(QStringLiteral("preferredStartZone"),
+                machining::tubeZoneName(report.preferredStartZone));
             values.insert(QStringLiteral("candidateRunCount"),
                 report.candidateRunCount);
             values.insert(QStringLiteral("candidateRuns"),
@@ -3290,6 +3290,8 @@ namespace cadcam::planning
             values.insert(QStringLiteral("direction"), report.direction);
             values.insert(QStringLiteral("fragmentCount"),
                 report.fragmentCount);
+            values.insert(QStringLiteral("midpointFragmentUsed"),
+                report.fragmentCount > 0);
             values.insert(QStringLiteral("nextPartitionId"),
                 report.nextPartitionId);
             values.insert(QStringLiteral("partitionMappingFound"),
@@ -3321,6 +3323,47 @@ namespace cadcam::planning
             );
         }
 
+        Diagnostic entrySelectionDiagnostic
+        (
+            const OperationContext& context,
+            const ProcessGroup& group,
+            const GroupTraversal& traversal
+        )
+        {
+            QVariantMap values;
+            values.insert(QStringLiteral("entrySelectionSummary"), true);
+            values.insert(QStringLiteral("unitKey"), processGroupKeyText(group));
+            values.insert(QStringLiteral("groupKind"), groupKindName(group.kind));
+            values.insert(QStringLiteral("candidateCount"),
+                traversal.entryCandidateCount);
+            values.insert(QStringLiteral("selectedStart"),
+                QStringLiteral("%1,%2,%3")
+                    .arg(traversal.start.x, 0, 'g', 15)
+                    .arg(traversal.start.y, 0, 'g', 15)
+                    .arg(traversal.start.z, 0, 'g', 15));
+            values.insert(QStringLiteral("selectedReverse"),
+                !traversal.entities.empty()
+                    && traversal.entities.front().reverseRelativeToInput);
+            values.insert(QStringLiteral("axisReversalCount"),
+                traversal.entryAxisReversalCount);
+            values.insert(QStringLiteral("tangentCost"),
+                traversal.entryTangentCost);
+            values.insert(QStringLiteral("rotationCost"),
+                traversal.rotationCost);
+            values.insert(QStringLiteral("movementDistance"),
+                traversal.movementDistance);
+            values.insert(QStringLiteral("midpointFragmentUsed"), false);
+            return planningDiagnostic
+            (
+                context,
+                DiagnosticCode::ProcessPlanningEntrySelectionSummary,
+                QStringLiteral("普通四轴加工单元已选择合法平滑入口。"),
+                QStringLiteral("Ordinary rotary unit selected a legal entry after zone and longitudinal ordering."),
+                values,
+                DiagnosticSeverity::Info
+            );
+        }
+
         std::optional<GroupTraversal> bestTraversal
         (
             const ProcessGroup& group,
@@ -3342,6 +3385,7 @@ namespace cadcam::planning
                 if (isSingleClosedEntryOptimizedCurve(group, entity))
                 {
                     std::optional<GroupTraversal> best;
+                    int candidateCount = 0;
                     const std::size_t startCandidateCount = entity.startParameter.has_value()
                         ? 1U : entity.path.vertices.size();
                     for (std::size_t startIndex = 0U;
@@ -3356,6 +3400,7 @@ namespace cadcam::planning
                                 policy.connectionTolerance, section, tubeCenter
                             );
                             if (!candidate.has_value()) continue;
+                            ++candidateCount;
                             if (!best.has_value()
                                 || traversalLess(*candidate, *best, selectionStrategy))
                             {
@@ -3363,6 +3408,8 @@ namespace cadcam::planning
                             }
                         }
                     }
+                    if (best.has_value())
+                        best->entryCandidateCount = candidateCount;
                     return best;
                 }
             }
@@ -3374,11 +3421,15 @@ namespace cadcam::planning
                     group, entities, currentPosition, policy, section,
                     tubeCenter, selectionStrategy
                 );
+                if (closedLoop.traversal.has_value())
+                    closedLoop.traversal->entryCandidateCount =
+                        closedLoop.report.candidateCount;
                 if (closedLoopReport != nullptr) *closedLoopReport = std::move(closedLoop.report);
                 return std::move(closedLoop.traversal);
             }
 
             std::optional<GroupTraversal> best;
+            int candidateCount = 0;
             for (const EntityId entityId : group.entityIds)
             {
                 for (const bool reverse : { false, true })
@@ -3392,11 +3443,13 @@ namespace cadcam::planning
                         policy.connectionTolerance, std::make_pair(entityId, reverse)
                     );
                     if (!candidate.has_value()) continue;
+                    ++candidateCount;
                     scoreTraversal(*candidate, currentPosition, section);
                     if (!best.has_value() || traversalLess(*candidate, *best, selectionStrategy))
                         best = std::move(candidate);
                 }
             }
+            if (best.has_value()) best->entryCandidateCount = candidateCount;
             return best;
         }
 
@@ -4168,6 +4221,14 @@ namespace cadcam::planning
             {
                 zoneSweepPartitions[partitionIndex].partitionId =
                     static_cast<int>(partitionIndex);
+                zoneSweepPartitions[partitionIndex].initialZone =
+                    policy.zone16Sweep.initialZone;
+                zoneSweepPartitions[partitionIndex].perimeterDirection =
+                    policy.zone16Sweep.perimeterDirection
+                        == PerimeterSweepDirection::Clockwise ? 1 : -1;
+                zoneSweepPartitions[partitionIndex].longitudinalDirection =
+                    policy.zone16Sweep.longitudinalDirection
+                        == LongitudinalSweepDirection::PositiveX ? 1 : -1;
             }
             for (std::size_t breakIndex = 0U;
                 breakIndex < orderedBreakBoundaryIndices.size(); ++breakIndex)
@@ -4286,6 +4347,8 @@ namespace cadcam::planning
         QVector<Diagnostic> closedLoopDiagnostics;
         Zone16SweepState zoneSweepState;
         Zone16SweepReport zoneSweepReport;
+        machining::TubeZone16 currentSweepZone =
+            policy.zone16Sweep.initialZone;
         Vector3d currentPosition = policy.initialPosition;
         int processOrder = 0;
         const auto finishZoneSweepPartition = [&]()
@@ -4319,7 +4382,8 @@ namespace cadcam::planning
 
             zoneSweepReport.partitionId = partitionId;
             zoneSweepReport.initialZone = initialZone;
-            zoneSweepReport.perimeterDirection = 1;
+            zoneSweepReport.perimeterDirection =
+                partition.perimeterDirection;
             zoneSweepReport.longitudinalDirection =
                 partition.longitudinalDirection;
             zoneSweepReport.partitionMinimumX = partition.minimumX;
@@ -4385,10 +4449,56 @@ namespace cadcam::planning
                 }
             }
 
+            const bool hasEligibleBreak = std::any_of
+            (
+                eligible.cbegin(), eligible.cend(),
+                [&plan](int groupId)
+                {
+                    return plan.groups[static_cast<std::size_t>(groupId)].kind
+                        == ProcessGroupKind::BreakBoundary;
+                }
+            );
+            if (zone16SweepEnabled && !zoneSweepState.active
+                && !hasEligibleBreak)
+            {
+                for (const TubeZoneSweepPartition& partition :
+                    zoneSweepPartitions)
+                {
+                    const bool hasEligibleUnit = std::any_of
+                    (
+                        eligible.cbegin(), eligible.cend(),
+                        [&partition](int groupId)
+                        {
+                            return partition.groupIds.find(groupId)
+                                != partition.groupIds.end();
+                        }
+                    );
+                    if (hasEligibleUnit)
+                    {
+                        if (!startZoneSweepPartition
+                            (partition.partitionId, currentSweepZone))
+                        {
+                            return failure<ProcessPlan>
+                            (
+                                OperationStatus::Failed, context,
+                                DiagnosticCode::ProcessPlanningZoneSweepProfileInvalid,
+                                QStringLiteral("无法以当前工艺区位启动 16 区位扫描。"),
+                                QStringLiteral("The eligible partition rejected the current sweep zone."),
+                                diagnosticValues(input, policy)
+                            );
+                        }
+                        break;
+                    }
+                }
+            }
+
             const bool initialSelection = scheduled.empty();
-            const ProcessOrderingStrategy selectionStrategy = initialSelection
-                ? ProcessOrderingStrategy::NearestNext
-                : policy.orderingStrategy;
+            const ProcessOrderingStrategy selectionStrategy =
+                policy.sortIntent == ProcessSortIntent::RebuildSequence
+                    && policy.orderingStrategy
+                        == ProcessOrderingStrategy::LazyRotation
+                ? ProcessOrderingStrategy::LazyRotation
+                : ProcessOrderingStrategy::NearestNext;
             std::vector<int> candidateGroupIds = eligible;
             std::unordered_map<int, ZoneSweepSelection> zoneSelections;
             if (zone16SweepEnabled && zoneSweepState.active)
@@ -4404,7 +4514,8 @@ namespace cadcam::planning
                 {
                     const machining::TubeZone16 zone = zoneAtOffset
                         (zoneSweepState.initialZone,
-                            zoneSweepState.currentZoneOffset);
+                            zoneSweepState.currentZoneOffset,
+                            partition.perimeterDirection);
                     const std::size_t zoneIndex =
                         machining::tubeZoneIndex(zone);
                     if (!zoneSweepState.zoneEntered)
@@ -4493,16 +4604,11 @@ namespace cadcam::planning
                                 plan.groups[static_cast<std::size_t>(right.groupId)]
                             );
                         });
-                        const double firstHitX = available.front().hitX;
-                        for (const ZoneSweepSelection& selection : available)
-                        {
-                            if (std::abs(selection.hitX - firstHitX)
-                                > zoneProjectionTolerance)
-                                break;
-                            candidateGroupIds.push_back(selection.groupId);
-                            zoneSelections.emplace
-                                (selection.groupId, selection);
-                        }
+                        const ZoneSweepSelection& selection =
+                            available.front();
+                        candidateGroupIds.push_back(selection.groupId);
+                        zoneSelections.emplace
+                            (selection.groupId, selection);
                         break;
                     }
 
@@ -4596,7 +4702,8 @@ namespace cadcam::planning
                             group, entities, currentPosition, policy,
                             *surfaceSweepSection, input.tubeSectionCenter,
                             selectionStrategy, zoneProjectionTolerance,
-                            boundaryRank->second, initialSelection
+                            boundaryRank->second,
+                            currentSweepZone
                         );
                     candidateClosedLoopReport =
                         std::move(breakTraversal.closedLoopReport);
@@ -4828,6 +4935,14 @@ namespace cadcam::planning
                     DiagnosticSeverity::Info
                 ));
             }
+            if (policy.sortIntent == ProcessSortIntent::RebuildSequence
+                && policy.orderingStrategy
+                    == ProcessOrderingStrategy::LazyRotation
+                && selectedGroup.kind != ProcessGroupKind::BreakBoundary)
+            {
+                closedLoopDiagnostics.push_back
+                    (entrySelectionDiagnostic(context, selectedGroup, selected));
+            }
             scheduled.insert(selected.groupId);
             for (const int successor : successors[selected.groupId]) --indegree[successor];
 
@@ -4864,6 +4979,8 @@ namespace cadcam::planning
                             values
                         );
                     }
+                    currentSweepZone =
+                        *selectedBreakReport->exitZone;
                     if (partition == partitionAfterBreakGroup.end())
                     {
                         QVariantMap values =
@@ -4914,20 +5031,15 @@ namespace cadcam::planning
                         zoneSelections.find(selected.groupId);
                     if (!zoneSweepState.active)
                     {
-                        const auto initialZone = traversalExitZone
-                        (
-                            selected, *surfaceSweepSection,
-                            zoneProjectionTolerance
-                        );
-                        if (!initialZone.has_value()
-                            || !startZoneSweepPartition(0, *initialZone))
+                        if (!startZoneSweepPartition
+                            (0, currentSweepZone))
                         {
                             return failure<ProcessPlan>
                             (
                                 OperationStatus::Failed, context,
                                 DiagnosticCode::ProcessPlanningZoneSweepProfileInvalid,
                                 QStringLiteral("首个加工单元无法初始化 16 区位扫描。"),
-                                QStringLiteral("The initial traversal exit did not resolve to one TubeZone16."),
+                                QStringLiteral("The configured initial sweep zone could not start partition zero."),
                                 diagnosticValues(input, policy, 0U, 0U, -1,
                                     selected.groupId)
                             );
@@ -4989,6 +5101,7 @@ namespace cadcam::planning
 
                     if (selectionAvailable && zoneSweepReport.active)
                     {
+                        currentSweepZone = selection.zone;
                         const double frontierAfter =
                             zoneSweepState.longitudinalDirection >= 0
                             ? std::max(zoneSweepState.frontierX,

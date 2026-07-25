@@ -4315,6 +4315,18 @@ bool Gcode_postprocessing_system::sortEntitiesWithProcessPlan3D
     policy.allowReverse = true;
     policy.preserveClosedLoopsAsAtomicGroups = true;
     policy.initialPosition = { 0.0, 0.0, 500.0 };
+    policy.zone16Sweep.initialZone =
+        cadcam::machining::TubeZone16::TopFace;
+    policy.zone16Sweep.perimeterDirection =
+        m_activeProfile.rotaryAxisConfig().perimeterSweepDirection
+            == GProfilePerimeterSweepDirection::Clockwise
+        ? cadcam::planning::PerimeterSweepDirection::Clockwise
+        : cadcam::planning::PerimeterSweepDirection::CounterClockwise;
+    policy.zone16Sweep.longitudinalDirection =
+        m_activeProfile.rotaryAxisConfig().longitudinalSweepDirection
+            == GProfileLongitudinalSweepDirection::PositiveX
+        ? cadcam::planning::LongitudinalSweepDirection::PositiveX
+        : cadcam::planning::LongitudinalSweepDirection::NegativeX;
 
     const OperationContext context = createOperationContext(QStringLiteral("BuildAndApplyProcessPlan3D"));
     const std::optional<cadcam::machining::TubeSectionModel> section =
