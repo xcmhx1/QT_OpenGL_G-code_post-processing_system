@@ -270,6 +270,8 @@ DocumentProcessPlanningAdapter::captureRotary
             ? process::DirectionPreference::Auto : state.overrideData.direction;
         entity.startParameter = rebuildSequence
             ? std::nullopt : state.overrideData.startParameter;
+        entity.manualDirectionPreference = state.overrideData.direction;
+        entity.manualStartParameter = state.overrideData.startParameter;
 
         if (entry.sourceEntity.has_value())
         {

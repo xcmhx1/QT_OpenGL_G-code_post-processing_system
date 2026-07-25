@@ -604,6 +604,20 @@ namespace
     {
         for (const Diagnostic& diagnostic : diagnostics)
         {
+            if (diagnostic.context.value
+                (QStringLiteral("entryZoneProfile")).toBool())
+            {
+                const QVariantMap& values = diagnostic.context;
+                qInfo().noquote()
+                    << QStringLiteral("[ProcessPlanning][EntryZoneProfile] unitKey=%1 groupKind=%2 certainMask=%3 possibleMask=%4 legalEntryMask=%5 candidateCountsByZone=%6")
+                        .arg(values.value(QStringLiteral("unitKey")).toString())
+                        .arg(values.value(QStringLiteral("groupKind")).toString())
+                        .arg(values.value(QStringLiteral("certainMask")).toString())
+                        .arg(values.value(QStringLiteral("possibleMask")).toString())
+                        .arg(values.value(QStringLiteral("legalEntryMask")).toString())
+                        .arg(values.value(QStringLiteral("candidateCountsByZone")).toString());
+                continue;
+            }
             if (!diagnostic.context.value
                 (QStringLiteral("entrySelectionSummary")).toBool())
             {
@@ -611,13 +625,22 @@ namespace
             }
             const QVariantMap& values = diagnostic.context;
             qInfo().noquote()
-                << QStringLiteral("[ProcessPlanning][EntrySelection] unitKey=%1 groupKind=%2 candidateCount=%3 selectedStart=%4 selectedReverse=%5 axisReversalCount=%6 tangentCost=%7 rotationCost=%8 movementDistance=%9 midpointFragmentUsed=%10")
+                << QStringLiteral("[ProcessPlanning][EntrySelection] unitKey=%1 scheduledZone=%2 selectedEntryZone=%3 candidateKind=%4 candidateCount=%5 wrongZoneRejectedCount=%6 selectedEntityId=%7 selectedSourceParameter=%8 selectedReverse=%9 entryPosition=%10 firstCutTangent=%11 distanceToZoneBoundary=%12 axisReversalCount=%13 tangentCost=%14 rotationCost=%15 movementDistance=%16 fragmentCount=%17")
                     .arg(values.value(QStringLiteral("unitKey")).toString())
-                    .arg(values.value(QStringLiteral("groupKind")).toString())
+                    .arg(values.value(QStringLiteral("scheduledZone")).toString())
+                    .arg(values.value(QStringLiteral("selectedEntryZone")).toString())
+                    .arg(values.value(QStringLiteral("candidateKind")).toString())
                     .arg(values.value(QStringLiteral("candidateCount")).toInt())
-                    .arg(values.value(QStringLiteral("selectedStart")).toString())
+                    .arg(values.value(QStringLiteral("wrongZoneRejectedCount")).toInt())
+                    .arg(values.value(QStringLiteral("selectedEntityId")).toULongLong())
+                    .arg(values.value(QStringLiteral("selectedSourceParameter"))
+                        .toDouble(), 0, 'g', 15)
                     .arg(values.value(QStringLiteral("selectedReverse")).toBool()
                         ? QStringLiteral("true") : QStringLiteral("false"))
+                    .arg(values.value(QStringLiteral("entryPosition")).toString())
+                    .arg(values.value(QStringLiteral("firstCutTangent")).toString())
+                    .arg(values.value(QStringLiteral("distanceToZoneBoundary"))
+                        .toDouble(), 0, 'g', 15)
                     .arg(values.value(QStringLiteral("axisReversalCount")).toInt())
                     .arg(values.value(QStringLiteral("tangentCost"))
                         .toDouble(), 0, 'g', 15)
@@ -625,8 +648,7 @@ namespace
                         .toDouble(), 0, 'g', 15)
                     .arg(values.value(QStringLiteral("movementDistance"))
                         .toDouble(), 0, 'g', 15)
-                    .arg(values.value(QStringLiteral("midpointFragmentUsed"))
-                        .toBool() ? 1 : 0);
+                    .arg(values.value(QStringLiteral("fragmentCount")).toInt());
         }
     }
 

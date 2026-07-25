@@ -62,6 +62,44 @@ namespace cadcam::planning
             double entryTangentCost = 0.0;
         };
 
+        enum class ZoneEntryCandidateKind
+        {
+            OpenEndpoint,
+            ClosedCurveParameter,
+            ClosedLoopConnection,
+            ClosedLoopMemberInterior,
+            BreakZoneMidpoint
+        };
+
+        struct ZoneEntryCandidate
+        {
+            machining::TubeZone16 zone =
+                machining::TubeZone16::TopFace;
+            ZoneEntryCandidateKind kind =
+                ZoneEntryCandidateKind::OpenEndpoint;
+            EntityId entityId = 0;
+            std::optional<double> sourceParameter;
+            bool reverse = false;
+            Vector3d entryPosition;
+            Vector3d firstCutPoint;
+            Vector3d firstCutTangent;
+            double entryX = 0.0;
+            double confidence = 0.0;
+            double distanceToZoneBoundary = 0.0;
+            bool ambiguous = false;
+        };
+
+        struct TraversalSelectionContext
+        {
+            std::optional<machining::TubeZone16> requiredEntryZone;
+            int longitudinalDirection = 1;
+            double zoneHitX = 0.0;
+            double frontierX = 0.0;
+            double projectionTolerance = 0.0;
+            Vector3d previousEnd;
+            bool hardZoneConstraint = false;
+        };
+
         struct GroupTraversal
         {
             int groupId = -1;
@@ -74,8 +112,11 @@ namespace cadcam::planning
             int entryAxisReversalCount = 0;
             double entryTangentCost = 0.0;
             int entryCandidateCount = 0;
+            int wrongZoneRejectedCount = 0;
             std::size_t stableSourceIndex = 0;
             EntityId stableEntityId = 0;
+            std::optional<ZoneEntryCandidate> selectedEntry;
+            std::vector<ProcessPathFragment> fragments;
         };
 
         struct ClosedLoopTraversalReport
@@ -88,6 +129,7 @@ namespace cadcam::planning
             int branchNodeCount = 0;
             int invalidDegreeNodeCount = 0;
             int candidateCount = 0;
+            int wrongZoneRejectedCount = 0;
             std::vector<EntityId> selectedOrder;
             std::vector<bool> selectedReverse;
             bool simpleLoopValid = false;
@@ -202,13 +244,17 @@ namespace cadcam::planning
         {
             machining::TubeZoneMask certainMask = 0U;
             machining::TubeZoneMask possibleMask = 0U;
+            machining::TubeZoneMask legalEntryMask = 0U;
+            machining::TubeZoneMask schedulableMask = 0U;
             std::array<machining::TubeZoneSpan,
                 machining::kTubeZone16Count> zoneSpans;
+            std::array<std::vector<ZoneEntryCandidate>,
+                machining::kTubeZone16Count> entryCandidates;
+            std::array<int, machining::kTubeZone16Count>
+                entryCandidateCounts{};
             bool closed = false;
             bool uncertain = false;
             bool fallbackOwner = false;
-            machining::TubeZone16 fallbackZone =
-                machining::TubeZone16::TopFace;
         };
 
         struct ZoneSweepSelection
@@ -1217,6 +1263,46 @@ namespace cadcam::planning
             return false;
         }
 
+        bool manualDirectionAllowed
+        (
+            const PlanningEntity& entity,
+            bool reverse,
+            const TraversalSelectionContext* selection
+        )
+        {
+            if (selection == nullptr || !selection->hardZoneConstraint)
+                return true;
+            switch (entity.manualDirectionPreference)
+            {
+            case process::DirectionPreference::Forward: return !reverse;
+            case process::DirectionPreference::Reverse: return reverse;
+            case process::DirectionPreference::Auto: return true;
+            }
+            return false;
+        }
+
+        bool hasManualEntryConstraint
+        (
+            const ProcessGroup& group,
+            const std::unordered_map<EntityId, const PlanningEntity*>& entities
+        )
+        {
+            return std::any_of
+            (
+                group.entityIds.cbegin(),
+                group.entityIds.cend(),
+                [&entities](EntityId entityId)
+                {
+                    const auto found = entities.find(entityId);
+                    return found != entities.end()
+                        && found->second != nullptr
+                        && (found->second->manualStartParameter.has_value()
+                            || found->second->manualDirectionPreference
+                                != process::DirectionPreference::Auto);
+                }
+            );
+        }
+
         std::optional<GroupTraversal> buildTraversal
         (
             const ProcessGroup& group,
@@ -1424,6 +1510,178 @@ namespace cadcam::planning
             }
         }
 
+        bool strongEntryZone(machining::TubeZone16 zone)
+        {
+            return machining::tubeZoneIndex(zone) % 2U == 0U;
+        }
+
+        Vector3d interpolateEntryPoint
+        (
+            const Vector3d& start,
+            const Vector3d& end,
+            double factor
+        )
+        {
+            return
+            {
+                start.x + (end.x - start.x) * factor,
+                start.y + (end.y - start.y) * factor,
+                start.z + (end.z - start.z) * factor
+            };
+        }
+
+        std::optional<ZoneEntryCandidate> classifyZoneEntry
+        (
+            ZoneEntryCandidateKind kind,
+            EntityId entityId,
+            std::optional<double> sourceParameter,
+            bool reverse,
+            const Vector3d& entryPosition,
+            const Vector3d& firstCutPoint,
+            const machining::TubeSectionModel& section,
+            double projectionTolerance
+        )
+        {
+            const double cutLength = distance(entryPosition, firstCutPoint);
+            if (!std::isfinite(cutLength)
+                || cutLength <= kCalculationEpsilon)
+            {
+                return std::nullopt;
+            }
+
+            std::optional<machining::TubeZone16> reliableZone;
+            double confidence = 1.0;
+            double maximumDeviation = 0.0;
+            for (const double factor : { 0.25, 0.5, 0.75 })
+            {
+                const Vector3d point = interpolateEntryPoint
+                    (entryPosition, firstCutPoint, factor);
+                const machining::TubeSectionProjection projection =
+                    machining::TubeSectionProjector::project
+                    (
+                        section, { point.y, point.z },
+                        projectionTolerance
+                    );
+                if (!projection.valid || projection.ambiguous
+                    || projection.onBoundary
+                    || !strongEntryZone(projection.zone)
+                    || projection.confidence < 0.5
+                    || projection.absoluteDistanceToShell
+                        > projectionTolerance * 0.8)
+                {
+                    return std::nullopt;
+                }
+                if (!reliableZone.has_value())
+                    reliableZone = projection.zone;
+                else if (*reliableZone != projection.zone)
+                    return std::nullopt;
+                confidence = std::min(confidence, projection.confidence);
+                maximumDeviation = std::max(maximumDeviation,
+                    projection.absoluteDistanceToShell);
+            }
+            if (!reliableZone.has_value()) return std::nullopt;
+
+            const machining::TubeSectionProjection entryProjection =
+                machining::TubeSectionProjector::project
+                (
+                    section, { entryPosition.y, entryPosition.z },
+                    projectionTolerance
+                );
+            if (entryProjection.valid && !entryProjection.onBoundary
+                && !entryProjection.ambiguous
+                && strongEntryZone(entryProjection.zone)
+                && entryProjection.zone != *reliableZone)
+            {
+                return std::nullopt;
+            }
+
+            ZoneEntryCandidate candidate;
+            candidate.zone = *reliableZone;
+            candidate.kind = kind;
+            candidate.entityId = entityId;
+            candidate.sourceParameter = sourceParameter;
+            candidate.reverse = reverse;
+            candidate.entryPosition = entryPosition;
+            candidate.firstCutPoint = firstCutPoint;
+            candidate.firstCutTangent =
+            {
+                firstCutPoint.x - entryPosition.x,
+                firstCutPoint.y - entryPosition.y,
+                firstCutPoint.z - entryPosition.z
+            };
+            candidate.entryX = entryPosition.x;
+            candidate.confidence = confidence;
+            candidate.distanceToZoneBoundary =
+                (entryProjection.onBoundary || entryProjection.ambiguous)
+                ? cutLength * 0.25 : cutLength;
+            candidate.distanceToZoneBoundary =
+                std::max(0.0, candidate.distanceToZoneBoundary
+                    - maximumDeviation);
+            candidate.ambiguous = false;
+            return candidate;
+        }
+
+        void scoreUnwrappedEntry
+        (
+            DirectedEntity& directed,
+            const Vector3d& previousEnd,
+            const Vector3d& firstCutPoint,
+            const machining::TubeSectionModel& section,
+            double connectionTolerance,
+            double projectionTolerance
+        )
+        {
+            scoreEntrySmoothness(directed, previousEnd, firstCutPoint,
+                Vector2d{ section.geometry.centerY, section.geometry.centerZ },
+                connectionTolerance);
+            const auto previous = machining::TubeSectionProjector::project
+                (section, { previousEnd.y, previousEnd.z },
+                    projectionTolerance);
+            const auto entry = machining::TubeSectionProjector::project
+                (section, { directed.start.y, directed.start.z },
+                    projectionTolerance);
+            const auto cut = machining::TubeSectionProjector::project
+                (section, { firstCutPoint.y, firstCutPoint.z },
+                    projectionTolerance);
+            if (!previous.valid || !entry.valid || !cut.valid
+                || section.geometry.perimeter <= kCalculationEpsilon)
+            {
+                return;
+            }
+
+            const double approachX = directed.start.x - previousEnd.x;
+            const double approachS = wrappedPerimeterDelta
+                (previous.perimeterPosition, entry.perimeterPosition,
+                    section.geometry.perimeter);
+            const double cutX = firstCutPoint.x - directed.start.x;
+            const double cutS = wrappedPerimeterDelta
+                (entry.perimeterPosition, cut.perimeterPosition,
+                    section.geometry.perimeter);
+            const double threshold = entryThreshold(connectionTolerance);
+            directed.entryAxisReversalCount = 0;
+            if (std::abs(approachX) > threshold
+                && std::abs(cutX) > threshold
+                && approachX * cutX < 0.0)
+            {
+                ++directed.entryAxisReversalCount;
+            }
+            if (std::abs(approachS) > threshold
+                && std::abs(cutS) > threshold
+                && approachS * cutS < 0.0)
+            {
+                ++directed.entryAxisReversalCount;
+            }
+            const double approachLength = std::hypot(approachX, approachS);
+            const double cutLength = std::hypot(cutX, cutS);
+            if (approachLength > threshold && cutLength > threshold)
+            {
+                const double dotValue = (approachX * cutX
+                    + approachS * cutS) / (approachLength * cutLength);
+                directed.entryTangentCost =
+                    std::clamp(1.0 - dotValue, 0.0, 2.0);
+            }
+        }
+
         bool isSingleClosedEntryOptimizedCurve
         (
             const ProcessGroup& group,
@@ -1432,7 +1690,8 @@ namespace cadcam::planning
         {
             return group.entityIds.size() == 1U && entity.path.closed
                 && (entity.sourceKind == geometry::SourceGeometryKind::Circle
-                    || entity.sourceKind == geometry::SourceGeometryKind::Ellipse);
+                    || entity.sourceKind == geometry::SourceGeometryKind::Ellipse
+                    || entity.sourceKind == geometry::SourceGeometryKind::Spline);
         }
 
         std::optional<GroupTraversal> buildSingleClosedCurveTraversal
@@ -1557,6 +1816,61 @@ namespace cadcam::planning
             return leftReverse < rightReverse;
         }
 
+        bool zoneConstrainedTraversalLess
+        (
+            const GroupTraversal& left,
+            const GroupTraversal& right,
+            const TraversalSelectionContext& selection,
+            ProcessOrderingStrategy strategy
+        )
+        {
+            if (!selection.hardZoneConstraint
+                || !selection.requiredEntryZone.has_value()
+                || !left.selectedEntry.has_value()
+                || !right.selectedEntry.has_value())
+            {
+                return traversalLess(left, right, strategy);
+            }
+            const ZoneEntryCandidate& leftEntry = *left.selectedEntry;
+            const ZoneEntryCandidate& rightEntry = *right.selectedEntry;
+            if (leftEntry.ambiguous != rightEntry.ambiguous)
+                return !leftEntry.ambiguous;
+            if (std::abs(leftEntry.distanceToZoneBoundary
+                - rightEntry.distanceToZoneBoundary) > kCalculationEpsilon)
+            {
+                return leftEntry.distanceToZoneBoundary
+                    > rightEntry.distanceToZoneBoundary;
+            }
+            if (left.entryAxisReversalCount != right.entryAxisReversalCount)
+                return left.entryAxisReversalCount
+                    < right.entryAxisReversalCount;
+            if (std::abs(left.entryTangentCost
+                - right.entryTangentCost) > kCalculationEpsilon)
+            {
+                return left.entryTangentCost < right.entryTangentCost;
+            }
+            const double leftHitDistance =
+                std::abs(leftEntry.entryX - selection.zoneHitX);
+            const double rightHitDistance =
+                std::abs(rightEntry.entryX - selection.zoneHitX);
+            if (std::abs(leftHitDistance - rightHitDistance)
+                > kCalculationEpsilon)
+            {
+                return leftHitDistance < rightHitDistance;
+            }
+            if (std::abs(left.rotationCost - right.rotationCost)
+                > kCalculationEpsilon)
+            {
+                return left.rotationCost < right.rotationCost;
+            }
+            if (std::abs(left.movementDistance - right.movementDistance)
+                > kCalculationEpsilon)
+            {
+                return left.movementDistance < right.movementDistance;
+            }
+            return traversalLess(left, right, strategy);
+        }
+
         bool surfaceSweepCandidateLess
         (
             const SchedulingCandidate& left,
@@ -1679,35 +1993,6 @@ namespace cadcam::planning
             std::sort(leftIds.begin(), leftIds.end());
             std::sort(rightIds.begin(), rightIds.end());
             return leftIds < rightIds;
-        }
-
-        std::optional<machining::TubeZone16> fallbackOwnerZone
-        (
-            const ProcessGroupZoneProfile& profile
-        )
-        {
-            std::optional<machining::TubeZone16> selected;
-            double selectedLength = -1.0;
-            bool selectedStrongZone = false;
-            for (std::size_t index = 0U;
-                index < machining::kTubeZone16Count; ++index)
-            {
-                const auto zone = static_cast<machining::TubeZone16>(index);
-                if ((profile.possibleMask & machining::tubeZoneBit(zone)) == 0U)
-                    continue;
-                const bool strongZone = index % 2U == 0U;
-                const double length = profile.zoneSpans[index].projectedLength;
-                if (!selected.has_value()
-                    || (strongZone != selectedStrongZone && strongZone)
-                    || (strongZone == selectedStrongZone
-                        && length > selectedLength + kCalculationEpsilon))
-                {
-                    selected = zone;
-                    selectedLength = length;
-                    selectedStrongZone = strongZone;
-                }
-            }
-            return selected;
         }
 
         std::optional<machining::TubeZone16> traversalExitZone
@@ -1897,7 +2182,8 @@ namespace cadcam::planning
                 const ProcessPlanningPolicy& policy,
                 const std::optional<machining::TubeSectionModel>& section,
                 const std::optional<Vector2d>& tubeCenter,
-                ProcessOrderingStrategy selectionStrategy
+                ProcessOrderingStrategy selectionStrategy,
+                const TraversalSelectionContext* selection = nullptr
             )
             {
                 Result result;
@@ -2050,12 +2336,19 @@ namespace cadcam::planning
                 std::optional<GroupTraversal> best;
                 int bestStartEndpoint = -1;
                 int bestLoopDirection = -1;
+                int wrongZoneRejectedCount = 0;
                 for (std::size_t startEdgeIndex = 0; startEdgeIndex < edges.size(); ++startEdgeIndex)
                 {
                     for (const bool startReverse : { false, true })
                     {
                         const Edge& startEdge = edges[startEdgeIndex];
-                        if (!directionAllowed(*startEdge.entity, startReverse, policy.allowReverse)) continue;
+                        if (!directionAllowed(*startEdge.entity, startReverse,
+                            policy.allowReverse)
+                            || !manualDirectionAllowed(*startEdge.entity,
+                                startReverse, selection))
+                        {
+                            continue;
+                        }
 
                         GroupTraversal candidate;
                         candidate.groupId = group.groupId;
@@ -2090,7 +2383,10 @@ namespace cadcam::planning
                             const Edge& edge = edges[edgeIndex];
                             const bool reverse = edge.endNode == currentNode;
                             if ((edge.startNode != currentNode && edge.endNode != currentNode)
-                                || !directionAllowed(*edge.entity, reverse, policy.allowReverse))
+                                || !directionAllowed(*edge.entity, reverse,
+                                    policy.allowReverse)
+                                || !manualDirectionAllowed(*edge.entity,
+                                    reverse, selection))
                             {
                                 candidateValid = false;
                                 break;
@@ -2137,11 +2433,71 @@ namespace cadcam::planning
                         if (distance(candidate.entities.back().end, candidate.start)
                             > policy.connectionTolerance) continue;
                         candidate.end = candidate.start;
-                        scoreEntrySmoothness
-                        (
-                            candidate.entities.front(), currentPosition, firstNextPoint,
-                            tubeCenter, policy.connectionTolerance
-                        );
+                        const DirectedEntity& firstDirected =
+                            candidate.entities.front();
+                        const auto firstVertices = firstDirected.reverseRelativeToInput
+                            ? std::vector<geometry::PathVertex3D>
+                                (firstDirected.entity->path.vertices.rbegin(),
+                                    firstDirected.entity->path.vertices.rend())
+                            : firstDirected.entity->path.vertices;
+                        const std::optional<double> entryParameter =
+                            firstVertices.empty() ? std::nullopt
+                                : std::optional<double>
+                                    (firstVertices.front().sourceParameter);
+                        if (selection != nullptr
+                            && selection->hardZoneConstraint
+                            && selection->requiredEntryZone.has_value()
+                            && section.has_value())
+                        {
+                            auto entry = classifyZoneEntry
+                            (
+                                ZoneEntryCandidateKind::ClosedLoopConnection,
+                                firstDirected.entity->entityId,
+                                entryParameter,
+                                firstDirected.reverseRelativeToInput,
+                                candidate.start, firstNextPoint, *section,
+                                selection->projectionTolerance
+                            );
+                            const bool manualStartMatches =
+                                !firstDirected.entity->manualStartParameter.has_value()
+                                || (entryParameter.has_value()
+                                    && std::abs(*entryParameter
+                                        - *firstDirected.entity->manualStartParameter)
+                                        <= 1.0e-10);
+                            const bool otherManualStartExists = std::any_of
+                            (
+                                candidate.entities.cbegin() + 1,
+                                candidate.entities.cend(),
+                                [](const DirectedEntity& directed)
+                                {
+                                    return directed.entity != nullptr
+                                        && directed.entity->manualStartParameter.has_value();
+                                }
+                            );
+                            if (!entry.has_value()
+                                || entry->zone
+                                    != *selection->requiredEntryZone
+                                || !manualStartMatches
+                                || otherManualStartExists)
+                            {
+                                ++wrongZoneRejectedCount;
+                                continue;
+                            }
+                            candidate.selectedEntry = std::move(entry);
+                            scoreUnwrappedEntry(candidate.entities.front(),
+                                selection->previousEnd, firstNextPoint,
+                                *section, policy.connectionTolerance,
+                                selection->projectionTolerance);
+                        }
+                        else
+                        {
+                            scoreEntrySmoothness
+                            (
+                                candidate.entities.front(), currentPosition,
+                                firstNextPoint, tubeCenter,
+                                policy.connectionTolerance
+                            );
+                        }
                         candidate.entryAxisReversalCount =
                             candidate.entities.front().entryAxisReversalCount;
                         candidate.entryTangentCost = candidate.entities.front().entryTangentCost;
@@ -2153,11 +2509,35 @@ namespace cadcam::planning
                         const int startEndpoint = startReverse ? 1 : 0;
                         const int loopDirection = startReverse ? 1 : 0;
                         const auto stableLess = [&candidate, startEndpoint, loopDirection,
-                            &best, bestStartEndpoint, bestLoopDirection, selectionStrategy]()
+                            &best, bestStartEndpoint, bestLoopDirection,
+                            selectionStrategy, selection]()
                         {
                             if (!best.has_value()) return true;
-                            if (traversalLess(candidate, *best, selectionStrategy)) return true;
-                            if (traversalLess(*best, candidate, selectionStrategy)) return false;
+                            if (selection != nullptr
+                                && zoneConstrainedTraversalLess(candidate,
+                                    *best, *selection, selectionStrategy))
+                            {
+                                return true;
+                            }
+                            if (selection != nullptr
+                                && zoneConstrainedTraversalLess(*best,
+                                    candidate, *selection,
+                                    selectionStrategy))
+                            {
+                                return false;
+                            }
+                            if (selection == nullptr
+                                && traversalLess(candidate, *best,
+                                    selectionStrategy))
+                            {
+                                return true;
+                            }
+                            if (selection == nullptr
+                                && traversalLess(*best, candidate,
+                                    selectionStrategy))
+                            {
+                                return false;
+                            }
                             if (startEndpoint != bestStartEndpoint)
                                 return startEndpoint < bestStartEndpoint;
                             if (loopDirection != bestLoopDirection)
@@ -2181,10 +2561,15 @@ namespace cadcam::planning
 
                 if (!best.has_value())
                 {
+                    result.report.wrongZoneRejectedCount =
+                        wrongZoneRejectedCount;
                     result.report.failureReason = QStringLiteral("No complete loop traversal satisfies member direction constraints.");
                     return result;
                 }
                 result.report.status = QStringLiteral("Success");
+                result.report.wrongZoneRejectedCount =
+                    wrongZoneRejectedCount;
+                best->wrongZoneRejectedCount = wrongZoneRejectedCount;
                 for (const DirectedEntity& directed : best->entities)
                 {
                     result.report.selectedOrder.push_back(directed.entity->entityId);
@@ -2195,7 +2580,7 @@ namespace cadcam::planning
             }
         };
 
-        class BreakBoundaryTraversalBuilder
+        class ClosedLoopZoneRunBuilder
         {
         public:
             struct Result
@@ -2205,7 +2590,7 @@ namespace cadcam::planning
                 BreakBoundaryTraversalReport report;
             };
 
-            static Result build
+            static Result buildBreak
             (
                 const ProcessGroup& group,
                 const std::unordered_map<EntityId, const PlanningEntity*>& entities,
@@ -2309,6 +2694,7 @@ namespace cadcam::planning
                             group.groupId, cycle, segments, run,
                             entities, currentPosition, policy,
                             section, tubeCenter, projectionTolerance,
+                            0.5, true,
                             directionIndex == 0U
                                 ? QStringLiteral("Forward")
                                 : QStringLiteral("Reverse"),
@@ -2400,7 +2786,261 @@ namespace cadcam::planning
                 return result;
             }
 
-        private:
+            struct OrdinaryResult
+            {
+                std::optional<GroupTraversal> traversal;
+                int candidateCount = 0;
+                int wrongZoneRejectedCount = 0;
+            };
+
+            static OrdinaryResult buildOrdinary
+            (
+                const ProcessGroup& group,
+                const GroupTraversal& canonicalTraversal,
+                const std::unordered_map<EntityId,
+                    const PlanningEntity*>& entities,
+                const Vector3d& currentPosition,
+                const ProcessPlanningPolicy& policy,
+                const machining::TubeSectionModel& section,
+                const std::optional<Vector2d>& tubeCenter,
+                ProcessOrderingStrategy selectionStrategy,
+                const TraversalSelectionContext& selection
+            )
+            {
+                OrdinaryResult result;
+                if (!selection.hardZoneConstraint
+                    || !selection.requiredEntryZone.has_value())
+                {
+                    return result;
+                }
+
+                std::vector<std::vector<DirectedEntity>> directions;
+                directions.push_back(canonicalTraversal.entities);
+                std::vector<DirectedEntity> reverseDirection;
+                reverseDirection.reserve(canonicalTraversal.entities.size());
+                bool reverseAllowed = true;
+                for (auto iterator = canonicalTraversal.entities.rbegin();
+                    iterator != canonicalTraversal.entities.rend(); ++iterator)
+                {
+                    DirectedEntity directed = *iterator;
+                    directed.reverseRelativeToInput =
+                        !directed.reverseRelativeToInput;
+                    if (directed.entity == nullptr
+                        || !directionAllowed(*directed.entity,
+                            directed.reverseRelativeToInput,
+                            policy.allowReverse)
+                        || !manualDirectionAllowed(*directed.entity,
+                            directed.reverseRelativeToInput, &selection))
+                    {
+                        reverseAllowed = false;
+                        break;
+                    }
+                    const auto vertices = orientedVertices(directed);
+                    if (vertices.size() < 2U)
+                    {
+                        reverseAllowed = false;
+                        break;
+                    }
+                    directed.start = vertices.front().position;
+                    directed.end = vertices.back().position;
+                    reverseDirection.push_back(std::move(directed));
+                }
+                if (reverseAllowed)
+                    directions.push_back(std::move(reverseDirection));
+
+                for (std::size_t directionIndex = 0U;
+                    directionIndex < directions.size(); ++directionIndex)
+                {
+                    const auto& cycle = directions[directionIndex];
+                    if (!std::all_of(cycle.cbegin(), cycle.cend(),
+                        [&selection](const DirectedEntity& directed)
+                        {
+                            return directed.entity != nullptr
+                                && manualDirectionAllowed
+                                (
+                                    *directed.entity,
+                                    directed.reverseRelativeToInput,
+                                    &selection
+                                );
+                        }))
+                    {
+                        continue;
+                    }
+                    const std::vector<BreakSegment> segments =
+                        buildSegments(cycle, section,
+                            selection.projectionTolerance);
+                    const std::vector<BreakZoneRun> runs =
+                        buildRuns(segments);
+                    for (const BreakZoneRun& run : runs)
+                    {
+                        if (!run.strongZone
+                            || run.zone != *selection.requiredEntryZone
+                            || run.length <= kCalculationEpsilon)
+                        {
+                            continue;
+                        }
+
+                        std::vector<double> factors{ 0.5 };
+                        double accumulated = 0.0;
+                        for (const std::size_t segmentIndex :
+                            run.segmentIndices)
+                        {
+                            const BreakSegment& segment =
+                                segments[segmentIndex];
+                            factors.push_back(std::clamp
+                                ((accumulated + segment.length * 0.5)
+                                    / run.length, 0.0, 1.0));
+                            if (accumulated > kCalculationEpsilon)
+                                factors.push_back(std::clamp
+                                    (accumulated / run.length, 0.0, 1.0));
+                            accumulated += segment.length;
+                        }
+                        std::sort(factors.begin(), factors.end());
+                        factors.erase(std::unique(factors.begin(),
+                            factors.end(),
+                            [](double left, double right)
+                            {
+                                return std::abs(left - right) <= 1.0e-10;
+                            }), factors.end());
+                        constexpr std::size_t kMaximumInteriorCandidatesPerRun =
+                            128U;
+                        if (factors.size()
+                            > kMaximumInteriorCandidatesPerRun)
+                        {
+                            std::vector<double> reduced;
+                            reduced.reserve
+                                (kMaximumInteriorCandidatesPerRun);
+                            for (std::size_t index = 0U;
+                                index < kMaximumInteriorCandidatesPerRun;
+                                ++index)
+                            {
+                                const std::size_t sourceIndex =
+                                    index * (factors.size() - 1U)
+                                    / (kMaximumInteriorCandidatesPerRun - 1U);
+                                reduced.push_back(factors[sourceIndex]);
+                            }
+                            factors = std::move(reduced);
+                        }
+
+                        for (const double factor : factors)
+                        {
+                            if (factor <= kCalculationEpsilon
+                                || factor >= 1.0 - kCalculationEpsilon)
+                            {
+                                continue;
+                            }
+                            bool midpointLocated = false;
+                            bool fragmentsBuilt = false;
+                            bool exitResolved = false;
+                            auto candidate = buildCandidate
+                            (
+                                group.groupId, cycle, segments, run,
+                                entities, currentPosition, policy, section,
+                                tubeCenter, selection.projectionTolerance,
+                                factor, false,
+                                directionIndex == 0U
+                                    ? QStringLiteral("Forward")
+                                    : QStringLiteral("Reverse"),
+                                midpointLocated, fragmentsBuilt, exitResolved
+                            );
+                            if (!candidate.has_value()
+                                || !fragmentsBuilt)
+                            {
+                                continue;
+                            }
+                            auto entry = classifyZoneEntry
+                            (
+                                ZoneEntryCandidateKind::
+                                    ClosedLoopMemberInterior,
+                                candidate->midpointEntityId,
+                                candidate->midpointSourceParameter,
+                                candidate->traversal.entities.front()
+                                    .reverseRelativeToInput,
+                                candidate->midpoint,
+                                candidate->firstCutPoint,
+                                section,
+                                selection.projectionTolerance
+                            );
+                            if (!entry.has_value()
+                                || entry->zone
+                                    != *selection.requiredEntryZone)
+                            {
+                                ++result.wrongZoneRejectedCount;
+                                continue;
+                            }
+
+                            const PlanningEntity* entryEntity =
+                                candidate->traversal.entities.front().entity;
+                            if (entryEntity == nullptr) continue;
+                            const bool manualStartMatches =
+                                !entryEntity->manualStartParameter.has_value()
+                                || std::abs(*entryEntity->manualStartParameter
+                                    - candidate->midpointSourceParameter)
+                                    <= 1.0e-10;
+                            const bool otherManualStartExists = std::any_of
+                            (
+                                candidate->traversal.entities.cbegin() + 1,
+                                candidate->traversal.entities.cend(),
+                                [](const DirectedEntity& directed)
+                                {
+                                    return directed.entity != nullptr
+                                        && directed.entity
+                                            ->manualStartParameter.has_value();
+                                }
+                            );
+                            if (!manualStartMatches
+                                || otherManualStartExists)
+                            {
+                                ++result.wrongZoneRejectedCount;
+                                continue;
+                            }
+
+                            candidate->traversal.selectedEntry =
+                                std::move(entry);
+                            candidate->traversal.fragments =
+                                candidate->fragments;
+                            scoreUnwrappedEntry
+                            (
+                                candidate->traversal.entities.front(),
+                                selection.previousEnd,
+                                candidate->firstCutPoint, section,
+                                policy.connectionTolerance,
+                                selection.projectionTolerance
+                            );
+                            candidate->traversal.entryAxisReversalCount =
+                                candidate->traversal.entities.front()
+                                    .entryAxisReversalCount;
+                            candidate->traversal.entryTangentCost =
+                                candidate->traversal.entities.front()
+                                    .entryTangentCost;
+                            scoreTraversal(candidate->traversal,
+                                currentPosition, section);
+                            ++result.candidateCount;
+                            if (!result.traversal.has_value()
+                                || zoneConstrainedTraversalLess
+                                (
+                                    candidate->traversal,
+                                    *result.traversal, selection,
+                                    selectionStrategy
+                                ))
+                            {
+                                result.traversal =
+                                    std::move(candidate->traversal);
+                            }
+                        }
+                    }
+                }
+                if (result.traversal.has_value())
+                {
+                    result.traversal->entryCandidateCount =
+                        result.candidateCount;
+                    result.traversal->wrongZoneRejectedCount =
+                        result.wrongZoneRejectedCount;
+                }
+                return result;
+            }
+
+        public:
             struct BreakSegment
             {
                 std::size_t entityOrder = 0U;
@@ -2461,6 +3101,7 @@ namespace cadcam::planning
                 EntityId midpointEntityId = 0;
                 std::size_t midpointSourceIndex = 0;
                 double midpointSourceParameter = 0.0;
+                Vector3d firstCutPoint;
                 double exitConfidence = 0.0;
                 double exitReliableLength = 0.0;
                 EntityId finalEntityId = 0;
@@ -2920,6 +3561,8 @@ namespace cadcam::planning
                 const machining::TubeSectionModel& section,
                 const std::optional<Vector2d>& tubeCenter,
                 double projectionTolerance,
+                double runFactor,
+                bool requireMatchingExit,
                 const QString& direction,
                 bool& midpointLocated,
                 bool& fragmentTraversalBuilt,
@@ -2931,7 +3574,8 @@ namespace cadcam::planning
                 {
                     return std::nullopt;
                 }
-                const double target = run.length * 0.5;
+                const double target = run.length * std::clamp
+                    (runFactor, 0.0, 1.0);
                 double accumulated = 0.0;
                 const BreakSegment* midpointSegment = nullptr;
                 double midpointFactor = 0.0;
@@ -2981,6 +3625,7 @@ namespace cadcam::planning
                     midpointSegment->sourceIndex;
                 candidate.midpointSourceParameter =
                     midpointParameter;
+                candidate.firstCutPoint = midpointSegment->end;
                 candidate.direction = direction;
                 candidate.traversal.groupId = groupId;
 
@@ -3112,25 +3757,28 @@ namespace cadcam::planning
                 }
                 fragmentTraversalBuilt = true;
 
-                const ExitResult exit = resolveExit
-                (
-                    candidate.fragments, entities, section,
-                    projectionTolerance, candidate.zone
-                );
-                if (!exit.zone.has_value()
-                    || *exit.zone != candidate.zone)
+                if (requireMatchingExit)
                 {
-                    return std::nullopt;
+                    const ExitResult exit = resolveExit
+                    (
+                        candidate.fragments, entities, section,
+                        projectionTolerance, candidate.zone
+                    );
+                    if (!exit.zone.has_value()
+                        || *exit.zone != candidate.zone)
+                    {
+                        return std::nullopt;
+                    }
+                    exitResolved = true;
+                    candidate.exitConfidence = exit.confidence;
+                    candidate.exitReliableLength = exit.reliableLength;
+                    candidate.finalEntityId = exit.finalEntityId;
+                    candidate.finalParameterBegin =
+                        exit.finalParameterBegin;
+                    candidate.finalParameterEnd =
+                        exit.finalParameterEnd;
+                    candidate.exitUsedFallback = exit.usedFallback;
                 }
-                exitResolved = true;
-                candidate.exitConfidence = exit.confidence;
-                candidate.exitReliableLength = exit.reliableLength;
-                candidate.finalEntityId = exit.finalEntityId;
-                candidate.finalParameterBegin =
-                    exit.finalParameterBegin;
-                candidate.finalParameterEnd =
-                    exit.finalParameterEnd;
-                candidate.exitUsedFallback = exit.usedFallback;
 
                 DirectedEntity& entry = candidate.traversal.entities.front();
                 scoreEntrySmoothness
@@ -3323,11 +3971,38 @@ namespace cadcam::planning
             );
         }
 
+        QString entryCandidateKindName(ZoneEntryCandidateKind kind)
+        {
+            switch (kind)
+            {
+            case ZoneEntryCandidateKind::OpenEndpoint:
+                return QStringLiteral("OpenEndpoint");
+            case ZoneEntryCandidateKind::ClosedCurveParameter:
+                return QStringLiteral("ClosedCurveParameter");
+            case ZoneEntryCandidateKind::ClosedLoopConnection:
+                return QStringLiteral("ClosedLoopConnection");
+            case ZoneEntryCandidateKind::ClosedLoopMemberInterior:
+                return QStringLiteral("ClosedLoopMemberInterior");
+            case ZoneEntryCandidateKind::BreakZoneMidpoint:
+                return QStringLiteral("BreakZoneMidpoint");
+            }
+            return QStringLiteral("Unknown");
+        }
+
+        QString vectorText(const Vector3d& value)
+        {
+            return QStringLiteral("%1,%2,%3")
+                .arg(value.x, 0, 'g', 15)
+                .arg(value.y, 0, 'g', 15)
+                .arg(value.z, 0, 'g', 15);
+        }
+
         Diagnostic entrySelectionDiagnostic
         (
             const OperationContext& context,
             const ProcessGroup& group,
-            const GroupTraversal& traversal
+            const GroupTraversal& traversal,
+            std::optional<machining::TubeZone16> scheduledZone
         )
         {
             QVariantMap values;
@@ -3336,11 +4011,10 @@ namespace cadcam::planning
             values.insert(QStringLiteral("groupKind"), groupKindName(group.kind));
             values.insert(QStringLiteral("candidateCount"),
                 traversal.entryCandidateCount);
+            values.insert(QStringLiteral("wrongZoneRejectedCount"),
+                traversal.wrongZoneRejectedCount);
             values.insert(QStringLiteral("selectedStart"),
-                QStringLiteral("%1,%2,%3")
-                    .arg(traversal.start.x, 0, 'g', 15)
-                    .arg(traversal.start.y, 0, 'g', 15)
-                    .arg(traversal.start.z, 0, 'g', 15));
+                vectorText(traversal.start));
             values.insert(QStringLiteral("selectedReverse"),
                 !traversal.entities.empty()
                     && traversal.entities.front().reverseRelativeToInput);
@@ -3352,7 +4026,44 @@ namespace cadcam::planning
                 traversal.rotationCost);
             values.insert(QStringLiteral("movementDistance"),
                 traversal.movementDistance);
-            values.insert(QStringLiteral("midpointFragmentUsed"), false);
+            values.insert(QStringLiteral("scheduledZone"),
+                scheduledZone.has_value()
+                ? machining::tubeZoneName(*scheduledZone)
+                : QStringLiteral("None"));
+            values.insert(QStringLiteral("selectedEntryZone"),
+                traversal.selectedEntry.has_value()
+                ? machining::tubeZoneName
+                    (traversal.selectedEntry->zone)
+                : QStringLiteral("None"));
+            values.insert(QStringLiteral("candidateKind"),
+                traversal.selectedEntry.has_value()
+                ? entryCandidateKindName
+                    (traversal.selectedEntry->kind)
+                : QStringLiteral("Unconstrained"));
+            values.insert(QStringLiteral("selectedEntityId"),
+                QVariant::fromValue<qulonglong>
+                    (traversal.selectedEntry.has_value()
+                    ? traversal.selectedEntry->entityId : 0U));
+            values.insert(QStringLiteral("selectedSourceParameter"),
+                traversal.selectedEntry.has_value()
+                    && traversal.selectedEntry->sourceParameter.has_value()
+                ? *traversal.selectedEntry->sourceParameter : 0.0);
+            values.insert(QStringLiteral("entryPosition"),
+                traversal.selectedEntry.has_value()
+                ? vectorText(traversal.selectedEntry->entryPosition)
+                : vectorText(traversal.start));
+            values.insert(QStringLiteral("firstCutTangent"),
+                traversal.selectedEntry.has_value()
+                ? vectorText(traversal.selectedEntry->firstCutTangent)
+                : QStringLiteral("0,0,0"));
+            values.insert(QStringLiteral("distanceToZoneBoundary"),
+                traversal.selectedEntry.has_value()
+                ? traversal.selectedEntry->distanceToZoneBoundary
+                : 0.0);
+            values.insert(QStringLiteral("fragmentCount"),
+                static_cast<int>(traversal.fragments.size()));
+            values.insert(QStringLiteral("midpointFragmentUsed"),
+                !traversal.fragments.empty());
             return planningDiagnostic
             (
                 context,
@@ -3373,7 +4084,8 @@ namespace cadcam::planning
             const std::optional<machining::TubeSectionModel>& section,
             const std::optional<Vector2d>& tubeCenter,
             ProcessOrderingStrategy selectionStrategy,
-            ClosedLoopTraversalReport* closedLoopReport = nullptr
+            ClosedLoopTraversalReport* closedLoopReport = nullptr,
+            const TraversalSelectionContext* selection = nullptr
         )
         {
             if (closedLoopReport != nullptr) *closedLoopReport = ClosedLoopTraversalReport{};
@@ -3386,70 +4098,347 @@ namespace cadcam::planning
                 {
                     std::optional<GroupTraversal> best;
                     int candidateCount = 0;
-                    const std::size_t startCandidateCount = entity.startParameter.has_value()
+                    int wrongZoneRejectedCount = 0;
+                    const std::size_t startCandidateCount =
+                        entity.startParameter.has_value()
                         ? 1U : entity.path.vertices.size();
                     for (std::size_t startIndex = 0U;
                         startIndex < startCandidateCount; ++startIndex)
                     {
                         for (const bool reverse : { false, true })
                         {
-                            if (!directionAllowed(entity, reverse, policy.allowReverse)) continue;
+                            if (!directionAllowed(entity, reverse,
+                                policy.allowReverse)
+                                || !manualDirectionAllowed(entity, reverse,
+                                    selection))
+                            {
+                                continue;
+                            }
+                            const double candidateParameter =
+                                entity.path.vertices[startIndex]
+                                    .sourceParameter;
+                            if (selection != nullptr
+                                && selection->hardZoneConstraint
+                                && entity.manualStartParameter.has_value()
+                                && std::abs(candidateParameter
+                                    - *entity.manualStartParameter)
+                                    > 1.0e-10)
+                            {
+                                continue;
+                            }
                             auto candidate = buildSingleClosedCurveTraversal
                             (
                                 group, entity, currentPosition, reverse, startIndex,
                                 policy.connectionTolerance, section, tubeCenter
                             );
                             if (!candidate.has_value()) continue;
+                            if (selection != nullptr
+                                && selection->hardZoneConstraint
+                                && selection->requiredEntryZone.has_value()
+                                && section.has_value())
+                            {
+                                const std::size_t pointCount =
+                                    entity.path.vertices.size();
+                                const double threshold = entryThreshold
+                                    (policy.connectionTolerance);
+                                std::optional<Vector3d> firstCutPoint;
+                                for (std::size_t offset = 1U;
+                                    offset < pointCount; ++offset)
+                                {
+                                    const std::size_t index = reverse
+                                        ? (startIndex + pointCount - offset)
+                                            % pointCount
+                                        : (startIndex + offset) % pointCount;
+                                    const Vector3d& point =
+                                        entity.path.vertices[index].position;
+                                    if (distance(candidate->start, point)
+                                        > threshold)
+                                    {
+                                        firstCutPoint = point;
+                                        break;
+                                    }
+                                }
+                                if (!firstCutPoint.has_value())
+                                    continue;
+                                auto entry = classifyZoneEntry
+                                (
+                                    ZoneEntryCandidateKind::
+                                        ClosedCurveParameter,
+                                    entity.entityId, candidateParameter,
+                                    reverse, candidate->start,
+                                    *firstCutPoint, *section,
+                                    selection->projectionTolerance
+                                );
+                                if (!entry.has_value()
+                                    || entry->zone
+                                        != *selection->requiredEntryZone)
+                                {
+                                    ++wrongZoneRejectedCount;
+                                    continue;
+                                }
+                                candidate->selectedEntry =
+                                    std::move(entry);
+                                scoreUnwrappedEntry
+                                (
+                                    candidate->entities.front(),
+                                    selection->previousEnd,
+                                    *firstCutPoint, *section,
+                                    policy.connectionTolerance,
+                                    selection->projectionTolerance
+                                );
+                                candidate->entryAxisReversalCount =
+                                    candidate->entities.front()
+                                        .entryAxisReversalCount;
+                                candidate->entryTangentCost =
+                                    candidate->entities.front()
+                                        .entryTangentCost;
+                            }
                             ++candidateCount;
                             if (!best.has_value()
-                                || traversalLess(*candidate, *best, selectionStrategy))
+                                || (selection != nullptr
+                                    ? zoneConstrainedTraversalLess
+                                        (*candidate, *best, *selection,
+                                            selectionStrategy)
+                                    : traversalLess(*candidate, *best,
+                                        selectionStrategy)))
                             {
                                 best = std::move(candidate);
                             }
                         }
                     }
                     if (best.has_value())
+                    {
                         best->entryCandidateCount = candidateCount;
+                        best->wrongZoneRejectedCount =
+                            wrongZoneRejectedCount;
+                    }
                     return best;
                 }
             }
 
             if (group.kind == ProcessGroupKind::ClosedLoop && group.entityIds.size() > 1U)
             {
-                auto closedLoop = ClosedLoopTraversalBuilder::build
+                auto canonicalLoop = ClosedLoopTraversalBuilder::build
                 (
                     group, entities, currentPosition, policy, section,
                     tubeCenter, selectionStrategy
                 );
-                if (closedLoop.traversal.has_value())
-                    closedLoop.traversal->entryCandidateCount =
-                        closedLoop.report.candidateCount;
-                if (closedLoopReport != nullptr) *closedLoopReport = std::move(closedLoop.report);
-                return std::move(closedLoop.traversal);
+                if (!canonicalLoop.traversal.has_value())
+                {
+                    if (closedLoopReport != nullptr)
+                        *closedLoopReport =
+                            std::move(canonicalLoop.report);
+                    return std::nullopt;
+                }
+                if (selection == nullptr
+                    || !selection->hardZoneConstraint
+                    || !section.has_value())
+                {
+                    canonicalLoop.traversal->entryCandidateCount =
+                        canonicalLoop.report.candidateCount;
+                    if (closedLoopReport != nullptr)
+                        *closedLoopReport =
+                            std::move(canonicalLoop.report);
+                    return std::move(canonicalLoop.traversal);
+                }
+
+                auto connectionLoop = ClosedLoopTraversalBuilder::build
+                (
+                    group, entities, currentPosition, policy, section,
+                    tubeCenter, selectionStrategy, selection
+                );
+                auto interior = ClosedLoopZoneRunBuilder::buildOrdinary
+                (
+                    group, *canonicalLoop.traversal, entities,
+                    currentPosition, policy, *section, tubeCenter,
+                    selectionStrategy, *selection
+                );
+                std::optional<GroupTraversal> best =
+                    std::move(connectionLoop.traversal);
+                if (interior.traversal.has_value()
+                    && (!best.has_value()
+                        || zoneConstrainedTraversalLess
+                        (*interior.traversal, *best, *selection,
+                            selectionStrategy)))
+                {
+                    best = std::move(interior.traversal);
+                }
+                const int connectionCandidateCount =
+                    connectionLoop.report.candidateCount;
+                const int totalCandidateCount =
+                    connectionCandidateCount + interior.candidateCount;
+                const int wrongZoneRejectedCount =
+                    connectionLoop.report.wrongZoneRejectedCount
+                    + interior.wrongZoneRejectedCount;
+                if (best.has_value())
+                {
+                    best->entryCandidateCount = totalCandidateCount;
+                    best->wrongZoneRejectedCount =
+                        wrongZoneRejectedCount;
+                }
+                canonicalLoop.report.candidateCount =
+                    totalCandidateCount;
+                if (best.has_value())
+                {
+                    canonicalLoop.report.selectedOrder.clear();
+                    canonicalLoop.report.selectedReverse.clear();
+                    for (const DirectedEntity& directed :
+                        best->entities)
+                    {
+                        canonicalLoop.report.selectedOrder.push_back
+                            (directed.entity->entityId);
+                        canonicalLoop.report.selectedReverse.push_back
+                            (directed.reverseRelativeToInput);
+                    }
+                }
+                if (closedLoopReport != nullptr)
+                    *closedLoopReport =
+                        std::move(canonicalLoop.report);
+                return best;
             }
 
             std::optional<GroupTraversal> best;
             int candidateCount = 0;
+            int wrongZoneRejectedCount = 0;
             for (const EntityId entityId : group.entityIds)
             {
                 for (const bool reverse : { false, true })
                 {
                     const auto found = entities.find(entityId);
                     if (found == entities.end()
-                        || !directionAllowed(*found->second, reverse, policy.allowReverse)) continue;
+                        || !directionAllowed(*found->second, reverse,
+                            policy.allowReverse)
+                        || !manualDirectionAllowed(*found->second,
+                            reverse, selection))
+                    {
+                        continue;
+                    }
                     auto candidate = buildTraversal
                     (
                         group, entities, currentPosition, policy.allowReverse,
                         policy.connectionTolerance, std::make_pair(entityId, reverse)
                     );
                     if (!candidate.has_value()) continue;
+                    if (selection != nullptr
+                        && selection->hardZoneConstraint
+                        && selection->requiredEntryZone.has_value()
+                        && section.has_value())
+                    {
+                        const DirectedEntity& entryDirected =
+                            candidate->entities.front();
+                        const bool manualDirectionsMatch = std::all_of
+                        (
+                            candidate->entities.cbegin(),
+                            candidate->entities.cend(),
+                            [&selection](const DirectedEntity& directed)
+                            {
+                                return directed.entity != nullptr
+                                    && manualDirectionAllowed
+                                    (
+                                        *directed.entity,
+                                        directed.reverseRelativeToInput,
+                                        selection
+                                    );
+                            }
+                        );
+                        if (!manualDirectionsMatch) continue;
+                        const std::vector<Vector3d> entryPoints =
+                            directedPoints(*entryDirected.entity,
+                                entryDirected.reverseRelativeToInput);
+                        const double threshold = entryThreshold
+                            (policy.connectionTolerance);
+                        const auto next = std::find_if
+                        (
+                            entryPoints.cbegin() + 1,
+                            entryPoints.cend(),
+                            [&entryPoints, threshold]
+                            (const Vector3d& point)
+                            {
+                                return distance(entryPoints.front(), point)
+                                    > threshold;
+                            }
+                        );
+                        if (next == entryPoints.cend()) continue;
+                        const auto entryVertices =
+                            entryDirected.reverseRelativeToInput
+                            ? std::vector<geometry::PathVertex3D>
+                                (entryDirected.entity->path.vertices.rbegin(),
+                                    entryDirected.entity->path.vertices.rend())
+                            : entryDirected.entity->path.vertices;
+                        const std::optional<double> entryParameter =
+                            entryVertices.empty() ? std::nullopt
+                                : std::optional<double>
+                                    (entryVertices.front().sourceParameter);
+                        auto entry = classifyZoneEntry
+                        (
+                            ZoneEntryCandidateKind::OpenEndpoint,
+                            entryDirected.entity->entityId,
+                            entryParameter,
+                            entryDirected.reverseRelativeToInput,
+                            candidate->start, *next, *section,
+                            selection->projectionTolerance
+                        );
+                        const bool manualStartMatches =
+                            !entryDirected.entity
+                                ->manualStartParameter.has_value()
+                            || (entryParameter.has_value()
+                                && std::abs(*entryParameter
+                                    - *entryDirected.entity
+                                        ->manualStartParameter)
+                                    <= 1.0e-10);
+                        const bool otherManualStartExists = std::any_of
+                        (
+                            candidate->entities.cbegin() + 1,
+                            candidate->entities.cend(),
+                            [](const DirectedEntity& directed)
+                            {
+                                return directed.entity != nullptr
+                                    && directed.entity
+                                        ->manualStartParameter.has_value();
+                            }
+                        );
+                        if (!entry.has_value()
+                            || entry->zone
+                                != *selection->requiredEntryZone
+                            || !manualStartMatches
+                            || otherManualStartExists)
+                        {
+                            ++wrongZoneRejectedCount;
+                            continue;
+                        }
+                        candidate->selectedEntry = std::move(entry);
+                        scoreUnwrappedEntry
+                        (
+                            candidate->entities.front(),
+                            selection->previousEnd, *next, *section,
+                            policy.connectionTolerance,
+                            selection->projectionTolerance
+                        );
+                        candidate->entryAxisReversalCount =
+                            candidate->entities.front()
+                                .entryAxisReversalCount;
+                        candidate->entryTangentCost =
+                            candidate->entities.front()
+                                .entryTangentCost;
+                    }
                     ++candidateCount;
                     scoreTraversal(*candidate, currentPosition, section);
-                    if (!best.has_value() || traversalLess(*candidate, *best, selectionStrategy))
+                    if (!best.has_value()
+                        || (selection != nullptr
+                            ? zoneConstrainedTraversalLess
+                                (*candidate, *best, *selection,
+                                    selectionStrategy)
+                            : traversalLess(*candidate, *best,
+                                selectionStrategy)))
                         best = std::move(candidate);
                 }
             }
-            if (best.has_value()) best->entryCandidateCount = candidateCount;
+            if (best.has_value())
+            {
+                best->entryCandidateCount = candidateCount;
+                best->wrongZoneRejectedCount =
+                    wrongZoneRejectedCount;
+            }
             return best;
         }
 
@@ -3480,6 +4469,14 @@ namespace cadcam::planning
             std::map<EntityId, const ProcessAssignment*> assignments;
             for (const ProcessAssignment& assignment : plan.assignments)
                 assignments.emplace(assignment.entityId, &assignment);
+            std::map<int, std::vector<const ProcessPathFragment*>>
+                fragmentsByUnit;
+            for (const ProcessPathFragment& fragment :
+                plan.plannedFragments)
+            {
+                fragmentsByUnit[fragment.processUnitIndex]
+                    .push_back(&fragment);
+            }
 
             for (const ProcessGroup& group : plan.groups)
             {
@@ -3499,6 +4496,141 @@ namespace cadcam::planning
                     failure.groupId = group.groupId;
                     failure.reason = QStringLiteral("Closed-loop ProcessUnit is missing or incomplete.");
                     return false;
+                }
+                const int processUnitIndex = static_cast<int>
+                    (std::distance(plan.processUnits.cbegin(), unit));
+                const auto fragmented = fragmentsByUnit.find
+                    (processUnitIndex);
+                if (fragmented != fragmentsByUnit.end())
+                {
+                    auto fragments = fragmented->second;
+                    std::sort(fragments.begin(), fragments.end(),
+                        [](const ProcessPathFragment* left,
+                            const ProcessPathFragment* right)
+                        {
+                            return left->fragmentOrder
+                                < right->fragmentOrder;
+                        });
+                    std::map<EntityId, int> fragmentCounts;
+                    std::map<EntityId, double> fragmentLengths;
+                    std::vector<std::vector<geometry::PathVertex3D>>
+                        fragmentPaths;
+                    for (std::size_t index = 0U;
+                        index < fragments.size(); ++index)
+                    {
+                        const ProcessPathFragment* fragment =
+                            fragments[index];
+                        const auto entity = fragment != nullptr
+                            ? entities.find(fragment->entityId)
+                            : entities.end();
+                        if (fragment == nullptr
+                            || fragment->fragmentOrder
+                                != static_cast<int>(index)
+                            || entity == entities.end()
+                            || entity->second == nullptr)
+                        {
+                            failure.groupId = group.groupId;
+                            failure.reason = QStringLiteral(
+                                "Closed-loop fragment metadata is incomplete.");
+                            return false;
+                        }
+                        auto path = ClosedLoopZoneRunBuilder::
+                            fragmentVertices
+                            (
+                                *entity->second,
+                                fragment->sourceParameterBegin,
+                                fragment->sourceParameterEnd,
+                                fragment->reverse
+                            );
+                        if (!path.has_value())
+                        {
+                            failure.groupId = group.groupId;
+                            failure.currentEntityId =
+                                fragment->entityId;
+                            failure.reason = QStringLiteral(
+                                "Closed-loop fragment parameter interval is invalid.");
+                            return false;
+                        }
+                        ++fragmentCounts[fragment->entityId];
+                        fragmentLengths[fragment->entityId] +=
+                            ClosedLoopZoneRunBuilder::pathLength(*path);
+                        fragmentPaths.push_back(std::move(*path));
+                    }
+                    int splitMemberCount = 0;
+                    for (const EntityId entityId :
+                        unit->key.memberEntityIds)
+                    {
+                        const auto entity = entities.find(entityId);
+                        if (entity == entities.end()
+                            || entity->second == nullptr)
+                        {
+                            failure.groupId = group.groupId;
+                            failure.currentEntityId = entityId;
+                            failure.reason = QStringLiteral(
+                                "Closed-loop fragment source entity is missing.");
+                            return false;
+                        }
+                        const int count = fragmentCounts[entityId];
+                        if (count == 2) ++splitMemberCount;
+                        else if (count != 1)
+                        {
+                            failure.groupId = group.groupId;
+                            failure.currentEntityId = entityId;
+                            failure.reason = QStringLiteral(
+                                "Closed-loop fragments do not cover each member exactly once.");
+                            return false;
+                        }
+                        const double fullLength =
+                            ClosedLoopZoneRunBuilder::pathLength
+                                (entity->second->path.vertices);
+                        const double lengthTolerance =
+                            std::max(1.0e-8, fullLength * 1.0e-9);
+                        if (std::abs(fragmentLengths[entityId]
+                            - fullLength) > lengthTolerance)
+                        {
+                            failure.groupId = group.groupId;
+                            failure.currentEntityId = entityId;
+                            failure.reason = QStringLiteral(
+                                "Closed-loop fragment coverage has a gap or overlap.");
+                            return false;
+                        }
+                    }
+                    if (splitMemberCount != 1
+                        || fragmentCounts.size()
+                            != unit->key.memberEntityIds.size())
+                    {
+                        failure.groupId = group.groupId;
+                        failure.reason = QStringLiteral(
+                            "Closed-loop internal entry must split exactly one member.");
+                        return false;
+                    }
+                    for (std::size_t index = 1U;
+                        index < fragmentPaths.size(); ++index)
+                    {
+                        const double gap = distance
+                            (fragmentPaths[index - 1U].back().position,
+                                fragmentPaths[index].front().position);
+                        if (gap > connectionTolerance)
+                        {
+                            failure = { group.groupId,
+                                fragments[index - 1U]->entityId,
+                                fragments[index]->entityId, gap,
+                                QStringLiteral(
+                                    "Adjacent closed-loop fragments are not physically connected.") };
+                            return false;
+                        }
+                    }
+                    if (fragmentPaths.empty()
+                        || distance(fragmentPaths.back().back().position,
+                            fragmentPaths.front().front().position)
+                            > connectionTolerance)
+                    {
+                        failure.groupId = group.groupId;
+                        failure.reason = QStringLiteral(
+                            "Closed-loop fragment traversal does not return to its entry.");
+                        return false;
+                    }
+                    continue;
                 }
 
                 Vector3d firstStart;
@@ -3904,9 +5036,51 @@ namespace cadcam::planning
                 profile.zoneSpans = sourceProfile.zoneSpans;
                 profile.closed = group.closed;
                 profile.uncertain = sourceProfile.uncertain;
-                if ((profile.certainMask & ~profile.possibleMask) != 0U
-                    || profile.possibleMask == 0U)
+                for (std::size_t zoneIndex = 0U;
+                    zoneIndex < machining::kTubeZone16Count;
+                    ++zoneIndex)
                 {
+                    TraversalSelectionContext selection;
+                    selection.requiredEntryZone =
+                        static_cast<machining::TubeZone16>(zoneIndex);
+                    selection.longitudinalDirection =
+                        policy.zone16Sweep.longitudinalDirection
+                            == LongitudinalSweepDirection::PositiveX
+                        ? 1 : -1;
+                    selection.zoneHitX = selection.longitudinalDirection >= 0
+                        ? profile.zoneSpans[zoneIndex].minimumX
+                        : profile.zoneSpans[zoneIndex].maximumX;
+                    selection.frontierX = selection.zoneHitX;
+                    selection.projectionTolerance =
+                        zoneProjectionTolerance;
+                    selection.previousEnd = policy.initialPosition;
+                    selection.hardZoneConstraint = true;
+                    ClosedLoopTraversalReport ignoredLoopReport;
+                    auto entryTraversal = bestTraversal
+                    (
+                        group, entities, policy.initialPosition, policy,
+                        input.tubeSection, input.tubeSectionCenter,
+                        ProcessOrderingStrategy::LazyRotation,
+                        &ignoredLoopReport, &selection
+                    );
+                    if (!entryTraversal.has_value()
+                        || !entryTraversal->selectedEntry.has_value())
+                    {
+                        continue;
+                    }
+                    profile.entryCandidates[zoneIndex].push_back
+                        (*entryTraversal->selectedEntry);
+                    profile.entryCandidateCounts[zoneIndex] =
+                        entryTraversal->entryCandidateCount;
+                    profile.legalEntryMask |= machining::tubeZoneBit
+                        (static_cast<machining::TubeZone16>(zoneIndex));
+                }
+                if ((profile.certainMask & ~profile.possibleMask) != 0U
+                    || profile.possibleMask == 0U
+                    || profile.legalEntryMask == 0U)
+                {
+                    const bool manualEntryConstraint =
+                        hasManualEntryConstraint(group, entities);
                     QVariantMap values = diagnosticValues
                         (input, policy, 0U, 0U, -1, group.groupId);
                     values.insert(QStringLiteral("unitKey"),
@@ -3915,32 +5089,48 @@ namespace cadcam::planning
                         zoneMaskText(profile.certainMask));
                     values.insert(QStringLiteral("possibleMask"),
                         zoneMaskText(profile.possibleMask));
+                    values.insert(QStringLiteral("legalEntryMask"),
+                        zoneMaskText(profile.legalEntryMask));
+                    values.insert(QStringLiteral("manualEntryConstraint"),
+                        manualEntryConstraint);
                     return failure<ProcessPlan>
                     (
-                        OperationStatus::Failed, context,
+                        manualEntryConstraint
+                            && profile.legalEntryMask == 0U
+                            ? OperationStatus::Conflict
+                            : OperationStatus::Failed,
+                        context,
                         DiagnosticCode::ProcessPlanningZoneSweepProfileInvalid,
-                        QStringLiteral("加工单元没有可用于 16 区位调度的可靠投影。"),
-                        QStringLiteral("certainMask is not a subset of possibleMask, or possibleMask is empty."),
+                        manualEntryConstraint
+                            && profile.legalEntryMask == 0U
+                            ? QStringLiteral("人工起点或方向无法形成合法的 16 区位入口。")
+                            : QStringLiteral("加工单元没有可用于 16 区位调度的可靠投影。"),
+                        manualEntryConstraint
+                            && profile.legalEntryMask == 0U
+                            ? QStringLiteral("Manual entry constraints eliminate every legal zone entry.")
+                            : QStringLiteral("Zone occupancy and executable entry masks are inconsistent or empty."),
                         values
                     );
                 }
-                if (profile.certainMask == 0U)
+                profile.schedulableMask =
+                    profile.certainMask & profile.legalEntryMask;
+                if (profile.schedulableMask == 0U)
                 {
-                    const auto fallback = fallbackOwnerZone(profile);
-                    if (!fallback.has_value())
+                    profile.schedulableMask =
+                        profile.possibleMask & profile.legalEntryMask;
+                    if (profile.schedulableMask == 0U)
                     {
                         return failure<ProcessPlan>
                         (
                             OperationStatus::Failed, context,
                             DiagnosticCode::ProcessPlanningZoneSweepProfileInvalid,
-                            QStringLiteral("加工单元无法确定保守的 16 区位归属。"),
-                            QStringLiteral("possibleMask did not provide a fallback owner."),
+                            QStringLiteral("加工单元经过的区位均不存在合法起刀点。"),
+                            QStringLiteral("Neither certainMask nor possibleMask intersects legalEntryMask."),
                             diagnosticValues(input, policy, 0U, 0U, -1,
                                 group.groupId)
                         );
                     }
                     profile.fallbackOwner = true;
-                    profile.fallbackZone = *fallback;
                     QVariantMap values = diagnosticValues
                         (input, policy, 0U, 0U, -1, group.groupId);
                     values.insert(QStringLiteral("unitKey"),
@@ -3949,18 +5139,53 @@ namespace cadcam::planning
                         zoneMaskText(profile.certainMask));
                     values.insert(QStringLiteral("possibleMask"),
                         zoneMaskText(profile.possibleMask));
-                    values.insert(QStringLiteral("fallbackZone"),
-                        machining::tubeZoneName(*fallback));
+                    values.insert(QStringLiteral("legalEntryMask"),
+                        zoneMaskText(profile.legalEntryMask));
+                    values.insert(QStringLiteral("schedulableMask"),
+                        zoneMaskText(profile.schedulableMask));
                     zoneSweepDiagnostics.push_back(planningDiagnostic
                     (
                         context,
                         DiagnosticCode::ProcessPlanningZoneSweepFallbackOwner,
                         QStringLiteral("加工单元使用保守区位归属参与 16 区位调度。"),
-                        QStringLiteral("certainMask was empty; the strongest possible zone owns scheduling."),
+                        QStringLiteral("certainMask had no legal entry; possibleMask supplies conservative entry zones."),
                         values,
                         DiagnosticSeverity::Warning
                     ));
                 }
+                QVariantMap entryValues;
+                entryValues.insert(QStringLiteral("entryZoneProfile"), true);
+                entryValues.insert(QStringLiteral("unitKey"),
+                    processGroupKeyText(group));
+                entryValues.insert(QStringLiteral("groupKind"),
+                    groupKindName(group.kind));
+                entryValues.insert(QStringLiteral("certainMask"),
+                    zoneMaskText(profile.certainMask));
+                entryValues.insert(QStringLiteral("possibleMask"),
+                    zoneMaskText(profile.possibleMask));
+                entryValues.insert(QStringLiteral("legalEntryMask"),
+                    zoneMaskText(profile.legalEntryMask));
+                QStringList counts;
+                for (std::size_t zoneIndex = 0U;
+                    zoneIndex < machining::kTubeZone16Count;
+                    ++zoneIndex)
+                {
+                    counts.push_back(QStringLiteral("%1:%2")
+                        .arg(machining::tubeZoneName
+                            (static_cast<machining::TubeZone16>(zoneIndex)))
+                        .arg(profile.entryCandidateCounts[zoneIndex]));
+                }
+                entryValues.insert(QStringLiteral("candidateCountsByZone"),
+                    counts.join(QLatin1Char(',')));
+                zoneSweepDiagnostics.push_back(planningDiagnostic
+                (
+                    context,
+                    DiagnosticCode::ProcessPlanningEntrySelectionSummary,
+                    QStringLiteral("加工单元已建立合法入口区位画像。"),
+                    QStringLiteral("Executable entry candidates were classified independently from occupancy."),
+                    entryValues,
+                    DiagnosticSeverity::Info
+                ));
                 groupZoneProfiles.emplace(group.groupId, std::move(profile));
             }
         }
@@ -4288,9 +5513,7 @@ namespace cadcam::planning
                 const ProcessGroupZoneProfile& profile =
                     groupZoneProfiles.at(group.groupId);
                 const machining::TubeZoneMask ownerMask =
-                    profile.fallbackOwner
-                    ? machining::tubeZoneBit(profile.fallbackZone)
-                    : profile.certainMask;
+                    profile.schedulableMask;
                 for (std::size_t zoneIndex = 0U;
                     zoneIndex < machining::kTubeZone16Count; ++zoneIndex)
                 {
@@ -4632,10 +5855,11 @@ namespace cadcam::planning
                                 groupZoneProfiles.at(groupId);
                             remainingDetails.push_back
                             (
-                                QStringLiteral("unitKey=%1|certainMask=%2|possibleMask=%3|zoneSpans=%4|fallbackOwner=%5|remainingPredecessors=%6")
+                                QStringLiteral("unitKey=%1|certainMask=%2|possibleMask=%3|legalEntryMask=%4|zoneSpans=%5|fallbackOwner=%6|remainingPredecessors=%7")
                                     .arg(key)
                                     .arg(zoneMaskText(profile.certainMask))
                                     .arg(zoneMaskText(profile.possibleMask))
+                                    .arg(zoneMaskText(profile.legalEntryMask))
                                     .arg(zoneSpansText(profile))
                                     .arg(profile.fallbackOwner ? 1 : 0)
                                     .arg(indegree[groupId])
@@ -4697,7 +5921,7 @@ namespace cadcam::planning
                         );
                     }
                     auto breakTraversal =
-                        BreakBoundaryTraversalBuilder::build
+                        ClosedLoopZoneRunBuilder::buildBreak
                         (
                             group, entities, currentPosition, policy,
                             *surfaceSweepSection, input.tubeSectionCenter,
@@ -4714,14 +5938,42 @@ namespace cadcam::planning
                 }
                 else
                 {
+                    std::optional<TraversalSelectionContext>
+                        traversalSelection;
+                    const auto zoneSelection =
+                        zoneSelections.find(groupId);
+                    if (zoneSelection != zoneSelections.end())
+                    {
+                        traversalSelection.emplace();
+                        traversalSelection->requiredEntryZone =
+                            zoneSelection->second.zone;
+                        traversalSelection->longitudinalDirection =
+                            zoneSweepState.longitudinalDirection;
+                        traversalSelection->zoneHitX =
+                            zoneSelection->second.hitX;
+                        traversalSelection->frontierX =
+                            zoneSelection->second.frontierBefore;
+                        traversalSelection->projectionTolerance =
+                            zoneProjectionTolerance;
+                        traversalSelection->previousEnd =
+                            currentPosition;
+                        traversalSelection->hardZoneConstraint = true;
+                    }
                     candidate = bestTraversal
                         (group, entities, currentPosition, policy,
                             input.tubeSection, input.tubeSectionCenter,
                             selectionStrategy,
-                            &candidateClosedLoopReport);
+                            &candidateClosedLoopReport,
+                            traversalSelection.has_value()
+                                ? &*traversalSelection : nullptr);
                 }
                 if (!candidate.has_value())
                 {
+                    const bool manualEntryConstraint =
+                        hasManualEntryConstraint(group, entities);
+                    const bool hardZoneConstraint =
+                        zoneSelections.find(groupId)
+                            != zoneSelections.end();
                     QVariantMap values = diagnosticValues
                     (
                         input, policy, 0U, 0U, -1, groupId, -1, -1,
@@ -4731,6 +5983,18 @@ namespace cadcam::planning
                         static_cast<int>(plan.exclusions.size()), -1, -1, initialSelection,
                         nullptr, group.kind
                     );
+                    values.insert(QStringLiteral("manualEntryConstraint"),
+                        manualEntryConstraint);
+                    values.insert(QStringLiteral("hardZoneConstraint"),
+                        hardZoneConstraint);
+                    const auto requiredZone =
+                        zoneSelections.find(groupId);
+                    if (requiredZone != zoneSelections.end())
+                    {
+                        values.insert(QStringLiteral("requiredEntryZone"),
+                            machining::tubeZoneName
+                                (requiredZone->second.zone));
+                    }
                     if (candidateClosedLoopReport.groupId >= 0)
                     {
                         const QVariantMap closedLoopValues =
@@ -4752,20 +6016,26 @@ namespace cadcam::planning
                     }
                     return failure<ProcessPlan>
                     (
-                        OperationStatus::Failed, context,
+                        manualEntryConstraint && hardZoneConstraint
+                            ? OperationStatus::Conflict
+                            : OperationStatus::Failed, context,
                         candidateBreakReport.has_value()
                             ? candidateBreakReport->failureCode
                             : candidateClosedLoopReport.groupId >= 0
                             && !candidateClosedLoopReport.simpleLoopValid
                             ? DiagnosticCode::ProcessPlanningGroupBuildFailed
                             : DiagnosticCode::ProcessPlanningDirectionFailed,
-                        candidateBreakReport.has_value()
+                        manualEntryConstraint && hardZoneConstraint
+                            ? QStringLiteral("人工起点或方向无法在当前扫描区位形成合法入口。")
+                            : candidateBreakReport.has_value()
                             ? QStringLiteral("加工断面无法从可靠强区位边段中点建立闭环遍历。")
                             : candidateClosedLoopReport.groupId >= 0
                             && !candidateClosedLoopReport.simpleLoopValid
                             ? QStringLiteral("多图元闭合加工单元不是唯一简单环，无法生成加工计划。")
                             : QStringLiteral("连续加工组无法建立有效入口和加工方向。"),
-                        candidateBreakReport.has_value()
+                        manualEntryConstraint && hardZoneConstraint
+                            ? QStringLiteral("Manual entry constraints conflict with requiredEntryZone.")
+                            : candidateBreakReport.has_value()
                             ? candidateBreakReport->failureReason
                             : candidateClosedLoopReport.groupId >= 0
                             ? candidateClosedLoopReport.failureReason
@@ -4888,6 +6158,38 @@ namespace cadcam::planning
                 selectedCandidate.breakReport;
 
             const ProcessGroup& selectedGroup = plan.groups[static_cast<std::size_t>(selected.groupId)];
+            const auto scheduledZoneSelection =
+                zoneSelections.find(selected.groupId);
+            if (scheduledZoneSelection != zoneSelections.end())
+            {
+                if (!selected.selectedEntry.has_value()
+                    || selected.selectedEntry->zone
+                        != scheduledZoneSelection->second.zone)
+                {
+                    QVariantMap values = diagnosticValues
+                        (input, policy, 0U, 0U, -1,
+                            selected.groupId);
+                    values.insert(QStringLiteral("unitKey"),
+                        processGroupKeyText(selectedGroup));
+                    values.insert(QStringLiteral("scheduledZone"),
+                        machining::tubeZoneName
+                            (scheduledZoneSelection->second.zone));
+                    values.insert(QStringLiteral("selectedEntryZone"),
+                        selected.selectedEntry.has_value()
+                        ? machining::tubeZoneName
+                            (selected.selectedEntry->zone)
+                        : QStringLiteral("None"));
+                    return failure<ProcessPlan>
+                    (
+                        OperationStatus::Failed, context,
+                        DiagnosticCode::
+                            ProcessPlanningInvariantViolation,
+                        QStringLiteral("加工单元实际起刀区位与当前扫描区位不一致。"),
+                        QStringLiteral("scheduledZone must equal selectedEntryZone before plan publication."),
+                        values
+                    );
+                }
+            }
             const bool continuous = selectedGroup.kind == ProcessGroupKind::ConnectedChain
                 || selectedGroup.kind == ProcessGroupKind::ClosedLoop
                 || selectedGroup.kind == ProcessGroupKind::BreakBoundary;
@@ -4913,10 +6215,15 @@ namespace cadcam::planning
                 assignment.startParameter = directed.selectedStartParameter;
                 plan.assignments.push_back(assignment);
             }
-            if (selectedBreakReport.has_value())
+            const std::vector<ProcessPathFragment>* selectedFragments =
+                selectedBreakReport.has_value()
+                ? &selectedBreakReport->fragments
+                : &selected.fragments;
+            if (selectedFragments != nullptr
+                && !selectedFragments->empty())
             {
                 for (ProcessPathFragment fragment :
-                    selectedBreakReport->fragments)
+                    *selectedFragments)
                 {
                     fragment.processUnitIndex = processUnitIndex;
                     plan.plannedFragments.push_back(std::move(fragment));
@@ -4941,7 +6248,14 @@ namespace cadcam::planning
                 && selectedGroup.kind != ProcessGroupKind::BreakBoundary)
             {
                 closedLoopDiagnostics.push_back
-                    (entrySelectionDiagnostic(context, selectedGroup, selected));
+                    (entrySelectionDiagnostic
+                    (
+                        context, selectedGroup, selected,
+                        scheduledZoneSelection != zoneSelections.end()
+                        ? std::optional<machining::TubeZone16>
+                            (scheduledZoneSelection->second.zone)
+                        : std::nullopt
+                    ));
             }
             scheduled.insert(selected.groupId);
             for (const int successor : successors[selected.groupId]) --indegree[successor];
@@ -5059,7 +6373,7 @@ namespace cadcam::planning
                             groupZoneProfiles.at(selected.groupId);
                         const machining::TubeZone16 zone =
                             zoneSweepState.initialZone;
-                        if ((profile.possibleMask
+                        if ((profile.schedulableMask
                             & machining::tubeZoneBit(zone)) == 0U)
                         {
                             QVariantMap values = diagnosticValues
@@ -5072,6 +6386,8 @@ namespace cadcam::planning
                                 zoneMaskText(profile.certainMask));
                             values.insert(QStringLiteral("possibleMask"),
                                 zoneMaskText(profile.possibleMask));
+                            values.insert(QStringLiteral("legalEntryMask"),
+                                zoneMaskText(profile.legalEntryMask));
                             return failure<ProcessPlan>
                             (
                                 OperationStatus::Failed, context,
@@ -5081,7 +6397,7 @@ namespace cadcam::planning
                                 values
                             );
                         }
-                        if ((profile.possibleMask
+                        if ((profile.schedulableMask
                             & machining::tubeZoneBit(zone)) != 0U)
                         {
                             selection.groupId = selected.groupId;

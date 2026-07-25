@@ -30,14 +30,14 @@
 - `PlanningEntity`：核心规划使用的图元路径、状态、断面角色和来源属性。
 - `ProcessGroup`：单图元、连接链、闭环、Break 断面或 Waste 断面组成的加工组。
 - `ProcessAssignment`：逐图元执行顺序、所属加工单元索引、连续组、方向和起点，继续供轨迹与 NC 使用。
-- `ProcessPathFragment`：仅为 `BreakBoundary` 从可靠边段中点起刀保存源参数区间和片段执行顺序，不改变图元与加工单元身份。
+- `ProcessPathFragment`：为 `BreakBoundary` 或普通多图元 `ClosedLoop` 的成员内部起刀保存源参数区间和片段执行顺序，不改变图元与加工单元身份。
 - `ProcessExclusion`：内部线、Waste 区间或其他规划排除结果。
 - `ProcessUnit`：保存规范身份、成员实际执行顺序和闭合状态。
 - `ProcessUnitKey`：仅表达单元身份，成员稳定 `EntityId` 保持升序、唯一和非空。
 - `ProcessUnitSequence`：保存当前单元身份顺序和序列 revision，编号由位置 `+1` 得到。
 - `ProcessUnitPresentation`：把单元身份、序列位置、成员执行顺序和首成员锚点投影给 Viewer。
 - `TubeZone16` 与 `TubeZoneMask`：按顺时针定义顶面、右上圆角、右面、右下圆角、底面、左下圆角、左面、左上圆角及八条相邻分界母线。
-- `ProcessUnitZoneProfile`：记录一个最终加工单元经过的全部截面区位、各区位 X 范围、入口出口区位和壳层偏差。
+- `ProcessUnitZoneProfile`：记录一个最终加工单元经过的全部截面区位和各区位 X 范围；规划器另行生成可执行入口区位画像，避免把“经过区位”当成“可从该区位起刀”。
 - `ProcessPlan`：保存模式、排序策略、revision、加工单元、单元序列、分组、约束、逐图元分配和排除项。
 
 ## 当前生产数据流
@@ -62,7 +62,7 @@
 “智能排序”动作
 → sortEntitiesByCurrentMode(RebuildSequence)
 → 三轴或四轴策略显式携带排序意图
-→ DocumentProcessPlanningAdapter 忽略本次输入中的人工方向和起点
+→ DocumentProcessPlanningAdapter 对一般候选使用自动方向和起点，并保留人工约束用于 16 区位入口冲突校验
 → ProcessPlanningService 忽略当前 ProcessUnitSequence
 → 核心规划器重建全部单元顺序、方向和起点
 → ProcessPlan
@@ -100,10 +100,12 @@ CadDocument + DocumentProcessState + 可选 TubeSectionModel
 + 原始 Path3D
 + 有效 TubeSectionModel
 → TubeSectionProjector
-→ ProcessUnitZoneProfile
+→ ProcessUnitZoneProfile 占用画像
+→ legalEntryMask 可执行入口画像
 → 断面分区与 16 区位扫描
+→ 当前区位硬约束下选择入口和方向
 → ProcessPlan
-→ Zone16Profile / Zone16Sweep 诊断日志
+→ EntryZoneProfile / EntrySelection / Zone16Sweep 诊断日志
 ```
 
 Break 断面入口链：
@@ -121,7 +123,7 @@ Break 断面入口链：
 → 初始化下一 16 区位加工分区
 ```
 
-区位画像在调度前一次性计算，只描述原始路径经过的截面区位和各区位 X 范围，不读取候选方向、起点或当前机床位置。画像只存在于本次计划构建过程，不写入 `DocumentProcessState` 或最终 `ProcessPlan`。
+占用画像在调度前一次性计算，只描述原始路径经过的截面区位和各区位 X 范围。入口画像由实际可执行的端点、闭合参数、闭环连接点和闭环成员内部切点生成；`legalEntryMask` 不直接复制占用掩码。两类画像只存在于本次计划构建过程，不写入 `DocumentProcessState` 或最终 `ProcessPlan`。
 
 当前普通排序的单元状态链：
 
@@ -180,18 +182,21 @@ Application 的 `DocumentProcessState` 持有当前 `ProcessUnitSequence`。Core
 - 严格闭环和可完整遍历的连续链形成原子加工单元，组内 assignment 在最终执行序列中连续，不被其他单元插入。
 - 三轴当前使用最近距离计划，方向偏好会约束正向或反向候选。
 - 四轴可按配置选择最近距离或懒旋转策略。仅在智能重建、懒旋转且存在有效截面时启用 16 区位生产扫描；普通排序、最近距离和无截面四轴保持原流程。
-- 每个普通 `ProcessGroup` 在调度前使用全部成员的原始 `Path3D` 形成静态区位画像。`certainMask` 是生产归属，`possibleMask` 只用于保守候选和诊断；无可靠强归属时可确定一个显式回退区位并记录警告。
+- 每个普通 `ProcessGroup` 在调度前使用全部成员的原始 `Path3D` 形成静态占用画像。`certainMask` 和 `possibleMask` 表达路径经过区位，`legalEntryMask` 表达实际可执行入口区位。生产桶优先使用 `certainMask & legalEntryMask`，交集为空时才使用 `possibleMask & legalEntryMask` 并记录警告。
 - Break 断面继续由现有工艺屏障划分加工分区。Break 专用遍历器仅在唯一简单环上分析四个平面和四个圆角强区位，八条分界母线不作为首选入口。
 - 懒旋转扫描的初始工艺区位固定为 `TopFace`，该状态不由首个加工单元或最左断面的偶然位置推导。
 - Break 起刀点取当前扫描区位内可靠连续边段的三维弧长中点；连续边段可以跨越多个源图元。首个 Break 接收当前 `TopFace`，完成闭环后出口仍回到该入口区位，后续继续从当前区位扫描。
-- 开放成员内部起刀通过两个互补 `ProcessPathFragment` 表达：先加工中点到成员出口，绕行其他成员后再加工成员入口到中点。规划发布前按源图元核对片段总弧长，并校验全部片段连续、闭合、无重复和无遗漏。
-- 计划发布校验要求所有 `ProcessPathFragment` 必须属于匹配的 `BreakBoundary` 加工单元；开放普通单元只能从链首或链尾进入，普通多图元闭环只能从现有成员连接点进入。
+- 闭环成员内部起刀通过两个互补 `ProcessPathFragment` 表达：先加工切点到成员出口，绕行其他成员后再加工成员入口到切点。规划发布前按源图元核对片段总弧长，并校验全部片段连续、闭合、无重复和无遗漏。
+- `ProcessPathFragment` 仅允许属于匹配的 `BreakBoundary` 或普通 `ClosedLoop` 加工单元。开放单图元和开放连续链只允许从物理端点进入，不生成计划片段。
+- 单图元圆、完整椭圆和闭合样条按参数候选选择入口；普通多图元闭环同时允许成员连接点和可靠强区位连续段内部切点。内部候选使用闭环区位连续段的中点、离散段中点和内部连接参数，候选数量有确定上限。
 - Break 的起点和出口必须属于同一强区位。出口从最终计划片段向落刀点反向累计可靠长度，短分界段和歧义段不作为强出口；仅在强信息不足时允许 possible 区位兜底并记录警告。
 - Break 完成后直接使用片段解析得到的出口区位初始化下一分区，不再根据普通闭环尾成员的偶然末段猜测。出口解析、分区映射和分区启动分别返回结构化诊断。
 - 没有 Break 时，首个分区也从策略固定的 `TopFace` 启动。
 - 每个分区按配置选择顺时针或逆时针遍历 16 区位。一个跨区单元可以进入多个区位桶，但在首次命中时整体加工，成员和闭环内部遍历不会被拆分或重复。
 - 每个区位拥有独立 X 前沿。`+X` 扫描使用该区位跨度的 `minimumX` 命中并以 `maximumX` 推进前沿，`-X` 扫描反向处理；进入新区位时从分区边界重新建立前沿。
-- 区位和 X 命中先选定整个 `ProcessGroup`，再在该组的合法端点、闭合参数入口或成员连接点中优化入口，不允许入口评分改变区位或 X 顺序。
+- 区位和 X 命中先选定整个 `ProcessGroup`，再把当前 `TubeZone16` 作为入口硬约束枚举合法端点、闭合参数、成员连接点或闭环成员内部切点。错误区位候选在评分前排除，入口评分不能改变区位、X 顺序或加工单元顺序。
+- 入口区位由入口点和其后的第一个非退化切削段共同确定；分界母线只参与消歧，歧义短段不能形成合法入口。合法候选在方管展开空间中比较入口反向、切线连续性、X 命中距离、旋转、移动和稳定身份。
+- 跨区加工单元完成后只更新实际当前位置，当前扫描区位保持不变；当前区位桶清空后才按周向策略切换下一区位。
 - 前沿只允许单调推进。完整落在当前前沿之后的未加工单元会返回结构化回退诊断，不再通过回头扫描掩盖区位画像或分区问题。
 - 四轴单图元闭合圆和完整椭圆的 Auto 起点在规划输入中保持为空，不再等同于 `π/2`；`π/2` 仅保留为几何编译器没有最终计划参数时的独立默认值。
 - 规划器直接使用现有 `Path3D` 顶点，把每个顶点的 `sourceParameter` 与允许的正反方向组合为候选，不增加采样点。人工起点存在时仅保留当前路径首点，人工方向继续限制允许候选。
@@ -200,7 +205,7 @@ Application 的 `DocumentProcessState` 持有当前 `ProcessUnitSequence`。Core
 - 多图元闭环不再使用最近端点贪心拼接。规划器枚举起始成员及其正反入口，沿端点图唯一绕行全部成员，并按完整候选统一比较入口平滑度、旋转、表面和移动代价。
 - 每个闭环成员只允许使用一次，成员方向继续服从人工方向偏好和全局反向许可；含自身闭合成员、分支、孤立边或方向冲突的多图元组直接拒绝，不回退通用遍历。
 - 闭环候选先验证最后成员物理终点可连接到入口，再把组结束位置设置为真实入口。计划发布前再次校验成员集合、Assignment 连续性、相邻物理端点及首尾闭合，失败结果不会更新后续组的当前位置。
-- 智能懒旋转的普通单元入口依次比较人工起点与方向约束、入口 X/A 轴反向数、切线代价、旋转代价、移动距离和稳定身份。三轴或缺少有效截面中心时，入口切线代价使用 XYZ 源路径向量。
+- 智能懒旋转的普通单元入口保留用户已设置的方向和起点作为硬约束输入；约束无法在当前扫描区位形成合法入口时拒绝计划，不静默改写用户状态。合法入口再依次比较区位边界距离、入口 X/周向反向数、展开空间切线代价、X 命中距离、旋转代价、移动距离和稳定身份。
 - `NearestNext` 继续以移动距离为首要比较项；普通排序不启用本次智能平滑入口规则。
 - 自动选出的入口参数和方向仅写入当前 `ProcessAssignment`，不回写 `DocumentProcessState`。
 - 三轴由拓扑分量和连续遍历直接形成 `ProcessUnit`，四轴由现有 `ProcessGroup` 和 directed traversal 形成 `ProcessUnit`；Waste 排除组不进入加工单元序列。
@@ -210,7 +215,7 @@ Application 的 `DocumentProcessState` 持有当前 `ProcessUnitSequence`。Core
 - 普通排序按 `ProcessUnitKey` 精确匹配当前权威序列，只保留仍存在单元的相对顺序；未匹配单元按自动候选计划中的相对顺序追加到末尾。
 - 单元级重排保持 `orderedMemberEntityIds`、方向、起点和连续组不变，只重建单元位置、`processUnitIndex` 和连续的逐图元 `processOrder`。
 - 普通排序继续读取并保留人工方向和人工起点。
-- 智能排序不读取当前单元序列，并在本次规划输入中把方向视为 `Auto`、人工起点视为未设置；用户状态本身不被删除或修改。
+- 智能排序不读取当前单元序列；一般几何排序仍以自动方向和自动起点重建。16 区位懒加工额外携带原始人工方向和起点，仅用于验证当前区位入口约束，用户状态本身不被删除或修改。
 - 重排结果继续通过加工单元结构校验和 Break 前后约束校验，校验成功后才更新权威序列。
 - 普通排序保序与人工块内移尾共用单元级计划重排：整体移动 `ProcessUnit`，保留 `orderedMemberEntityIds`，重建 `processUnitIndex` 和连续 `processOrder`。
 - 人工块内移尾在候选计划通过单元结构和 Break 约束校验后才更新 `DocumentProcessState`，然后将计划重新绑定到新 revision 并重建展示快照。
@@ -225,7 +230,7 @@ Application 的 `DocumentProcessState` 持有当前 `ProcessUnitSequence`。Core
 - 区位画像按最终 `Path3D` 线段计算；端点、线段中点和必要的临时细分共同识别跨区路径。临时细分只存在于分类过程，不修改生产路径或采样策略。
 - 平面和圆角只有累计非零投影长度超过数值阈值才形成强占用；路径穿越、沿线运行或稳定端点接触可直接标记相应分界母线。
 - 圆弧、椭圆和样条允许在独立投影容差内投影到理想方管壳层，原始路径保持不变；画像记录最大、平均壳层偏差，并把接近容差边缘或无法可靠消歧的结果标记为不确定。
-- 智能懒旋转生产排序直接读取 `certainMask` 和各区位 X 范围。旧主表面、`Mixed` 和中值锚点不参与该生产分支；`possibleMask` 仅承担保守回退和诊断。
+- 智能懒旋转生产排序读取 `certainMask`、`possibleMask`、`legalEntryMask` 和各区位 X 范围。旧主表面、`Mixed` 和中值锚点不参与该生产分支；占用区位没有合法入口时不能进入对应生产桶。
 
 ## 相关源码
 

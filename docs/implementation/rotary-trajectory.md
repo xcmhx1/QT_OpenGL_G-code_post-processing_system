@@ -45,7 +45,7 @@ Rotary4Axis ProcessPlan
 + 旋转轴和运动配置
 → GeometrySourceSnapshot
 → 按 assignment 重新编译 Path3D
-  或按 plannedFragments 裁切互补 Path3D
+  或按 plannedFragments 裁切闭环互补 Path3D
 → RotaryKinematics
 → RotaryTrajectoryBuilder
 → MachineTrajectory
@@ -90,11 +90,12 @@ Rotary4Axis ProcessPlan
 ## 关键业务规则
 
 - 每条路径使用计划确定的 `reverse` 和 `startParameter` 重新编译，轨迹不重新排序。
-- Break 断面的计划片段使用与普通路径相同的生产采样策略编译完整源 `Path3D`，再按 `sourceParameterBegin`、`sourceParameterEnd` 和方向裁切；中点在对应离散线段内插值，不吸附到最近顶点。
-- 同一 Break 起点成员可以在轨迹执行序列中出现两个互补片段。`ProcessAssignment`、`ProcessUnitKey` 和 Viewer 身份仍只保存一次稳定 `EntityId`；轨迹通过 `sourceProcessOrder` 与 `fragmentOrder` 区分源计划身份和执行位置。
+- Break 断面和普通多图元闭环的计划片段使用与普通路径相同的生产采样策略编译完整源 `Path3D`，再按 `sourceParameterBegin`、`sourceParameterEnd` 和方向裁切；内部切点在对应离散线段内插值，不吸附到最近顶点。
+- 同一闭环起点成员可以在轨迹执行序列中出现两个互补片段。`ProcessAssignment`、`ProcessUnitKey` 和 Viewer 身份仍只保存一次稳定 `EntityId`；轨迹通过 `sourceProcessOrder` 与 `fragmentOrder` 区分源计划身份和执行位置。
 - `RotaryTrajectoryBuilder` 对片段执行标识进行唯一性校验，并按展开后的片段顺序执行原有源空间和机床空间连续性检查。闭合组回起点和过切基于完整片段序列，不复制完整源图元。
 - NC 构建器按通用轨迹执行块复用源图元元数据，并把块顺序重建为实际执行顺序；NC 与 G-code 层不判断 Break 类型。
-- 智能懒旋转计划在有效方管截面下使用静态 16 区位画像、Break 分区和每区独立 X 前沿确定加工单元顺序。该顺序已经固化在 `ProcessPlan` 中，轨迹层只消费最终 assignment，不再次进行区位调度。
+- 智能懒旋转计划在有效方管截面下使用静态 16 区位占用画像、合法入口画像、Break 分区和每区独立 X 前沿确定加工单元顺序及入口。该结果已经固化在 `ProcessPlan`、assignment 和可选片段中，轨迹层不再次进行区位调度或入口选择。
+- 当前扫描区位是规划阶段的入口硬约束。跨区单元可以整体经过其他平面或圆角，但完成后不会提前改变扫描阶段；轨迹层只执行规划后的连续路径。
 - 16 区位画像使用理想壳层投影记录跨面、跨圆角、分界母线接触和 X 范围。它属于规划派生数据，不替换 `RotaryKinematics` 对单条路径的生产表面分类。
 - 规划阶段使用 Break 最终计划片段解析得到的强区位出口初始化下一分区，并按当前配置的顺时针或逆时针方向遍历全部 16 区位。区位扫描状态不进入 `DocumentProcessState`、轨迹或 NC。
 - 单图元闭合圆和完整椭圆的自动入口由规划器联合确定；轨迹服务使用 Assignment 中的最终起点参数和方向重新编译同一源几何，不再次选择入口。

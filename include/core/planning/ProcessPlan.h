@@ -63,6 +63,9 @@ namespace cadcam::planning
         int boundaryPairId = -1;
         process::DirectionPreference directionPreference = process::DirectionPreference::Auto;
         std::optional<double> startParameter;
+        process::DirectionPreference manualDirectionPreference =
+            process::DirectionPreference::Auto;
+        std::optional<double> manualStartParameter;
     };
 
     struct ProcessUnitKey
@@ -245,12 +248,13 @@ namespace cadcam::planning
             auto& fragments = fragmentsByUnit[unitIndex];
             if (fragments.empty()) continue;
             const ProcessUnit& unit = plan.processUnits[unitIndex];
-            const auto matchingBreak = std::find_if
+            const auto matchingFragmentGroup = std::find_if
             (
                 plan.groups.cbegin(), plan.groups.cend(),
                 [&unit](const ProcessGroup& group)
                 {
-                    if (group.kind != ProcessGroupKind::BreakBoundary)
+                    if (group.kind != ProcessGroupKind::BreakBoundary
+                        && group.kind != ProcessGroupKind::ClosedLoop)
                         return false;
                     std::vector<geometry::EntityId> groupIds = group.entityIds;
                     std::sort(groupIds.begin(), groupIds.end());
@@ -259,7 +263,7 @@ namespace cadcam::planning
                     return groupIds == unit.key.memberEntityIds;
                 }
             );
-            if (matchingBreak == plan.groups.cend()) return false;
+            if (matchingFragmentGroup == plan.groups.cend()) return false;
             std::sort(fragments.begin(), fragments.end(),
                 [](const ProcessPathFragment* left, const ProcessPathFragment* right)
                 {
