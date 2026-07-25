@@ -132,17 +132,47 @@ namespace cadcam::machine
             return result;
         }
 
-        std::set<geometry::EntityId> uniqueIds;
+        std::set<geometry::EntityId> wholeEntityIds;
+        std::set<std::pair<geometry::EntityId, int>> fragmentIds;
+        std::set<geometry::EntityId> fragmentedEntityIds;
         for (std::size_t index = 0; index < input.entities.size(); ++index)
         {
             const auto& entity = input.entities[index];
             if (entity.processOrder != static_cast<int>(index) || entity.entityId == 0
-                || !uniqueIds.insert(entity.entityId).second || entity.path.vertices.empty())
+                || entity.sourceProcessOrder < 0
+                || entity.path.vertices.empty())
             {
                 result.status = OperationStatus::InvalidInput;
                 result.addDiagnostic(diagnostic(DiagnosticCode::MachineTrajectoryInputInvalid,
                     DiagnosticSeverity::Error, QStringLiteral("四轴轨迹的加工顺序、图元标识或路径无效。"),
                     taskContext.operationContext, &entity));
+                return result;
+            }
+            bool identityValid = false;
+            if (entity.fragmentOrder >= 0)
+            {
+                identityValid =
+                    wholeEntityIds.count(entity.entityId) == 0U
+                    && fragmentIds.emplace(entity.entityId,
+                        entity.fragmentOrder).second;
+                fragmentedEntityIds.insert(entity.entityId);
+            }
+            else
+            {
+                identityValid =
+                    fragmentedEntityIds.count(entity.entityId) == 0U
+                    && wholeEntityIds.insert(entity.entityId).second;
+            }
+            if (!identityValid)
+            {
+                result.status = OperationStatus::InvalidInput;
+                result.addDiagnostic(diagnostic
+                (
+                    DiagnosticCode::MachineTrajectoryInputInvalid,
+                    DiagnosticSeverity::Error,
+                    QStringLiteral("四轴轨迹包含重复的完整图元或片段执行标识。"),
+                    taskContext.operationContext, &entity
+                ));
                 return result;
             }
         }
@@ -318,6 +348,8 @@ namespace cadcam::machine
             entity.sourceKind = inputEntity.sourceKind;
             entity.sourceIndex = inputEntity.sourceIndex;
             entity.processOrder = inputEntity.processOrder;
+            entity.sourceProcessOrder = inputEntity.sourceProcessOrder;
+            entity.fragmentOrder = inputEntity.fragmentOrder;
             entity.processGroupId = inputEntity.processGroupId;
             entity.closed = inputEntity.closed;
             entity.continuousFromPrevious = sameGroup;

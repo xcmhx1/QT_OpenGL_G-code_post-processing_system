@@ -98,6 +98,12 @@ QString diagnosticCodeName(DiagnosticCode code)
     case DiagnosticCode::ProcessPlanningZoneSweepProfileInvalid: return QStringLiteral("ProcessPlanningZoneSweepProfileInvalid");
     case DiagnosticCode::ProcessPlanningZoneSweepFallbackOwner: return QStringLiteral("ProcessPlanningZoneSweepFallbackOwner");
     case DiagnosticCode::ProcessPlanningZoneSweepBacktrackRequired: return QStringLiteral("ProcessPlanningZoneSweepBacktrackRequired");
+    case DiagnosticCode::ProcessPlanningBreakStartSummary: return QStringLiteral("ProcessPlanningBreakStartSummary");
+    case DiagnosticCode::ProcessPlanningBreakExitZoneUnresolved: return QStringLiteral("ProcessPlanningBreakExitZoneUnresolved");
+    case DiagnosticCode::ProcessPlanningBreakPartitionMappingMissing: return QStringLiteral("ProcessPlanningBreakPartitionMappingMissing");
+    case DiagnosticCode::ProcessPlanningBreakPartitionStartFailed: return QStringLiteral("ProcessPlanningBreakPartitionStartFailed");
+    case DiagnosticCode::ProcessPlanningBreakMidpointCandidateMissing: return QStringLiteral("ProcessPlanningBreakMidpointCandidateMissing");
+    case DiagnosticCode::ProcessPlanningBreakFragmentTraversalInvalid: return QStringLiteral("ProcessPlanningBreakFragmentTraversalInvalid");
     case DiagnosticCode::ProcessPlanningDirectionFailed: return QStringLiteral("ProcessPlanningDirectionFailed");
     case DiagnosticCode::ProcessPlanningOrderingFailed: return QStringLiteral("ProcessPlanningOrderingFailed");
     case DiagnosticCode::ProcessPlanningInvariantViolation: return QStringLiteral("ProcessPlanningInvariantViolation");

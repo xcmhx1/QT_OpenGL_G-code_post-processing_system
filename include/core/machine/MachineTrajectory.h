@@ -35,6 +35,8 @@ namespace cadcam::machine
         geometry::SourceGeometryKind sourceKind = geometry::SourceGeometryKind::Unknown;
         std::size_t sourceIndex = 0;
         int processOrder = -1;
+        int sourceProcessOrder = -1;
+        int fragmentOrder = -1;
         int processGroupId = -1;
         bool closed = false;
         bool continuousFromPrevious = false;
@@ -92,6 +94,8 @@ namespace cadcam::machine
         std::size_t sourceIndex = 0;
         geometry::SourceGeometryKind sourceKind = geometry::SourceGeometryKind::Unknown;
         int processOrder = -1;
+        int sourceProcessOrder = -1;
+        int fragmentOrder = -1;
         int processGroupId = -1;
         bool closed = false;
         bool firstInGroup = false;

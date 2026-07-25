@@ -101,6 +101,133 @@ namespace
         return policy;
     }
 
+    double pathDistance
+    (
+        const cadcam::geometry::Vector3d& left,
+        const cadcam::geometry::Vector3d& right
+    )
+    {
+        return std::sqrt
+        (
+            (left.x - right.x) * (left.x - right.x)
+            + (left.y - right.y) * (left.y - right.y)
+            + (left.z - right.z) * (left.z - right.z)
+        );
+    }
+
+    cadcam::geometry::PathVertex3D interpolatePathVertex
+    (
+        const cadcam::geometry::PathVertex3D& start,
+        const cadcam::geometry::PathVertex3D& end,
+        double parameter
+    )
+    {
+        const double denominator =
+            end.sourceParameter - start.sourceParameter;
+        const double factor = std::abs(denominator) <= 1.0e-12
+            ? 0.0 : std::clamp
+                ((parameter - start.sourceParameter) / denominator,
+                    0.0, 1.0);
+        return
+        {
+            {
+                start.position.x
+                    + (end.position.x - start.position.x) * factor,
+                start.position.y
+                    + (end.position.y - start.position.y) * factor,
+                start.position.z
+                    + (end.position.z - start.position.z) * factor
+            },
+            parameter
+        };
+    }
+
+    struct PathParameterLocation
+    {
+        std::size_t segmentIndex = 0U;
+        cadcam::geometry::PathVertex3D vertex;
+    };
+
+    std::optional<PathParameterLocation> locatePathParameter
+    (
+        const std::vector<cadcam::geometry::PathVertex3D>& vertices,
+        double parameter
+    )
+    {
+        if (vertices.size() < 2U || !std::isfinite(parameter))
+            return std::nullopt;
+        constexpr double parameterEpsilon = 1.0e-10;
+        for (std::size_t index = 1U; index < vertices.size(); ++index)
+        {
+            const double minimum = std::min
+                (vertices[index - 1U].sourceParameter,
+                    vertices[index].sourceParameter)
+                - parameterEpsilon;
+            const double maximum = std::max
+                (vertices[index - 1U].sourceParameter,
+                    vertices[index].sourceParameter)
+                + parameterEpsilon;
+            if (parameter < minimum || parameter > maximum) continue;
+            return PathParameterLocation
+            {
+                index - 1U,
+                interpolatePathVertex
+                    (vertices[index - 1U], vertices[index], parameter)
+            };
+        }
+        return std::nullopt;
+    }
+
+    std::optional<cadcam::geometry::Path3D> slicePath
+    (
+        const cadcam::geometry::Path3D& source,
+        const cadcam::planning::ProcessPathFragment& fragment
+    )
+    {
+        std::vector<cadcam::geometry::PathVertex3D> vertices =
+            source.vertices;
+        if (fragment.reverse) std::reverse(vertices.begin(), vertices.end());
+        const auto begin = locatePathParameter
+            (vertices, fragment.sourceParameterBegin);
+        const auto end = locatePathParameter
+            (vertices, fragment.sourceParameterEnd);
+        if (!begin.has_value() || !end.has_value()
+            || begin->segmentIndex > end->segmentIndex)
+        {
+            return std::nullopt;
+        }
+
+        cadcam::geometry::Path3D result = source;
+        result.vertices.clear();
+        result.closed = false;
+        result.vertices.push_back(begin->vertex);
+        for (std::size_t index = begin->segmentIndex + 1U;
+            index <= end->segmentIndex && index < vertices.size(); ++index)
+        {
+            if (pathDistance(result.vertices.back().position,
+                vertices[index].position) > 1.0e-12)
+            {
+                result.vertices.push_back(vertices[index]);
+            }
+        }
+        if (pathDistance(result.vertices.back().position,
+            end->vertex.position) > 1.0e-12)
+        {
+            result.vertices.push_back(end->vertex);
+        }
+        else
+        {
+            result.vertices.back() = end->vertex;
+        }
+        if (result.vertices.size() < 2U
+            || pathDistance(result.vertices.front().position,
+                result.vertices.back().position) <= 1.0e-12)
+        {
+            return std::nullopt;
+        }
+        return result;
+    }
+
     Diagnostic serviceDiagnostic
     (
         DiagnosticCode code,
@@ -208,7 +335,25 @@ OperationResult<cadcam::machine::MachineTrajectory> MachineTrajectoryService::bu
     input.processGroups = plan.groups;
     input.tubeSection = tubeSection;
     geometry::GeometryCompiler compiler;
-    input.entities.reserve(assignments.size());
+    std::map<geometry::EntityId, const planning::ProcessAssignment*>
+        assignmentsById;
+    for (const auto& assignment : assignments)
+        assignmentsById.emplace(assignment.entityId, &assignment);
+    std::map<int, std::vector<const planning::ProcessPathFragment*>>
+        fragmentsByUnit;
+    for (const auto& fragment : plan.plannedFragments)
+        fragmentsByUnit[fragment.processUnitIndex].push_back(&fragment);
+    for (auto& [unitIndex, fragments] : fragmentsByUnit)
+    {
+        std::sort(fragments.begin(), fragments.end(),
+            [](const auto* left, const auto* right)
+            {
+                return left->fragmentOrder < right->fragmentOrder;
+            });
+    }
+    std::map<geometry::EntityId, geometry::Path3D> canonicalPaths;
+    std::set<int> emittedFragmentUnits;
+    input.entities.reserve(assignments.size() + plan.plannedFragments.size());
     for (std::size_t index = 0; index < assignments.size(); ++index)
     {
         const auto& assignment = assignments[index];
@@ -225,6 +370,106 @@ OperationResult<cadcam::machine::MachineTrajectory> MachineTrajectoryService::bu
                 taskContext.operationContext, assignment.entityId));
             return result;
         }
+
+        const auto fragmentedUnit = fragmentsByUnit.find
+            (assignment.processUnitIndex);
+        if (fragmentedUnit != fragmentsByUnit.end())
+        {
+            if (!emittedFragmentUnits.insert
+                (assignment.processUnitIndex).second)
+            {
+                continue;
+            }
+            for (const planning::ProcessPathFragment* fragment :
+                fragmentedUnit->second)
+            {
+                if (fragment == nullptr) continue;
+                const auto sourceAssignment = assignmentsById.find
+                    (fragment->entityId);
+                const auto sourceEntry = entries.find
+                    (fragment->entityId);
+                if (sourceAssignment == assignmentsById.end()
+                    || sourceEntry == entries.end()
+                    || sourceEntry->second == nullptr
+                    || !sourceEntry->second->sourceEntity.has_value())
+                {
+                    result.status = OperationStatus::Failed;
+                    result.addDiagnostic(serviceDiagnostic
+                    (
+                        DiagnosticCode::MachineTrajectoryEntityMissing,
+                        QStringLiteral("计划片段对应的图元在几何快照中不存在。"),
+                        taskContext.operationContext,
+                        fragment->entityId
+                    ));
+                    return result;
+                }
+
+                auto canonical = canonicalPaths.find(fragment->entityId);
+                if (canonical == canonicalPaths.end())
+                {
+                    geometry::PathCompileOptions options;
+                    auto compiled = compiler.compile
+                    (
+                        *sourceEntry->second->sourceEntity,
+                        productionSamplingPolicy
+                            (sourceEntry->second->attributes.originalDxfType),
+                        options,
+                        taskContext.operationContext
+                    );
+                    result.mergeDiagnostics(compiled);
+                    if (!compiled.succeeded()
+                        || !compiled.value.has_value())
+                    {
+                        result.status = OperationStatus::Failed;
+                        result.addDiagnostic(serviceDiagnostic
+                        (
+                            DiagnosticCode::MachineTrajectoryGeometryCompileFailed,
+                            QStringLiteral("计划片段的源图元无法编译为四轴路径。"),
+                            taskContext.operationContext,
+                            fragment->entityId
+                        ));
+                        return result;
+                    }
+                    canonical = canonicalPaths.emplace
+                        (fragment->entityId,
+                            std::move(*compiled.value)).first;
+                }
+                const auto path = slicePath
+                    (canonical->second, *fragment);
+                if (!path.has_value())
+                {
+                    result.status = OperationStatus::Failed;
+                    result.addDiagnostic(serviceDiagnostic
+                    (
+                        DiagnosticCode::MachineTrajectoryInvalidPath,
+                        QStringLiteral("计划片段无法映射到完整源路径。"),
+                        taskContext.operationContext,
+                        fragment->entityId
+                    ));
+                    return result;
+                }
+
+                machine::TrajectoryEntityInput entity;
+                entity.entityId = fragment->entityId;
+                entity.sourceIndex = sourceEntry->second->sourceIndex;
+                entity.sourceKind = sourceEntry->second->sourceKind;
+                entity.processOrder =
+                    static_cast<int>(input.entities.size());
+                entity.sourceProcessOrder =
+                    sourceAssignment->second->processOrder;
+                entity.fragmentOrder = fragment->fragmentOrder;
+                entity.processGroupId =
+                    sourceAssignment->second->continuousGroupId;
+                entity.path = *path;
+                const auto group = groups.find(entity.processGroupId);
+                entity.closed = group != groups.end()
+                    && group->second != nullptr
+                    ? group->second->closed : false;
+                input.entities.push_back(std::move(entity));
+            }
+            continue;
+        }
+
         geometry::PathCompileOptions options;
         options.reverse = assignment.reverse;
         options.startParameter = assignment.startParameter;
@@ -247,12 +492,12 @@ OperationResult<cadcam::machine::MachineTrajectory> MachineTrajectoryService::bu
                 taskContext.operationContext, assignment.entityId));
             return result;
         }
-
         machine::TrajectoryEntityInput entity;
         entity.entityId = assignment.entityId;
         entity.sourceIndex = found->second->sourceIndex;
         entity.sourceKind = found->second->sourceKind;
-        entity.processOrder = assignment.processOrder;
+        entity.processOrder = static_cast<int>(input.entities.size());
+        entity.sourceProcessOrder = assignment.processOrder;
         entity.processGroupId = assignment.continuousGroupId;
         entity.path = std::move(*compiled.value);
         entity.closed = entity.path.closed;
@@ -260,17 +505,19 @@ OperationResult<cadcam::machine::MachineTrajectory> MachineTrajectoryService::bu
         if (group != groups.end() && group->second != nullptr)
         {
             entity.closed = group->second->closed;
-            entity.firstInGroup = index == 0
-                || assignments[index - 1].continuousGroupId != entity.processGroupId;
-            entity.lastInGroup = index + 1 == assignments.size()
-                || assignments[index + 1].continuousGroupId != entity.processGroupId;
-        }
-        else
-        {
-            entity.firstInGroup = true;
-            entity.lastInGroup = true;
         }
         input.entities.push_back(std::move(entity));
+    }
+    for (std::size_t index = 0; index < input.entities.size(); ++index)
+    {
+        auto& entity = input.entities[index];
+        entity.firstInGroup = entity.processGroupId < 0 || index == 0U
+            || input.entities[index - 1U].processGroupId
+                != entity.processGroupId;
+        entity.lastInGroup = entity.processGroupId < 0
+            || index + 1U == input.entities.size()
+            || input.entities[index + 1U].processGroupId
+                != entity.processGroupId;
     }
 
     machine::RotaryMachinePolicy policy;

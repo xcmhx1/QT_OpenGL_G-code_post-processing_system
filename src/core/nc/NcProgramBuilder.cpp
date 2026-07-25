@@ -149,14 +149,31 @@ OperationResult<cadcam::nc::NcProgram> cadcam::nc::NcProgramBuilder::buildRotary
 
     std::vector<const machine::EntityTrajectory*> ordered;
     ordered.reserve(trajectory.entities.size());
-    std::set<geometry::EntityId> trajectoryIds;
+    std::set<geometry::EntityId> wholeTrajectoryIds;
+    std::set<geometry::EntityId> fragmentedTrajectoryIds;
+    std::set<std::pair<geometry::EntityId, int>> trajectoryFragments;
     for (const auto& entity : trajectory.entities)
     {
-        if (entity.entityId == 0 || !trajectoryIds.insert(entity.entityId).second)
+        bool identityValid = entity.entityId != 0;
+        if (identityValid && entity.fragmentOrder >= 0)
+        {
+            identityValid = wholeTrajectoryIds.count(entity.entityId) == 0U
+                && trajectoryFragments.emplace
+                    (entity.entityId, entity.fragmentOrder).second;
+            fragmentedTrajectoryIds.insert(entity.entityId);
+        }
+        else if (identityValid)
+        {
+            identityValid =
+                fragmentedTrajectoryIds.count(entity.entityId) == 0U
+                && wholeTrajectoryIds.insert(entity.entityId).second;
+        }
+        if (!identityValid)
         {
             result.status = OperationStatus::InvalidInput;
             result.addDiagnostic(builderDiagnostic(DiagnosticCode::NcProgramDuplicateEntity,
-                QStringLiteral("四轴轨迹包含零编号或重复图元。"), context, entity.entityId));
+                QStringLiteral("四轴轨迹包含零编号、重复完整图元或重复片段。"),
+                context, entity.entityId));
             return result;
         }
         ordered.push_back(&entity);
@@ -187,7 +204,8 @@ OperationResult<cadcam::nc::NcProgram> cadcam::nc::NcProgramBuilder::buildRotary
         }
         const NcEntityMetadata& entityMetadata = *metadataIt->second;
         if (source.processOrder != static_cast<int>(index)
-            || entityMetadata.processOrder != source.processOrder
+            || source.sourceProcessOrder < 0
+            || entityMetadata.processOrder != source.sourceProcessOrder
             || entityMetadata.processGroupId != source.processGroupId
             || entityMetadata.sourceIndex != source.sourceIndex
             || entityMetadata.sourceKind != source.sourceKind)
@@ -205,6 +223,7 @@ OperationResult<cadcam::nc::NcProgram> cadcam::nc::NcProgramBuilder::buildRotary
 
         NcEntityBlock block;
         block.metadata = entityMetadata;
+        block.metadata.processOrder = source.processOrder;
         const auto appendMoves = [&](const std::vector<machine::MachineMove>& moves) -> bool
         {
             for (std::size_t motionIndex = 0; motionIndex < moves.size(); ++motionIndex)
@@ -237,7 +256,10 @@ OperationResult<cadcam::nc::NcProgram> cadcam::nc::NcProgramBuilder::buildRotary
         program.entities.push_back(std::move(block));
     }
 
-    if (metadataById.size() != program.entities.size())
+    std::set<geometry::EntityId> usedEntityIds;
+    for (const auto& entity : trajectory.entities)
+        usedEntityIds.insert(entity.entityId);
+    if (metadataById.size() != usedEntityIds.size())
     {
         result.status = OperationStatus::Conflict;
         result.addDiagnostic(builderDiagnostic(DiagnosticCode::NcProgramInvariantViolation,

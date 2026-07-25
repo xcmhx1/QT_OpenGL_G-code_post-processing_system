@@ -93,6 +93,18 @@ namespace
                 plan.assignments.push_back(std::move(assignment));
             }
         }
+        std::map<EntityId, int> unitIndexByEntity;
+        for (const ProcessAssignment& assignment : plan.assignments)
+            unitIndexByEntity.emplace
+                (assignment.entityId, assignment.processUnitIndex);
+        for (cadcam::planning::ProcessPathFragment& fragment :
+            plan.plannedFragments)
+        {
+            const auto unitIndex = unitIndexByEntity.find
+                (fragment.entityId);
+            if (unitIndex == unitIndexByEntity.end()) return false;
+            fragment.processUnitIndex = unitIndex->second;
+        }
         return cadcam::planning::validateProcessUnitStructure(plan)
             && satisfiesPrecedenceConstraints(plan);
     }
@@ -162,6 +174,8 @@ namespace
             [&key](const ProcessUnit& candidate) { return candidate.key == key; }
         );
         if (unit == plan.processUnits.end()) return false;
+        const int processUnitIndex = static_cast<int>
+            (std::distance(plan.processUnits.begin(), unit));
 
         std::map<EntityId, ProcessAssignment*> assignmentsByEntity;
         for (ProcessAssignment& assignment : plan.assignments)
@@ -177,6 +191,19 @@ namespace
             assignment->second->startParameter = member.startParameter;
             unit->orderedMemberEntityIds.push_back(member.entityId);
         }
+        plan.plannedFragments.erase
+        (
+            std::remove_if
+            (
+                plan.plannedFragments.begin(), plan.plannedFragments.end(),
+                [processUnitIndex]
+                (const cadcam::planning::ProcessPathFragment& fragment)
+                {
+                    return fragment.processUnitIndex == processUnitIndex;
+                }
+            ),
+            plan.plannedFragments.end()
+        );
         return true;
     }
 
@@ -535,6 +562,42 @@ namespace
         }
     }
 
+    void logBreakStartPlanningSummaries(const QVector<Diagnostic>& diagnostics)
+    {
+        for (const Diagnostic& diagnostic : diagnostics)
+        {
+            if (!diagnostic.context.value
+                (QStringLiteral("breakStartSummary")).toBool())
+            {
+                continue;
+            }
+            const QVariantMap& values = diagnostic.context;
+            qInfo().noquote()
+                << QStringLiteral("[ProcessPlanning][BreakStart] groupId=%1 boundaryRank=%2 isFirstPlannedUnit=%3 strategy=%4 startZone=%5 startEntityId=%6 startParameter=%7 startPosition=%8 runLength=%9 direction=%10 exitZone=%11 exitConfidence=%12 fragmentCount=%13 status=%14")
+                    .arg(values.value(QStringLiteral("groupId"), -1).toInt())
+                    .arg(values.value(QStringLiteral("boundaryRank"), -1).toInt())
+                    .arg(values.value(QStringLiteral("isFirstPlannedUnit")).toBool()
+                        ? QStringLiteral("true") : QStringLiteral("false"))
+                    .arg(values.value(QStringLiteral("strategy")).toString())
+                    .arg(values.value(QStringLiteral("selectedZone"),
+                        QStringLiteral("Unknown")).toString())
+                    .arg(values.value(QStringLiteral("selectedEntityId")).toULongLong())
+                    .arg(values.value(QStringLiteral("selectedSourceParameter"))
+                        .toDouble(), 0, 'g', 15)
+                    .arg(values.value(QStringLiteral("selectedMidpoint")).toString())
+                    .arg(values.value(QStringLiteral("selectedRunLength"))
+                        .toDouble(), 0, 'g', 15)
+                    .arg(values.value(QStringLiteral("direction")).toString())
+                    .arg(values.value(QStringLiteral("exitZone"),
+                        QStringLiteral("Unknown")).toString())
+                    .arg(values.value(QStringLiteral("exitConfidence"))
+                        .toDouble(), 0, 'g', 15)
+                    .arg(values.value(QStringLiteral("fragmentCount")).toInt())
+                    .arg(values.value(QStringLiteral("status"),
+                        QStringLiteral("Unknown")).toString());
+        }
+    }
+
     void logZone16SweepPlanningSummaries(const QVector<Diagnostic>& diagnostics)
     {
         for (const Diagnostic& diagnostic : diagnostics)
@@ -705,6 +768,7 @@ OperationResult<cadcam::planning::ProcessPlan> ProcessPlanningService::buildRota
     auto result = cadcam::planning::ProcessPlanBuilder::build
         (*capture.value, policy, context);
     logClosedLoopPlanningSummaries(result.diagnostics);
+    logBreakStartPlanningSummaries(result.diagnostics);
     logZone16SweepPlanningSummaries(result.diagnostics);
     result.mergeDiagnostics(capture.diagnostics);
     if (result.succeeded() && result.value.has_value()

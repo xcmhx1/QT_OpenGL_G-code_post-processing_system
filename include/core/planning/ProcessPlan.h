@@ -5,6 +5,7 @@
 #include "core/topology/PathTopology.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <functional>
 #include <optional>
@@ -84,6 +85,16 @@ namespace cadcam::planning
         std::optional<double> startParameter;
     };
 
+    struct ProcessPathFragment
+    {
+        geometry::EntityId entityId = 0;
+        int processUnitIndex = -1;
+        int fragmentOrder = -1;
+        double sourceParameterBegin = 0.0;
+        double sourceParameterEnd = 0.0;
+        bool reverse = false;
+    };
+
     struct ProcessGroup
     {
         int groupId = -1;
@@ -114,6 +125,7 @@ namespace cadcam::planning
         std::vector<ProcessUnit> processUnits;
         ProcessUnitSequence processUnitSequence;
         std::vector<ProcessAssignment> assignments;
+        std::vector<ProcessPathFragment> plannedFragments;
         std::vector<ProcessGroup> groups;
         std::vector<ProcessExclusion> exclusions;
         std::vector<ProcessPrecedence> precedenceConstraints;
@@ -189,6 +201,59 @@ namespace cadcam::planning
         for (std::size_t index = 0; index < plan.processUnits.size(); ++index)
         {
             if (assignedByUnit[index] != plan.processUnits[index].orderedMemberEntityIds) return false;
+        }
+
+        std::vector<std::vector<const ProcessPathFragment*>> fragmentsByUnit
+            (plan.processUnits.size());
+        for (const ProcessPathFragment& fragment : plan.plannedFragments)
+        {
+            if (fragment.entityId == 0U
+                || fragment.processUnitIndex < 0
+                || static_cast<std::size_t>(fragment.processUnitIndex) >= plan.processUnits.size()
+                || fragment.fragmentOrder < 0
+                || !std::isfinite(fragment.sourceParameterBegin)
+                || !std::isfinite(fragment.sourceParameterEnd)
+                || fragment.sourceParameterBegin == fragment.sourceParameterEnd)
+            {
+                return false;
+            }
+            const ProcessUnit& unit =
+                plan.processUnits[static_cast<std::size_t>(fragment.processUnitIndex)];
+            if (!std::binary_search(unit.key.memberEntityIds.begin(),
+                unit.key.memberEntityIds.end(), fragment.entityId))
+            {
+                return false;
+            }
+            fragmentsByUnit[static_cast<std::size_t>(fragment.processUnitIndex)]
+                .push_back(&fragment);
+        }
+        for (std::size_t unitIndex = 0; unitIndex < fragmentsByUnit.size(); ++unitIndex)
+        {
+            auto& fragments = fragmentsByUnit[unitIndex];
+            if (fragments.empty()) continue;
+            std::sort(fragments.begin(), fragments.end(),
+                [](const ProcessPathFragment* left, const ProcessPathFragment* right)
+                {
+                    return left->fragmentOrder < right->fragmentOrder;
+                });
+            std::set<geometry::EntityId> fragmentedIds;
+            for (std::size_t fragmentIndex = 0;
+                fragmentIndex < fragments.size(); ++fragmentIndex)
+            {
+                if (fragments[fragmentIndex]->fragmentOrder
+                    != static_cast<int>(fragmentIndex))
+                {
+                    return false;
+                }
+                fragmentedIds.insert(fragments[fragmentIndex]->entityId);
+            }
+            if (fragmentedIds.size()
+                    != plan.processUnits[unitIndex].key.memberEntityIds.size()
+                || !std::equal(fragmentedIds.begin(), fragmentedIds.end(),
+                    plan.processUnits[unitIndex].key.memberEntityIds.begin()))
+            {
+                return false;
+            }
         }
         return true;
     }
