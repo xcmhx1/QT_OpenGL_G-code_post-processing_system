@@ -774,7 +774,8 @@ void Gcode_postprocessing_system::openHelpDialog(CadHelpSection section)
         &dialog,
         &CadHelpDialog::displayTitleConfigurationRequested,
         this,
-        &Gcode_postprocessing_system::openDisplayTitleDialog
+        &Gcode_postprocessing_system::openDisplayTitleDialog,
+        Qt::QueuedConnection
     );
     dialog.setCurrentSection(section);
     dialog.exec();

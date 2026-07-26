@@ -398,7 +398,8 @@ bool CadHelpDialog::eventFilter(QObject* watched, QEvent* event)
         && watched == m_aboutBrowser->viewport()
         && m_tabWidget != nullptr
         && m_tabWidget->currentWidget() == m_aboutBrowser
-        && event->type() == QEvent::MouseButtonPress)
+        && (event->type() == QEvent::MouseButtonPress
+            || event->type() == QEvent::MouseButtonDblClick))
     {
         const QMouseEvent* mouseEvent =
             static_cast<const QMouseEvent*>(event);
