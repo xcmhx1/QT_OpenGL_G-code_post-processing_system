@@ -17,6 +17,7 @@ namespace cadcam::infrastructure::nc
     {
         QString programHeader;
         QString programFooter;
+        GCodeBlock processUnitBlock;
         QHash<QString, GCodeBlock> entityTypeBlocks;
         QHash<QString, GCodeBlock> layerBlocks;
         QHash<QString, GCodeBlock> colorBlocks;

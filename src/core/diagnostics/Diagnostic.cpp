@@ -146,10 +146,12 @@ QString diagnosticCodeName(DiagnosticCode code)
     case DiagnosticCode::NcProgramDuplicateEntity: return QStringLiteral("NcProgramDuplicateEntity");
     case DiagnosticCode::NcProgramUnsupportedMotion: return QStringLiteral("NcProgramUnsupportedMotion");
     case DiagnosticCode::NcProgramInvariantViolation: return QStringLiteral("NcProgramInvariantViolation");
+    case DiagnosticCode::NcProgramCuttingControlInvalid: return QStringLiteral("NcProgramCuttingControlInvalid");
     case DiagnosticCode::GCodeProfileInvalid: return QStringLiteral("GCodeProfileInvalid");
     case DiagnosticCode::GCodeEntityBlockMissing: return QStringLiteral("GCodeEntityBlockMissing");
     case DiagnosticCode::GCodeRenderingFailed: return QStringLiteral("GCodeRenderingFailed");
     case DiagnosticCode::GCodeTextOptimizationFailed: return QStringLiteral("GCodeTextOptimizationFailed");
+    case DiagnosticCode::GCodeCuttingStateViolation: return QStringLiteral("GCodeCuttingStateViolation");
     case DiagnosticCode::PlanarNcInputInvalid: return QStringLiteral("PlanarNcInputInvalid");
     case DiagnosticCode::PlanarNcRevisionMismatch: return QStringLiteral("PlanarNcRevisionMismatch");
     case DiagnosticCode::PlanarNcEntityMissing: return QStringLiteral("PlanarNcEntityMissing");

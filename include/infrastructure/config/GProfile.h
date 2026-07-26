@@ -79,6 +79,8 @@ public:
 
     void setFileCode(const GProfileCodeBlock& codeBlock);
     const GProfileCodeBlock& fileCode() const;
+    void setProcessUnitCode(const GProfileCodeBlock& codeBlock);
+    const GProfileCodeBlock& processUnitCode() const;
 
     void setEntityTypeCode(const QString& entityType, const GProfileCodeBlock& codeBlock);
     bool containsEntityTypeCode(const QString& entityType) const;
@@ -116,6 +118,12 @@ public:
 private:
     QString m_profileName;
     GProfileCodeBlock m_fileCode;
+    GProfileCodeBlock m_processUnitCode
+    {
+        QStringLiteral("M03"),
+        QStringLiteral("M05"),
+        QStringLiteral("加工单元启停代码")
+    };
     QMap<QString, GProfileCodeBlock> m_entityTypeCodes;
     QMap<QString, GProfileCodeBlock> m_layerCodes;
     QMap<QString, GProfileCodeBlock> m_entityColorCodes;

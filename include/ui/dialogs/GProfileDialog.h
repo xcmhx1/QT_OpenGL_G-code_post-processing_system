@@ -87,6 +87,8 @@ private:
     QPlainTextEdit* m_fileHeaderEdit = nullptr;
     QPlainTextEdit* m_fileFooterEdit = nullptr;
     QPlainTextEdit* m_fileCommentEdit = nullptr;
+    QPlainTextEdit* m_processUnitHeaderEdit = nullptr;
+    QPlainTextEdit* m_processUnitFooterEdit = nullptr;
     QDoubleSpinBox* m_rotationSafetyClearanceSpinBox = nullptr;
     QDoubleSpinBox* m_sameZoneTransferClearanceSpinBox = nullptr;
     QCheckBox* m_coordinatedTransferCheckBox = nullptr;

@@ -242,7 +242,11 @@ void GProfileDialog::buildUi()
 
     QLabel* ruleOrderHintLabel = new QLabel
     (
-        QStringLiteral("规则应用顺序：文件头 -> 每个图元：定位移动 -> 图层头 -> 颜色头 -> 类型头 -> 图元加工代码 -> 类型尾 -> 颜色尾 -> 图层尾 -> 文件尾。"),
+        QStringLiteral(
+            "四轴规则应用顺序：文件头 -> 加工单元头 -> 单元内每个图元："
+            "定位移动 -> 图层头 -> 颜色头 -> 类型头 -> 图元加工代码 -> "
+            "类型尾 -> 颜色尾 -> 图层尾 -> 加工单元尾 -> 文件尾。"
+            "M03/M05 应配置在加工单元头/尾中。"),
         this
     );
     ruleOrderHintLabel->setWordWrap(true);
@@ -274,6 +278,20 @@ void GProfileDialog::buildUi()
     m_fileCommentEdit = new QPlainTextEdit(fileTab);
     m_fileCommentEdit->setMinimumHeight(80);
     fileFormLayout->addRow(QStringLiteral("说明"), m_fileCommentEdit);
+
+    m_processUnitHeaderEdit = new QPlainTextEdit(fileTab);
+    m_processUnitHeaderEdit->setMinimumHeight(80);
+    m_processUnitHeaderEdit->setToolTip(QStringLiteral(
+        "加工单元完成快速定位后、第一条切削运动前输出。"));
+    fileFormLayout->addRow(QStringLiteral("加工单元开始代码"),
+        m_processUnitHeaderEdit);
+
+    m_processUnitFooterEdit = new QPlainTextEdit(fileTab);
+    m_processUnitFooterEdit->setMinimumHeight(80);
+    m_processUnitFooterEdit->setToolTip(QStringLiteral(
+        "加工单元全部切削和过切完成后、下一次快速转移前输出。"));
+    fileFormLayout->addRow(QStringLiteral("加工单元结束代码"),
+        m_processUnitFooterEdit);
 
     fileLayout->addLayout(fileFormLayout);
     tabWidget->addTab(fileTab, QStringLiteral("文件级"));
@@ -664,6 +682,8 @@ void GProfileDialog::applyProfile(const GProfile& profile)
     setBlockText(m_fileHeaderEdit, profile.fileCode().header);
     setBlockText(m_fileFooterEdit, profile.fileCode().footer);
     setBlockText(m_fileCommentEdit, profile.fileCode().comment);
+    setBlockText(m_processUnitHeaderEdit, profile.processUnitCode().header);
+    setBlockText(m_processUnitFooterEdit, profile.processUnitCode().footer);
     m_rotationSafetyClearanceSpinBox->setValue
         (profile.toolTransferConfig().rotationSafetyClearance);
     m_sameZoneTransferClearanceSpinBox->setValue
@@ -739,6 +759,14 @@ GProfile GProfileDialog::collectProfile() const
             blockText(m_fileHeaderEdit),
             blockText(m_fileFooterEdit),
             blockText(m_fileCommentEdit)
+        }
+    );
+    profile.setProcessUnitCode
+    (
+        {
+            blockText(m_processUnitHeaderEdit),
+            blockText(m_processUnitFooterEdit),
+            QStringLiteral("加工单元启停代码")
         }
     );
 

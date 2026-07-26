@@ -1,5 +1,7 @@
 #include "core/nc/NcProgramBuilder.h"
 
+#include <QDebug>
+
 #include <algorithm>
 #include <cmath>
 #include <map>
@@ -115,6 +117,28 @@ namespace
             && motion.axes.z.has_value() && std::isfinite(*motion.axes.z)
             && motion.axes.a.has_value() && std::isfinite(*motion.axes.a);
     }
+
+    bool cuttingMotion(const cadcam::nc::NcMotion& motion)
+    {
+        using cadcam::nc::NcSourceMoveKind;
+        return motion.sourceKind == NcSourceMoveKind::Cutting
+            || motion.sourceKind == NcSourceMoveKind::CuttingConnection
+            || motion.sourceKind == NcSourceMoveKind::Overcut;
+    }
+
+    struct CuttingControlSummary
+    {
+        int processUnitIndex = -1;
+        int firstProcessOrder = -1;
+        int lastProcessOrder = -1;
+        int memberBlockCount = 0;
+        int fragmentBlockCount = 0;
+        int cuttingMotionCount = 0;
+        int connectionMotionCount = 0;
+        int overcutMotionCount = 0;
+        int enableCount = 0;
+        int disableCount = 0;
+    };
 }
 
 OperationResult<cadcam::nc::NcProgram> cadcam::nc::NcProgramBuilder::buildRotary
@@ -182,6 +206,55 @@ OperationResult<cadcam::nc::NcProgram> cadcam::nc::NcProgramBuilder::buildRotary
     {
         return left->processOrder < right->processOrder;
     });
+    int expectedProcessUnitIndex = 0;
+    int currentProcessUnitIndex = -1;
+    std::set<int> completedProcessUnits;
+    for (std::size_t index = 0; index < ordered.size(); ++index)
+    {
+        const machine::EntityTrajectory& source = *ordered[index];
+        if (source.processUnitIndex < 0)
+        {
+            result.status = OperationStatus::InvalidInput;
+            result.addDiagnostic(builderDiagnostic
+            (
+                DiagnosticCode::NcProgramCuttingControlInvalid,
+                QStringLiteral("四轴轨迹缺少有效的加工单元编号。"),
+                context,
+                source.entityId,
+                {
+                    { QStringLiteral("processOrder"), source.processOrder },
+                    { QStringLiteral("processUnitIndex"),
+                        source.processUnitIndex }
+                }
+            ));
+            return result;
+        }
+        if (source.processUnitIndex == currentProcessUnitIndex) continue;
+        if (currentProcessUnitIndex >= 0)
+            completedProcessUnits.insert(currentProcessUnitIndex);
+        if (completedProcessUnits.count(source.processUnitIndex) != 0U
+            || source.processUnitIndex != expectedProcessUnitIndex)
+        {
+            result.status = OperationStatus::Conflict;
+            result.addDiagnostic(builderDiagnostic
+            (
+                DiagnosticCode::NcProgramCuttingControlInvalid,
+                QStringLiteral("四轴轨迹中的加工单元不连续或顺序无效。"),
+                context,
+                source.entityId,
+                {
+                    { QStringLiteral("processOrder"), source.processOrder },
+                    { QStringLiteral("processUnitIndex"),
+                        source.processUnitIndex },
+                    { QStringLiteral("expectedProcessUnitIndex"),
+                        expectedProcessUnitIndex }
+                }
+            ));
+            return result;
+        }
+        currentProcessUnitIndex = source.processUnitIndex;
+        ++expectedProcessUnitIndex;
+    }
 
     NcProgram program;
     program.contentRevision = trajectory.contentRevision;
@@ -189,10 +262,18 @@ OperationResult<cadcam::nc::NcProgram> cadcam::nc::NcProgramBuilder::buildRotary
     program.mode = NcProgramMode::Rotary4Axis;
     appendRotaryComments(program, trajectory.rotaryContext, tubeSection);
     program.entities.reserve(ordered.size());
+    std::vector<CuttingControlSummary> cuttingControlSummaries
+        (static_cast<std::size_t>(expectedProcessUnitIndex));
 
     for (std::size_t index = 0; index < ordered.size(); ++index)
     {
         const machine::EntityTrajectory& source = *ordered[index];
+        const bool firstInUnit = index == 0U
+            || ordered[index - 1U]->processUnitIndex
+                != source.processUnitIndex;
+        const bool lastInUnit = index + 1U == ordered.size()
+            || ordered[index + 1U]->processUnitIndex
+                != source.processUnitIndex;
         const auto metadataIt = metadataById.find(source.entityId);
         if (metadataIt == metadataById.end())
         {
@@ -222,6 +303,11 @@ OperationResult<cadcam::nc::NcProgram> cadcam::nc::NcProgramBuilder::buildRotary
         }
 
         NcEntityBlock block;
+        block.processUnitIndex = source.processUnitIndex;
+        block.beforeCutting = firstInUnit
+            ? NcCuttingControl::Enable : NcCuttingControl::None;
+        block.afterCutting = lastInUnit
+            ? NcCuttingControl::Disable : NcCuttingControl::None;
         block.metadata = entityMetadata;
         block.metadata.processOrder = source.processOrder;
         const auto appendMoves = [&](const std::vector<machine::MachineMove>& moves) -> bool
@@ -253,7 +339,141 @@ OperationResult<cadcam::nc::NcProgram> cadcam::nc::NcProgramBuilder::buildRotary
                 QStringLiteral("NC 图元块没有任何运动。"), context, source.entityId));
             return result;
         }
+
+        CuttingControlSummary& summary = cuttingControlSummaries
+            [static_cast<std::size_t>(source.processUnitIndex)];
+        if (firstInUnit)
+        {
+            summary.processUnitIndex = source.processUnitIndex;
+            summary.firstProcessOrder = source.processOrder;
+        }
+        summary.lastProcessOrder = source.processOrder;
+        ++summary.memberBlockCount;
+        if (source.fragmentOrder >= 0) ++summary.fragmentBlockCount;
+        if (block.beforeCutting == NcCuttingControl::Enable)
+            ++summary.enableCount;
+        if (block.afterCutting == NcCuttingControl::Disable)
+            ++summary.disableCount;
+
+        bool cuttingStarted = false;
+        int rapidCount = 0;
+        for (const NcMotion& motion : block.motions)
+        {
+            if (motion.sourceKind == NcSourceMoveKind::Rapid)
+            {
+                ++rapidCount;
+                if (!firstInUnit || cuttingStarted)
+                {
+                    result.status = OperationStatus::Conflict;
+                    result.addDiagnostic(builderDiagnostic
+                    (
+                        DiagnosticCode::NcProgramCuttingControlInvalid,
+                        QStringLiteral("加工单元内部或切削开始后出现了快速运动。"),
+                        context,
+                        source.entityId,
+                        {
+                            { QStringLiteral("processOrder"),
+                                source.processOrder },
+                            { QStringLiteral("processUnitIndex"),
+                                source.processUnitIndex },
+                            { QStringLiteral("firstInUnit"), firstInUnit }
+                        }
+                    ));
+                    return result;
+                }
+                continue;
+            }
+            if (!cuttingMotion(motion))
+            {
+                result.status = OperationStatus::NotSupported;
+                result.addDiagnostic(builderDiagnostic
+                (
+                    DiagnosticCode::NcProgramCuttingControlInvalid,
+                    QStringLiteral("加工单元包含未知的切削运动类型。"),
+                    context,
+                    source.entityId
+                ));
+                return result;
+            }
+            cuttingStarted = true;
+            if (motion.sourceKind == NcSourceMoveKind::Cutting)
+                ++summary.cuttingMotionCount;
+            else if (motion.sourceKind
+                == NcSourceMoveKind::CuttingConnection)
+            {
+                ++summary.connectionMotionCount;
+            }
+            else if (motion.sourceKind == NcSourceMoveKind::Overcut)
+                ++summary.overcutMotionCount;
+        }
+        if (!cuttingStarted
+            || (firstInUnit && source.processUnitIndex > 0
+                && rapidCount == 0))
+        {
+            result.status = OperationStatus::Conflict;
+            result.addDiagnostic(builderDiagnostic
+            (
+                DiagnosticCode::NcProgramCuttingControlInvalid,
+                !cuttingStarted
+                    ? QStringLiteral("加工单元图元块不包含切削运动。")
+                    : QStringLiteral("相邻加工单元之间缺少关闭状态下的快速转移。"),
+                context,
+                source.entityId,
+                {
+                    { QStringLiteral("processOrder"), source.processOrder },
+                    { QStringLiteral("processUnitIndex"),
+                        source.processUnitIndex },
+                    { QStringLiteral("rapidCount"), rapidCount }
+                }
+            ));
+            return result;
+        }
         program.entities.push_back(std::move(block));
+    }
+
+    for (const CuttingControlSummary& summary : cuttingControlSummaries)
+    {
+        const int cuttingLikeCount = summary.cuttingMotionCount
+            + summary.connectionMotionCount + summary.overcutMotionCount;
+        if (summary.processUnitIndex < 0
+            || summary.enableCount != 1 || summary.disableCount != 1
+            || cuttingLikeCount <= 0)
+        {
+            result.status = OperationStatus::Conflict;
+            result.addDiagnostic(builderDiagnostic
+            (
+                DiagnosticCode::NcProgramCuttingControlInvalid,
+                QStringLiteral("加工单元启停边界不完整。"),
+                context,
+                0,
+                {
+                    { QStringLiteral("processUnitIndex"),
+                        summary.processUnitIndex },
+                    { QStringLiteral("enableCount"), summary.enableCount },
+                    { QStringLiteral("disableCount"),
+                        summary.disableCount },
+                    { QStringLiteral("cuttingMotionCount"),
+                        cuttingLikeCount }
+                }
+            ));
+            return result;
+        }
+        qInfo().noquote() << QStringLiteral(
+            "[NcProgram][CuttingControl] processUnitIndex=%1 "
+            "firstProcessOrder=%2 lastProcessOrder=%3 "
+            "memberBlockCount=%4 fragmentBlockCount=%5 "
+            "cuttingMotionCount=%6 connectionMotionCount=%7 "
+            "overcutMotionCount=%8 enableCount=%9 disableCount=%10")
+            .arg(summary.processUnitIndex)
+            .arg(summary.firstProcessOrder)
+            .arg(summary.lastProcessOrder)
+            .arg(summary.memberBlockCount)
+            .arg(summary.fragmentBlockCount)
+            .arg(summary.cuttingMotionCount)
+            .arg(summary.connectionMotionCount)
+            .arg(summary.overcutMotionCount)
+            .arg(summary.enableCount)
+            .arg(summary.disableCount);
     }
 
     std::set<geometry::EntityId> usedEntityIds;

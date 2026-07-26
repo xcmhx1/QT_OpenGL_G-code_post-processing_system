@@ -661,6 +661,7 @@ namespace cadcam::machine
                     inputEntity.sourceProcessOrder;
                 entity.fragmentOrder = inputEntity.fragmentOrder;
                 entity.processGroupId = inputEntity.processGroupId;
+                entity.processUnitIndex = inputEntity.processUnitIndex;
                 entity.closed = inputEntity.closed;
                 entity.continuousFromPrevious = localIndex > 0U;
                 entity.firstInGroup = inputEntity.firstInGroup;

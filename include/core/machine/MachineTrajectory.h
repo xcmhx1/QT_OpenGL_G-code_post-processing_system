@@ -32,6 +32,7 @@ namespace cadcam::machine
         int sourceProcessOrder = -1;
         int fragmentOrder = -1;
         int processGroupId = -1;
+        int processUnitIndex = -1;
         bool closed = false;
         bool continuousFromPrevious = false;
         bool firstInGroup = false;

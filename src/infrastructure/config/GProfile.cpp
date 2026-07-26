@@ -2,9 +2,11 @@
 
 #include "infrastructure/config/GProfile.h"
 
+#include <QDebug>
 #include <QFile>
 #include <QJsonDocument>
 #include <QJsonValue>
+#include <QRegularExpression>
 
 #include <algorithm>
 
@@ -12,6 +14,7 @@ namespace
 {
     constexpr const char* kProfileNameKey = "profileName";
     constexpr const char* kFileCodeKey = "fileCode";
+    constexpr const char* kProcessUnitCodeKey = "processUnitCode";
     constexpr const char* kEntityTypeCodesKey = "entityTypeCodes";
     constexpr const char* kLayerCodesKey = "layerCodes";
     constexpr const char* kEntityColorCodesKey = "entityColorCodes";
@@ -105,15 +108,77 @@ namespace
     {
         const GProfileCodeBlock colorCode
         {
-            QStringLiteral("M03"),
-            QStringLiteral("M05"),
-            QStringLiteral("颜色规则默认加工头尾")
+            QString(),
+            QString(),
+            QStringLiteral("颜色规则仅用于特殊工艺代码")
         };
 
         for (const QString& colorKey : defaultProcessColorKeys())
         {
             profile.setEntityColorCode(colorKey, colorCode);
         }
+    }
+
+    QString migrateLegacyCuttingControlText
+    (
+        const QString& text,
+        int& removedStandaloneCount,
+        int& migratedMixedCount
+    )
+    {
+        QString normalized = text;
+        normalized.replace(QStringLiteral("\r\n"), QStringLiteral("\n"));
+        normalized.replace(QLatin1Char('\r'), QLatin1Char('\n'));
+        const QRegularExpression mixedCode
+        (
+            QStringLiteral("(^|\\s)M0?(3|5)(?=\\s|$)"),
+            QRegularExpression::CaseInsensitiveOption
+        );
+        QStringList migratedLines;
+        const QStringList lines = normalized.split
+            (QLatin1Char('\n'), Qt::KeepEmptyParts);
+        for (const QString& line : lines)
+        {
+            const QString trimmed = line.trimmed().toUpper();
+            if (trimmed == QStringLiteral("M03")
+                || trimmed == QStringLiteral("M3")
+                || trimmed == QStringLiteral("M05")
+                || trimmed == QStringLiteral("M5"))
+            {
+                ++removedStandaloneCount;
+                continue;
+            }
+            if (!mixedCode.match(line).hasMatch())
+            {
+                migratedLines.push_back(line);
+                continue;
+            }
+
+            QString migrated = line;
+            migrated.remove(mixedCode);
+            migrated = migrated.trimmed();
+            if (!migrated.isEmpty()) migratedLines.push_back(migrated);
+            ++migratedMixedCount;
+        }
+        while (!migratedLines.isEmpty()
+            && migratedLines.back().isEmpty())
+        {
+            migratedLines.removeLast();
+        }
+        return migratedLines.join(QStringLiteral("\r\n"));
+    }
+
+    void migrateLegacyCuttingControlBlock
+    (
+        GProfileCodeBlock& block,
+        int& removedStandaloneCount,
+        int& migratedMixedCount
+    )
+    {
+        block.header = migrateLegacyCuttingControlText
+            (block.header, removedStandaloneCount, migratedMixedCount);
+        block.footer = migrateLegacyCuttingControlText
+            (block.footer, removedStandaloneCount, migratedMixedCount);
     }
 }
 
@@ -244,6 +309,14 @@ GProfile GProfile::createDefaultLaserProfile()
             QStringLiteral("3轴G加工默认文件配置")
         }
     );
+    profile.setProcessUnitCode
+    (
+        {
+            QStringLiteral("M03"),
+            QStringLiteral("M05"),
+            QStringLiteral("加工单元启停代码")
+        }
+    );
 
     applyDefaultEntityTypeRules(profile);
     applyDefaultColorRules(profile);
@@ -261,6 +334,14 @@ GProfile GProfile::createDefaultRotaryProfile()
             QStringLiteral("%\r\nG90\r\nG21\r\nG17\r\nM8\r\nM7\r\nG00 Z50\r\nG80 G40 G49 G17 G90\r\nM05"),
             QStringLiteral("G00 Z50\r\nM05\r\nM30\r\n%"),
             QStringLiteral("4轴G加工默认文件配置")
+        }
+    );
+    profile.setProcessUnitCode
+    (
+        {
+            QStringLiteral("M03"),
+            QStringLiteral("M05"),
+            QStringLiteral("加工单元启停代码")
         }
     );
 
@@ -305,6 +386,17 @@ GProfile GProfile::loadFromFile(const QString& filePath, QString* errorMessage)
     const QJsonObject rootObject = document.object();
     profile.m_profileName = rootObject.value(kProfileNameKey).toString();
     profile.m_fileCode = GProfileCodeBlock::fromJson(rootObject.value(kFileCodeKey).toObject());
+    const bool requiresCuttingControlMigration =
+        !rootObject.contains(kProcessUnitCodeKey);
+    profile.m_processUnitCode = requiresCuttingControlMigration
+        ? GProfileCodeBlock
+            {
+                QStringLiteral("M03"),
+                QStringLiteral("M05"),
+                QStringLiteral("加工单元启停代码")
+            }
+        : GProfileCodeBlock::fromJson
+            (rootObject.value(kProcessUnitCodeKey).toObject());
 
     const QJsonObject entityTypeObject = rootObject.value(kEntityTypeCodesKey).toObject();
 
@@ -325,6 +417,41 @@ GProfile GProfile::loadFromFile(const QString& filePath, QString* errorMessage)
     for (auto it = entityColorObject.begin(); it != entityColorObject.end(); ++it)
     {
         profile.m_entityColorCodes.insert(normalizeColorKey(it.key()), GProfileCodeBlock::fromJson(it.value().toObject()));
+    }
+    if (requiresCuttingControlMigration)
+    {
+        int removedStandaloneCount = 0;
+        int migratedMixedCount = 0;
+        for (auto it = profile.m_entityTypeCodes.begin();
+            it != profile.m_entityTypeCodes.end(); ++it)
+        {
+            migrateLegacyCuttingControlBlock
+                (it.value(), removedStandaloneCount, migratedMixedCount);
+        }
+        for (auto it = profile.m_layerCodes.begin();
+            it != profile.m_layerCodes.end(); ++it)
+        {
+            migrateLegacyCuttingControlBlock
+                (it.value(), removedStandaloneCount, migratedMixedCount);
+        }
+        for (auto it = profile.m_entityColorCodes.begin();
+            it != profile.m_entityColorCodes.end(); ++it)
+        {
+            migrateLegacyCuttingControlBlock
+                (it.value(), removedStandaloneCount, migratedMixedCount);
+        }
+        qInfo().noquote() << QStringLiteral(
+            "[GProfile][Migration] processUnitCode=M03/M05 "
+            "removedStandaloneCuttingCodes=%1 migratedMixedLines=%2")
+            .arg(removedStandaloneCount)
+            .arg(migratedMixedCount);
+        if (migratedMixedCount > 0)
+        {
+            qWarning().noquote() << QStringLiteral(
+                "[GProfile][Migration] 旧规则中存在与其他命令同一行的 "
+                "M03/M05；启停命令已迁移到加工单元代码，其他参数已保留，"
+                "请人工核对迁移后的工艺顺序。");
+        }
     }
 
     const QJsonObject rotaryObject =
@@ -363,6 +490,7 @@ bool GProfile::saveToFile(const QString& filePath, QString* errorMessage) const
     QJsonObject rootObject;
     rootObject.insert(kProfileNameKey, m_profileName);
     rootObject.insert(kFileCodeKey, m_fileCode.toJson());
+    rootObject.insert(kProcessUnitCodeKey, m_processUnitCode.toJson());
 
     QJsonObject entityTypeObject;
 
@@ -432,6 +560,12 @@ void GProfile::clear()
 {
     m_profileName.clear();
     m_fileCode = GProfileCodeBlock();
+    m_processUnitCode =
+    {
+        QStringLiteral("M03"),
+        QStringLiteral("M05"),
+        QStringLiteral("加工单元启停代码")
+    };
     m_entityTypeCodes.clear();
     m_layerCodes.clear();
     m_entityColorCodes.clear();
@@ -457,6 +591,16 @@ void GProfile::setFileCode(const GProfileCodeBlock& codeBlock)
 const GProfileCodeBlock& GProfile::fileCode() const
 {
     return m_fileCode;
+}
+
+void GProfile::setProcessUnitCode(const GProfileCodeBlock& codeBlock)
+{
+    m_processUnitCode = codeBlock;
+}
+
+const GProfileCodeBlock& GProfile::processUnitCode() const
+{
+    return m_processUnitCode;
 }
 
 void GProfile::setEntityTypeCode(const QString& entityType, const GProfileCodeBlock& codeBlock)

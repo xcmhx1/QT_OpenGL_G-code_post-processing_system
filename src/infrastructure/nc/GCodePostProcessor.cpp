@@ -2,9 +2,12 @@
 
 #include "infrastructure/config/GProfile.h"
 
+#include <QDebug>
+#include <QRegularExpression>
 #include <QStringList>
 
 #include <cmath>
+#include <set>
 
 namespace cadcam::infrastructure::nc
 {
@@ -44,31 +47,21 @@ namespace cadcam::infrastructure::nc
             }
         }
 
-        bool standaloneMCode(const QString& line, const QString& padded, const QString& shortCode)
+        bool containsCuttingControlCode(const QString& text)
         {
-            const QString normalized = line.trimmed().toUpper();
-            return normalized == padded || normalized == shortCode;
-        }
-
-        bool optimizeLaserRestarts(QStringList& lines)
-        {
-            QStringList optimized;
-            optimized.reserve(lines.size());
-            for (const QString& line : lines)
+            static const QRegularExpression code
+            (
+                QStringLiteral("(^|\\s)M0?(3|5)(?=\\s|$)"),
+                QRegularExpression::CaseInsensitiveOption
+            );
+            QString normalized = text;
+            normalized.replace(QStringLiteral("\r\n"), QStringLiteral("\n"));
+            normalized.replace(QLatin1Char('\r'), QLatin1Char('\n'));
+            for (const QString& line : normalized.split(QLatin1Char('\n')))
             {
-                const bool startsLaser = standaloneMCode
-                    (line, QStringLiteral("M03"), QStringLiteral("M3"));
-                const bool previousStopsLaser = !optimized.isEmpty()
-                    && standaloneMCode(optimized.constLast(), QStringLiteral("M05"), QStringLiteral("M5"));
-                if (startsLaser && previousStopsLaser)
-                {
-                    optimized.removeLast();
-                    continue;
-                }
-                optimized.push_back(line);
+                if (code.match(line).hasMatch()) return true;
             }
-            lines = std::move(optimized);
-            return true;
+            return false;
         }
 
         QString formatMotion
@@ -183,6 +176,7 @@ namespace cadcam::infrastructure::nc
         GCodePostProcessorProfile result;
         result.programHeader = profile.fileCode().header;
         result.programFooter = profile.fileCode().footer;
+        result.processUnitBlock = toBlock(profile.processUnitCode());
         for (auto it = profile.entityTypeCodes().cbegin(); it != profile.entityTypeCodes().cend(); ++it)
             result.entityTypeBlocks.insert(it.key(), toBlock(it.value()));
         if (!result.entityTypeBlocks.contains(QStringLiteral("SPLINE")))
@@ -223,12 +217,67 @@ namespace cadcam::infrastructure::nc
                 }));
             return result;
         }
+        const bool rotary =
+            program.mode == cadcam::nc::NcProgramMode::Rotary4Axis;
+        if (rotary
+            && (profile.processUnitBlock.header.trimmed().isEmpty()
+                || profile.processUnitBlock.footer.trimmed().isEmpty()))
+        {
+            result.status = OperationStatus::InvalidInput;
+            result.addDiagnostic(postDiagnostic
+            (
+                DiagnosticCode::GCodeProfileInvalid,
+                QStringLiteral("四轴加工单元开始或结束代码为空。"),
+                context
+            ));
+            return result;
+        }
+        if (rotary)
+        {
+            const auto invalidRule = [](const auto& blocks)
+            {
+                for (auto it = blocks.cbegin(); it != blocks.cend(); ++it)
+                {
+                    if (containsCuttingControlCode(it.value().header)
+                        || containsCuttingControlCode(it.value().footer))
+                    {
+                        return it.key();
+                    }
+                }
+                return QString();
+            };
+            QString invalidRuleKey = invalidRule(profile.layerBlocks);
+            if (invalidRuleKey.isEmpty())
+                invalidRuleKey = invalidRule(profile.colorBlocks);
+            if (invalidRuleKey.isEmpty())
+                invalidRuleKey = invalidRule(profile.entityTypeBlocks);
+            if (!invalidRuleKey.isEmpty())
+            {
+                result.status = OperationStatus::InvalidInput;
+                result.addDiagnostic(postDiagnostic
+                (
+                    DiagnosticCode::GCodeProfileInvalid,
+                    QStringLiteral("图层、颜色或图元类型规则仍包含 M03/M05。"),
+                    context,
+                    0,
+                    { { QStringLiteral("ruleKey"), invalidRuleKey } }
+                ));
+                return result;
+            }
+        }
 
         QStringList lines;
         appendTextBlock(lines, profile.programHeader);
         for (const auto& comment : program.leadingComments)
             lines.push_back(QLatin1Char('(') + QString::fromStdString(comment.text) + QLatin1Char(')'));
 
+        enum class CuttingState { Off, On };
+        CuttingState cuttingState = CuttingState::Off;
+        int enableCount = 0;
+        int disableCount = 0;
+        int rapidWhileEnabledCount = 0;
+        int cuttingWhileDisabledCount = 0;
+        std::set<int> processUnitIndices;
         for (std::size_t entityIndex = 0; entityIndex < program.entities.size(); ++entityIndex)
         {
             const cadcam::nc::NcEntityBlock& entity = program.entities[entityIndex];
@@ -239,7 +288,8 @@ namespace cadcam::infrastructure::nc
                 || entity.metadata.sourceKind == geometry::SourceGeometryKind::Arc;
             if (entity.metadata.entityId == 0
                 || entity.metadata.processOrder != static_cast<int>(entityIndex)
-                || entity.motions.empty())
+                || entity.motions.empty()
+                || (rotary && entity.processUnitIndex < 0))
             {
                 result.status = OperationStatus::Failed;
                 result.addDiagnostic(postDiagnostic(DiagnosticCode::NcProgramInvariantViolation,
@@ -258,6 +308,25 @@ namespace cadcam::infrastructure::nc
             {
                 const cadcam::nc::NcMotion& motion = entity.motions[motionIndex];
                 if (motion.sourceKind != cadcam::nc::NcSourceMoveKind::Rapid) break;
+                if (rotary && cuttingState != CuttingState::Off)
+                {
+                    ++rapidWhileEnabledCount;
+                    result.status = OperationStatus::Conflict;
+                    result.addDiagnostic(postDiagnostic
+                    (
+                        DiagnosticCode::GCodeCuttingStateViolation,
+                        QStringLiteral("切削开启状态下出现了快速运动。"),
+                        context,
+                        entity.metadata.entityId,
+                        {
+                            { QStringLiteral("processUnitIndex"),
+                                entity.processUnitIndex },
+                            { QStringLiteral("motionIndex"),
+                                static_cast<qulonglong>(motionIndex) }
+                        }
+                    ));
+                    return result;
+                }
                 if (!validMotion(motion, program.mode, true))
                 {
                     result.status = OperationStatus::Failed;
@@ -280,6 +349,46 @@ namespace cadcam::infrastructure::nc
             appendTextBlock(lines, layerBlock.header);
             appendTextBlock(lines, colorBlock.header);
             appendTextBlock(lines, typeBlock.header);
+            if (rotary)
+            {
+                processUnitIndices.insert(entity.processUnitIndex);
+                if (entity.beforeCutting
+                    == cadcam::nc::NcCuttingControl::Enable)
+                {
+                    if (cuttingState != CuttingState::Off)
+                    {
+                        result.status = OperationStatus::Conflict;
+                        result.addDiagnostic(postDiagnostic
+                        (
+                            DiagnosticCode::GCodeCuttingStateViolation,
+                            QStringLiteral("加工单元重复开启切削状态。"),
+                            context,
+                            entity.metadata.entityId,
+                            {
+                                { QStringLiteral("processUnitIndex"),
+                                    entity.processUnitIndex }
+                            }
+                        ));
+                        return result;
+                    }
+                    appendTextBlock(lines, profile.processUnitBlock.header);
+                    cuttingState = CuttingState::On;
+                    ++enableCount;
+                }
+                else if (entity.beforeCutting
+                    == cadcam::nc::NcCuttingControl::Disable)
+                {
+                    result.status = OperationStatus::Conflict;
+                    result.addDiagnostic(postDiagnostic
+                    (
+                        DiagnosticCode::GCodeCuttingStateViolation,
+                        QStringLiteral("加工单元切削前控制语义无效。"),
+                        context,
+                        entity.metadata.entityId
+                    ));
+                    return result;
+                }
+            }
 
             for (; motionIndex < entity.motions.size(); ++motionIndex)
             {
@@ -302,6 +411,25 @@ namespace cadcam::infrastructure::nc
                         }));
                     return result;
                 }
+                if (rotary && cuttingState != CuttingState::On)
+                {
+                    ++cuttingWhileDisabledCount;
+                    result.status = OperationStatus::Conflict;
+                    result.addDiagnostic(postDiagnostic
+                    (
+                        DiagnosticCode::GCodeCuttingStateViolation,
+                        QStringLiteral("切削关闭状态下出现了切削运动。"),
+                        context,
+                        entity.metadata.entityId,
+                        {
+                            { QStringLiteral("processUnitIndex"),
+                                entity.processUnitIndex },
+                            { QStringLiteral("motionIndex"),
+                                static_cast<qulonglong>(motionIndex) }
+                        }
+                    ));
+                    return result;
+                }
                 const bool circular = motion.kind == cadcam::nc::NcMotionKind::CircularClockwise
                     || motion.kind == cadcam::nc::NcMotionKind::CircularCounterclockwise;
                 if (circular && motion.plane == cadcam::nc::NcPlane::ZX)
@@ -314,25 +442,91 @@ namespace cadcam::infrastructure::nc
                     lines.push_back(QStringLiteral("G17"));
             }
 
+            if (rotary)
+            {
+                if (entity.afterCutting
+                    == cadcam::nc::NcCuttingControl::Disable)
+                {
+                    if (cuttingState != CuttingState::On)
+                    {
+                        result.status = OperationStatus::Conflict;
+                        result.addDiagnostic(postDiagnostic
+                        (
+                            DiagnosticCode::GCodeCuttingStateViolation,
+                            QStringLiteral("加工单元结束时切削状态未开启。"),
+                            context,
+                            entity.metadata.entityId,
+                            {
+                                { QStringLiteral("processUnitIndex"),
+                                    entity.processUnitIndex }
+                            }
+                        ));
+                        return result;
+                    }
+                    appendTextBlock(lines, profile.processUnitBlock.footer);
+                    cuttingState = CuttingState::Off;
+                    ++disableCount;
+                }
+                else if (entity.afterCutting
+                    == cadcam::nc::NcCuttingControl::Enable)
+                {
+                    result.status = OperationStatus::Conflict;
+                    result.addDiagnostic(postDiagnostic
+                    (
+                        DiagnosticCode::GCodeCuttingStateViolation,
+                        QStringLiteral("加工单元切削后控制语义无效。"),
+                        context,
+                        entity.metadata.entityId
+                    ));
+                    return result;
+                }
+            }
             appendTextBlock(lines, typeBlock.footer);
             appendTextBlock(lines, colorBlock.footer);
             appendTextBlock(lines, layerBlock.footer);
         }
 
-        appendTextBlock(lines, profile.programFooter);
-        if (!optimizeLaserRestarts(lines))
+        if (rotary
+            && (cuttingState != CuttingState::Off
+                || enableCount != static_cast<int>(processUnitIndices.size())
+                || disableCount != static_cast<int>(processUnitIndices.size())))
         {
-            result.status = OperationStatus::Failed;
-            result.addDiagnostic(postDiagnostic(DiagnosticCode::GCodeTextOptimizationFailed,
-                QStringLiteral("G 代码文本优化失败。"), context));
+            result.status = OperationStatus::Conflict;
+            result.addDiagnostic(postDiagnostic
+            (
+                DiagnosticCode::GCodeCuttingStateViolation,
+                QStringLiteral("四轴程序结束时加工单元启停状态不完整。"),
+                context,
+                0,
+                {
+                    { QStringLiteral("processUnitCount"),
+                        static_cast<int>(processUnitIndices.size()) },
+                    { QStringLiteral("enableCount"), enableCount },
+                    { QStringLiteral("disableCount"), disableCount }
+                }
+            ));
             return result;
         }
+        appendTextBlock(lines, profile.programFooter);
         if (lines.empty())
         {
             result.status = OperationStatus::Failed;
             result.addDiagnostic(postDiagnostic(DiagnosticCode::GCodeRenderingFailed,
                 QStringLiteral("生成的 G 代码为空。"), context));
             return result;
+        }
+        if (rotary)
+        {
+            qInfo().noquote() << QStringLiteral(
+                "[GCode][CuttingState] processUnitCount=%1 enableCount=%2 "
+                "disableCount=%3 rapidWhileEnabledCount=%4 "
+                "cuttingWhileDisabledCount=%5 "
+                "legacyRestartOptimization=false status=Success")
+                .arg(processUnitIndices.size())
+                .arg(enableCount)
+                .arg(disableCount)
+                .arg(rapidWhileEnabledCount)
+                .arg(cuttingWhileDisabledCount);
         }
 
         result.status = OperationStatus::Success;

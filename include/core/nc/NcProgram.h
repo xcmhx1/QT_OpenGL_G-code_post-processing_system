@@ -13,6 +13,7 @@ namespace cadcam::nc
     enum class NcProgramMode { Planar3Axis, Rotary4Axis };
     enum class NcMotionKind { Rapid, Linear, CircularClockwise, CircularCounterclockwise };
     enum class NcSourceMoveKind { Rapid, Cutting, CuttingConnection, Overcut };
+    enum class NcCuttingControl { None, Enable, Disable };
     enum class NcPlane { XY, ZX, YZ };
 
     struct NcAxisWords
@@ -51,6 +52,9 @@ namespace cadcam::nc
 
     struct NcEntityBlock
     {
+        int processUnitIndex = -1;
+        NcCuttingControl beforeCutting = NcCuttingControl::None;
+        NcCuttingControl afterCutting = NcCuttingControl::None;
         NcEntityMetadata metadata;
         std::vector<NcMotion> motions;
     };
