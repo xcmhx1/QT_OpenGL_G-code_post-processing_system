@@ -609,7 +609,7 @@ namespace
             {
                 const QVariantMap& values = diagnostic.context;
                 qInfo().noquote()
-                    << QStringLiteral("[ProcessPlanning][EntryZoneProfile] unitKey=%1 groupKind=%2 memberSourceKinds=%3 certainMask=%4 possibleMask=%5 connectionEntryMask=%6 curveInteriorEntryMask=%7 legalEntryMask=%8 candidateCountsByZone=%9 arcMemberIdsByZone=%10 ellipseMemberIdsByZone=%11")
+                    << QStringLiteral("[ProcessPlanning][EntryZoneProfile] unitKey=%1 groupKind=%2 memberSourceKinds=%3 certainMask=%4 possibleMask=%5 connectionEntryMask=%6 curveInteriorEntryMask=%7 zoneRunMidpointEntryMask=%8 legalEntryMask=%9 candidateCountsByZone=%10 arcMemberIdsByZone=%11 ellipseMemberIdsByZone=%12")
                         .arg(values.value(QStringLiteral("unitKey")).toString())
                         .arg(values.value(QStringLiteral("groupKind")).toString())
                         .arg(values.value(QStringLiteral("memberSourceKinds")).toString())
@@ -617,6 +617,7 @@ namespace
                         .arg(values.value(QStringLiteral("possibleMask")).toString())
                         .arg(values.value(QStringLiteral("connectionEntryMask")).toString())
                         .arg(values.value(QStringLiteral("curveInteriorEntryMask")).toString())
+                        .arg(values.value(QStringLiteral("zoneRunMidpointEntryMask")).toString())
                         .arg(values.value(QStringLiteral("legalEntryMask")).toString())
                         .arg(values.value(QStringLiteral("candidateCountsByZone")).toString())
                         .arg(values.value(QStringLiteral("arcMemberIdsByZone")).toString())
@@ -630,8 +631,9 @@ namespace
             }
             const QVariantMap& values = diagnostic.context;
             qInfo().noquote()
-                << QStringLiteral("[ProcessPlanning][EntrySelection] unitKey=%1 scheduledZone=%2 selectedEntryZone=%3 selectionMode=%4 candidateKind=%5 connectionCandidateCount=%6 arcInteriorCandidateCount=%7 ellipseInteriorCandidateCount=%8 curveCandidateRejectedCount=%9 candidateCount=%10 wrongZoneRejectedCount=%11 selectedEntityId=%12 selectedSourceKind=%13 selectedSourceParameter=%14 selectedReverse=%15 entryPosition=%16 firstCutTangent=%17 distanceToMemberEndpoint=%18 distanceToZoneBoundary=%19 axisReversalCount=%20 tangentCost=%21 rotationCost=%22 movementDistance=%23 fragmentCount=%24")
+                << QStringLiteral("[ProcessPlanning][EntrySelection] unitKey=%1 ownerZone=%2 scheduledZone=%3 selectedEntryZone=%4 selectionMode=%5 candidateKind=%6 connectionCandidateCount=%7 arcInteriorCandidateCount=%8 ellipseInteriorCandidateCount=%9 zoneRunMidpointCandidateCount=%10 curveCandidateRejectedCount=%11 candidateCount=%12 wrongZoneRejectedCount=%13 selectedEntityId=%14 selectedSourceKind=%15 selectedSourceParameter=%16 selectedReverse=%17 entryPosition=%18 firstCutTangent=%19 distanceToMemberEndpoint=%20 distanceToZoneBoundary=%21 axisReversalCount=%22 tangentCost=%23 rotationCost=%24 movementDistance=%25 fragmentCount=%26")
                     .arg(values.value(QStringLiteral("unitKey")).toString())
+                    .arg(values.value(QStringLiteral("ownerZone")).toString())
                     .arg(values.value(QStringLiteral("scheduledZone")).toString())
                     .arg(values.value(QStringLiteral("selectedEntryZone")).toString())
                     .arg(values.value(QStringLiteral("selectionMode")).toString())
@@ -639,6 +641,7 @@ namespace
                     .arg(values.value(QStringLiteral("connectionCandidateCount")).toInt())
                     .arg(values.value(QStringLiteral("arcInteriorCandidateCount")).toInt())
                     .arg(values.value(QStringLiteral("ellipseInteriorCandidateCount")).toInt())
+                    .arg(values.value(QStringLiteral("zoneRunMidpointCandidateCount")).toInt())
                     .arg(values.value(QStringLiteral("curveCandidateRejectedCount")).toInt())
                     .arg(values.value(QStringLiteral("candidateCount")).toInt())
                     .arg(values.value(QStringLiteral("wrongZoneRejectedCount")).toInt())
@@ -673,15 +676,17 @@ namespace
             if (values.value(QStringLiteral("zoneOwnership")).toBool())
             {
                 qInfo().noquote()
-                    << QStringLiteral("[ProcessPlanning][ZoneOwnership] partitionId=%1 unitKey=%2 certainMask=%3 possibleMask=%4 legalEntryMask=%5 ownerZone=%6 usedPossibleFallback=%7")
+                    << QStringLiteral("[ProcessPlanning][ZoneOwnership] partitionId=%1 unitKey=%2 certainMask=%3 possibleMask=%4 ownerCandidateMask=%5 ownerZone=%6 ownerBasis=%7 legalEntryMaskBefore=%8 usedBoundaryFallback=%9")
                         .arg(values.value(QStringLiteral("partitionId"), -1).toInt())
                         .arg(values.value(QStringLiteral("unitKey")).toString())
                         .arg(values.value(QStringLiteral("certainMask")).toString())
                         .arg(values.value(QStringLiteral("possibleMask")).toString())
-                        .arg(values.value(QStringLiteral("legalEntryMask")).toString())
+                        .arg(values.value(QStringLiteral("ownerCandidateMask")).toString())
                         .arg(values.value(QStringLiteral("ownerZone"),
                             QStringLiteral("Unknown")).toString())
-                        .arg(values.value(QStringLiteral("usedPossibleFallback")).toBool()
+                        .arg(values.value(QStringLiteral("ownerBasis")).toString())
+                        .arg(values.value(QStringLiteral("legalEntryMaskBefore")).toString())
+                        .arg(values.value(QStringLiteral("usedBoundaryFallback")).toBool()
                             ? QStringLiteral("true") : QStringLiteral("false"));
                 continue;
             }

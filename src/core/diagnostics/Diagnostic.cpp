@@ -98,6 +98,7 @@ QString diagnosticCodeName(DiagnosticCode code)
     case DiagnosticCode::ProcessPlanningZone16SweepSummary: return QStringLiteral("ProcessPlanningZone16SweepSummary");
     case DiagnosticCode::ProcessPlanningZoneSweepProfileInvalid: return QStringLiteral("ProcessPlanningZoneSweepProfileInvalid");
     case DiagnosticCode::ProcessPlanningZoneSweepFallbackOwner: return QStringLiteral("ProcessPlanningZoneSweepFallbackOwner");
+    case DiagnosticCode::ProcessPlanningOwnerZoneEntryUnavailable: return QStringLiteral("ProcessPlanningOwnerZoneEntryUnavailable");
     case DiagnosticCode::ProcessPlanningZoneSweepBacktrackRequired: return QStringLiteral("ProcessPlanningZoneSweepBacktrackRequired");
     case DiagnosticCode::ProcessPlanningZoneBlockedByPrecedence: return QStringLiteral("ProcessPlanningZoneBlockedByPrecedence");
     case DiagnosticCode::ProcessPlanningZoneReentered: return QStringLiteral("ProcessPlanningZoneReentered");

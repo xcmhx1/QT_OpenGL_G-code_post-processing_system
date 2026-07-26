@@ -102,8 +102,9 @@ CadDocument + DocumentProcessState + 可选 TubeSectionModel
 + 有效 TubeSectionModel
 → TubeSectionProjector
 → ProcessUnitZoneProfile 占用画像
-→ legalEntryMask 可执行入口画像
+→ certainMask / possibleMask 占用画像
 → 按分区周向顺序冻结唯一 ownerZone
+→ 为 ownerZone 补齐可执行入口
 → 每个单元进入一个生产区位桶
 → 当前区位完整完成后推进 16 区位扫描
 → 当前区位硬约束下选择入口和方向
@@ -126,7 +127,7 @@ Break 断面入口链：
 → 初始化下一 16 区位加工分区
 ```
 
-占用画像在调度前一次性计算，只描述原始路径经过的截面区位和各区位 X 范围。入口画像由实际可执行的端点、闭合参数、闭环连接点和圆弧/椭圆弧成员内部切点生成；`connectionEntryMask` 与 `curveInteriorEntryMask` 分别记录连接入口和曲线内部入口，二者合并为 `legalEntryMask`。`legalEntryMask` 仅表达入口能力，不表达生产桶数量。分区启动时按实际初始区位和周向方向，从 `certainMask & legalEntryMask` 中选择首个区位作为唯一 `ownerZone`；强掩码为空时才使用 `possibleMask & legalEntryMask` 并记录警告。这些临时画像和归属不写入 `DocumentProcessState` 或最终 `ProcessPlan`。
+占用画像在调度前一次性计算，只描述原始路径经过的截面区位和各区位 X 范围。分区启动时按实际初始区位和周向方向，先在 `certainMask` 的四个平面和四个圆角强区位中选择唯一 `ownerZone`；没有可靠强区位时再检查 `possibleMask` 的强区位并记录警告，只有两者均无强区位时才使用分界母线并记录警告。入口画像由实际可执行的端点、闭合参数、闭环连接点、圆弧/椭圆弧成员内部切点和普通多图元闭环的可靠区位连续段中点生成；`connectionEntryMask`、`curveInteriorEntryMask` 与 `zoneRunMidpointEntryMask` 合并为 `legalEntryMask`。`legalEntryMask` 只表达入口能力，不参与 `ownerZone` 选择；owner 冻结后，入口算法必须适配该区位。这些临时画像和归属不写入 `DocumentProcessState` 或最终 `ProcessPlan`。
 
 当前普通排序的单元状态链：
 
@@ -189,9 +190,9 @@ Application 的 `DocumentProcessState` 持有当前 `ProcessUnitSequence`。Core
 - Break 断面继续由现有工艺屏障划分加工分区。Break 专用遍历器仅在唯一简单环上分析四个平面和四个圆角强区位，八条分界母线不作为首选入口。
 - 懒旋转扫描的初始工艺区位固定为 `TopFace`，该状态不由首个加工单元或最左断面的偶然位置推导。
 - Break 起刀点取当前扫描区位内可靠连续边段的三维弧长中点；连续边段可以跨越多个源图元。首个 Break 接收当前 `TopFace`，完成闭环后出口仍回到该入口区位，后续继续从当前区位扫描。
-- 普通多图元闭环仅允许非闭合 `Arc` 和部分 `Ellipse` 成员产生内部起刀候选。`Line`、`Polyline`、`Spline` 及其他成员只提供闭环连接点，不依据离散点曲率推断曲线资格。
-- 当前扫描区位存在可靠圆弧或椭圆弧内部候选时，规划器进入曲线内部模式，只在这些候选之间评分；连接点继续计入画像和诊断，但不参与最终比较。当前区位没有可靠曲线内部候选时，稳定回退到连接点模式。
-- 曲线成员内部起刀通过两个互补 `ProcessPathFragment` 表达：先加工切点到成员出口，绕行其他成员后再加工成员入口到切点。规划发布前按源图元核对片段总弧长，并校验全部片段连续、闭合、无重复和无遗漏。
+- 普通多图元闭环优先使用非闭合 `Arc` 和部分 `Ellipse` 成员的曲线内部优化入口；只有这两类成员进行参数候选和切线平滑评分。
+- 当前 owner 区位没有可靠圆弧或椭圆弧内部候选时，先使用合法成员连接点；连接点也不存在时，可在 `Line`、`Polyline`、`Spline`、`Arc` 或 `Ellipse` 形成的最长可靠连续区位段上取三维弧长中点。该中点必须远离区位边界和成员端点，并按稳定实体身份和源参数消歧。
+- 闭环成员内部起刀通过两个互补 `ProcessPathFragment` 表达：先加工切点到成员出口，绕行其他成员后再加工成员入口到切点。规划发布前按源图元核对片段总弧长，并校验全部片段连续、闭合、无重复和无遗漏。
 - `ProcessPathFragment` 仅允许属于匹配的 `BreakBoundary` 或普通 `ClosedLoop` 加工单元。开放单图元和开放连续链只允许从物理端点进入，不生成计划片段。
 - 单图元圆、完整椭圆和闭合样条继续按原参数候选选择入口。普通多图元闭环的圆弧或部分椭圆弧成员在当前可靠强区位参数段内有限枚举内部参数点；参数点必须远离成员端点和区位边界，候选数量有确定上限。
 - Break 的起点和出口必须属于同一强区位。出口从最终计划片段向落刀点反向累计可靠长度，短分界段和歧义段不作为强出口；仅在强信息不足时允许 possible 区位兜底并记录警告。
@@ -236,7 +237,7 @@ Application 的 `DocumentProcessState` 持有当前 `ProcessUnitSequence`。Core
 - 区位画像按最终 `Path3D` 线段计算；端点、线段中点和必要的临时细分共同识别跨区路径。临时细分只存在于分类过程，不修改生产路径或采样策略。
 - 平面和圆角只有累计非零投影长度超过数值阈值才形成强占用；路径穿越、沿线运行或稳定端点接触可直接标记相应分界母线。
 - 圆弧、椭圆和样条允许在独立投影容差内投影到理想方管壳层，原始路径保持不变；画像记录最大、平均壳层偏差，并把接近容差边缘或无法可靠消歧的结果标记为不确定。
-- 智能懒旋转生产排序读取 `certainMask`、`possibleMask`、`legalEntryMask` 和各区位 X 范围。旧主表面、`Mixed` 和中值锚点不参与该生产分支；入口能力集合只参与唯一归属和具体入口选择，不再使同一单元进入多个生产桶。
+- 智能懒旋转生产排序使用 `certainMask`、`possibleMask` 和各区位 X 范围确定唯一生产归属，再使用 `legalEntryMask` 建立 owner 区位入口。入口候选数量、切线代价、移动距离和最终入口不得反向改变归属；旧主表面、`Mixed` 和中值锚点不参与该生产分支。
 
 ## 相关源码
 

@@ -116,6 +116,7 @@ enum class DiagnosticCode
     ProcessPlanningZone16SweepSummary,
     ProcessPlanningZoneSweepProfileInvalid,
     ProcessPlanningZoneSweepFallbackOwner,
+    ProcessPlanningOwnerZoneEntryUnavailable,
     ProcessPlanningZoneSweepBacktrackRequired,
     ProcessPlanningZoneBlockedByPrecedence,
     ProcessPlanningZoneReentered,

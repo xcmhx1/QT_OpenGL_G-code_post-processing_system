@@ -69,6 +69,7 @@ namespace cadcam::planning
             ClosedLoopConnection,
             ClosedLoopArcInterior,
             ClosedLoopEllipseInterior,
+            ClosedLoopZoneRunMidpoint,
             BreakZoneMidpoint
         };
 
@@ -102,6 +103,7 @@ namespace cadcam::planning
             double projectionTolerance = 0.0;
             Vector3d previousEnd;
             bool hardZoneConstraint = false;
+            bool allowZoneRunMidpointFallback = false;
         };
 
         struct GroupTraversal
@@ -119,6 +121,7 @@ namespace cadcam::planning
             int connectionCandidateCount = 0;
             int arcInteriorCandidateCount = 0;
             int ellipseInteriorCandidateCount = 0;
+            int zoneRunMidpointCandidateCount = 0;
             int curveCandidateRejectedCount = 0;
             int wrongZoneRejectedCount = 0;
             std::size_t stableSourceIndex = 0;
@@ -256,6 +259,7 @@ namespace cadcam::planning
             machining::TubeZoneMask possibleMask = 0U;
             machining::TubeZoneMask connectionEntryMask = 0U;
             machining::TubeZoneMask curveInteriorEntryMask = 0U;
+            machining::TubeZoneMask zoneRunMidpointEntryMask = 0U;
             machining::TubeZoneMask legalEntryMask = 0U;
             machining::TubeZoneMask schedulableMask = 0U;
             std::array<machining::TubeZoneSpan,
@@ -288,6 +292,9 @@ namespace cadcam::planning
             machining::TubeZone16 ownerZone =
                 machining::TubeZone16::TopFace;
             bool usedPossibleFallback = false;
+            bool usedBoundaryFallback = false;
+            machining::TubeZoneMask ownerCandidateMask = 0U;
+            machining::TubeZoneMask legalEntryMaskBefore = 0U;
         };
 
         struct TubeZoneSweepPartition
@@ -2000,6 +2007,18 @@ namespace cadcam::planning
             return std::nullopt;
         }
 
+        machining::TubeZoneMask strongTubeZoneMask()
+        {
+            machining::TubeZoneMask mask = 0U;
+            for (std::size_t index = 0U;
+                index < machining::kTubeZone16Count; index += 2U)
+            {
+                mask |= machining::tubeZoneBit
+                    (static_cast<machining::TubeZone16>(index));
+            }
+            return mask;
+        }
+
         bool zoneCompleted
         (
             const TubeZoneSweepPartition& partition,
@@ -2185,24 +2204,35 @@ namespace cadcam::planning
                 zoneMaskText(profile.certainMask));
             values.insert(QStringLiteral("possibleMask"),
                 zoneMaskText(profile.possibleMask));
-            values.insert(QStringLiteral("legalEntryMask"),
-                zoneMaskText(profile.legalEntryMask));
+            values.insert(QStringLiteral("ownerCandidateMask"),
+                zoneMaskText(ownership.ownerCandidateMask));
             values.insert(QStringLiteral("ownerZone"),
                 machining::tubeZoneName(ownership.ownerZone));
+            values.insert(QStringLiteral("ownerBasis"),
+                ownership.usedPossibleFallback
+                ? QStringLiteral("PossibleOccupancyFallback")
+                : QStringLiteral("CertainOccupancy"));
+            values.insert(QStringLiteral("legalEntryMaskBefore"),
+                zoneMaskText(ownership.legalEntryMaskBefore));
             values.insert(QStringLiteral("usedPossibleFallback"),
                 ownership.usedPossibleFallback);
+            values.insert(QStringLiteral("usedBoundaryFallback"),
+                ownership.usedBoundaryFallback);
             return planningDiagnostic
             (
                 context,
                 ownership.usedPossibleFallback
+                    || ownership.usedBoundaryFallback
                     ? DiagnosticCode::ProcessPlanningZoneSweepFallbackOwner
                     : DiagnosticCode::ProcessPlanningZone16SweepSummary,
                 ownership.usedPossibleFallback
+                    || ownership.usedBoundaryFallback
                     ? QStringLiteral("加工单元使用保守区位作为唯一生产归属。")
                     : QStringLiteral("加工单元已确定唯一生产区位。"),
                 QStringLiteral("A single immutable owner zone was selected for this partition."),
                 values,
                 ownership.usedPossibleFallback
+                    || ownership.usedBoundaryFallback
                     ? DiagnosticSeverity::Warning : DiagnosticSeverity::Info
             );
         }
@@ -2944,9 +2974,11 @@ namespace cadcam::planning
             struct OrdinaryResult
             {
                 std::optional<GroupTraversal> traversal;
+                std::optional<GroupTraversal> zoneRunMidpointTraversal;
                 int candidateCount = 0;
                 int arcInteriorCandidateCount = 0;
                 int ellipseInteriorCandidateCount = 0;
+                int zoneRunMidpointCandidateCount = 0;
                 int curveCandidateRejectedCount = 0;
                 int wrongZoneRejectedCount = 0;
                 std::vector<EntityId> arcCandidateEntityIds;
@@ -2963,6 +2995,25 @@ namespace cadcam::planning
                             == geometry::SourceGeometryKind::Arc
                         || entity.sourceKind
                             == geometry::SourceGeometryKind::Ellipse);
+            }
+
+            static bool ordinaryZoneRunMidpointEligible
+            (
+                const PlanningEntity& entity
+            )
+            {
+                if (entity.path.closed) return false;
+                switch (entity.sourceKind)
+                {
+                case geometry::SourceGeometryKind::Line:
+                case geometry::SourceGeometryKind::Polyline:
+                case geometry::SourceGeometryKind::Spline:
+                case geometry::SourceGeometryKind::Arc:
+                case geometry::SourceGeometryKind::Ellipse:
+                    return true;
+                default:
+                    return false;
+                }
             }
 
             static OrdinaryResult buildOrdinary
@@ -3282,6 +3333,199 @@ namespace cadcam::planning
                                     std::move(candidate->traversal);
                             }
                         }
+                    }
+                }
+                if (selection.allowZoneRunMidpointFallback)
+                {
+                    std::optional<Candidate> bestMidpoint;
+                    for (std::size_t directionIndex = 0U;
+                        directionIndex < directions.size(); ++directionIndex)
+                    {
+                        const auto& cycle = directions[directionIndex];
+                        const std::vector<BreakSegment> segments =
+                            buildSegments(cycle, section,
+                                selection.projectionTolerance);
+                        const std::vector<BreakZoneRun> runs =
+                            buildRuns(segments);
+                        for (const BreakZoneRun& run : runs)
+                        {
+                            if (!run.strongZone || run.touchesBoundary
+                                || run.zone
+                                    != *selection.requiredEntryZone
+                                || run.length <= kCalculationEpsilon)
+                            {
+                                continue;
+                            }
+                            bool midpointLocated = false;
+                            bool fragmentsBuilt = false;
+                            bool exitResolved = false;
+                            auto candidate = buildCandidate
+                            (
+                                group.groupId, cycle, segments, run,
+                                entities, currentPosition, policy, section,
+                                tubeCenter, selection.projectionTolerance,
+                                0.5, false,
+                                directionIndex == 0U
+                                    ? QStringLiteral("Forward")
+                                    : QStringLiteral("Reverse"),
+                                midpointLocated, fragmentsBuilt, exitResolved
+                            );
+                            if (!candidate.has_value() || !midpointLocated
+                                || !fragmentsBuilt)
+                            {
+                                continue;
+                            }
+                            const auto entryEntityFound = entities.find
+                                (candidate->midpointEntityId);
+                            if (entryEntityFound == entities.end()
+                                || entryEntityFound->second == nullptr
+                                || !ordinaryZoneRunMidpointEligible
+                                    (*entryEntityFound->second))
+                            {
+                                continue;
+                            }
+                            const PlanningEntity& entryEntity =
+                                *entryEntityFound->second;
+                            const double endpointTolerance = std::max
+                            (
+                                1.0e-8,
+                                selection.projectionTolerance * 1.0e-3
+                            );
+                            const double distanceToMemberEndpoint = std::min
+                            (
+                                distance(candidate->midpoint,
+                                    entryEntity.path.vertices.front()
+                                        .position),
+                                distance(candidate->midpoint,
+                                    entryEntity.path.vertices.back()
+                                        .position)
+                            );
+                            if (distanceToMemberEndpoint
+                                <= endpointTolerance)
+                            {
+                                continue;
+                            }
+                            auto entry = classifyZoneEntry
+                            (
+                                ZoneEntryCandidateKind::
+                                    ClosedLoopZoneRunMidpoint,
+                                candidate->midpointEntityId,
+                                candidate->midpointSourceParameter,
+                                candidate->traversal.entities.front()
+                                    .reverseRelativeToInput,
+                                candidate->midpoint,
+                                candidate->firstCutPoint,
+                                entryEntity.sourceKind,
+                                section,
+                                selection.projectionTolerance
+                            );
+                            if (!entry.has_value() || entry->ambiguous
+                                || entry->zone
+                                    != *selection.requiredEntryZone
+                                || entry->distanceToZoneBoundary
+                                    <= endpointTolerance)
+                            {
+                                continue;
+                            }
+                            const PlanningEntity* traversalEntryEntity =
+                                candidate->traversal.entities.front().entity;
+                            if (traversalEntryEntity == nullptr)
+                                continue;
+                            const bool manualStartMatches =
+                                !traversalEntryEntity
+                                    ->manualStartParameter.has_value()
+                                || std::abs(*traversalEntryEntity
+                                    ->manualStartParameter
+                                    - candidate->midpointSourceParameter)
+                                    <= 1.0e-10;
+                            const bool otherManualStartExists = std::any_of
+                            (
+                                candidate->traversal.entities.cbegin() + 1,
+                                candidate->traversal.entities.cend(),
+                                [](const DirectedEntity& directed)
+                                {
+                                    return directed.entity != nullptr
+                                        && directed.entity
+                                            ->manualStartParameter.has_value();
+                                }
+                            );
+                            if (!manualStartMatches
+                                || otherManualStartExists)
+                            {
+                                continue;
+                            }
+                            entry->distanceToMemberEndpoint =
+                                distanceToMemberEndpoint;
+                            candidate->traversal.selectedEntry =
+                                std::move(entry);
+                            candidate->traversal.fragments =
+                                candidate->fragments;
+                            scoreUnwrappedEntry
+                            (
+                                candidate->traversal.entities.front(),
+                                selection.previousEnd,
+                                candidate->firstCutPoint, section,
+                                policy.connectionTolerance,
+                                selection.projectionTolerance
+                            );
+                            candidate->traversal.entryAxisReversalCount =
+                                candidate->traversal.entities.front()
+                                    .entryAxisReversalCount;
+                            candidate->traversal.entryTangentCost =
+                                candidate->traversal.entities.front()
+                                    .entryTangentCost;
+                            scoreTraversal(candidate->traversal,
+                                currentPosition, section);
+                            ++result.zoneRunMidpointCandidateCount;
+                            const double lengthTolerance = std::max
+                                (1.0e-9,
+                                    selection.projectionTolerance * 1.0e-3);
+                            const auto midpointLess =
+                                [lengthTolerance](const Candidate& left,
+                                    const Candidate& right)
+                            {
+                                if (std::abs(left.runLength
+                                    - right.runLength) > lengthTolerance)
+                                {
+                                    return left.runLength > right.runLength;
+                                }
+                                if (std::abs(left.maximumShellDeviation
+                                    - right.maximumShellDeviation)
+                                    > kCalculationEpsilon)
+                                {
+                                    return left.maximumShellDeviation
+                                        < right.maximumShellDeviation;
+                                }
+                                if (left.midpointEntityId
+                                    != right.midpointEntityId)
+                                {
+                                    return left.midpointEntityId
+                                        < right.midpointEntityId;
+                                }
+                                if (left.midpointSourceParameter
+                                    != right.midpointSourceParameter)
+                                {
+                                    return left.midpointSourceParameter
+                                        < right.midpointSourceParameter;
+                                }
+                                return left.direction < right.direction;
+                            };
+                            if (!bestMidpoint.has_value()
+                                || midpointLess(*candidate, *bestMidpoint))
+                            {
+                                bestMidpoint = std::move(candidate);
+                            }
+                        }
+                    }
+                    if (bestMidpoint.has_value())
+                    {
+                        bestMidpoint->traversal.entryCandidateCount =
+                            result.zoneRunMidpointCandidateCount;
+                        bestMidpoint->traversal
+                            .zoneRunMidpointCandidateCount =
+                            result.zoneRunMidpointCandidateCount;
+                        result.zoneRunMidpointTraversal =
+                            std::move(bestMidpoint->traversal);
                     }
                 }
                 if (result.traversal.has_value())
@@ -4263,6 +4507,8 @@ namespace cadcam::planning
                 return QStringLiteral("ClosedLoopArcInterior");
             case ZoneEntryCandidateKind::ClosedLoopEllipseInterior:
                 return QStringLiteral("ClosedLoopEllipseInterior");
+            case ZoneEntryCandidateKind::ClosedLoopZoneRunMidpoint:
+                return QStringLiteral("ClosedLoopZoneRunMidpoint");
             case ZoneEntryCandidateKind::BreakZoneMidpoint:
                 return QStringLiteral("BreakZoneMidpoint");
             }
@@ -4321,6 +4567,8 @@ namespace cadcam::planning
                 traversal.arcInteriorCandidateCount);
             values.insert(QStringLiteral("ellipseInteriorCandidateCount"),
                 traversal.ellipseInteriorCandidateCount);
+            values.insert(QStringLiteral("zoneRunMidpointCandidateCount"),
+                traversal.zoneRunMidpointCandidateCount);
             values.insert(QStringLiteral("curveCandidateRejectedCount"),
                 traversal.curveCandidateRejectedCount);
             values.insert(QStringLiteral("wrongZoneRejectedCount"),
@@ -4342,6 +4590,10 @@ namespace cadcam::planning
                 scheduledZone.has_value()
                 ? machining::tubeZoneName(*scheduledZone)
                 : QStringLiteral("None"));
+            values.insert(QStringLiteral("ownerZone"),
+                scheduledZone.has_value()
+                ? machining::tubeZoneName(*scheduledZone)
+                : QStringLiteral("None"));
             values.insert(QStringLiteral("selectedEntryZone"),
                 traversal.selectedEntry.has_value()
                 ? machining::tubeZoneName
@@ -4359,10 +4611,17 @@ namespace cadcam::planning
                     || traversal.selectedEntry->kind
                         == ZoneEntryCandidateKind::
                             ClosedLoopEllipseInterior);
+            const bool zoneRunMidpointSelected =
+                traversal.selectedEntry.has_value()
+                && traversal.selectedEntry->kind
+                    == ZoneEntryCandidateKind::
+                        ClosedLoopZoneRunMidpoint;
             values.insert(QStringLiteral("selectionMode"),
                 curveInteriorSelected
                 ? QStringLiteral("CurveInterior")
-                : QStringLiteral("ConnectionFallback"));
+                : zoneRunMidpointSelected
+                    ? QStringLiteral("ZoneRunMidpointFallback")
+                    : QStringLiteral("ConnectionFallback"));
             values.insert(QStringLiteral("selectedEntityId"),
                 QVariant::fromValue<qulonglong>
                     (traversal.selectedEntry.has_value()
@@ -4587,13 +4846,21 @@ namespace cadcam::planning
                 );
                 const bool curveInteriorMode =
                     interior.traversal.has_value();
-                std::optional<GroupTraversal> best = curveInteriorMode
-                    ? std::move(interior.traversal)
-                    : std::move(connectionLoop.traversal);
+                const bool connectionMode =
+                    !curveInteriorMode
+                    && connectionLoop.traversal.has_value();
+                std::optional<GroupTraversal> best;
+                if (curveInteriorMode)
+                    best = std::move(interior.traversal);
+                else if (connectionMode)
+                    best = std::move(connectionLoop.traversal);
+                else if (selection->allowZoneRunMidpointFallback)
+                    best = std::move(interior.zoneRunMidpointTraversal);
                 const int connectionCandidateCount =
                     connectionLoop.report.candidateCount;
                 const int totalCandidateCount =
-                    connectionCandidateCount + interior.candidateCount;
+                    connectionCandidateCount + interior.candidateCount
+                    + interior.zoneRunMidpointCandidateCount;
                 const int wrongZoneRejectedCount =
                     connectionLoop.report.wrongZoneRejectedCount
                     + interior.wrongZoneRejectedCount;
@@ -4606,6 +4873,8 @@ namespace cadcam::planning
                         interior.arcInteriorCandidateCount;
                     best->ellipseInteriorCandidateCount =
                         interior.ellipseInteriorCandidateCount;
+                    best->zoneRunMidpointCandidateCount =
+                        interior.zoneRunMidpointCandidateCount;
                     best->curveCandidateRejectedCount =
                         interior.curveCandidateRejectedCount;
                     best->arcInteriorCandidateEntityIds =
@@ -5435,7 +5704,8 @@ namespace cadcam::planning
                                 ->ellipseInteriorCandidateEntityIds;
                         profile.legalEntryMask =
                             profile.connectionEntryMask
-                            | profile.curveInteriorEntryMask;
+                            | profile.curveInteriorEntryMask
+                            | profile.zoneRunMidpointEntryMask;
                     }
                     else
                     {
@@ -5443,11 +5713,8 @@ namespace cadcam::planning
                     }
                 }
                 if ((profile.certainMask & ~profile.possibleMask) != 0U
-                    || profile.possibleMask == 0U
-                    || profile.legalEntryMask == 0U)
+                    || profile.possibleMask == 0U)
                 {
-                    const bool manualEntryConstraint =
-                        hasManualEntryConstraint(group, entities);
                     QVariantMap values = diagnosticValues
                         (input, policy, 0U, 0U, -1, group.groupId);
                     values.insert(QStringLiteral("unitKey"),
@@ -5458,46 +5725,18 @@ namespace cadcam::planning
                         zoneMaskText(profile.possibleMask));
                     values.insert(QStringLiteral("legalEntryMask"),
                         zoneMaskText(profile.legalEntryMask));
-                    values.insert(QStringLiteral("manualEntryConstraint"),
-                        manualEntryConstraint);
                     return failure<ProcessPlan>
                     (
-                        manualEntryConstraint
-                            && profile.legalEntryMask == 0U
-                            ? OperationStatus::Conflict
-                            : OperationStatus::Failed,
+                        OperationStatus::Failed,
                         context,
                         DiagnosticCode::ProcessPlanningZoneSweepProfileInvalid,
-                        manualEntryConstraint
-                            && profile.legalEntryMask == 0U
-                            ? QStringLiteral("人工起点或方向无法形成合法的 16 区位入口。")
-                            : QStringLiteral("加工单元没有可用于 16 区位调度的可靠投影。"),
-                        manualEntryConstraint
-                            && profile.legalEntryMask == 0U
-                            ? QStringLiteral("Manual entry constraints eliminate every legal zone entry.")
-                            : QStringLiteral("Zone occupancy and executable entry masks are inconsistent or empty."),
+                        QStringLiteral("加工单元没有可用于 16 区位调度的可靠投影。"),
+                        QStringLiteral("Zone occupancy masks are inconsistent or empty."),
                         values
                     );
                 }
-                profile.schedulableMask =
-                    profile.certainMask & profile.legalEntryMask;
-                if (profile.schedulableMask == 0U)
-                {
-                    profile.schedulableMask =
-                        profile.possibleMask & profile.legalEntryMask;
-                    if (profile.schedulableMask == 0U)
-                    {
-                        return failure<ProcessPlan>
-                        (
-                            OperationStatus::Failed, context,
-                            DiagnosticCode::ProcessPlanningZoneSweepProfileInvalid,
-                            QStringLiteral("加工单元经过的区位均不存在合法起刀点。"),
-                            QStringLiteral("Neither certainMask nor possibleMask intersects legalEntryMask."),
-                            diagnosticValues(input, policy, 0U, 0U, -1,
-                                group.groupId)
-                        );
-                    }
-                }
+                profile.schedulableMask = profile.certainMask != 0U
+                    ? profile.certainMask : profile.possibleMask;
                 QVariantMap entryValues;
                 entryValues.insert(QStringLiteral("entryZoneProfile"), true);
                 entryValues.insert(QStringLiteral("unitKey"),
@@ -5514,6 +5753,8 @@ namespace cadcam::planning
                     zoneMaskText(profile.connectionEntryMask));
                 entryValues.insert(QStringLiteral("curveInteriorEntryMask"),
                     zoneMaskText(profile.curveInteriorEntryMask));
+                entryValues.insert(QStringLiteral("zoneRunMidpointEntryMask"),
+                    zoneMaskText(profile.zoneRunMidpointEntryMask));
                 QStringList memberSourceKinds;
                 for (const EntityId entityId : group.entityIds)
                 {
@@ -6094,22 +6335,36 @@ namespace cadcam::planning
             });
             for (const int groupId : orderedGroupIds)
             {
-                const ProcessGroupZoneProfile& profile =
+                ProcessGroupZoneProfile& profile =
                     groupZoneProfiles.at(groupId);
-                const machining::TubeZoneMask strongSchedulableMask =
-                    profile.certainMask & profile.legalEntryMask;
-                std::optional<machining::TubeZone16> ownerZone =
-                    firstZoneInSweep(strongSchedulableMask, initialZone,
-                        partition.perimeterDirection);
+                const machining::TubeZoneMask strongZones =
+                    strongTubeZoneMask();
+                machining::TubeZoneMask ownerCandidateMask =
+                    profile.certainMask & strongZones;
                 bool usedPossibleFallback = false;
-                if (!ownerZone.has_value())
+                bool usedBoundaryFallback = false;
+                if (ownerCandidateMask == 0U)
                 {
-                    const machining::TubeZoneMask fallbackMask =
-                        profile.possibleMask & profile.legalEntryMask;
-                    ownerZone = firstZoneInSweep(fallbackMask, initialZone,
-                        partition.perimeterDirection);
-                    usedPossibleFallback = ownerZone.has_value();
+                    ownerCandidateMask =
+                        profile.possibleMask & strongZones;
+                    usedPossibleFallback = ownerCandidateMask != 0U;
                 }
+                if (ownerCandidateMask == 0U
+                    && profile.certainMask != 0U)
+                {
+                    ownerCandidateMask = profile.certainMask;
+                    usedBoundaryFallback = true;
+                }
+                if (ownerCandidateMask == 0U
+                    && profile.possibleMask != 0U)
+                {
+                    ownerCandidateMask = profile.possibleMask;
+                    usedPossibleFallback = true;
+                    usedBoundaryFallback = true;
+                }
+                std::optional<machining::TubeZone16> ownerZone =
+                    firstZoneInSweep(ownerCandidateMask, initialZone,
+                        partition.perimeterDirection);
                 if (!ownerZone.has_value())
                 {
                     QVariantMap values = diagnosticValues
@@ -6122,13 +6377,13 @@ namespace cadcam::planning
                         zoneMaskText(profile.certainMask));
                     values.insert(QStringLiteral("possibleMask"),
                         zoneMaskText(profile.possibleMask));
-                    values.insert(QStringLiteral("legalEntryMask"),
-                        zoneMaskText(profile.legalEntryMask));
+                    values.insert(QStringLiteral("ownerCandidateMask"),
+                        zoneMaskText(ownerCandidateMask));
                     setZoneSweepLifecycleFailure
                     (
                         DiagnosticCode::ProcessPlanningZoneSweepProfileInvalid,
                         QStringLiteral("加工单元没有可用的唯一生产区位。"),
-                        QStringLiteral("Neither the strong nor fallback schedulable mask contains a zone in the partition sweep."),
+                        QStringLiteral("Neither certain nor possible occupancy contains a zone in the partition sweep."),
                         std::move(values)
                     );
                     return false;
@@ -6137,6 +6392,134 @@ namespace cadcam::planning
                 ownership.groupId = groupId;
                 ownership.ownerZone = *ownerZone;
                 ownership.usedPossibleFallback = usedPossibleFallback;
+                ownership.usedBoundaryFallback = usedBoundaryFallback;
+                ownership.ownerCandidateMask = ownerCandidateMask;
+                ownership.legalEntryMaskBefore = profile.legalEntryMask;
+                const machining::TubeZoneMask ownerBit =
+                    machining::tubeZoneBit(*ownerZone);
+                if ((profile.legalEntryMask & ownerBit) == 0U)
+                {
+                    const ProcessGroup& group =
+                        plan.groups[static_cast<std::size_t>(groupId)];
+                    if (group.kind == ProcessGroupKind::ClosedLoop
+                        && group.entityIds.size() > 1U
+                        && surfaceSweepSection.has_value())
+                    {
+                        TraversalSelectionContext selection;
+                        selection.requiredEntryZone = *ownerZone;
+                        selection.longitudinalDirection =
+                            partition.longitudinalDirection;
+                        const machining::TubeZoneSpan& ownerSpan =
+                            profile.zoneSpans[machining::tubeZoneIndex
+                                (*ownerZone)];
+                        selection.zoneHitX =
+                            selection.longitudinalDirection >= 0
+                            ? ownerSpan.minimumX : ownerSpan.maximumX;
+                        selection.frontierX = selection.zoneHitX;
+                        selection.projectionTolerance =
+                            zoneProjectionTolerance;
+                        selection.previousEnd = currentPosition;
+                        selection.hardZoneConstraint = true;
+                        selection.allowZoneRunMidpointFallback = true;
+                        ClosedLoopTraversalReport ignoredLoopReport;
+                        auto ownerEntry = bestTraversal
+                        (
+                            group, entities, currentPosition, policy,
+                            input.tubeSection, input.tubeSectionCenter,
+                            ProcessOrderingStrategy::LazyRotation,
+                            &ignoredLoopReport, &selection
+                        );
+                        if (ownerEntry.has_value()
+                            && ownerEntry->selectedEntry.has_value()
+                            && ownerEntry->selectedEntry->zone == *ownerZone)
+                        {
+                            const std::size_t ownerIndex =
+                                machining::tubeZoneIndex(*ownerZone);
+                            profile.entryCandidates[ownerIndex].push_back
+                                (*ownerEntry->selectedEntry);
+                            profile.entryCandidateCounts[ownerIndex] =
+                                ownerEntry->entryCandidateCount;
+                            switch (ownerEntry->selectedEntry->kind)
+                            {
+                            case ZoneEntryCandidateKind::
+                                ClosedLoopArcInterior:
+                            case ZoneEntryCandidateKind::
+                                ClosedLoopEllipseInterior:
+                                profile.curveInteriorEntryMask |= ownerBit;
+                                break;
+                            case ZoneEntryCandidateKind::
+                                ClosedLoopConnection:
+                                profile.connectionEntryMask |= ownerBit;
+                                break;
+                            case ZoneEntryCandidateKind::
+                                ClosedLoopZoneRunMidpoint:
+                                profile.zoneRunMidpointEntryMask |= ownerBit;
+                                break;
+                            default:
+                                break;
+                            }
+                            profile.legalEntryMask =
+                                profile.connectionEntryMask
+                                | profile.curveInteriorEntryMask
+                                | profile.zoneRunMidpointEntryMask;
+                            const QString unitKey =
+                                processGroupKeyText(group);
+                            for (Diagnostic& diagnostic :
+                                zoneSweepDiagnostics)
+                            {
+                                if (!diagnostic.context.value
+                                        (QStringLiteral("entryZoneProfile"))
+                                        .toBool()
+                                    || diagnostic.context.value
+                                        (QStringLiteral("unitKey"))
+                                        .toString() != unitKey)
+                                {
+                                    continue;
+                                }
+                                diagnostic.context.insert
+                                (
+                                    QStringLiteral(
+                                        "zoneRunMidpointEntryMask"),
+                                    zoneMaskText(profile
+                                        .zoneRunMidpointEntryMask)
+                                );
+                                diagnostic.context.insert
+                                (
+                                    QStringLiteral("legalEntryMask"),
+                                    zoneMaskText(profile.legalEntryMask)
+                                );
+                                break;
+                            }
+                        }
+                    }
+                    if ((profile.legalEntryMask & ownerBit) == 0U)
+                    {
+                        QVariantMap values = diagnosticValues
+                            (input, policy, 0U, 0U, -1, groupId);
+                        values.insert(QStringLiteral("partitionId"),
+                            partitionId);
+                        values.insert(QStringLiteral("unitKey"),
+                            processGroupKeyText(plan.groups
+                                [static_cast<std::size_t>(groupId)]));
+                        values.insert(QStringLiteral("ownerZone"),
+                            machining::tubeZoneName(*ownerZone));
+                        values.insert(QStringLiteral("certainMask"),
+                            zoneMaskText(profile.certainMask));
+                        values.insert(QStringLiteral("possibleMask"),
+                            zoneMaskText(profile.possibleMask));
+                        values.insert(QStringLiteral("legalEntryMaskBefore"),
+                            zoneMaskText(ownership.legalEntryMaskBefore));
+                        setZoneSweepLifecycleFailure
+                        (
+                            DiagnosticCode::
+                                ProcessPlanningOwnerZoneEntryUnavailable,
+                            QStringLiteral("加工单元无法在所属区位建立合法起刀点。"),
+                            QStringLiteral("The immutable owner zone has no legal connection, curve-interior, or reliable run-midpoint entry."),
+                            std::move(values)
+                        );
+                        return false;
+                    }
+                }
                 partition.ownerships.emplace(groupId, ownership);
                 partition.zoneBuckets[machining::tubeZoneIndex(*ownerZone)]
                     .push_back(groupId);
@@ -6656,6 +7039,13 @@ namespace cadcam::planning
                         traversalSelection->previousEnd =
                             currentPosition;
                         traversalSelection->hardZoneConstraint = true;
+                        const ProcessGroupZoneProfile& profile =
+                            groupZoneProfiles.at(groupId);
+                        traversalSelection
+                            ->allowZoneRunMidpointFallback =
+                            (profile.zoneRunMidpointEntryMask
+                                & machining::tubeZoneBit
+                                    (zoneSelection->second.zone)) != 0U;
                     }
                     candidate = bestTraversal
                         (group, entities, currentPosition, policy,
@@ -7226,7 +7616,8 @@ namespace cadcam::planning
                         selection.frontierBefore =
                             zoneSweepState.frontierX;
                         selection.fallbackOwner =
-                            ownership->second.usedPossibleFallback;
+                            ownership->second.usedPossibleFallback
+                            || ownership->second.usedBoundaryFallback;
                         selectionAvailable = true;
                     }
 
