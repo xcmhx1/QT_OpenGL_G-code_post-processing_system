@@ -275,6 +275,7 @@ DocumentProcessPlanningAdapter::captureRotary
 
         if (entry.sourceEntity.has_value())
         {
+            entity.sourceEntity = *entry.sourceEntity;
             geometry::PathCompileOptions options;
             options.startParameter = entity.startParameter;
             geometry::SamplingPolicy pathPolicy =

@@ -77,12 +77,26 @@ namespace cadcam::machine
 
         MachinePose4D clearancePose
         (
+            const geometry::Vector3d& sourcePoint,
             const MachinePose4D& pose,
-            double outwardDistance
+            double outwardDistance,
+            const RotaryMachinePolicy& policy,
+            const std::optional<machining::TubeSectionModel>& section
         )
         {
+            const geometry::Vector3d retract =
+                RotaryKinematics::sourceRetractPose
+                (
+                    sourcePoint,
+                    outwardDistance,
+                    section,
+                    policy.tubeCenterY,
+                    policy.tubeCenterZ,
+                    policy.numericalEpsilon
+                );
+            const double resolvedDistance = sourceDistance(sourcePoint, retract);
             MachinePose4D result = pose;
-            result.z += outwardDistance;
+            result.z += resolvedDistance;
             return result;
         }
 
@@ -380,9 +394,13 @@ namespace cadcam::machine
                 if (policy.useSafeZBeforeRapid)
                 {
                     const MachinePose4D safe = clearancePose
-                        (first, policy.clearance.retractClearance);
+                        (inputEntity.path.vertices.front().position, first,
+                            policy.clearance.retractClearance, policy,
+                            input.tubeSection);
                     const MachinePose4D approach = clearancePose
-                        (first, policy.clearance.approachClearance);
+                        (inputEntity.path.vertices.front().position, first,
+                            policy.clearance.approachClearance, policy,
+                            input.tubeSection);
                     entity.approachMoves.push_back(move(MachineMoveKind::Rapid, safe, inputEntity));
                     if (poseDistance(safe, approach) > policy.numericalEpsilon)
                         entity.approachMoves.push_back(move(MachineMoveKind::Rapid, approach, inputEntity));
@@ -396,11 +414,17 @@ namespace cadcam::machine
                 if (policy.useSafeZBeforeRapid)
                 {
                     const MachinePose4D departure = clearancePose
-                        (previousPose, policy.clearance.retractClearance);
+                        (input.entities[index - 1U].path.vertices.back().position,
+                            previousPose, policy.clearance.retractClearance,
+                            policy, input.tubeSection);
                     const MachinePose4D transfer = clearancePose
-                        (first, policy.clearance.retractClearance);
+                        (inputEntity.path.vertices.front().position, first,
+                            policy.clearance.retractClearance, policy,
+                            input.tubeSection);
                     const MachinePose4D approach = clearancePose
-                        (first, policy.clearance.approachClearance);
+                        (inputEntity.path.vertices.front().position, first,
+                            policy.clearance.approachClearance, policy,
+                            input.tubeSection);
                     if (poseDistance(previousPose, departure) > policy.numericalEpsilon)
                         entity.approachMoves.push_back(move(MachineMoveKind::Rapid, departure, inputEntity));
                     if (poseDistance(departure, transfer) > policy.numericalEpsilon)

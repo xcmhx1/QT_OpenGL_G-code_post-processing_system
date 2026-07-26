@@ -630,6 +630,36 @@ namespace
                 continue;
             }
             const QVariantMap& values = diagnostic.context;
+            if (values.value
+                (QStringLiteral("entryRefinementSummary")).toBool())
+            {
+                qInfo().noquote()
+                    << QStringLiteral("[ProcessPlanning][EntryRefinement] unitKey=%1 ownerZone=%2 previousCutEnd=%3 previousRetractPose=%4 mode=%5 curveMemberCount=%6 arcTangentRootCount=%7 ellipseTangentRootCount=%8 validTangentCount=%9 connectionCandidateCount=%10 selectedEntityId=%11 selectedSourceKind=%12 selectedSourceParameter=%13 travelDistance=%14 approachCutAngle=%15 selectedReverse=%16 fragmentCount=%17 nearestConnectionDistance=%18 forwardAngle=%19 reverseAngle=%20 tangentResidual=%21 approachCutDot=%22")
+                        .arg(values.value(QStringLiteral("unitKey")).toString())
+                        .arg(values.value(QStringLiteral("ownerZone")).toString())
+                        .arg(values.value(QStringLiteral("previousCutEnd")).toString())
+                        .arg(values.value(QStringLiteral("previousRetractPose")).toString())
+                        .arg(values.value(QStringLiteral("selectionMode")).toString())
+                        .arg(values.value(QStringLiteral("curveMemberCount")).toInt())
+                        .arg(values.value(QStringLiteral("arcTangentRootCount")).toInt())
+                        .arg(values.value(QStringLiteral("ellipseTangentRootCount")).toInt())
+                        .arg(values.value(QStringLiteral("validTangentCount")).toInt())
+                        .arg(values.value(QStringLiteral("connectionCandidateCount")).toInt())
+                        .arg(values.value(QStringLiteral("selectedEntityId")).toULongLong())
+                        .arg(values.value(QStringLiteral("selectedSourceKind")).toString())
+                        .arg(values.value(QStringLiteral("selectedSourceParameter")).toDouble(), 0, 'g', 15)
+                        .arg(values.value(QStringLiteral("travelDistance")).toDouble(), 0, 'g', 15)
+                        .arg(values.value(QStringLiteral("approachCutAngle")).toDouble(), 0, 'g', 15)
+                        .arg(values.value(QStringLiteral("selectedReverse")).toBool()
+                            ? QStringLiteral("true") : QStringLiteral("false"))
+                        .arg(values.value(QStringLiteral("fragmentCount")).toInt())
+                        .arg(values.value(QStringLiteral("nearestConnectionDistance")).toDouble(), 0, 'g', 15)
+                        .arg(values.value(QStringLiteral("forwardAngle")).toDouble(), 0, 'g', 15)
+                        .arg(values.value(QStringLiteral("reverseAngle")).toDouble(), 0, 'g', 15)
+                        .arg(values.value(QStringLiteral("tangentResidual")).toDouble(), 0, 'g', 15)
+                        .arg(values.value(QStringLiteral("approachCutDot")).toDouble(), 0, 'g', 15);
+                continue;
+            }
             qInfo().noquote()
                 << QStringLiteral("[ProcessPlanning][EntrySelection] unitKey=%1 ownerZone=%2 scheduledZone=%3 selectedEntryZone=%4 selectionMode=%5 candidateKind=%6 connectionCandidateCount=%7 arcInteriorCandidateCount=%8 ellipseInteriorCandidateCount=%9 zoneRunMidpointCandidateCount=%10 curveCandidateRejectedCount=%11 candidateCount=%12 wrongZoneRejectedCount=%13 selectedEntityId=%14 selectedSourceKind=%15 selectedSourceParameter=%16 selectedReverse=%17 entryPosition=%18 firstCutTangent=%19 distanceToMemberEndpoint=%20 distanceToZoneBoundary=%21 axisReversalCount=%22 tangentCost=%23 rotationCost=%24 movementDistance=%25 fragmentCount=%26")
                     .arg(values.value(QStringLiteral("unitKey")).toString())

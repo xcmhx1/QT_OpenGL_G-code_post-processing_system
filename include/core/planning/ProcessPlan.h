@@ -44,6 +44,8 @@ namespace cadcam::planning
         ProcessSortIntent sortIntent = ProcessSortIntent::RebuildSequence;
         ProcessOrderingStrategy orderingStrategy = ProcessOrderingStrategy::NearestNext;
         double connectionTolerance = 1.0;
+        double retractClearance = 5.0;
+        double connectionDistanceTieTolerance = 1.0e-6;
         bool allowReverse = true;
         bool preserveClosedLoopsAsAtomicGroups = true;
         geometry::Vector3d initialPosition{ 0.0, 0.0, 500.0 };
@@ -55,6 +57,7 @@ namespace cadcam::planning
         geometry::EntityId entityId = 0;
         std::size_t sourceIndex = 0;
         geometry::SourceGeometryKind sourceKind = geometry::SourceGeometryKind::Unknown;
+        std::optional<geometry::SourceEntity> sourceEntity;
         geometry::Path3D path;
         bool visible = true;
         bool processEnabled = true;

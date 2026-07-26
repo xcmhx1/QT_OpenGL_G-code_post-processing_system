@@ -15,6 +15,16 @@ namespace cadcam::machine
     class RotaryKinematics
     {
     public:
+        static geometry::Vector3d sourceRetractPose
+        (
+            const geometry::Vector3d& cutEnd,
+            double outwardDistance,
+            const std::optional<machining::TubeSectionModel>& section,
+            double tubeCenterY,
+            double tubeCenterZ,
+            double tolerance
+        );
+
         static OperationResult<RotaryKinematicsResult> transform
         (
             const geometry::Path3D& path,

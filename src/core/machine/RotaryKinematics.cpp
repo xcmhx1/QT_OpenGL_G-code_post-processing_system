@@ -1,5 +1,7 @@
 #include "core/machine/RotaryKinematics.h"
 
+#include "core/machining/TubeSectionProjector.h"
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -316,6 +318,106 @@ namespace cadcam::machine
             default: return false;
             }
         }
+    }
+
+    geometry::Vector3d RotaryKinematics::sourceRetractPose
+    (
+        const geometry::Vector3d& cutEnd,
+        double outwardDistance,
+        const std::optional<machining::TubeSectionModel>& section,
+        double tubeCenterY,
+        double tubeCenterZ,
+        double tolerance
+    )
+    {
+        geometry::Vector3d normal
+        {
+            0.0,
+            cutEnd.y - tubeCenterY,
+            cutEnd.z - tubeCenterZ
+        };
+        if (section.has_value())
+        {
+            const machining::TubeSectionProjection projection =
+                machining::TubeSectionProjector::project
+                (
+                    *section,
+                    { cutEnd.y, cutEnd.z },
+                    std::max(tolerance, 1.0e-8)
+                );
+            if (projection.valid)
+            {
+                switch (projection.zone)
+                {
+                case machining::TubeZone16::TopFace:
+                    normal = { 0.0, 0.0, 1.0 };
+                    break;
+                case machining::TubeZone16::RightFace:
+                    normal = { 0.0, 1.0, 0.0 };
+                    break;
+                case machining::TubeZone16::BottomFace:
+                    normal = { 0.0, 0.0, -1.0 };
+                    break;
+                case machining::TubeZone16::LeftFace:
+                    normal = { 0.0, -1.0, 0.0 };
+                    break;
+                case machining::TubeZone16::TopRightCorner:
+                case machining::TubeZone16::BottomRightCorner:
+                case machining::TubeZone16::BottomLeftCorner:
+                case machining::TubeZone16::TopLeftCorner:
+                {
+                    const int yDirection =
+                        projection.zone == machining::TubeZone16
+                            ::TopRightCorner
+                        || projection.zone == machining::TubeZone16
+                            ::BottomRightCorner
+                        ? 1 : -1;
+                    const int zDirection =
+                        projection.zone == machining::TubeZone16
+                            ::TopRightCorner
+                        || projection.zone == machining::TubeZone16
+                            ::TopLeftCorner
+                        ? 1 : -1;
+                    const auto corner = std::find_if
+                    (
+                        section->corners.cbegin(),
+                        section->corners.cend(),
+                        [yDirection, zDirection]
+                        (const machining::TubeCornerGeometry& value)
+                        {
+                            return value.yDirection == yDirection
+                                && value.zDirection == zDirection;
+                        }
+                    );
+                    if (corner != section->corners.cend())
+                    {
+                        normal =
+                        {
+                            0.0,
+                            cutEnd.y - corner->center.x,
+                            cutEnd.z - corner->center.y
+                        };
+                    }
+                    break;
+                }
+                default:
+                    break;
+                }
+            }
+        }
+
+        const double length = std::hypot(normal.y, normal.z);
+        if (!std::isfinite(outwardDistance) || outwardDistance <= 0.0
+            || !std::isfinite(length) || length <= std::max(tolerance, 1.0e-12))
+        {
+            return cutEnd;
+        }
+        return
+        {
+            cutEnd.x,
+            cutEnd.y + normal.y / length * outwardDistance,
+            cutEnd.z + normal.z / length * outwardDistance
+        };
     }
 
     OperationResult<RotaryKinematicsResult> RotaryKinematics::transform

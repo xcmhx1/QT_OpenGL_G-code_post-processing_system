@@ -4312,6 +4312,8 @@ bool Gcode_postprocessing_system::sortEntitiesWithProcessPlan3D
         ? cadcam::planning::ProcessOrderingStrategy::LazyRotation
         : cadcam::planning::ProcessOrderingStrategy::NearestNext;
     policy.connectionTolerance = kEndCutConnectionTolerance;
+    policy.retractClearance =
+        m_activeProfile.toolClearanceConfig().retractClearance;
     policy.allowReverse = true;
     policy.preserveClosedLoopsAsAtomicGroups = true;
     policy.initialPosition = { 0.0, 0.0, 500.0 };

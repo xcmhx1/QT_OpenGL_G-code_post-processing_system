@@ -2,6 +2,7 @@
 
 #include "core/machining/TubeCutBoundary.h"
 #include "core/machining/TubeSectionProjector.h"
+#include "core/machine/RotaryKinematics.h"
 
 #include <QStringList>
 
@@ -102,6 +103,8 @@ namespace cadcam::planning
             double frontierX = 0.0;
             double projectionTolerance = 0.0;
             Vector3d previousEnd;
+            Vector3d previousCutEnd;
+            Vector3d previousRetractPose;
             bool hardZoneConstraint = false;
             bool allowZoneRunMidpointFallback = false;
         };
@@ -130,6 +133,20 @@ namespace cadcam::planning
             std::vector<EntityId> ellipseInteriorCandidateEntityIds;
             std::optional<ZoneEntryCandidate> selectedEntry;
             std::vector<ProcessPathFragment> fragments;
+            QString entryRefinementMode;
+            Vector3d previousCutEnd;
+            Vector3d previousRetractPose;
+            int curveMemberCount = 0;
+            int arcTangentRootCount = 0;
+            int ellipseTangentRootCount = 0;
+            int validTangentCount = 0;
+            double entryTravelDistance = 0.0;
+            double approachCutAngle = 0.0;
+            double nearestConnectionDistance = 0.0;
+            double forwardAngle = 0.0;
+            double reverseAngle = 0.0;
+            double tangentResidual = 0.0;
+            double approachCutDot = 0.0;
         };
 
         struct ClosedLoopTraversalReport
@@ -351,6 +368,267 @@ namespace cadcam::planning
                 + (left.y - right.y) * (left.y - right.y)
                 + (left.z - right.z) * (left.z - right.z)
             );
+        }
+
+        Vector3d entrySubtract(const Vector3d& left, const Vector3d& right)
+        {
+            return { left.x - right.x, left.y - right.y, left.z - right.z };
+        }
+
+        double entryDot(const Vector3d& left, const Vector3d& right)
+        {
+            return left.x * right.x + left.y * right.y + left.z * right.z;
+        }
+
+        Vector3d entryCross(const Vector3d& left, const Vector3d& right)
+        {
+            return
+            {
+                left.y * right.z - left.z * right.y,
+                left.z * right.x - left.x * right.z,
+                left.x * right.y - left.y * right.x
+            };
+        }
+
+        double entryLength(const Vector3d& value)
+        {
+            return std::sqrt(entryDot(value, value));
+        }
+
+        std::optional<Vector3d> entryNormalized(const Vector3d& value)
+        {
+            const double length = entryLength(value);
+            if (!std::isfinite(length) || length <= kCalculationEpsilon)
+                return std::nullopt;
+            return Vector3d
+            {
+                value.x / length,
+                value.y / length,
+                value.z / length
+            };
+        }
+
+        constexpr double kEntryTwoPi =
+            6.283185307179586476925286766559;
+
+        std::optional<double> parameterInPositiveSweep
+        (
+            double parameter,
+            double start,
+            double end,
+            double tolerance
+        )
+        {
+            if (!std::isfinite(parameter) || !std::isfinite(start)
+                || !std::isfinite(end))
+            {
+                return std::nullopt;
+            }
+            while (end <= start) end += kEntryTwoPi;
+            while (parameter < start - tolerance) parameter += kEntryTwoPi;
+            while (parameter > end + tolerance
+                && parameter - kEntryTwoPi >= start - tolerance)
+            {
+                parameter -= kEntryTwoPi;
+            }
+            if (parameter < start - tolerance || parameter > end + tolerance)
+                return std::nullopt;
+            return std::clamp(parameter, start, end);
+        }
+
+        struct ExactCurveTangentRoot
+        {
+            double parameter = 0.0;
+            Vector3d point;
+            double residual = 0.0;
+        };
+
+        std::vector<ExactCurveTangentRoot> arcTangentRoots
+        (
+            const geometry::ArcGeometry& arc,
+            const Vector3d& externalPoint,
+            double tolerance
+        )
+        {
+            std::vector<ExactCurveTangentRoot> roots;
+            const auto axisU = entryNormalized(arc.axisU);
+            const auto axisV = entryNormalized(arc.axisV);
+            if (!axisU.has_value() || !axisV.has_value()
+                || !std::isfinite(arc.radius) || arc.radius <= tolerance)
+            {
+                return roots;
+            }
+            const Vector3d offset = entrySubtract(externalPoint, arc.center);
+            const double localX = entryDot(offset, *axisU);
+            const double localY = entryDot(offset, *axisV);
+            const double radialDistance = std::hypot(localX, localY);
+            if (!std::isfinite(radialDistance)
+                || radialDistance <= arc.radius + tolerance)
+            {
+                return roots;
+            }
+            const double base = std::atan2(localY, localX);
+            const double delta = std::acos(std::clamp
+                (arc.radius / radialDistance, -1.0, 1.0));
+            for (const double rawParameter : { base - delta, base + delta })
+            {
+                const auto parameter = parameterInPositiveSweep
+                    (rawParameter, arc.startParameter, arc.endParameter,
+                        tolerance);
+                if (!parameter.has_value()) continue;
+                const Vector3d radial
+                {
+                    axisU->x * arc.radius * std::cos(*parameter)
+                        + axisV->x * arc.radius * std::sin(*parameter),
+                    axisU->y * arc.radius * std::cos(*parameter)
+                        + axisV->y * arc.radius * std::sin(*parameter),
+                    axisU->z * arc.radius * std::cos(*parameter)
+                        + axisV->z * arc.radius * std::sin(*parameter)
+                };
+                const Vector3d point
+                {
+                    arc.center.x + radial.x,
+                    arc.center.y + radial.y,
+                    arc.center.z + radial.z
+                };
+                const double scale = std::max
+                    (1.0, arc.radius * distance(externalPoint, point));
+                const double residual =
+                    std::abs(entryDot(radial,
+                        entrySubtract(externalPoint, point))) / scale;
+                roots.push_back({ *parameter, point, residual });
+            }
+            return roots;
+        }
+
+        std::vector<ExactCurveTangentRoot> ellipseTangentRoots
+        (
+            const geometry::EllipseGeometry& ellipse,
+            const Vector3d& externalPoint,
+            double tolerance
+        )
+        {
+            std::vector<ExactCurveTangentRoot> roots;
+            const Vector3d normal = entryCross
+                (ellipse.majorAxis, ellipse.minorAxis);
+            const auto unitNormal = entryNormalized(normal);
+            if (!unitNormal.has_value()) return roots;
+            double start = ellipse.startParameter;
+            double end = ellipse.endParameter;
+            while (end <= start) end += kEntryTwoPi;
+            const auto pointAt = [&ellipse](double parameter)
+            {
+                return Vector3d
+                {
+                    ellipse.center.x
+                        + ellipse.majorAxis.x * std::cos(parameter)
+                        + ellipse.minorAxis.x * std::sin(parameter),
+                    ellipse.center.y
+                        + ellipse.majorAxis.y * std::cos(parameter)
+                        + ellipse.minorAxis.y * std::sin(parameter),
+                    ellipse.center.z
+                        + ellipse.majorAxis.z * std::cos(parameter)
+                        + ellipse.minorAxis.z * std::sin(parameter)
+                };
+            };
+            const auto derivativeAt = [&ellipse](double parameter)
+            {
+                return Vector3d
+                {
+                    -ellipse.majorAxis.x * std::sin(parameter)
+                        + ellipse.minorAxis.x * std::cos(parameter),
+                    -ellipse.majorAxis.y * std::sin(parameter)
+                        + ellipse.minorAxis.y * std::cos(parameter),
+                    -ellipse.majorAxis.z * std::sin(parameter)
+                        + ellipse.minorAxis.z * std::cos(parameter)
+                };
+            };
+            const auto equation = [&](double parameter)
+            {
+                const Vector3d point = pointAt(parameter);
+                return entryDot(entryCross
+                    (entrySubtract(externalPoint, point),
+                        derivativeAt(parameter)), *unitNormal);
+            };
+            constexpr int kScanIntervals = 64;
+            constexpr int kMaximumIterations = 64;
+            const double parameterTolerance = std::max(1.0e-12, tolerance);
+            const double residualTolerance = std::max
+                (1.0e-10, tolerance * std::max
+                    (entryLength(ellipse.majorAxis),
+                        entryLength(ellipse.minorAxis)));
+            double left = start;
+            double leftValue = equation(left);
+            for (int interval = 1; interval <= kScanIntervals; ++interval)
+            {
+                const double right = start + (end - start)
+                    * static_cast<double>(interval)
+                    / static_cast<double>(kScanIntervals);
+                const double rightValue = equation(right);
+                std::optional<double> root;
+                if (std::abs(leftValue) <= residualTolerance)
+                    root = left;
+                else if (std::isfinite(leftValue)
+                    && std::isfinite(rightValue)
+                    && leftValue * rightValue < 0.0)
+                {
+                    double low = left;
+                    double high = right;
+                    double lowValue = leftValue;
+                    for (int iteration = 0;
+                        iteration < kMaximumIterations; ++iteration)
+                    {
+                        const double middle = (low + high) * 0.5;
+                        const double middleValue = equation(middle);
+                        if (std::abs(middleValue) <= residualTolerance
+                            || high - low <= parameterTolerance)
+                        {
+                            low = high = middle;
+                            break;
+                        }
+                        if (lowValue * middleValue <= 0.0)
+                            high = middle;
+                        else
+                        {
+                            low = middle;
+                            lowValue = middleValue;
+                        }
+                    }
+                    root = (low + high) * 0.5;
+                }
+                if (root.has_value())
+                {
+                    bool duplicate = false;
+                    for (const auto& existing : roots)
+                    {
+                        duplicate = duplicate
+                            || std::abs(existing.parameter - *root)
+                                <= parameterTolerance * 8.0;
+                    }
+                    if (!duplicate)
+                    {
+                        roots.push_back
+                        ({
+                            *root,
+                            pointAt(*root),
+                            std::abs(equation(*root))
+                        });
+                    }
+                }
+                left = right;
+                leftValue = rightValue;
+            }
+            if (std::abs(leftValue) <= residualTolerance)
+            {
+                bool duplicate = false;
+                for (const auto& existing : roots)
+                    duplicate = duplicate
+                        || std::abs(existing.parameter - end)
+                            <= parameterTolerance * 8.0;
+                if (!duplicate)
+                    roots.push_back({ end, pointAt(end), std::abs(leftValue) });
+            }
+            return roots;
         }
 
         QString strategyName(ProcessOrderingStrategy strategy)
@@ -1669,9 +1947,19 @@ namespace cadcam::planning
             scoreEntrySmoothness(directed, previousEnd, firstCutPoint,
                 Vector2d{ section.geometry.centerY, section.geometry.centerZ },
                 connectionTolerance);
+            const double previousProjectionTolerance = std::max
+            (
+                projectionTolerance,
+                std::hypot
+                (
+                    previousEnd.y - section.geometry.centerY,
+                    previousEnd.z - section.geometry.centerZ
+                ) + std::max(section.geometry.yLength,
+                    section.geometry.zWidth)
+            );
             const auto previous = machining::TubeSectionProjector::project
                 (section, { previousEnd.y, previousEnd.z },
-                    projectionTolerance);
+                    previousProjectionTolerance);
             const auto entry = machining::TubeSectionProjector::project
                 (section, { directed.start.y, directed.start.z },
                     projectionTolerance);
@@ -2518,6 +2806,7 @@ namespace cadcam::planning
                 }
 
                 std::optional<GroupTraversal> best;
+                std::vector<GroupTraversal> connectionCandidates;
                 int bestStartEndpoint = -1;
                 int bestLoopDirection = -1;
                 int wrongZoneRejectedCount = 0;
@@ -2670,9 +2959,20 @@ namespace cadcam::planning
                             }
                             candidate.selectedEntry = std::move(entry);
                             scoreUnwrappedEntry(candidate.entities.front(),
-                                selection->previousEnd, firstNextPoint,
+                                selection->previousRetractPose, firstNextPoint,
                                 *section, policy.connectionTolerance,
                                 selection->projectionTolerance);
+                            candidate.entryRefinementMode =
+                                QStringLiteral("NearestConnection");
+                            candidate.previousCutEnd =
+                                selection->previousCutEnd;
+                            candidate.previousRetractPose =
+                                selection->previousRetractPose;
+                            candidate.entryTravelDistance =
+                                distance(selection->previousRetractPose,
+                                    candidate.start);
+                            candidate.nearestConnectionDistance =
+                                candidate.entryTravelDistance;
                         }
                         else
                         {
@@ -2690,6 +2990,23 @@ namespace cadcam::planning
                         candidate.stableEntityId = candidate.entities.front().entity->entityId;
                         scoreTraversal(candidate, currentPosition, section);
                         ++result.report.candidateCount;
+                        if (selection != nullptr
+                            && selection->hardZoneConstraint)
+                        {
+                            const double dotValue = std::clamp
+                            (
+                                1.0 - candidate.entryTangentCost,
+                                -1.0,
+                                1.0
+                            );
+                            candidate.approachCutDot = dotValue;
+                            candidate.approachCutAngle =
+                                std::acos(dotValue)
+                                * 180.0 / 3.14159265358979323846;
+                            connectionCandidates.push_back
+                                (std::move(candidate));
+                            continue;
+                        }
 
                         const int startEndpoint = startReverse ? 1 : 0;
                         const int loopDirection = startReverse ? 1 : 0;
@@ -2744,6 +3061,75 @@ namespace cadcam::planning
                     }
                 }
 
+                if (selection != nullptr
+                    && selection->hardZoneConstraint
+                    && !connectionCandidates.empty())
+                {
+                    const double tieTolerance = std::max
+                    (
+                        policy.connectionDistanceTieTolerance,
+                        kCalculationEpsilon
+                    );
+                    const auto connectionLess =
+                        [tieTolerance](const GroupTraversal& left,
+                            const GroupTraversal& right)
+                    {
+                        if (std::abs(left.entryTravelDistance
+                            - right.entryTravelDistance) > tieTolerance)
+                        {
+                            return left.entryTravelDistance
+                                < right.entryTravelDistance;
+                        }
+                        if (std::abs(left.entryTangentCost
+                            - right.entryTangentCost)
+                            > kCalculationEpsilon)
+                        {
+                            return left.entryTangentCost
+                                < right.entryTangentCost;
+                        }
+                        if (left.stableEntityId != right.stableEntityId)
+                            return left.stableEntityId
+                                < right.stableEntityId;
+                        const bool leftReverse = !left.entities.empty()
+                            && left.entities.front()
+                                .reverseRelativeToInput;
+                        const bool rightReverse = !right.entities.empty()
+                            && right.entities.front()
+                                .reverseRelativeToInput;
+                        return leftReverse < rightReverse;
+                    };
+                    auto selected = std::min_element
+                        (connectionCandidates.begin(),
+                            connectionCandidates.end(), connectionLess);
+                    best = *selected;
+                    const double samePointTolerance = std::max
+                        (policy.connectionDistanceTieTolerance, 1.0e-8);
+                    best->forwardAngle =
+                        std::numeric_limits<double>::quiet_NaN();
+                    best->reverseAngle =
+                        std::numeric_limits<double>::quiet_NaN();
+                    for (const GroupTraversal& candidate :
+                        connectionCandidates)
+                    {
+                        if (distance(candidate.start, best->start)
+                            > samePointTolerance
+                            || candidate.entities.empty())
+                        {
+                            continue;
+                        }
+                        if (candidate.entities.front()
+                            .reverseRelativeToInput)
+                        {
+                            best->reverseAngle =
+                                candidate.approachCutAngle;
+                        }
+                        else
+                        {
+                            best->forwardAngle =
+                                candidate.approachCutAngle;
+                        }
+                    }
+                }
                 if (!best.has_value())
                 {
                     result.report.wrongZoneRejectedCount =
@@ -2768,6 +3154,9 @@ namespace cadcam::planning
         class ClosedLoopZoneRunBuilder
         {
         public:
+            struct BreakSegment;
+            struct BreakZoneRun;
+
             struct Result
             {
                 std::optional<GroupTraversal> traversal;
@@ -2879,7 +3268,7 @@ namespace cadcam::planning
                             group.groupId, cycle, segments, run,
                             entities, currentPosition, policy,
                             section, tubeCenter, projectionTolerance,
-                            0.5, true,
+                            0.5, std::nullopt, std::nullopt, true,
                             directionIndex == 0U
                                 ? QStringLiteral("Forward")
                                 : QStringLiteral("Reverse"),
@@ -2981,6 +3370,10 @@ namespace cadcam::planning
                 int zoneRunMidpointCandidateCount = 0;
                 int curveCandidateRejectedCount = 0;
                 int wrongZoneRejectedCount = 0;
+                int curveMemberCount = 0;
+                int arcTangentRootCount = 0;
+                int ellipseTangentRootCount = 0;
+                int validTangentCount = 0;
                 std::vector<EntityId> arcCandidateEntityIds;
                 std::vector<EntityId> ellipseCandidateEntityIds;
             };
@@ -3014,6 +3407,52 @@ namespace cadcam::planning
                 default:
                     return false;
                 }
+            }
+
+            static std::optional<double> runFactorForParameter
+            (
+                const BreakZoneRun& run,
+                const std::vector<BreakSegment>& segments,
+                EntityId entityId,
+                double parameter
+            )
+            {
+                double accumulated = 0.0;
+                for (const std::size_t segmentIndex : run.segmentIndices)
+                {
+                    const BreakSegment& segment = segments[segmentIndex];
+                    if (segment.entityId == entityId)
+                    {
+                        const double minimum = std::min
+                            (segment.parameterBegin, segment.parameterEnd);
+                        const double maximum = std::max
+                            (segment.parameterBegin, segment.parameterEnd);
+                        if (parameter >= minimum - 1.0e-10
+                            && parameter <= maximum + 1.0e-10)
+                        {
+                            const double denominator =
+                                segment.parameterEnd - segment.parameterBegin;
+                            if (std::abs(denominator) <= 1.0e-12)
+                                return std::nullopt;
+                            const double localFactor = std::clamp
+                            (
+                                (parameter - segment.parameterBegin)
+                                    / denominator,
+                                0.0,
+                                1.0
+                            );
+                            return std::clamp
+                            (
+                                (accumulated + segment.length * localFactor)
+                                    / run.length,
+                                0.0,
+                                1.0
+                            );
+                        }
+                    }
+                    accumulated += segment.length;
+                }
+                return std::nullopt;
             }
 
             static OrdinaryResult buildOrdinary
@@ -3071,6 +3510,20 @@ namespace cadcam::planning
                 if (reverseAllowed)
                     directions.push_back(std::move(reverseDirection));
 
+                std::set<EntityId> curveMemberIds;
+                for (const DirectedEntity& directed :
+                    canonicalTraversal.entities)
+                {
+                    if (directed.entity != nullptr
+                        && ordinaryCurveInteriorEligible(*directed.entity)
+                        && directed.entity->sourceEntity.has_value())
+                    {
+                        curveMemberIds.insert(directed.entity->entityId);
+                    }
+                }
+                result.curveMemberCount =
+                    static_cast<int>(curveMemberIds.size());
+
                 for (std::size_t directionIndex = 0U;
                     directionIndex < directions.size(); ++directionIndex)
                 {
@@ -3103,8 +3556,18 @@ namespace cadcam::planning
                             continue;
                         }
 
-                        std::vector<double> factors;
-                        double accumulated = 0.0;
+                        struct RootCandidate
+                        {
+                            EntityId entityId = 0;
+                            geometry::SourceGeometryKind sourceKind =
+                                geometry::SourceGeometryKind::Unknown;
+                            double parameter = 0.0;
+                            Vector3d point;
+                            double residual = 0.0;
+                            double runFactor = 0.0;
+                        };
+                        std::vector<RootCandidate> roots;
+                        std::set<EntityId> examinedMembers;
                         for (const std::size_t segmentIndex :
                             run.segmentIndices)
                         {
@@ -3112,59 +3575,96 @@ namespace cadcam::planning
                                 segments[segmentIndex];
                             const auto entity = entities.find
                                 (segment.entityId);
-                            if (entity != entities.end()
-                                && entity->second != nullptr
-                                && ordinaryCurveInteriorEligible
-                                    (*entity->second))
-                            {
-                                for (const double segmentFactor :
-                                    { 0.25, 0.5, 0.75 })
-                                {
-                                    factors.push_back(std::clamp
-                                    (
-                                        (accumulated + segment.length
-                                            * segmentFactor) / run.length,
-                                        0.0, 1.0
-                                    ));
-                                }
-                            }
-                            accumulated += segment.length;
-                        }
-                        if (factors.empty()) continue;
-                        std::sort(factors.begin(), factors.end());
-                        factors.erase(std::unique(factors.begin(),
-                            factors.end(),
-                            [](double left, double right)
-                            {
-                                return std::abs(left - right) <= 1.0e-10;
-                            }), factors.end());
-                        constexpr std::size_t kMaximumInteriorCandidatesPerRun =
-                            128U;
-                        if (factors.size()
-                            > kMaximumInteriorCandidatesPerRun)
-                        {
-                            std::vector<double> reduced;
-                            reduced.reserve
-                                (kMaximumInteriorCandidatesPerRun);
-                            for (std::size_t index = 0U;
-                                index < kMaximumInteriorCandidatesPerRun;
-                                ++index)
-                            {
-                                const std::size_t sourceIndex =
-                                    index * (factors.size() - 1U)
-                                    / (kMaximumInteriorCandidatesPerRun - 1U);
-                                reduced.push_back(factors[sourceIndex]);
-                            }
-                            factors = std::move(reduced);
-                        }
-
-                        for (const double factor : factors)
-                        {
-                            if (factor <= kCalculationEpsilon
-                                || factor >= 1.0 - kCalculationEpsilon)
+                            if (entity == entities.end()
+                                || entity->second == nullptr
+                                || !ordinaryCurveInteriorEligible
+                                    (*entity->second)
+                                || !entity->second->sourceEntity.has_value()
+                                || !examinedMembers.insert
+                                    (segment.entityId).second)
                             {
                                 continue;
                             }
+                            const PlanningEntity& curveEntity =
+                                *entity->second;
+                            std::vector<ExactCurveTangentRoot>
+                                memberRoots;
+                            if (curveEntity.sourceKind
+                                == geometry::SourceGeometryKind::Arc)
+                            {
+                                if (const auto* arc =
+                                    std::get_if<geometry::ArcGeometry>
+                                    (&curveEntity.sourceEntity->geometry))
+                                {
+                                    memberRoots = arcTangentRoots
+                                        (*arc,
+                                            selection.previousRetractPose,
+                                            std::max(1.0e-10,
+                                                selection
+                                                    .projectionTolerance
+                                                    * 1.0e-6));
+                                }
+                            }
+                            else if (curveEntity.sourceKind
+                                == geometry::SourceGeometryKind::Ellipse)
+                            {
+                                if (const auto* ellipse =
+                                    std::get_if<geometry::EllipseGeometry>
+                                    (&curveEntity.sourceEntity->geometry))
+                                {
+                                    memberRoots = ellipseTangentRoots
+                                        (*ellipse,
+                                            selection.previousRetractPose,
+                                            std::max(1.0e-10,
+                                                selection
+                                                    .projectionTolerance
+                                                    * 1.0e-6));
+                                }
+                            }
+                            if (directionIndex == 0U)
+                            {
+                                if (curveEntity.sourceKind
+                                    == geometry::SourceGeometryKind::Arc)
+                                {
+                                    result.arcTangentRootCount +=
+                                        static_cast<int>(memberRoots.size());
+                                }
+                                else
+                                {
+                                    result.ellipseTangentRootCount +=
+                                        static_cast<int>(memberRoots.size());
+                                }
+                            }
+                            for (const auto& root : memberRoots)
+                            {
+                                const auto runFactor =
+                                    runFactorForParameter
+                                    (
+                                        run, segments,
+                                        curveEntity.entityId,
+                                        root.parameter
+                                    );
+                                if (!runFactor.has_value()
+                                    || *runFactor <= kCalculationEpsilon
+                                    || *runFactor
+                                        >= 1.0 - kCalculationEpsilon)
+                                {
+                                    continue;
+                                }
+                                roots.push_back
+                                ({
+                                    curveEntity.entityId,
+                                    curveEntity.sourceKind,
+                                    root.parameter,
+                                    root.point,
+                                    root.residual,
+                                    *runFactor
+                                });
+                            }
+                        }
+
+                        for (const RootCandidate& root : roots)
+                        {
                             bool midpointLocated = false;
                             bool fragmentsBuilt = false;
                             bool exitResolved = false;
@@ -3173,7 +3673,8 @@ namespace cadcam::planning
                                 group.groupId, cycle, segments, run,
                                 entities, currentPosition, policy, section,
                                 tubeCenter, selection.projectionTolerance,
-                                factor, false,
+                                root.runFactor, root.point, root.parameter,
+                                false,
                                 directionIndex == 0U
                                     ? QStringLiteral("Forward")
                                     : QStringLiteral("Reverse"),
@@ -3294,7 +3795,7 @@ namespace cadcam::planning
                             scoreUnwrappedEntry
                             (
                                 candidate->traversal.entities.front(),
-                                selection.previousEnd,
+                                selection.previousRetractPose,
                                 candidate->firstCutPoint, section,
                                 policy.connectionTolerance,
                                 selection.projectionTolerance
@@ -3305,9 +3806,33 @@ namespace cadcam::planning
                             candidate->traversal.entryTangentCost =
                                 candidate->traversal.entities.front()
                                     .entryTangentCost;
+                            candidate->traversal.entryRefinementMode =
+                                QStringLiteral("ExactCurveTangent");
+                            candidate->traversal.previousCutEnd =
+                                selection.previousCutEnd;
+                            candidate->traversal.previousRetractPose =
+                                selection.previousRetractPose;
+                            candidate->traversal.entryTravelDistance =
+                                distance(selection.previousRetractPose,
+                                    candidate->midpoint);
+                            candidate->traversal.approachCutDot =
+                                std::clamp
+                                (
+                                    1.0 - candidate->traversal
+                                        .entryTangentCost,
+                                    -1.0,
+                                    1.0
+                                );
+                            candidate->traversal.approachCutAngle =
+                                std::acos(candidate->traversal
+                                    .approachCutDot)
+                                * 180.0 / 3.14159265358979323846;
+                            candidate->traversal.tangentResidual =
+                                root.residual;
                             scoreTraversal(candidate->traversal,
                                 currentPosition, section);
                             ++result.candidateCount;
+                            ++result.validTangentCount;
                             if (entryEntity.sourceKind
                                 == geometry::SourceGeometryKind::Arc)
                             {
@@ -3321,13 +3846,61 @@ namespace cadcam::planning
                                 result.ellipseCandidateEntityIds.push_back
                                     (entryEntity.entityId);
                             }
+                            const auto tangentLess =
+                                [](const GroupTraversal& left,
+                                    const GroupTraversal& right)
+                            {
+                                const bool leftSameDirection =
+                                    left.approachCutDot > 0.0;
+                                const bool rightSameDirection =
+                                    right.approachCutDot > 0.0;
+                                if (leftSameDirection != rightSameDirection)
+                                    return leftSameDirection;
+                                if (std::abs(left.entryTravelDistance
+                                    - right.entryTravelDistance)
+                                    > kCalculationEpsilon)
+                                {
+                                    return left.entryTravelDistance
+                                        < right.entryTravelDistance;
+                                }
+                                if (left.entryAxisReversalCount
+                                    != right.entryAxisReversalCount)
+                                {
+                                    return left.entryAxisReversalCount
+                                        < right.entryAxisReversalCount;
+                                }
+                                if (std::abs(left.rotationCost
+                                    - right.rotationCost)
+                                    > kCalculationEpsilon)
+                                {
+                                    return left.rotationCost
+                                        < right.rotationCost;
+                                }
+                                if (left.stableEntityId
+                                    != right.stableEntityId)
+                                {
+                                    return left.stableEntityId
+                                        < right.stableEntityId;
+                                }
+                                const double leftParameter =
+                                    left.selectedEntry
+                                        ->sourceParameter.value_or(0.0);
+                                const double rightParameter =
+                                    right.selectedEntry
+                                        ->sourceParameter.value_or(0.0);
+                                if (std::abs(leftParameter - rightParameter)
+                                    > 1.0e-12)
+                                {
+                                    return leftParameter < rightParameter;
+                                }
+                                return left.entities.front()
+                                    .reverseRelativeToInput
+                                    < right.entities.front()
+                                        .reverseRelativeToInput;
+                            };
                             if (!result.traversal.has_value()
-                                || zoneConstrainedTraversalLess
-                                (
-                                    candidate->traversal,
-                                    *result.traversal, selection,
-                                    selectionStrategy
-                                ))
+                                || tangentLess(candidate->traversal,
+                                    *result.traversal))
                             {
                                 result.traversal =
                                     std::move(candidate->traversal);
@@ -3364,7 +3937,7 @@ namespace cadcam::planning
                                 group.groupId, cycle, segments, run,
                                 entities, currentPosition, policy, section,
                                 tubeCenter, selection.projectionTolerance,
-                                0.5, false,
+                                0.5, std::nullopt, std::nullopt, false,
                                 directionIndex == 0U
                                     ? QStringLiteral("Forward")
                                     : QStringLiteral("Reverse"),
@@ -3463,7 +4036,7 @@ namespace cadcam::planning
                             scoreUnwrappedEntry
                             (
                                 candidate->traversal.entities.front(),
-                                selection.previousEnd,
+                                selection.previousRetractPose,
                                 candidate->firstCutPoint, section,
                                 policy.connectionTolerance,
                                 selection.projectionTolerance
@@ -3474,6 +4047,27 @@ namespace cadcam::planning
                             candidate->traversal.entryTangentCost =
                                 candidate->traversal.entities.front()
                                     .entryTangentCost;
+                            candidate->traversal.entryRefinementMode =
+                                QStringLiteral("ZoneRunMidpointFallback");
+                            candidate->traversal.previousCutEnd =
+                                selection.previousCutEnd;
+                            candidate->traversal.previousRetractPose =
+                                selection.previousRetractPose;
+                            candidate->traversal.entryTravelDistance =
+                                distance(selection.previousRetractPose,
+                                    candidate->midpoint);
+                            candidate->traversal.approachCutDot =
+                                std::clamp
+                                (
+                                    1.0 - candidate->traversal
+                                        .entryTangentCost,
+                                    -1.0,
+                                    1.0
+                                );
+                            candidate->traversal.approachCutAngle =
+                                std::acos(candidate->traversal
+                                    .approachCutDot)
+                                * 180.0 / 3.14159265358979323846;
                             scoreTraversal(candidate->traversal,
                                 currentPosition, section);
                             ++result.zoneRunMidpointCandidateCount;
@@ -3558,6 +4152,26 @@ namespace cadcam::planning
                         result.ellipseCandidateEntityIds;
                     result.traversal->wrongZoneRejectedCount =
                         result.wrongZoneRejectedCount;
+                    result.traversal->curveMemberCount =
+                        result.curveMemberCount;
+                    result.traversal->arcTangentRootCount =
+                        result.arcTangentRootCount;
+                    result.traversal->ellipseTangentRootCount =
+                        result.ellipseTangentRootCount;
+                    result.traversal->validTangentCount =
+                        result.validTangentCount;
+                }
+                if (result.zoneRunMidpointTraversal.has_value())
+                {
+                    result.zoneRunMidpointTraversal->curveMemberCount =
+                        result.curveMemberCount;
+                    result.zoneRunMidpointTraversal->arcTangentRootCount =
+                        result.arcTangentRootCount;
+                    result.zoneRunMidpointTraversal
+                        ->ellipseTangentRootCount =
+                        result.ellipseTangentRootCount;
+                    result.zoneRunMidpointTraversal->validTangentCount =
+                        result.validTangentCount;
                 }
                 return result;
             }
@@ -4084,6 +4698,8 @@ namespace cadcam::planning
                 const std::optional<Vector2d>& tubeCenter,
                 double projectionTolerance,
                 double runFactor,
+                std::optional<Vector3d> exactPoint,
+                std::optional<double> exactParameter,
                 bool requireMatchingExit,
                 const QString& direction,
                 bool& midpointLocated,
@@ -4123,14 +4739,16 @@ namespace cadcam::planning
                 }
                 midpointLocated = true;
 
-                const Vector3d midpoint = interpolate
+                const Vector3d midpoint = exactPoint.value_or(interpolate
                     (midpointSegment->start, midpointSegment->end,
-                        midpointFactor);
-                const double midpointParameter =
+                        midpointFactor));
+                const double midpointParameter = exactParameter.value_or
+                (
                     midpointSegment->parameterBegin
                     + (midpointSegment->parameterEnd
                         - midpointSegment->parameterBegin)
-                        * midpointFactor;
+                        * midpointFactor
+                );
                 const std::size_t startEntityOrder =
                     midpointSegment->entityOrder;
 
@@ -4557,6 +5175,8 @@ namespace cadcam::planning
         {
             QVariantMap values;
             values.insert(QStringLiteral("entrySelectionSummary"), true);
+            values.insert(QStringLiteral("entryRefinementSummary"),
+                !traversal.entryRefinementMode.isEmpty());
             values.insert(QStringLiteral("unitKey"), processGroupKeyText(group));
             values.insert(QStringLiteral("groupKind"), groupKindName(group.kind));
             values.insert(QStringLiteral("candidateCount"),
@@ -4617,11 +5237,13 @@ namespace cadcam::planning
                     == ZoneEntryCandidateKind::
                         ClosedLoopZoneRunMidpoint;
             values.insert(QStringLiteral("selectionMode"),
-                curveInteriorSelected
-                ? QStringLiteral("CurveInterior")
-                : zoneRunMidpointSelected
-                    ? QStringLiteral("ZoneRunMidpointFallback")
-                    : QStringLiteral("ConnectionFallback"));
+                !traversal.entryRefinementMode.isEmpty()
+                ? traversal.entryRefinementMode
+                : curveInteriorSelected
+                    ? QStringLiteral("ExactCurveTangent")
+                    : zoneRunMidpointSelected
+                        ? QStringLiteral("ZoneRunMidpointFallback")
+                        : QStringLiteral("NearestConnection"));
             values.insert(QStringLiteral("selectedEntityId"),
                 QVariant::fromValue<qulonglong>
                     (traversal.selectedEntry.has_value()
@@ -4655,6 +5277,32 @@ namespace cadcam::planning
                 static_cast<int>(traversal.fragments.size()));
             values.insert(QStringLiteral("midpointFragmentUsed"),
                 !traversal.fragments.empty());
+            values.insert(QStringLiteral("previousCutEnd"),
+                vectorText(traversal.previousCutEnd));
+            values.insert(QStringLiteral("previousRetractPose"),
+                vectorText(traversal.previousRetractPose));
+            values.insert(QStringLiteral("curveMemberCount"),
+                traversal.curveMemberCount);
+            values.insert(QStringLiteral("arcTangentRootCount"),
+                traversal.arcTangentRootCount);
+            values.insert(QStringLiteral("ellipseTangentRootCount"),
+                traversal.ellipseTangentRootCount);
+            values.insert(QStringLiteral("validTangentCount"),
+                traversal.validTangentCount);
+            values.insert(QStringLiteral("travelDistance"),
+                traversal.entryTravelDistance);
+            values.insert(QStringLiteral("approachCutAngle"),
+                traversal.approachCutAngle);
+            values.insert(QStringLiteral("nearestConnectionDistance"),
+                traversal.nearestConnectionDistance);
+            values.insert(QStringLiteral("forwardAngle"),
+                traversal.forwardAngle);
+            values.insert(QStringLiteral("reverseAngle"),
+                traversal.reverseAngle);
+            values.insert(QStringLiteral("tangentResidual"),
+                traversal.tangentResidual);
+            values.insert(QStringLiteral("approachCutDot"),
+                traversal.approachCutDot);
             return planningDiagnostic
             (
                 context,
@@ -4877,6 +5525,14 @@ namespace cadcam::planning
                         interior.zoneRunMidpointCandidateCount;
                     best->curveCandidateRejectedCount =
                         interior.curveCandidateRejectedCount;
+                    best->curveMemberCount =
+                        interior.curveMemberCount;
+                    best->arcTangentRootCount =
+                        interior.arcTangentRootCount;
+                    best->ellipseTangentRootCount =
+                        interior.ellipseTangentRootCount;
+                    best->validTangentCount =
+                        interior.validTangentCount;
                     best->arcInteriorCandidateEntityIds =
                         std::move(interior.arcCandidateEntityIds);
                     best->ellipseInteriorCandidateEntityIds =
@@ -5307,7 +5963,11 @@ namespace cadcam::planning
     {
         if (input.contentRevision == 0U || input.topology == nullptr
             || input.entities.empty() || policy.connectionTolerance <= 0.0
-            || !std::isfinite(policy.connectionTolerance))
+            || !std::isfinite(policy.connectionTolerance)
+            || !std::isfinite(policy.retractClearance)
+            || policy.retractClearance <= 0.0
+            || !std::isfinite(policy.connectionDistanceTieTolerance)
+            || policy.connectionDistanceTieTolerance <= 0.0)
         {
             return failure<ProcessPlan>
             (
@@ -7036,8 +7696,29 @@ namespace cadcam::planning
                             zoneSelection->second.frontierBefore;
                         traversalSelection->projectionTolerance =
                             zoneProjectionTolerance;
-                        traversalSelection->previousEnd =
+                        traversalSelection->previousCutEnd =
                             currentPosition;
+                        traversalSelection->previousRetractPose =
+                            initialSelection
+                            ? currentPosition
+                            : machine::RotaryKinematics
+                                ::sourceRetractPose
+                                (
+                                    currentPosition,
+                                    policy.retractClearance,
+                                    input.tubeSection,
+                                    input.tubeSectionCenter.has_value()
+                                        ? input.tubeSectionCenter->x
+                                        : surfaceSweepSection
+                                            ->geometry.centerY,
+                                    input.tubeSectionCenter.has_value()
+                                        ? input.tubeSectionCenter->y
+                                        : surfaceSweepSection
+                                            ->geometry.centerZ,
+                                    zoneProjectionTolerance
+                                );
+                        traversalSelection->previousEnd =
+                            traversalSelection->previousRetractPose;
                         traversalSelection->hardZoneConstraint = true;
                         const ProcessGroupZoneProfile& profile =
                             groupZoneProfiles.at(groupId);
@@ -7196,37 +7877,15 @@ namespace cadcam::planning
                         }
                         else
                         {
-                            const GroupTraversal& leftTraversal =
-                                candidates[candidateIndex].traversal;
-                            const GroupTraversal& rightTraversal =
-                                candidates[selectedIndex].traversal;
-                            if (std::abs(leftTraversal.movementDistance
-                                - rightTraversal.movementDistance)
-                                > kCalculationEpsilon)
-                                replace = leftTraversal.movementDistance
-                                    < rightTraversal.movementDistance;
-                            else if (leftTraversal.entryAxisReversalCount
-                                != rightTraversal.entryAxisReversalCount)
-                                replace = leftTraversal.entryAxisReversalCount
-                                    < rightTraversal.entryAxisReversalCount;
-                            else if (std::abs(leftTraversal.entryTangentCost
-                                - rightTraversal.entryTangentCost)
-                                > kCalculationEpsilon)
-                                replace = leftTraversal.entryTangentCost
-                                    < rightTraversal.entryTangentCost;
-                            else if (std::abs(leftTraversal.rotationCost
-                                - rightTraversal.rotationCost)
-                                > kCalculationEpsilon)
-                                replace = leftTraversal.rotationCost
-                                    < rightTraversal.rotationCost;
-                            else
-                                replace = processGroupStableLess
-                                (
-                                    plan.groups[static_cast<std::size_t>
-                                        (leftTraversal.groupId)],
-                                    plan.groups[static_cast<std::size_t>
-                                        (rightTraversal.groupId)]
-                                );
+                            replace = processGroupStableLess
+                            (
+                                plan.groups[static_cast<std::size_t>
+                                    (candidates[candidateIndex]
+                                        .traversal.groupId)],
+                                plan.groups[static_cast<std::size_t>
+                                    (candidates[selectedIndex]
+                                        .traversal.groupId)]
+                            );
                         }
                     }
                 }
