@@ -12,6 +12,21 @@ namespace cadcam::machine
 {
     enum class MachineMoveKind { Rapid, Cutting, CuttingConnection, Overcut };
     enum class RotarySurfaceRegion { Top, Right, Bottom, Left, Corner, Radial, Unknown };
+    enum class TransferMotionKind
+    {
+        InitialApproach,
+        SameZoneSurfaceTransfer,
+        SameZoneClearanceTransfer,
+        CrossZoneRotaryTransfer
+    };
+    enum class TransferMotionPhase
+    {
+        None,
+        SurfaceTransfer,
+        CoordinatedDeparture,
+        SafeRotaryTransfer,
+        CoordinatedApproach
+    };
 
     struct MachinePose4D
     {
@@ -25,6 +40,8 @@ namespace cadcam::machine
     {
         MachineMoveKind kind = MachineMoveKind::Rapid;
         MachinePose4D target;
+        TransferMotionKind transferKind = TransferMotionKind::InitialApproach;
+        TransferMotionPhase transferPhase = TransferMotionPhase::None;
         geometry::EntityId entityId = 0;
         int processGroupId = -1;
     };
@@ -79,6 +96,27 @@ namespace cadcam::machine
         double sectionMaximumZ = 0.0;
     };
 
+    struct TransferMotionSummary
+    {
+        int fromProcessUnit = -1;
+        int toProcessUnit = -1;
+        std::optional<machining::TubeZone16> fromOwnerZone;
+        std::optional<machining::TubeZone16> toOwnerZone;
+        TransferMotionKind kind = TransferMotionKind::InitialApproach;
+        MachinePose4D previousCutEnd;
+        MachinePose4D nextCutStart;
+        MachinePose4D departureTarget;
+        MachinePose4D rotaryTransferTarget;
+        MachinePose4D approachTarget;
+        double deltaA = 0.0;
+        double rotationSafetyClearance = 0.0;
+        double sameZoneTransferClearance = 0.0;
+        double rotationSafeMachineZ = 0.0;
+        bool coordinated = false;
+        bool surfaceTransfer = false;
+        int segmentCount = 0;
+    };
+
     struct MachineTrajectory
     {
         std::uint64_t contentRevision = 0;
@@ -86,6 +124,7 @@ namespace cadcam::machine
         RotaryTrajectoryContext rotaryContext;
         std::vector<EntityTrajectory> entities;
         std::vector<RotarySurfaceSummary> surfaceSummaries;
+        std::vector<TransferMotionSummary> transferSummaries;
     };
 
     struct TrajectoryEntityInput
@@ -97,6 +136,8 @@ namespace cadcam::machine
         int sourceProcessOrder = -1;
         int fragmentOrder = -1;
         int processGroupId = -1;
+        int processUnitIndex = -1;
+        std::optional<machining::TubeZone16> ownerZone;
         bool closed = false;
         bool firstInGroup = false;
         bool lastInGroup = false;
@@ -107,6 +148,24 @@ namespace cadcam::machine
     {
         double retractClearance = 5.0;
         double approachClearance = 0.0;
+    };
+
+    struct ToolTransferPolicy
+    {
+        double rotationSafetyClearance = 5.0;
+        double sameZoneTransferClearance = 0.0;
+        bool coordinatedTransferEnabled = true;
+    };
+
+    struct TransferClassificationInput
+    {
+        int previousProcessUnitIndex = -1;
+        int nextProcessUnitIndex = -1;
+        std::optional<machining::TubeZone16> previousOwnerZone;
+        std::optional<machining::TubeZone16> nextOwnerZone;
+        MachinePose4D previousCutEnd;
+        MachinePose4D nextCutStart;
+        double aAxisTolerance = 1.0e-5;
     };
 
     struct PlanarTrajectoryEntityInput
@@ -141,7 +200,7 @@ namespace cadcam::machine
         bool useInitialMachinePoint = false;
         MachinePose4D initialMachinePoint;
         bool useSafeZBeforeRapid = true;
-        ToolClearancePolicy clearance;
+        ToolTransferPolicy transfer;
         double machiningPlaneZOffset = 0.0;
         double overcutDistance = 2.0;
         double continuousConnectionTolerance = 1.0;

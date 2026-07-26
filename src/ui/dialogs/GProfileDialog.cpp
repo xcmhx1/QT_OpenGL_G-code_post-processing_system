@@ -416,21 +416,29 @@ void GProfileDialog::buildUi()
     safetyFormLayout->setContentsMargins(0, 0, 0, 0);
     safetyFormLayout->setSpacing(8);
 
-    m_retractClearanceSpinBox = new QDoubleSpinBox(safetyTab);
-    m_retractClearanceSpinBox->setDecimals(3);
-    m_retractClearanceSpinBox->setRange(0.001, 1000000.0);
-    m_retractClearanceSpinBox->setSingleStep(1.0);
-    m_retractClearanceSpinBox->setSuffix(QStringLiteral(" mm"));
-    safetyFormLayout->addRow(QStringLiteral("抬刀安全距离"),
-        m_retractClearanceSpinBox);
+    m_rotationSafetyClearanceSpinBox = new QDoubleSpinBox(safetyTab);
+    m_rotationSafetyClearanceSpinBox->setDecimals(3);
+    m_rotationSafetyClearanceSpinBox->setRange(0.001, 1000000.0);
+    m_rotationSafetyClearanceSpinBox->setSingleStep(1.0);
+    m_rotationSafetyClearanceSpinBox->setSuffix(QStringLiteral(" mm"));
+    m_rotationSafetyClearanceSpinBox->setToolTip(QStringLiteral(
+        "工件旋转时刀头高于方管最大旋转包络的安全余量。"));
+    safetyFormLayout->addRow(QStringLiteral("旋转安全抬刀距离"),
+        m_rotationSafetyClearanceSpinBox);
 
-    m_approachClearanceSpinBox = new QDoubleSpinBox(safetyTab);
-    m_approachClearanceSpinBox->setDecimals(3);
-    m_approachClearanceSpinBox->setRange(0.0, 1000000.0);
-    m_approachClearanceSpinBox->setSingleStep(0.1);
-    m_approachClearanceSpinBox->setSuffix(QStringLiteral(" mm"));
-    safetyFormLayout->addRow(QStringLiteral("落刀接近距离"),
-        m_approachClearanceSpinBox);
+    m_sameZoneTransferClearanceSpinBox = new QDoubleSpinBox(safetyTab);
+    m_sameZoneTransferClearanceSpinBox->setDecimals(3);
+    m_sameZoneTransferClearanceSpinBox->setRange(0.0, 1000000.0);
+    m_sameZoneTransferClearanceSpinBox->setSingleStep(0.1);
+    m_sameZoneTransferClearanceSpinBox->setSuffix(QStringLiteral(" mm"));
+    m_sameZoneTransferClearanceSpinBox->setToolTip(QStringLiteral(
+        "同一区位加工单元之间空移时的离面高度；设置为 0 时不抬刀。"));
+    safetyFormLayout->addRow(QStringLiteral("同区空移离面距离"),
+        m_sameZoneTransferClearanceSpinBox);
+
+    m_coordinatedTransferCheckBox = new QCheckBox(
+        QStringLiteral("启用安全约束下的多轴联动转移"), safetyTab);
+    safetyFormLayout->addRow(QString(), m_coordinatedTransferCheckBox);
 
     safetyLayout->addLayout(safetyFormLayout);
     safetyLayout->addStretch(1);
@@ -492,14 +500,6 @@ void GProfileDialog::buildUi()
     connect(reset4AxisButton, &QPushButton::clicked, this, [this]() { resetToDefaultRotaryProfile(); });
     connect(m_buttonBox, &QDialogButtonBox::accepted, this, &GProfileDialog::accept);
     connect(m_buttonBox, &QDialogButtonBox::rejected, this, &GProfileDialog::reject);
-    connect(m_retractClearanceSpinBox,
-        qOverload<double>(&QDoubleSpinBox::valueChanged), this,
-        [this](double value)
-        {
-            if (m_approachClearanceSpinBox != nullptr)
-                m_approachClearanceSpinBox->setMaximum(value);
-        });
-
     connect
     (
         m_entityTypeListWidget,
@@ -664,12 +664,12 @@ void GProfileDialog::applyProfile(const GProfile& profile)
     setBlockText(m_fileHeaderEdit, profile.fileCode().header);
     setBlockText(m_fileFooterEdit, profile.fileCode().footer);
     setBlockText(m_fileCommentEdit, profile.fileCode().comment);
-    m_retractClearanceSpinBox->setValue
-        (profile.toolClearanceConfig().retractClearance);
-    m_approachClearanceSpinBox->setMaximum
-        (profile.toolClearanceConfig().retractClearance);
-    m_approachClearanceSpinBox->setValue
-        (profile.toolClearanceConfig().approachClearance);
+    m_rotationSafetyClearanceSpinBox->setValue
+        (profile.toolTransferConfig().rotationSafetyClearance);
+    m_sameZoneTransferClearanceSpinBox->setValue
+        (profile.toolTransferConfig().sameZoneTransferClearance);
+    m_coordinatedTransferCheckBox->setChecked
+        (profile.toolTransferConfig().coordinatedTransferEnabled);
     m_rotaryPlaneZOffsetSpinBox->setValue(profile.rotaryAxisConfig().machiningPlaneZOffset);
     m_rotaryOvercutDistanceSpinBox->setValue(profile.rotaryAxisConfig().overcutDistance);
     m_lazyRotationProcessingCheckBox->setChecked
@@ -695,14 +695,20 @@ GProfile GProfileDialog::collectProfile() const
 {
     GProfile profile;
     GProfileRotaryAxisConfig rotaryConfig = m_profile.rotaryAxisConfig();
-    GProfileToolClearanceConfig clearanceConfig =
-        m_profile.toolClearanceConfig();
-    clearanceConfig.retractClearance = m_retractClearanceSpinBox != nullptr
-        ? m_retractClearanceSpinBox->value()
-        : clearanceConfig.retractClearance;
-    clearanceConfig.approachClearance = m_approachClearanceSpinBox != nullptr
-        ? m_approachClearanceSpinBox->value()
-        : clearanceConfig.approachClearance;
+    GProfileToolTransferConfig transferConfig =
+        m_profile.toolTransferConfig();
+    transferConfig.rotationSafetyClearance =
+        m_rotationSafetyClearanceSpinBox != nullptr
+        ? m_rotationSafetyClearanceSpinBox->value()
+        : transferConfig.rotationSafetyClearance;
+    transferConfig.sameZoneTransferClearance =
+        m_sameZoneTransferClearanceSpinBox != nullptr
+        ? m_sameZoneTransferClearanceSpinBox->value()
+        : transferConfig.sameZoneTransferClearance;
+    transferConfig.coordinatedTransferEnabled =
+        m_coordinatedTransferCheckBox != nullptr
+        ? m_coordinatedTransferCheckBox->isChecked()
+        : transferConfig.coordinatedTransferEnabled;
     rotaryConfig.machiningPlaneZOffset = m_rotaryPlaneZOffsetSpinBox != nullptr
         ? m_rotaryPlaneZOffsetSpinBox->value()
         : rotaryConfig.machiningPlaneZOffset;
@@ -725,7 +731,7 @@ GProfile GProfileDialog::collectProfile() const
                 (m_longitudinalSweepDirectionComboBox->currentData().toInt());
     }
     profile.setRotaryAxisConfig(rotaryConfig);
-    profile.setToolClearanceConfig(clearanceConfig);
+    profile.setToolTransferConfig(transferConfig);
     profile.setProfileName(m_profileNameEdit->text().trimmed());
     profile.setFileCode
     (

@@ -4,6 +4,7 @@
 #include "application/geometry/DocumentGeometrySnapshotBuilder.h"
 #include "core/geometry/GeometryCompiler.h"
 #include "core/machine/RotaryTrajectoryBuilder.h"
+#include "core/machining/TubeSectionProjector.h"
 #include "drw_entities.h"
 
 #include <QDebug>
@@ -66,6 +67,92 @@ namespace
                     .arg(summary.rawAEnd, 0, 'g', 15)
                     .arg(summary.alignedAStart, 0, 'g', 15)
                     .arg(summary.alignedAEnd, 0, 'g', 15);
+        }
+    }
+
+    QString transferKindName(cadcam::machine::TransferMotionKind kind)
+    {
+        using cadcam::machine::TransferMotionKind;
+        switch (kind)
+        {
+        case TransferMotionKind::InitialApproach:
+            return QStringLiteral("InitialApproach");
+        case TransferMotionKind::SameZoneSurfaceTransfer:
+            return QStringLiteral("SameZoneSurfaceTransfer");
+        case TransferMotionKind::SameZoneClearanceTransfer:
+            return QStringLiteral("SameZoneClearanceTransfer");
+        case TransferMotionKind::CrossZoneRotaryTransfer:
+            return QStringLiteral("CrossZoneRotaryTransfer");
+        }
+        return QStringLiteral("Unknown");
+    }
+
+    QString ownerZoneName
+    (
+        const std::optional<cadcam::machining::TubeZone16>& zone
+    )
+    {
+        return zone.has_value()
+            ? cadcam::machining::tubeZoneName(*zone)
+            : QStringLiteral("None");
+    }
+
+    QString poseText(const cadcam::machine::MachinePose4D& pose)
+    {
+        return QStringLiteral("(%1,%2,%3,%4)")
+            .arg(pose.x, 0, 'g', 15)
+            .arg(pose.y, 0, 'g', 15)
+            .arg(pose.z, 0, 'g', 15)
+            .arg(pose.aDegrees, 0, 'g', 15);
+    }
+
+    void logTransferSummaries
+    (
+        const cadcam::machine::MachineTrajectory& trajectory
+    )
+    {
+        using cadcam::machine::TransferMotionKind;
+        for (const auto& summary : trajectory.transferSummaries)
+        {
+            QString message = QStringLiteral(
+                "[MachineTrajectory][Transfer] fromProcessUnit=%1 "
+                "toProcessUnit=%2 fromOwnerZone=%3 toOwnerZone=%4 "
+                "kind=%5 previousCutEnd=%6 nextCutStart=%7 deltaA=%8 "
+                "rotationSafetyClearance=%9 sameZoneTransferClearance=%10 "
+                "rotationSafeMachineZ=%11 coordinated=%12 segmentCount=%13")
+                .arg(summary.fromProcessUnit)
+                .arg(summary.toProcessUnit)
+                .arg(ownerZoneName(summary.fromOwnerZone))
+                .arg(ownerZoneName(summary.toOwnerZone))
+                .arg(transferKindName(summary.kind))
+                .arg(poseText(summary.previousCutEnd))
+                .arg(poseText(summary.nextCutStart))
+                .arg(summary.deltaA, 0, 'g', 15)
+                .arg(summary.rotationSafetyClearance, 0, 'g', 15)
+                .arg(summary.sameZoneTransferClearance, 0, 'g', 15)
+                .arg(summary.rotationSafeMachineZ, 0, 'g', 15)
+                .arg(summary.coordinated
+                    ? QStringLiteral("true") : QStringLiteral("false"))
+                .arg(summary.segmentCount);
+            if (summary.kind
+                == TransferMotionKind::CrossZoneRotaryTransfer
+                || summary.kind == TransferMotionKind::InitialApproach)
+            {
+                message += QStringLiteral(
+                    " departureTarget=%1 rotaryTransferTarget=%2 "
+                    "approachTarget=%3")
+                    .arg(poseText(summary.departureTarget))
+                    .arg(poseText(summary.rotaryTransferTarget))
+                    .arg(poseText(summary.approachTarget));
+            }
+            else if (summary.kind
+                == TransferMotionKind::SameZoneSurfaceTransfer)
+            {
+                message += QStringLiteral(" surfaceTransfer=%1")
+                    .arg(summary.surfaceTransfer
+                        ? QStringLiteral("true") : QStringLiteral("false"));
+            }
+            qInfo().noquote() << message;
         }
     }
 
@@ -256,7 +343,7 @@ OperationResult<cadcam::machine::MachineTrajectory> MachineTrajectoryService::bu
     const cadcam::planning::ProcessPlan& plan,
     const std::optional<cadcam::machining::TubeSectionModel>& tubeSection,
     const GProfileRotaryAxisConfig& config,
-    const GProfileToolClearanceConfig& clearanceConfig,
+    const GProfileToolTransferConfig& transferConfig,
     const TaskContext& taskContext,
     const std::optional<cadcam::geometry::Vector2d>& explicitTubeCenter
 ) const
@@ -359,7 +446,11 @@ OperationResult<cadcam::machine::MachineTrajectory> MachineTrajectoryService::bu
     {
         const auto& assignment = assignments[index];
         const auto found = entries.find(assignment.entityId);
-        if (assignment.processOrder != static_cast<int>(index) || found == entries.end()
+        if (assignment.processOrder != static_cast<int>(index)
+            || assignment.processUnitIndex < 0
+            || static_cast<std::size_t>(assignment.processUnitIndex)
+                >= plan.processUnits.size()
+            || found == entries.end()
             || found->second == nullptr || !found->second->sourceEntity.has_value())
         {
             result.status = OperationStatus::Failed;
@@ -461,6 +552,16 @@ OperationResult<cadcam::machine::MachineTrajectory> MachineTrajectoryService::bu
                 entity.fragmentOrder = fragment->fragmentOrder;
                 entity.processGroupId =
                     sourceAssignment->second->continuousGroupId;
+                entity.processUnitIndex =
+                    sourceAssignment->second->processUnitIndex;
+                if (entity.processUnitIndex >= 0
+                    && static_cast<std::size_t>(entity.processUnitIndex)
+                        < plan.processUnits.size())
+                {
+                    entity.ownerZone = plan.processUnits
+                        [static_cast<std::size_t>
+                            (entity.processUnitIndex)].ownerZone;
+                }
                 entity.path = *path;
                 const auto group = groups.find(entity.processGroupId);
                 entity.closed = group != groups.end()
@@ -500,6 +601,14 @@ OperationResult<cadcam::machine::MachineTrajectory> MachineTrajectoryService::bu
         entity.processOrder = static_cast<int>(input.entities.size());
         entity.sourceProcessOrder = assignment.processOrder;
         entity.processGroupId = assignment.continuousGroupId;
+        entity.processUnitIndex = assignment.processUnitIndex;
+        if (entity.processUnitIndex >= 0
+            && static_cast<std::size_t>(entity.processUnitIndex)
+                < plan.processUnits.size())
+        {
+            entity.ownerZone = plan.processUnits
+                [static_cast<std::size_t>(entity.processUnitIndex)].ownerZone;
+        }
         entity.path = std::move(*compiled.value);
         entity.closed = entity.path.closed;
         const auto group = groups.find(entity.processGroupId);
@@ -512,13 +621,12 @@ OperationResult<cadcam::machine::MachineTrajectory> MachineTrajectoryService::bu
     for (std::size_t index = 0; index < input.entities.size(); ++index)
     {
         auto& entity = input.entities[index];
-        entity.firstInGroup = entity.processGroupId < 0 || index == 0U
-            || input.entities[index - 1U].processGroupId
-                != entity.processGroupId;
-        entity.lastInGroup = entity.processGroupId < 0
-            || index + 1U == input.entities.size()
-            || input.entities[index + 1U].processGroupId
-                != entity.processGroupId;
+        entity.firstInGroup = index == 0U
+            || input.entities[index - 1U].processUnitIndex
+                != entity.processUnitIndex;
+        entity.lastInGroup = index + 1U == input.entities.size()
+            || input.entities[index + 1U].processUnitIndex
+                != entity.processUnitIndex;
     }
 
     machine::RotaryMachinePolicy policy;
@@ -530,10 +638,12 @@ OperationResult<cadcam::machine::MachineTrajectory> MachineTrajectoryService::bu
     policy.useInitialMachinePoint = config.useInitialMachinePoint;
     policy.initialMachinePoint = { config.initialMachineX, config.initialMachineY, config.initialMachineZ, 0.0 };
     policy.useSafeZBeforeRapid = config.useSafeZBeforeRapid;
-    policy.clearance.retractClearance =
-        clearanceConfig.retractClearance;
-    policy.clearance.approachClearance =
-        clearanceConfig.approachClearance;
+    policy.transfer.rotationSafetyClearance =
+        transferConfig.rotationSafetyClearance;
+    policy.transfer.sameZoneTransferClearance =
+        transferConfig.sameZoneTransferClearance;
+    policy.transfer.coordinatedTransferEnabled =
+        transferConfig.coordinatedTransferEnabled;
     policy.machiningPlaneZOffset = config.machiningPlaneZOffset;
     policy.overcutDistance = config.overcutDistance;
     if (tubeSection.has_value() && !tubeSection->geometry.boundary.empty())
@@ -591,13 +701,19 @@ OperationResult<cadcam::machine::MachineTrajectory> MachineTrajectoryService::bu
     }
 
     qInfo().noquote()
-        << QStringLiteral("[MachineTrajectory][Clearance] mode=Rotary4Axis retractClearance=%1 approachClearance=%2")
-            .arg(policy.clearance.retractClearance, 0, 'g', 15)
-            .arg(policy.clearance.approachClearance, 0, 'g', 15);
+        << QStringLiteral("[MachineTrajectory][TransferPolicy] mode=Rotary4Axis rotationSafetyClearance=%1 sameZoneTransferClearance=%2 coordinated=%3")
+            .arg(policy.transfer.rotationSafetyClearance, 0, 'g', 15)
+            .arg(policy.transfer.sameZoneTransferClearance, 0, 'g', 15)
+            .arg(policy.transfer.coordinatedTransferEnabled
+                ? QStringLiteral("true") : QStringLiteral("false"));
     auto built = machine::RotaryTrajectoryBuilder::build(input, policy, taskContext);
     result.mergeDiagnostics(built);
     result.status = built.status;
     result.value = std::move(built.value);
-    if (result.value.has_value()) logSurfaceSummaries(*result.value);
+    if (result.value.has_value())
+    {
+        logSurfaceSummaries(*result.value);
+        logTransferSummaries(*result.value);
+    }
     return result;
 }

@@ -634,11 +634,11 @@ namespace
                 (QStringLiteral("entryRefinementSummary")).toBool())
             {
                 qInfo().noquote()
-                    << QStringLiteral("[ProcessPlanning][EntryRefinement] unitKey=%1 ownerZone=%2 previousCutEnd=%3 previousRetractPose=%4 mode=%5 curveMemberCount=%6 arcTangentRootCount=%7 ellipseTangentRootCount=%8 validTangentCount=%9 connectionCandidateCount=%10 selectedEntityId=%11 selectedSourceKind=%12 selectedSourceParameter=%13 travelDistance=%14 approachCutAngle=%15 selectedReverse=%16 fragmentCount=%17 nearestConnectionDistance=%18 forwardAngle=%19 reverseAngle=%20 tangentResidual=%21 approachCutDot=%22")
+        << QStringLiteral("[ProcessPlanning][EntryRefinement] unitKey=%1 ownerZone=%2 previousCutEnd=%3 previousTransferAnchor=%4 mode=%5 curveMemberCount=%6 arcTangentRootCount=%7 ellipseTangentRootCount=%8 validTangentCount=%9 connectionCandidateCount=%10 selectedEntityId=%11 selectedSourceKind=%12 selectedSourceParameter=%13 travelDistance=%14 approachCutAngle=%15 selectedReverse=%16 fragmentCount=%17 nearestConnectionDistance=%18 forwardAngle=%19 reverseAngle=%20 tangentResidual=%21 approachCutDot=%22")
                         .arg(values.value(QStringLiteral("unitKey")).toString())
                         .arg(values.value(QStringLiteral("ownerZone")).toString())
                         .arg(values.value(QStringLiteral("previousCutEnd")).toString())
-                        .arg(values.value(QStringLiteral("previousRetractPose")).toString())
+            .arg(values.value(QStringLiteral("previousTransferAnchor")).toString())
                         .arg(values.value(QStringLiteral("selectionMode")).toString())
                         .arg(values.value(QStringLiteral("curveMemberCount")).toInt())
                         .arg(values.value(QStringLiteral("arcTangentRootCount")).toInt())

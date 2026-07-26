@@ -320,7 +320,7 @@ namespace cadcam::machine
         }
     }
 
-    geometry::Vector3d RotaryKinematics::sourceRetractPose
+    geometry::Vector3d RotaryKinematics::sourceLocalClearancePose
     (
         const geometry::Vector3d& cutEnd,
         double outwardDistance,
@@ -417,6 +417,69 @@ namespace cadcam::machine
             cutEnd.x,
             cutEnd.y + normal.y / length * outwardDistance,
             cutEnd.z + normal.z / length * outwardDistance
+        };
+    }
+
+    double RotaryKinematics::sectionMaximumCollisionRadius
+    (
+        const machining::TubeSectionModel& section,
+        double tubeCenterY,
+        double tubeCenterZ
+    )
+    {
+        double radius = 0.0;
+        for (const geometry::Vector2d& point : section.geometry.boundary)
+        {
+            radius = std::max(radius, std::hypot
+                (point.x - tubeCenterY, point.y - tubeCenterZ));
+        }
+        return radius;
+    }
+
+    double RotaryKinematics::rotationSafeMachineZ
+    (
+        double tubeCenterZ,
+        double maximumCollisionRadius,
+        double rotationSafetyClearance
+    )
+    {
+        return tubeCenterZ + maximumCollisionRadius
+            + rotationSafetyClearance;
+    }
+
+    geometry::Vector3d RotaryKinematics::sourceTransferAnchor
+    (
+        const geometry::Vector3d& cutEnd,
+        const std::optional<machining::TubeZone16>& previousOwnerZone,
+        const std::optional<machining::TubeZone16>& nextOwnerZone,
+        const ToolTransferPolicy& transfer,
+        const std::optional<machining::TubeSectionModel>& section,
+        double tubeCenterY,
+        double tubeCenterZ,
+        double tolerance
+    )
+    {
+        if (previousOwnerZone.has_value() && nextOwnerZone.has_value()
+            && previousOwnerZone == nextOwnerZone)
+        {
+            return transfer.sameZoneTransferClearance > 0.0
+                ? sourceLocalClearancePose
+                    (cutEnd, transfer.sameZoneTransferClearance, section,
+                        tubeCenterY, tubeCenterZ, tolerance)
+                : cutEnd;
+        }
+
+        const double maximumRadius = section.has_value()
+            ? sectionMaximumCollisionRadius
+                (*section, tubeCenterY, tubeCenterZ)
+            : std::hypot
+                (cutEnd.y - tubeCenterY, cutEnd.z - tubeCenterZ);
+        return
+        {
+            cutEnd.x,
+            tubeCenterY,
+            rotationSafeMachineZ(tubeCenterZ, maximumRadius,
+                transfer.rotationSafetyClearance)
         };
     }
 

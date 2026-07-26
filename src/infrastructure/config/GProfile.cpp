@@ -16,7 +16,8 @@ namespace
     constexpr const char* kLayerCodesKey = "layerCodes";
     constexpr const char* kEntityColorCodesKey = "entityColorCodes";
     constexpr const char* kRotaryAxisConfigKey = "rotaryAxisConfig";
-    constexpr const char* kToolClearanceConfigKey = "toolClearanceConfig";
+    constexpr const char* kToolTransferConfigKey = "toolTransferConfig";
+    constexpr const char* kLegacyToolClearanceConfigKey = "toolClearanceConfig";
     constexpr const char* kHeaderKey = "header";
     constexpr const char* kFooterKey = "footer";
     constexpr const char* kCommentKey = "comment";
@@ -26,6 +27,12 @@ namespace
     constexpr const char* kSafeZKey = "safeZ";
     constexpr const char* kRetractClearanceKey = "retractClearance";
     constexpr const char* kApproachClearanceKey = "approachClearance";
+    constexpr const char* kRotationSafetyClearanceKey =
+        "rotationSafetyClearance";
+    constexpr const char* kSameZoneTransferClearanceKey =
+        "sameZoneTransferClearance";
+    constexpr const char* kCoordinatedTransferEnabledKey =
+        "coordinatedTransferEnabled";
     constexpr const char* kPerimeterSweepDirectionKey = "perimeterSweepDirection";
     constexpr const char* kLongitudinalSweepDirectionKey = "longitudinalSweepDirection";
     constexpr const char* kMachiningPlaneZOffsetKey = "machiningPlaneZOffset";
@@ -128,24 +135,36 @@ GProfileCodeBlock GProfileCodeBlock::fromJson(const QJsonObject& object)
     return codeBlock;
 }
 
-QJsonObject GProfileToolClearanceConfig::toJson() const
+QJsonObject GProfileToolTransferConfig::toJson() const
 {
     QJsonObject object;
-    object.insert(kRetractClearanceKey, retractClearance);
-    object.insert(kApproachClearanceKey, approachClearance);
+    object.insert(kRotationSafetyClearanceKey, rotationSafetyClearance);
+    object.insert(kSameZoneTransferClearanceKey, sameZoneTransferClearance);
+    object.insert(kCoordinatedTransferEnabledKey, coordinatedTransferEnabled);
     return object;
 }
 
-GProfileToolClearanceConfig GProfileToolClearanceConfig::fromJson
+GProfileToolTransferConfig GProfileToolTransferConfig::fromJson
 (
     const QJsonObject& object
 )
 {
-    GProfileToolClearanceConfig config;
-    config.retractClearance = object.value(kRetractClearanceKey)
-        .toDouble(config.retractClearance);
-    config.approachClearance = object.value(kApproachClearanceKey)
-        .toDouble(config.approachClearance);
+    GProfileToolTransferConfig config;
+    config.rotationSafetyClearance =
+        object.contains(kRotationSafetyClearanceKey)
+        ? object.value(kRotationSafetyClearanceKey)
+            .toDouble(config.rotationSafetyClearance)
+        : object.value(kRetractClearanceKey)
+            .toDouble(config.rotationSafetyClearance);
+    config.sameZoneTransferClearance =
+        object.contains(kSameZoneTransferClearanceKey)
+        ? object.value(kSameZoneTransferClearanceKey)
+            .toDouble(config.sameZoneTransferClearance)
+        : object.value(kApproachClearanceKey)
+            .toDouble(config.sameZoneTransferClearance);
+    config.coordinatedTransferEnabled =
+        object.value(kCoordinatedTransferEnabledKey)
+            .toBool(config.coordinatedTransferEnabled);
     return config;
 }
 
@@ -312,17 +331,23 @@ GProfile GProfile::loadFromFile(const QString& filePath, QString* errorMessage)
         rootObject.value(kRotaryAxisConfigKey).toObject();
     profile.m_rotaryAxisConfig =
         GProfileRotaryAxisConfig::fromJson(rotaryObject);
-    if (rootObject.contains(kToolClearanceConfigKey))
+    if (rootObject.contains(kToolTransferConfigKey))
     {
-        profile.m_toolClearanceConfig =
-            GProfileToolClearanceConfig::fromJson
-                (rootObject.value(kToolClearanceConfigKey).toObject());
+        profile.m_toolTransferConfig =
+            GProfileToolTransferConfig::fromJson
+                (rootObject.value(kToolTransferConfigKey).toObject());
+    }
+    else if (rootObject.contains(kLegacyToolClearanceConfigKey))
+    {
+        profile.m_toolTransferConfig =
+            GProfileToolTransferConfig::fromJson
+                (rootObject.value(kLegacyToolClearanceConfigKey).toObject());
     }
     else
     {
-        profile.m_toolClearanceConfig.retractClearance =
+        profile.m_toolTransferConfig.rotationSafetyClearance =
             rotaryObject.value(kSafeZKey).toDouble
-                (profile.m_toolClearanceConfig.retractClearance);
+                (profile.m_toolTransferConfig.rotationSafetyClearance);
     }
 
     if (errorMessage != nullptr)
@@ -366,8 +391,8 @@ bool GProfile::saveToFile(const QString& filePath, QString* errorMessage) const
 
     rootObject.insert(kEntityColorCodesKey, entityColorObject);
     rootObject.insert(kRotaryAxisConfigKey, m_rotaryAxisConfig.toJson());
-    rootObject.insert(kToolClearanceConfigKey,
-        m_toolClearanceConfig.toJson());
+    rootObject.insert(kToolTransferConfigKey,
+        m_toolTransferConfig.toJson());
 
     QFile file(filePath);
 
@@ -411,7 +436,7 @@ void GProfile::clear()
     m_layerCodes.clear();
     m_entityColorCodes.clear();
     m_rotaryAxisConfig = GProfileRotaryAxisConfig();
-    m_toolClearanceConfig = GProfileToolClearanceConfig();
+    m_toolTransferConfig = GProfileToolTransferConfig();
 }
 
 void GProfile::setProfileName(const QString& profileName)
@@ -566,17 +591,17 @@ const GProfileRotaryAxisConfig& GProfile::rotaryAxisConfig() const
     return m_rotaryAxisConfig;
 }
 
-void GProfile::setToolClearanceConfig
+void GProfile::setToolTransferConfig
 (
-    const GProfileToolClearanceConfig& config
+    const GProfileToolTransferConfig& config
 )
 {
-    m_toolClearanceConfig = config;
+    m_toolTransferConfig = config;
 }
 
-const GProfileToolClearanceConfig& GProfile::toolClearanceConfig() const
+const GProfileToolTransferConfig& GProfile::toolTransferConfig() const
 {
-    return m_toolClearanceConfig;
+    return m_toolTransferConfig;
 }
 
 QString GProfile::normalizeEntityTypeKey(const QString& entityType)

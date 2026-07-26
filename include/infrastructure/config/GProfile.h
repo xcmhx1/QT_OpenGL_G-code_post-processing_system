@@ -15,13 +15,14 @@ struct GProfileCodeBlock
     static GProfileCodeBlock fromJson(const QJsonObject& object);
 };
 
-struct GProfileToolClearanceConfig
+struct GProfileToolTransferConfig
 {
-    double retractClearance = 5.0;
-    double approachClearance = 0.0;
+    double rotationSafetyClearance = 5.0;
+    double sameZoneTransferClearance = 0.0;
+    bool coordinatedTransferEnabled = true;
 
     QJsonObject toJson() const;
-    static GProfileToolClearanceConfig fromJson(const QJsonObject& object);
+    static GProfileToolTransferConfig fromJson(const QJsonObject& object);
 };
 
 enum class GProfilePerimeterSweepDirection
@@ -103,8 +104,8 @@ public:
 
     void setRotaryAxisConfig(const GProfileRotaryAxisConfig& config);
     const GProfileRotaryAxisConfig& rotaryAxisConfig() const;
-    void setToolClearanceConfig(const GProfileToolClearanceConfig& config);
-    const GProfileToolClearanceConfig& toolClearanceConfig() const;
+    void setToolTransferConfig(const GProfileToolTransferConfig& config);
+    const GProfileToolTransferConfig& toolTransferConfig() const;
 
     static QString normalizeEntityTypeKey(const QString& entityType);
     static QString normalizeLayerKey(const QString& layerName);
@@ -119,5 +120,5 @@ private:
     QMap<QString, GProfileCodeBlock> m_layerCodes;
     QMap<QString, GProfileCodeBlock> m_entityColorCodes;
     GProfileRotaryAxisConfig m_rotaryAxisConfig;
-    GProfileToolClearanceConfig m_toolClearanceConfig;
+    GProfileToolTransferConfig m_toolTransferConfig;
 };

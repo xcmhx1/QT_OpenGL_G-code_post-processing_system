@@ -104,7 +104,7 @@ namespace cadcam::planning
             double projectionTolerance = 0.0;
             Vector3d previousEnd;
             Vector3d previousCutEnd;
-            Vector3d previousRetractPose;
+            Vector3d previousTransferAnchor;
             bool hardZoneConstraint = false;
             bool allowZoneRunMidpointFallback = false;
         };
@@ -135,7 +135,7 @@ namespace cadcam::planning
             std::vector<ProcessPathFragment> fragments;
             QString entryRefinementMode;
             Vector3d previousCutEnd;
-            Vector3d previousRetractPose;
+            Vector3d previousTransferAnchor;
             int curveMemberCount = 0;
             int arcTangentRootCount = 0;
             int ellipseTangentRootCount = 0;
@@ -2959,17 +2959,17 @@ namespace cadcam::planning
                             }
                             candidate.selectedEntry = std::move(entry);
                             scoreUnwrappedEntry(candidate.entities.front(),
-                                selection->previousRetractPose, firstNextPoint,
+                                selection->previousTransferAnchor, firstNextPoint,
                                 *section, policy.connectionTolerance,
                                 selection->projectionTolerance);
                             candidate.entryRefinementMode =
                                 QStringLiteral("NearestConnection");
                             candidate.previousCutEnd =
                                 selection->previousCutEnd;
-                            candidate.previousRetractPose =
-                                selection->previousRetractPose;
+                            candidate.previousTransferAnchor =
+                                selection->previousTransferAnchor;
                             candidate.entryTravelDistance =
-                                distance(selection->previousRetractPose,
+                                distance(selection->previousTransferAnchor,
                                     candidate.start);
                             candidate.nearestConnectionDistance =
                                 candidate.entryTravelDistance;
@@ -3598,7 +3598,7 @@ namespace cadcam::planning
                                 {
                                     memberRoots = arcTangentRoots
                                         (*arc,
-                                            selection.previousRetractPose,
+                                            selection.previousTransferAnchor,
                                             std::max(1.0e-10,
                                                 selection
                                                     .projectionTolerance
@@ -3614,7 +3614,7 @@ namespace cadcam::planning
                                 {
                                     memberRoots = ellipseTangentRoots
                                         (*ellipse,
-                                            selection.previousRetractPose,
+                                            selection.previousTransferAnchor,
                                             std::max(1.0e-10,
                                                 selection
                                                     .projectionTolerance
@@ -3795,7 +3795,7 @@ namespace cadcam::planning
                             scoreUnwrappedEntry
                             (
                                 candidate->traversal.entities.front(),
-                                selection.previousRetractPose,
+                                selection.previousTransferAnchor,
                                 candidate->firstCutPoint, section,
                                 policy.connectionTolerance,
                                 selection.projectionTolerance
@@ -3810,10 +3810,10 @@ namespace cadcam::planning
                                 QStringLiteral("ExactCurveTangent");
                             candidate->traversal.previousCutEnd =
                                 selection.previousCutEnd;
-                            candidate->traversal.previousRetractPose =
-                                selection.previousRetractPose;
+                            candidate->traversal.previousTransferAnchor =
+                                selection.previousTransferAnchor;
                             candidate->traversal.entryTravelDistance =
-                                distance(selection.previousRetractPose,
+                                distance(selection.previousTransferAnchor,
                                     candidate->midpoint);
                             candidate->traversal.approachCutDot =
                                 std::clamp
@@ -4036,7 +4036,7 @@ namespace cadcam::planning
                             scoreUnwrappedEntry
                             (
                                 candidate->traversal.entities.front(),
-                                selection.previousRetractPose,
+                                selection.previousTransferAnchor,
                                 candidate->firstCutPoint, section,
                                 policy.connectionTolerance,
                                 selection.projectionTolerance
@@ -4051,10 +4051,10 @@ namespace cadcam::planning
                                 QStringLiteral("ZoneRunMidpointFallback");
                             candidate->traversal.previousCutEnd =
                                 selection.previousCutEnd;
-                            candidate->traversal.previousRetractPose =
-                                selection.previousRetractPose;
+                            candidate->traversal.previousTransferAnchor =
+                                selection.previousTransferAnchor;
                             candidate->traversal.entryTravelDistance =
-                                distance(selection.previousRetractPose,
+                                distance(selection.previousTransferAnchor,
                                     candidate->midpoint);
                             candidate->traversal.approachCutDot =
                                 std::clamp
@@ -5279,8 +5279,8 @@ namespace cadcam::planning
                 !traversal.fragments.empty());
             values.insert(QStringLiteral("previousCutEnd"),
                 vectorText(traversal.previousCutEnd));
-            values.insert(QStringLiteral("previousRetractPose"),
-                vectorText(traversal.previousRetractPose));
+            values.insert(QStringLiteral("previousTransferAnchor"),
+                vectorText(traversal.previousTransferAnchor));
             values.insert(QStringLiteral("curveMemberCount"),
                 traversal.curveMemberCount);
             values.insert(QStringLiteral("arcTangentRootCount"),
@@ -5964,8 +5964,10 @@ namespace cadcam::planning
         if (input.contentRevision == 0U || input.topology == nullptr
             || input.entities.empty() || policy.connectionTolerance <= 0.0
             || !std::isfinite(policy.connectionTolerance)
-            || !std::isfinite(policy.retractClearance)
-            || policy.retractClearance <= 0.0
+            || !std::isfinite(policy.rotationSafetyClearance)
+            || policy.rotationSafetyClearance <= 0.0
+            || !std::isfinite(policy.sameZoneTransferClearance)
+            || policy.sameZoneTransferClearance < 0.0
             || !std::isfinite(policy.connectionDistanceTieTolerance)
             || policy.connectionDistanceTieTolerance <= 0.0)
         {
@@ -6844,6 +6846,7 @@ namespace cadcam::planning
         machining::TubeZone16 currentSweepZone =
             policy.zone16Sweep.initialZone;
         Vector3d currentPosition = policy.initialPosition;
+        std::optional<machining::TubeZone16> previousTransferZone;
         int processOrder = 0;
         std::vector<bool> startedPartitions(zoneSweepPartitions.size(), false);
         std::vector<bool> finishedPartitions(zoneSweepPartitions.size(), false);
@@ -7698,14 +7701,23 @@ namespace cadcam::planning
                             zoneProjectionTolerance;
                         traversalSelection->previousCutEnd =
                             currentPosition;
-                        traversalSelection->previousRetractPose =
+                        machine::ToolTransferPolicy transferPolicy;
+                        transferPolicy.rotationSafetyClearance =
+                            policy.rotationSafetyClearance;
+                        transferPolicy.sameZoneTransferClearance =
+                            policy.sameZoneTransferClearance;
+                        transferPolicy.coordinatedTransferEnabled =
+                            policy.coordinatedTransferEnabled;
+                        traversalSelection->previousTransferAnchor =
                             initialSelection
                             ? currentPosition
                             : machine::RotaryKinematics
-                                ::sourceRetractPose
+                                ::sourceTransferAnchor
                                 (
                                     currentPosition,
-                                    policy.retractClearance,
+                                    previousTransferZone,
+                                    zoneSelection->second.zone,
+                                    transferPolicy,
                                     input.tubeSection,
                                     input.tubeSectionCenter.has_value()
                                         ? input.tubeSectionCenter->x
@@ -7718,7 +7730,7 @@ namespace cadcam::planning
                                     zoneProjectionTolerance
                                 );
                         traversalSelection->previousEnd =
-                            traversalSelection->previousRetractPose;
+                            traversalSelection->previousTransferAnchor;
                         traversalSelection->hardZoneConstraint = true;
                         const ProcessGroupZoneProfile& profile =
                             groupZoneProfiles.at(groupId);
@@ -7964,6 +7976,14 @@ namespace cadcam::planning
             processUnit.key.memberEntityIds = selectedGroup.entityIds;
             std::sort(processUnit.key.memberEntityIds.begin(), processUnit.key.memberEntityIds.end());
             processUnit.closed = selectedGroup.closed;
+            processUnit.ownerZone =
+                scheduledZoneSelection != zoneSelections.end()
+                ? std::optional<machining::TubeZone16>
+                    (scheduledZoneSelection->second.zone)
+                : selected.selectedEntry.has_value()
+                    ? std::optional<machining::TubeZone16>
+                        (selected.selectedEntry->zone)
+                    : std::nullopt;
             processUnit.orderedMemberEntityIds.reserve(selected.entities.size());
             for (const DirectedEntity& directed : selected.entities)
                 processUnit.orderedMemberEntityIds.push_back(directed.entity->entityId);
@@ -7996,6 +8016,7 @@ namespace cadcam::planning
                 }
             }
             currentPosition = selected.end;
+            previousTransferZone = processUnit.ownerZone;
             if (selectedClosedLoopReport.has_value())
             {
                 closedLoopDiagnostics.push_back(planningDiagnostic

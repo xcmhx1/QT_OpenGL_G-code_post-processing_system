@@ -224,7 +224,7 @@ OperationResult<QString> GGenerator::buildRotaryProgramText(const OperationConte
         *m_processPlan,
         m_tubeSectionModel,
         m_profile->rotaryAxisConfig(),
-        m_profile->toolClearanceConfig(),
+        m_profile->toolTransferConfig(),
         context,
         explicitCenter
     );
@@ -287,7 +287,7 @@ OperationResult<QString> GGenerator::buildProgramText(const OperationContext& co
     NcProgramService service;
     auto program = service.buildPlanarProgram
         (*m_document, *m_processState, *m_processPlan,
-            m_profile->toolClearanceConfig(), context);
+            m_profile->toolTransferConfig(), context);
     result.mergeDiagnostics(program);
     if (!program.succeeded() || !program.value.has_value())
     {

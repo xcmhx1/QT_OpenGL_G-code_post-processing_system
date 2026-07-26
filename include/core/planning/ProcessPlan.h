@@ -44,7 +44,9 @@ namespace cadcam::planning
         ProcessSortIntent sortIntent = ProcessSortIntent::RebuildSequence;
         ProcessOrderingStrategy orderingStrategy = ProcessOrderingStrategy::NearestNext;
         double connectionTolerance = 1.0;
-        double retractClearance = 5.0;
+        double rotationSafetyClearance = 5.0;
+        double sameZoneTransferClearance = 0.0;
+        bool coordinatedTransferEnabled = true;
         double connectionDistanceTieTolerance = 1.0e-6;
         bool allowReverse = true;
         bool preserveClosedLoopsAsAtomicGroups = true;
@@ -85,6 +87,7 @@ namespace cadcam::planning
     {
         ProcessUnitKey key;
         std::vector<geometry::EntityId> orderedMemberEntityIds;
+        std::optional<machining::TubeZone16> ownerZone;
         bool closed = false;
     };
 

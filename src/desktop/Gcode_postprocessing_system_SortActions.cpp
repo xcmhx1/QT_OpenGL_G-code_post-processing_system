@@ -4312,8 +4312,12 @@ bool Gcode_postprocessing_system::sortEntitiesWithProcessPlan3D
         ? cadcam::planning::ProcessOrderingStrategy::LazyRotation
         : cadcam::planning::ProcessOrderingStrategy::NearestNext;
     policy.connectionTolerance = kEndCutConnectionTolerance;
-    policy.retractClearance =
-        m_activeProfile.toolClearanceConfig().retractClearance;
+    policy.rotationSafetyClearance =
+        m_activeProfile.toolTransferConfig().rotationSafetyClearance;
+    policy.sameZoneTransferClearance =
+        m_activeProfile.toolTransferConfig().sameZoneTransferClearance;
+    policy.coordinatedTransferEnabled =
+        m_activeProfile.toolTransferConfig().coordinatedTransferEnabled;
     policy.allowReverse = true;
     policy.preserveClosedLoopsAsAtomicGroups = true;
     policy.initialPosition = { 0.0, 0.0, 500.0 };

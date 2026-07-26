@@ -15,10 +15,36 @@ namespace cadcam::machine
     class RotaryKinematics
     {
     public:
-        static geometry::Vector3d sourceRetractPose
+        static geometry::Vector3d sourceLocalClearancePose
         (
             const geometry::Vector3d& cutEnd,
             double outwardDistance,
+            const std::optional<machining::TubeSectionModel>& section,
+            double tubeCenterY,
+            double tubeCenterZ,
+            double tolerance
+        );
+
+        static double sectionMaximumCollisionRadius
+        (
+            const machining::TubeSectionModel& section,
+            double tubeCenterY,
+            double tubeCenterZ
+        );
+
+        static double rotationSafeMachineZ
+        (
+            double tubeCenterZ,
+            double maximumCollisionRadius,
+            double rotationSafetyClearance
+        );
+
+        static geometry::Vector3d sourceTransferAnchor
+        (
+            const geometry::Vector3d& cutEnd,
+            const std::optional<machining::TubeZone16>& previousOwnerZone,
+            const std::optional<machining::TubeZone16>& nextOwnerZone,
+            const ToolTransferPolicy& transfer,
             const std::optional<machining::TubeSectionModel>& section,
             double tubeCenterY,
             double tubeCenterZ,

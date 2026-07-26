@@ -153,6 +153,7 @@ enum class DiagnosticCode
     TubeSectionProjectionFailed,
     MachineTrajectoryContinuityFailure,
     MachineTrajectorySafeMoveFailed,
+    MachineTrajectoryTransferSafetyViolation,
     MachineTrajectoryOvercutFailed,
     MachineTrajectoryInvariantViolation,
     NcProgramInputInvalid,
