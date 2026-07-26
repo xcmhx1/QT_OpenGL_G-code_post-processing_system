@@ -4,14 +4,14 @@
 
 ## 1. 方案说明
 
-当前商业化方案采用运行目录配置文件方式：
+当前商业化方案采用内嵌程序品牌与运行目录授权文件：
 
-- `branding.json`：控制客户版标题、公司名、标题后缀、图标路径。
-- `app.ico`：客户版图标文件，由 `branding.json` 引用。
+- 程序名称和窗口图标固定编译进主程序。
+- `branding.json`：可选，仅保存公司名、网站、支持和简介信息。
 - `license.dat`：授权文件。不存在或无效时按 Lite 版本运行。
 - `license_request.bat`：客户双击后生成机器码。
 
-该方案可以正常配合 Qt 的 `windeployqt` 打包。为了简化操作，本文档默认直接在构建输出目录 `x64\Release` 中打包。`windeployqt` 只负责复制 Qt 运行库和插件，不会自动复制 `branding.json`、`license.dat`、`license_request.bat` 等业务配置文件，因此这些文件需要手动复制到构建输出目录。
+该方案可以正常配合 Qt 的 `windeployqt` 打包。为了简化操作，本文档默认直接在构建输出目录 `x64\Release` 中打包。`windeployqt` 只负责复制 Qt 运行库和插件，不会自动复制 `branding.json`、`license.dat`、`license_request.bat` 等业务文件，因此需要按交付内容手动复制。
 
 ## 2. 版本划分
 
@@ -90,9 +90,9 @@ x64\Release\
 - 是否复制了 OpenCV 运行库 `opencv_world4110.dll`。
 - 是否在纯净机器上缺少 VC++ Runtime。必要时安装 Microsoft Visual C++ Redistributable。
 
-## 6. 添加客户品牌文件
+## 6. 添加可选客户信息
 
-将 `branding.example.json` 复制到构建输出目录并改名为 `branding.json`：
+如需显示客户支持信息，可将 `branding.example.json` 复制到构建输出目录并改名为 `branding.json`：
 
 ```powershell
 Copy-Item .\branding.example.json .\x64\Release\branding.json
@@ -102,27 +102,14 @@ Copy-Item .\branding.example.json .\x64\Release\branding.json
 
 ```json
 {
-  "applicationName": "客户版 CAD/CAM",
   "companyName": "客户公司名称",
   "website": "https://example.com",
   "support": "技术支持：support@example.com",
-  "about": "本软件用于二维 CAD 绘图、DXF/DWG 处理与 G 代码后处理。",
-  "windowTitleSuffix": "商业交付版",
-  "iconPath": "app.ico"
+  "about": "本软件用于二维 CAD 绘图、DXF/DWG 处理与 G 代码后处理。"
 }
 ```
 
-将客户图标复制到构建输出目录：
-
-```powershell
-Copy-Item .\app.ico .\x64\Release\app.ico
-```
-
-要求：
-
-- `iconPath` 必须与实际图标文件名一致。
-- 图标文件应放在 exe 同目录，除非 `iconPath` 写绝对路径。
-- 如果不提供图标，程序仍可运行，只是使用默认窗口图标。
+程序窗口图标已经作为 Qt Resource 编译进 EXE，不需要在发布目录复制外部图标文件。Windows 资源管理器中的 EXE 文件图标仍由已有 `.ico/.rc` 资源决定。
 
 ## 7. 添加机器码生成工具
 
@@ -185,8 +172,7 @@ powershell -ExecutionPolicy Bypass -File .\tools\Generate-License.ps1 .\机器�
 ```text
 x64\Release\
   G-code_post-processing_system.exe
-  branding.json
-  app.ico
+  branding.json（可选）
   license_request.bat
   opencv_world4110.dll
   Qt6Core.dll
@@ -203,8 +189,7 @@ x64\Release\
 ```text
 x64\Release\
   G-code_post-processing_system.exe
-  branding.json
-  app.ico
+  branding.json（可选）
   license.dat
   license_request.bat
   opencv_world4110.dll
@@ -229,18 +214,17 @@ x64\Release\
 4. 双击 `license_request.bat`，确认能生成 `机器码.txt`，且文件内容只有一行机器码。
 5. 使用 `tools\Generate-License.ps1` 生成本机对应的 `license.dat`。
 6. 将 `license.dat` 放入 `x64\Release`。
-7. 重新启动主程序，确认窗口标题显示 Pro，受限功能可以打开。
+7. 重新启动主程序，确认授权状态为 Pro，受限功能可以打开。
 8. 在一台未安装 Qt 的机器或虚拟机上启动发布包，确认没有缺 DLL。
 
 ## 11. 推荐的一键打包命令
 
-下面命令假设已经完成 Release 构建，并且项目根目录下存在 `app.ico`：
+下面命令假设已经完成 Release 构建：
 
 ```powershell
 $out = ".\x64\Release"
 Copy-Item .\branding.example.json "$out\branding.json"
 Copy-Item .\license_request.bat $out\
-Copy-Item .\app.ico $out\ -ErrorAction SilentlyContinue
 & "D:\Qt\6.9.3\msvc2022_64\bin\windeployqt.exe" --release "$out\G-code_post-processing_system.exe"
 ```
 
@@ -252,17 +236,11 @@ Copy-Item .\license.dat .\x64\Release\
 
 ## 12. 常见问题
 
-程序打开后标题没有变化：
+窗口或任务栏图标未显示：
 
-- 检查 `branding.json` 是否在 exe 同目录。
-- 检查 JSON 是否格式正确。
-- 检查字段名是否为 `applicationName`、`companyName`、`windowTitleSuffix`、`iconPath`。
-
-图标没有变化：
-
-- 检查 `branding.json` 中的 `iconPath` 是否正确。
-- 检查图标文件是否在 exe 同目录。
-- 注意该方案修改的是运行时窗口图标，不一定修改 Windows 资源管理器中 exe 文件自身的内嵌图标。
+- 确认使用最新 Release 构建，窗口图标来自 EXE 内嵌的 Qt Resource。
+- 确认发布目录包含 `qsvgicon.dll`、`qsvg.dll` 及其 Qt 依赖。
+- Windows 资源管理器中的 EXE 文件图标由 `.ico/.rc` 资源决定，与运行时窗口图标分开。
 
 授权后仍显示 Lite：
 
@@ -290,4 +268,4 @@ Copy-Item .\license.dat .\x64\Release\
 - `branding.example.json`
 - 源码、工程文件、调试符号、构建中间目录
 
-客户包中只需要运行程序、依赖 DLL、品牌配置、授权申请脚本，以及可选的 `license.dat`。
+客户包中只需要运行程序、依赖 DLL、授权申请脚本、可选客户信息文件，以及可选的 `license.dat`。

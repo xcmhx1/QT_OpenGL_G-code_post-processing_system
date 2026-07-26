@@ -318,6 +318,9 @@
     <None Include="tools\Generate-License.bat">
       <Filter>Documentation</Filter>
     </None>
+    <None Include="resources\G.svg">
+      <Filter>Resource Files</Filter>
+    </None>
   </ItemGroup>
   <ItemGroup>
     <QtMoc Include="include\desktop\Gcode_postprocessing_system.h">
@@ -340,6 +343,9 @@
     </QtMoc>
     <QtMoc Include="include\ui\widgets\CadStatusPaneWidget.h">
       <Filter>Header Files\ui\widgets</Filter>
+    </QtMoc>
+    <QtMoc Include="include\ui\dialogs\CadHelpDialog.h">
+      <Filter>Header Files\ui\dialogs</Filter>
     </QtMoc>
   </ItemGroup>
   <ItemGroup>
@@ -700,9 +706,6 @@
       <Filter>Header Files\desktop</Filter>
     </ClInclude>
     <ClInclude Include="include\ui\dialogs\CadAppearanceSettingsDialog.h">
-      <Filter>Header Files\ui\dialogs</Filter>
-    </ClInclude>
-    <ClInclude Include="include\ui\dialogs\CadHelpDialog.h">
       <Filter>Header Files\ui\dialogs</Filter>
     </ClInclude>
     <ClInclude Include="include\ui\dialogs\CadBitmapImportDialog.h">

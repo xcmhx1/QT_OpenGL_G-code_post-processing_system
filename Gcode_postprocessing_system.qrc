@@ -1,4 +1,7 @@
 <RCC>
     <qresource prefix="Gcode_postprocessing_system">
     </qresource>
+    <qresource prefix="/branding">
+        <file alias="G.svg">resources/G.svg</file>
+    </qresource>
 </RCC>

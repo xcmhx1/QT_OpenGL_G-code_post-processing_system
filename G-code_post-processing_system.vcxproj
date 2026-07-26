@@ -136,6 +136,7 @@ if exist "$(VCRuntimeRedistDir)\*.dll" copy /Y "$(VCRuntimeRedistDir)\*.dll" "$(
     <None Include="license_request.bat" />
     <None Include="license.example.json" />
     <None Include="README.md" />
+    <None Include="resources\G.svg" />
     <None Include="tools\Generate-License.bat" />
     <None Include="tools\Generate-License.ps1" />
   </ItemGroup>
@@ -144,6 +145,7 @@ if exist "$(VCRuntimeRedistDir)\*.dll" copy /Y "$(VCRuntimeRedistDir)\*.dll" "$(
     <QtMoc Include="include\ui\widgets\CadToolPanelWidget.h" />
     <QtMoc Include="include\ui\widgets\MachiningSettingsWidget.h" />
     <QtMoc Include="include\ui\widgets\CadStatusPaneWidget.h" />
+    <QtMoc Include="include\ui\dialogs\CadHelpDialog.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\desktop\AppBranding.cpp">
@@ -564,7 +566,6 @@ if exist "$(VCRuntimeRedistDir)\*.dll" copy /Y "$(VCRuntimeRedistDir)\*.dll" "$(
     <ClInclude Include="include\desktop\AppLicense.h" />
     <ClInclude Include="include\desktop\AppTheme.h" />
     <ClInclude Include="include\ui\dialogs\CadAppearanceSettingsDialog.h" />
-    <ClInclude Include="include\ui\dialogs\CadHelpDialog.h" />
     <ClInclude Include="include\cad\view\transform\CadCamera.h" />
     <ClInclude Include="include\cad\view\transform\CadCameraMath.h" />
     <ClInclude Include="include\cad\view\transform\CadCameraUtils.h" />

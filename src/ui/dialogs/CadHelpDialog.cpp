@@ -3,7 +3,11 @@
 
 #include "ui/dialogs/CadHelpDialog.h"
 
+#include <QCoreApplication>
 #include <QDialogButtonBox>
+#include <QEvent>
+#include <QGuiApplication>
+#include <QMouseEvent>
 #include <QPushButton>
 #include <QTabWidget>
 #include <QTextBrowser>
@@ -234,25 +238,62 @@ code { font-family: Consolas, monospace; }
 )HTML");
     }
 
-    QString aboutHtml()
+    QString aboutHtml
+    (
+        const QString& aboutText,
+        const QString& companyName,
+        const QString& website,
+        const QString& supportText,
+        const QString& licenseText
+    )
     {
-        return QString::fromUtf8(R"HTML(
-<h2>程序定位</h2>
-<p>本程序是基于 Qt 6 Widgets、OpenGL 4.5 Core Profile 和 Visual Studio 的 CAD / G-code 后处理系统。</p>
-<h2>核心能力</h2>
-<ul>
-<li>导入 DXF / DWG / 位图并显示或矢量化。</li>
-<li>创建和编辑常用二维 CAD 图元。</li>
-<li>按加工顺序、加工方向和 Profile 配置导出 3轴 / 4轴(绕A) G 代码。</li>
-<li>提供 AutoCAD 风格的 Ribbon、动态命令、对象捕捉、正交和极轴追踪。</li>
-</ul>
-<h2>边界说明</h2>
-<ul>
-<li>普通 DXF 导出会尽量保留原始实体；兼容性要求高时建议使用“导出为DXF（安全模式）”。</li>
-<li>四轴导出仍以当前项目定义的绕 X 轴回转场景为主。</li>
-<li>第三方 libdxfrw 目录不属于业务代码，除非必要不应修改。</li>
-</ul>
-)HTML");
+        QString displayTitle =
+            QGuiApplication::applicationDisplayName().trimmed();
+        if (displayTitle.isEmpty())
+        {
+            displayTitle = QCoreApplication::applicationName().trimmed();
+        }
+
+        QString body = QStringLiteral("<h2>%1</h2>")
+            .arg(displayTitle.toHtmlEscaped());
+        const QString version =
+            QCoreApplication::applicationVersion().trimmed();
+        if (!version.isEmpty())
+        {
+            body += QStringLiteral("<p>版本：%1</p>")
+                .arg(version.toHtmlEscaped());
+        }
+        const QString summary = aboutText.trimmed().isEmpty()
+            ? QStringLiteral("本程序用于 CAD 图形处理、加工路径配置和 G 代码生成。")
+            : aboutText.trimmed();
+        body += QStringLiteral("<p>%1</p>")
+            .arg(summary.toHtmlEscaped());
+        if (!companyName.trimmed().isEmpty())
+        {
+            body += QStringLiteral("<p>软件提供方：%1</p>")
+                .arg(companyName.trimmed().toHtmlEscaped());
+        }
+        if (!website.trimmed().isEmpty())
+        {
+            body += QStringLiteral("<p>网站：%1</p>")
+                .arg(website.trimmed().toHtmlEscaped());
+        }
+        if (!supportText.trimmed().isEmpty())
+        {
+            body += QStringLiteral("<p>支持信息：%1</p>")
+                .arg(supportText.trimmed().toHtmlEscaped());
+        }
+        if (!licenseText.trimmed().isEmpty())
+        {
+            body += QStringLiteral("<p>授权状态：%1</p>")
+                .arg(licenseText.trimmed().toHtmlEscaped());
+        }
+        else
+        {
+            body += QStringLiteral(
+                "<p>软件使用与授权范围以交付说明和有效授权为准。</p>");
+        }
+        return body;
     }
 }
 
@@ -276,12 +317,29 @@ CadHelpDialog::CadHelpDialog(QWidget* parent)
     addSection(CadHelpSection::Machining, QStringLiteral("机加工 / G代码"), machiningHtml());
     addSection(CadHelpSection::BitmapImport, QStringLiteral("位图导入"), bitmapHtml());
     addSection(CadHelpSection::Appearance, QStringLiteral("外观与显示"), appearanceHtml());
-    addSection(CadHelpSection::About, QStringLiteral("关于"), aboutHtml());
+    m_aboutBrowser =
+        addSection(CadHelpSection::About, QStringLiteral("关于"),
+            aboutHtml(m_aboutText, m_companyName, m_website,
+                m_supportText, m_licenseText));
+    m_aboutBrowser->viewport()->installEventFilter(this);
+
+    connect(m_tabWidget, &QTabWidget::currentChanged, this,
+        [this](int)
+        {
+            if (m_tabWidget->currentWidget() != m_aboutBrowser)
+            {
+                resetAboutClickSequence();
+            }
+        });
 
     QDialogButtonBox* buttonBox = new QDialogButtonBox(QDialogButtonBox::Close, this);
     buttonBox->button(QDialogButtonBox::Close)->setText(QStringLiteral("关闭"));
     rootLayout->addWidget(buttonBox);
     connect(buttonBox, &QDialogButtonBox::rejected, this, &QDialog::reject);
+    connect(this, &QDialog::finished, this,
+        [this](int) { resetAboutClickSequence(); });
+    connect(qGuiApp, &QGuiApplication::applicationDisplayNameChanged,
+        this, &CadHelpDialog::refreshAboutContent);
 }
 
 void CadHelpDialog::setCurrentSection(CadHelpSection section)
@@ -299,6 +357,78 @@ void CadHelpDialog::setCurrentSection(CadHelpSection section)
             return;
         }
     }
+}
+
+void CadHelpDialog::setAboutInformation
+(
+    const QString& aboutText,
+    const QString& companyName,
+    const QString& website,
+    const QString& supportText,
+    const QString& licenseText
+)
+{
+    m_aboutText = aboutText;
+    m_companyName = companyName;
+    m_website = website;
+    m_supportText = supportText;
+    m_licenseText = licenseText;
+    refreshAboutContent();
+}
+
+void CadHelpDialog::refreshAboutContent()
+{
+    if (m_aboutBrowser != nullptr)
+    {
+        m_aboutBrowser->setHtml
+        (
+            wrapHelpHtml
+            (
+                QStringLiteral("关于"),
+                aboutHtml(m_aboutText, m_companyName, m_website,
+                    m_supportText, m_licenseText)
+            )
+        );
+    }
+}
+
+bool CadHelpDialog::eventFilter(QObject* watched, QEvent* event)
+{
+    if (m_aboutBrowser != nullptr
+        && watched == m_aboutBrowser->viewport()
+        && m_tabWidget != nullptr
+        && m_tabWidget->currentWidget() == m_aboutBrowser
+        && event->type() == QEvent::MouseButtonPress)
+    {
+        const QMouseEvent* mouseEvent =
+            static_cast<const QMouseEvent*>(event);
+        if (mouseEvent->button() == Qt::LeftButton)
+        {
+            if (!m_aboutClickTimer.isValid()
+                || m_aboutClickTimer.elapsed() > 5000)
+            {
+                m_aboutClickTimer.start();
+                m_aboutClickCount = 1;
+            }
+            else
+            {
+                ++m_aboutClickCount;
+            }
+
+            if (m_aboutClickCount >= 10)
+            {
+                resetAboutClickSequence();
+                emit displayTitleConfigurationRequested();
+            }
+        }
+    }
+    return QDialog::eventFilter(watched, event);
+}
+
+void CadHelpDialog::resetAboutClickSequence()
+{
+    m_aboutClickCount = 0;
+    m_aboutClickTimer.invalidate();
 }
 
 QTextBrowser* CadHelpDialog::addSection(CadHelpSection section, const QString& title, const QString& htmlBody)

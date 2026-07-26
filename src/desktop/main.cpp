@@ -7,6 +7,8 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
+#include <QGuiApplication>
+#include <QIcon>
 
 namespace
 {
@@ -28,6 +30,20 @@ namespace
 int main(int argc, char* argv[])
 {
     QApplication app(argc, argv);
+    const AppBranding branding = AppBranding::load();
+    QCoreApplication::setApplicationName(branding.applicationName());
+    QCoreApplication::setOrganizationName(QStringLiteral("G-code Post Processing"));
+    QGuiApplication::setApplicationDisplayName(branding.applicationName());
+
+    const QIcon applicationIcon(QStringLiteral(":/branding/G.svg"));
+    if (applicationIcon.isNull())
+    {
+        qWarning("Failed to load application icon from :/branding/G.svg");
+    }
+    else
+    {
+        QApplication::setWindowIcon(applicationIcon);
+    }
 
     if (QApplication::arguments().contains(QStringLiteral("--license-request")))
     {

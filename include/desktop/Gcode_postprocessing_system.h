@@ -82,6 +82,12 @@ private:
     void initializeThemeMenu();
     void initializeHelpMenu();
     void applyBranding();
+    QString defaultDisplayTitle() const;
+    QString loadDisplayTitle() const;
+    void saveDisplayTitle(const QString& title) const;
+    void resetDisplayTitle() const;
+    void applyDisplayTitle();
+    void openDisplayTitleDialog();
     bool ensureFeatureAvailable(AppFeature feature, const QString& actionName);
     void openHelpDialog(CadHelpSection section);
     void openAppearanceSettingsDialog();

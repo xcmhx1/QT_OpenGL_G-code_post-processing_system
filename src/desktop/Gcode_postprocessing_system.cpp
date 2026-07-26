@@ -17,8 +17,10 @@
 #include <QElapsedTimer>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QGuiApplication>
 #include <QInputDialog>
 #include <QKeySequence>
+#include <QLineEdit>
 #include <QMap>
 #include <QMessageBox>
 #include <QMenu>
@@ -41,7 +43,28 @@ namespace
 {
     constexpr const char* kBuiltinThreeAxisProfileId = "builtin:3axis";
     constexpr const char* kBuiltinFourAxisProfileId = "builtin:4axis";
+    constexpr const char* kBrandingSettingsGroup = "Branding";
+    constexpr const char* kDisplayTitleSettingsKey = "DisplayTitle";
     constexpr int kColorByLayer = 256;
+    constexpr int kMaximumDisplayTitleLength = 64;
+
+    bool validDisplayTitle(const QString& value)
+    {
+        if (value.trimmed().size() > kMaximumDisplayTitleLength)
+        {
+            return false;
+        }
+        for (const QChar character : value)
+        {
+            if (character.category() == QChar::Other_Control
+                || character.category() == QChar::Separator_Line
+                || character.category() == QChar::Separator_Paragraph)
+            {
+                return false;
+            }
+        }
+        return true;
+    }
 
     QString entityTypeDisplayName(DRW::ETYPE type)
     {
@@ -738,34 +761,125 @@ void Gcode_postprocessing_system::initializeHelpMenu()
 void Gcode_postprocessing_system::openHelpDialog(CadHelpSection section)
 {
     CadHelpDialog dialog(this);
+    dialog.setAboutInformation
+    (
+        m_branding.aboutText(),
+        m_branding.companyName(),
+        m_branding.website(),
+        m_branding.supportText(),
+        m_license.statusText()
+    );
+    connect
+    (
+        &dialog,
+        &CadHelpDialog::displayTitleConfigurationRequested,
+        this,
+        &Gcode_postprocessing_system::openDisplayTitleDialog
+    );
     dialog.setCurrentSection(section);
     dialog.exec();
 }
 
 void Gcode_postprocessing_system::applyBranding()
 {
-    QCoreApplication::setApplicationName(m_branding.applicationName());
-    QCoreApplication::setOrganizationName(m_branding.companyName());
-
-    QString title = m_branding.applicationName();
-
-    if (!m_branding.windowTitleSuffix().trimmed().isEmpty())
+    const QIcon applicationIcon = QApplication::windowIcon();
+    if (!applicationIcon.isNull())
     {
-        title += QStringLiteral(" - %1").arg(m_branding.windowTitleSuffix().trimmed());
+        setWindowIcon(applicationIcon);
     }
 
-    title += QStringLiteral(" [%1]").arg(m_license.editionName());
-    setWindowTitle(title);
-
-    const QIcon icon = m_branding.icon();
-
-    if (!icon.isNull())
-    {
-        setWindowIcon(icon);
-        qApp->setWindowIcon(icon);
-    }
-
+    applyDisplayTitle();
     statusBar()->showMessage(m_license.statusText(), 5000);
+}
+
+QString Gcode_postprocessing_system::defaultDisplayTitle() const
+{
+    return m_branding.applicationName();
+}
+
+QString Gcode_postprocessing_system::loadDisplayTitle() const
+{
+    QSettings settings;
+    settings.beginGroup(QString::fromLatin1(kBrandingSettingsGroup));
+    const QString storedTitle = settings
+        .value(QString::fromLatin1(kDisplayTitleSettingsKey))
+        .toString();
+    settings.endGroup();
+
+    if (!validDisplayTitle(storedTitle))
+    {
+        return defaultDisplayTitle();
+    }
+    const QString normalizedTitle = storedTitle.trimmed();
+    return normalizedTitle.isEmpty()
+        ? defaultDisplayTitle() : normalizedTitle;
+}
+
+void Gcode_postprocessing_system::saveDisplayTitle
+    (const QString& title) const
+{
+    QSettings settings;
+    settings.beginGroup(QString::fromLatin1(kBrandingSettingsGroup));
+    settings.setValue(QString::fromLatin1(kDisplayTitleSettingsKey),
+        title.trimmed());
+    settings.endGroup();
+    settings.sync();
+}
+
+void Gcode_postprocessing_system::resetDisplayTitle() const
+{
+    QSettings settings;
+    settings.beginGroup(QString::fromLatin1(kBrandingSettingsGroup));
+    settings.remove(QString::fromLatin1(kDisplayTitleSettingsKey));
+    settings.endGroup();
+    settings.sync();
+}
+
+void Gcode_postprocessing_system::applyDisplayTitle()
+{
+    const QString displayTitle = loadDisplayTitle();
+    QGuiApplication::setApplicationDisplayName(displayTitle);
+    setWindowTitle(displayTitle);
+}
+
+void Gcode_postprocessing_system::openDisplayTitleDialog()
+{
+    bool accepted = false;
+    const QString input = QInputDialog::getText
+    (
+        this,
+        QStringLiteral("程序标题配置"),
+        QStringLiteral("请输入程序窗口标题。\n留空并确认可恢复默认标题。"),
+        QLineEdit::Normal,
+        loadDisplayTitle(),
+        &accepted
+    );
+    if (!accepted)
+    {
+        return;
+    }
+    if (!validDisplayTitle(input))
+    {
+        QMessageBox::warning
+        (
+            this,
+            QStringLiteral("程序标题配置"),
+            QStringLiteral(
+                "程序标题不能包含换行或控制字符，长度不能超过 64 个字符。")
+        );
+        return;
+    }
+
+    const QString normalizedTitle = input.trimmed();
+    if (normalizedTitle.isEmpty())
+    {
+        resetDisplayTitle();
+    }
+    else
+    {
+        saveDisplayTitle(normalizedTitle);
+    }
+    applyDisplayTitle();
 }
 
 bool Gcode_postprocessing_system::ensureFeatureAvailable(AppFeature feature, const QString& actionName)
