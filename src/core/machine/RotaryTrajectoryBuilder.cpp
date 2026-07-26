@@ -1,5 +1,6 @@
 #include "core/machine/RotaryTrajectoryBuilder.h"
 
+#include "core/machine/ProcessUnitExecutionResolver.h"
 #include "core/machine/RotaryKinematics.h"
 
 #include <algorithm>
@@ -79,13 +80,6 @@ namespace cadcam::machine
                 entity.processGroupId
             };
         }
-
-        MachinePose4D interpolate
-        (
-            const MachinePose4D& start,
-            const MachinePose4D& end,
-            double factor
-        );
 
         bool transferIsSafe
         (
@@ -277,11 +271,16 @@ namespace cadcam::machine
         bool previewMatchesPlan
         (
             const RotaryTransferPreview& preview,
+            const RotaryTransferRequest& request,
             const planning::PlannedTransferSignature& planned,
             double tolerance
         )
         {
             if (!plannedKindMatches(preview.kind, planned.kind)
+                || !poseMatches(request.previousCutEnd,
+                    planned.previousCutEnd, tolerance)
+                || sourceDistance(request.previousSourceEnd,
+                    planned.previousSourceEnd) > tolerance
                 || !poseMatches(preview.finalApproachOrigin,
                     planned.finalApproachOrigin, tolerance)
                 || !poseMatches(preview.cutStart, planned.cutStart, tolerance)
@@ -325,6 +324,8 @@ namespace cadcam::machine
             summary.toOwnerZone = request.nextOwnerZone;
             summary.kind = preview.kind;
             summary.previousCutEnd = request.previousCutEnd;
+            summary.actualPreviousCutEnd = request.previousCutEnd;
+            summary.actualPreviousSourceEnd = request.previousSourceEnd;
             summary.nextCutStart = request.nextCutStart;
             summary.actualFinalApproachOrigin =
                 preview.finalApproachOrigin;
@@ -371,21 +372,31 @@ namespace cadcam::machine
                     planned.finalApproachOrigin.z,
                     planned.finalApproachOrigin.aDegrees
                 };
+                summary.plannedPreviousCutEnd =
+                {
+                    planned.previousCutEnd.x,
+                    planned.previousCutEnd.y,
+                    planned.previousCutEnd.z,
+                    planned.previousCutEnd.aDegrees
+                };
+                summary.plannedPreviousSourceEnd =
+                    planned.previousSourceEnd;
+                summary.poseDelta = std::max
+                (
+                    machinePositionDistance
+                        (summary.plannedPreviousCutEnd,
+                            summary.actualPreviousCutEnd),
+                    std::abs(summary.plannedPreviousCutEnd.aDegrees
+                        - summary.actualPreviousCutEnd.aDegrees)
+                );
+                summary.sourceDelta = sourceDistance
+                    (summary.plannedPreviousSourceEnd,
+                        summary.actualPreviousSourceEnd);
                 summary.previewMatched = previewMatchesPlan
-                    (preview, planned, request.numericalEpsilon);
+                    (preview, request, planned,
+                        request.numericalEpsilon);
             }
             return summary;
-        }
-
-        MachinePose4D interpolate(const MachinePose4D& start, const MachinePose4D& end, double factor)
-        {
-            return
-            {
-                start.x + (end.x - start.x) * factor,
-                start.y + (end.y - start.y) * factor,
-                start.z + (end.z - start.z) * factor,
-                start.aDegrees + (end.aDegrees - start.aDegrees) * factor
-            };
         }
 
         bool finitePose(const MachinePose4D& pose)
@@ -394,13 +405,6 @@ namespace cadcam::machine
                 && std::isfinite(pose.z) && std::isfinite(pose.aDegrees);
         }
 
-        MachinePose4D finalPose(const EntityTrajectory& entity, const MachinePose4D& fallback)
-        {
-            if (!entity.overcutMoves.empty()) return entity.overcutMoves.back().target;
-            if (!entity.cuttingMoves.empty()) return entity.cuttingMoves.back().target;
-            if (!entity.approachMoves.empty()) return entity.approachMoves.back().target;
-            return fallback;
-        }
     }
 
     OperationResult<MachineTrajectory> RotaryTrajectoryBuilder::build
@@ -577,362 +581,324 @@ namespace cadcam::machine
                 policy.transfer.rotationSafetyClearance
             );
 
-        std::vector<std::vector<MachinePose4D>> posesByEntity;
-        posesByEntity.reserve(input.entities.size());
-        std::vector<RotarySurfaceSummary> surfaceSummaries;
-        surfaceSummaries.reserve(input.entities.size());
-        for (const auto& entity : input.entities)
-        {
-            auto transformed = RotaryKinematics::transform
-                (entity.path, policy, input.tubeSection, taskContext.operationContext);
-            result.mergeDiagnostics(transformed);
-            if (!transformed.succeeded() || !transformed.value.has_value())
-            {
-                result.status = OperationStatus::Failed;
-                return result;
-            }
-            transformed.value->surface.processGroupId = entity.processGroupId;
-            posesByEntity.push_back(std::move(transformed.value->poses));
-            surfaceSummaries.push_back(std::move(transformed.value->surface));
-        }
-
         trajectory.entities.reserve(input.entities.size());
         bool hasPrevious = false;
         MachinePose4D previousPose;
         geometry::Vector3d previousSourcePose;
-        std::size_t groupStartIndex = 0U;
-        for (std::size_t index = 0; index < input.entities.size(); ++index)
+        const TrajectoryEntityInput* previousEntity = nullptr;
+        std::size_t unitBegin = 0U;
+        while (unitBegin < input.entities.size())
         {
-            const auto& inputEntity = input.entities[index];
-            auto& poses = posesByEntity[index];
-            const bool sameUnit = index > 0
-                && input.entities[index - 1].processUnitIndex
-                    == inputEntity.processUnitIndex;
-            const bool sameGroup = index > 0 && inputEntity.processGroupId >= 0
-                && input.entities[index - 1].processGroupId == inputEntity.processGroupId;
-            if (!sameGroup) groupStartIndex = index;
-            if (policy.keepContinuousAngle && hasPrevious)
+            const int processUnitIndex =
+                input.entities[unitBegin].processUnitIndex;
+            std::size_t unitEnd = unitBegin + 1U;
+            while (unitEnd < input.entities.size()
+                && input.entities[unitEnd].processUnitIndex
+                    == processUnitIndex)
             {
-                double offset = 0.0;
-                while (poses.front().aDegrees + offset - previousPose.aDegrees > 180.0) offset -= 360.0;
-                while (poses.front().aDegrees + offset - previousPose.aDegrees < -180.0) offset += 360.0;
-                for (auto& pose : poses) pose.aDegrees += offset;
+                ++unitEnd;
             }
-            surfaceSummaries[index].alignedAStart = poses.front().aDegrees;
-            surfaceSummaries[index].alignedAEnd = poses.back().aDegrees;
-            const double connectionDistance = index > 0
-                ? sourceDistance(input.entities[index - 1].path.vertices.back().position,
-                                 inputEntity.path.vertices.front().position)
-                : 0.0;
-            if (sameUnit
-                && connectionDistance > policy.continuousConnectionTolerance)
+
+            std::vector<ProcessUnitExecutionPath> executionPaths;
+            executionPaths.reserve(unitEnd - unitBegin);
+            for (std::size_t index = unitBegin; index < unitEnd; ++index)
             {
-                result.status = OperationStatus::Failed;
-                Diagnostic value = diagnostic(DiagnosticCode::MachineTrajectoryContinuityFailure,
-                    DiagnosticSeverity::Error, QStringLiteral("连续加工组内的相邻路径没有连接。"),
-                    taskContext.operationContext, &inputEntity);
-                value.context.insert(QStringLiteral("connectionDistance"), connectionDistance);
-                result.addDiagnostic(value);
+                const TrajectoryEntityInput& entity = input.entities[index];
+                executionPaths.push_back
+                ({
+                    entity.entityId,
+                    entity.sourceIndex,
+                    entity.sourceKind,
+                    entity.sourceProcessOrder,
+                    entity.fragmentOrder,
+                    entity.processGroupId,
+                    entity.processUnitIndex,
+                    entity.path
+                });
+            }
+
+            auto resolved = ProcessUnitExecutionResolver::resolve
+            (
+                executionPaths,
+                input.entities[unitBegin].closed,
+                policy,
+                input.tubeSection,
+                hasPrevious
+                    ? std::optional<MachinePose4D>(previousPose)
+                    : std::nullopt,
+                taskContext.operationContext
+            );
+            result.mergeDiagnostics(resolved);
+            if (!resolved.succeeded() || !resolved.value.has_value())
+            {
+                result.status = resolved.status;
                 return result;
             }
-            if (sameUnit)
-            {
-                const MachinePose4D& previousEnd = posesByEntity[index - 1U].back();
-                const MachinePose4D& nextStart = poses.front();
-                const double machineDistance = machinePositionDistance(previousEnd, nextStart);
-                const double angleDifference = std::abs(nextStart.aDegrees - previousEnd.aDegrees);
-                if (machineDistance > policy.continuousConnectionTolerance
-                    || angleDifference > 180.0 + policy.numericalEpsilon)
-                {
-                    result.status = OperationStatus::Failed;
-                    Diagnostic value = diagnostic
-                    (
-                        DiagnosticCode::MachineTrajectoryContinuityFailure,
-                        DiagnosticSeverity::Error,
-                        QStringLiteral("连续加工组的源路径相连，但机床轨迹端点不连续。"),
-                        taskContext.operationContext,
-                        &inputEntity
-                    );
-                    value.context.insert(QStringLiteral("previousEntityId"),
-                        QVariant::fromValue<qulonglong>(input.entities[index - 1U].entityId));
-                    value.context.insert(QStringLiteral("nextEntityId"),
-                        QVariant::fromValue<qulonglong>(inputEntity.entityId));
-                    value.context.insert(QStringLiteral("sourceConnectionDistance"), connectionDistance);
-                    value.context.insert(QStringLiteral("machineConnectionDistance"), machineDistance);
-                    value.context.insert(QStringLiteral("previousA"), previousEnd.aDegrees);
-                    value.context.insert(QStringLiteral("nextA"), nextStart.aDegrees);
-                    result.addDiagnostic(value);
-                    return result;
-                }
-            }
 
-            EntityTrajectory entity;
-            entity.entityId = inputEntity.entityId;
-            entity.sourceKind = inputEntity.sourceKind;
-            entity.sourceIndex = inputEntity.sourceIndex;
-            entity.processOrder = inputEntity.processOrder;
-            entity.sourceProcessOrder = inputEntity.sourceProcessOrder;
-            entity.fragmentOrder = inputEntity.fragmentOrder;
-            entity.processGroupId = inputEntity.processGroupId;
-            entity.closed = inputEntity.closed;
-            entity.continuousFromPrevious = sameUnit;
-            entity.firstInGroup = inputEntity.firstInGroup;
-            entity.lastInGroup = inputEntity.lastInGroup;
-            for (const auto& vertex : inputEntity.path.vertices) entity.sourcePath.push_back(vertex.position);
+            ProcessUnitExecutionResult& execution = *resolved.value;
+            trajectory.surfaceSummaries.insert
+            (
+                trajectory.surfaceSummaries.end(),
+                execution.surfaceSummaries.begin(),
+                execution.surfaceSummaries.end()
+            );
 
-            const MachinePose4D& first = poses.front();
-            if (!hasPrevious)
+            for (std::size_t localIndex = 0U;
+                localIndex < execution.paths.size(); ++localIndex)
             {
-                const MachinePose4D initial = policy.useInitialMachinePoint
-                    ? policy.initialMachinePoint
-                    : MachinePose4D{ first.x, first.y, 0.0, 0.0 };
-                const RotaryTransferRequest request = transferRequest
-                    (initial, first,
-                        inputEntity.path.vertices.front().position,
-                        inputEntity.path.vertices.front().position,
-                        nullptr, inputEntity, policy, input.tubeSection,
-                        trajectory.rotaryContext.safeMachineZ);
-                auto transfer = RotaryTransferPlanner::preview
-                    (request, taskContext.operationContext);
-                result.mergeDiagnostics(transfer);
-                if (!transfer.succeeded() || !transfer.value.has_value())
+                const std::size_t inputIndex = unitBegin + localIndex;
+                const TrajectoryEntityInput& inputEntity =
+                    input.entities[inputIndex];
+                const std::vector<MachinePose4D>& poses =
+                    execution.posesByPath[localIndex];
+
+                EntityTrajectory entity;
+                entity.entityId = inputEntity.entityId;
+                entity.sourceKind = inputEntity.sourceKind;
+                entity.sourceIndex = inputEntity.sourceIndex;
+                entity.processOrder = inputEntity.processOrder;
+                entity.sourceProcessOrder =
+                    inputEntity.sourceProcessOrder;
+                entity.fragmentOrder = inputEntity.fragmentOrder;
+                entity.processGroupId = inputEntity.processGroupId;
+                entity.closed = inputEntity.closed;
+                entity.continuousFromPrevious = localIndex > 0U;
+                entity.firstInGroup = inputEntity.firstInGroup;
+                entity.lastInGroup = inputEntity.lastInGroup;
+                for (const auto& vertex : inputEntity.path.vertices)
+                    entity.sourcePath.push_back(vertex.position);
+
+                if (localIndex == 0U)
                 {
-                    result.status = OperationStatus::Failed;
-                    return result;
-                }
-                const TransferMotionSummary summary =
-                    appendTransferPreview(entity.approachMoves, request,
-                        *transfer.value, inputEntity);
-                if (summary.hasPlannedPreview && !summary.previewMatched)
-                {
-                    result.status = OperationStatus::Conflict;
-                    result.addDiagnostic(diagnostic
+                    const MachinePose4D initial =
+                        policy.useInitialMachinePoint
+                        ? policy.initialMachinePoint
+                        : MachinePose4D
+                            {
+                                execution.cutStart.x,
+                                execution.cutStart.y,
+                                0.0,
+                                0.0
+                            };
+                    const MachinePose4D& transferStart =
+                        hasPrevious ? previousPose : initial;
+                    const RotaryTransferRequest request = transferRequest
                     (
-                        DiagnosticCode::
-                            MachineTrajectoryTransferPreviewMismatch,
-                        DiagnosticSeverity::Error,
-                        QStringLiteral("实际首次接近轨迹与加工计划预览不一致。"),
-                        taskContext.operationContext,
-                        &inputEntity
-                    ));
-                    return result;
-                }
-                if (!transferIsSafe(initial, first, entity.approachMoves,
-                    summary, policy.numericalEpsilon))
-                {
-                    result.status = OperationStatus::Failed;
-                    result.addDiagnostic(diagnostic
-                    (
-                        DiagnosticCode::
-                            MachineTrajectoryTransferSafetyViolation,
-                        DiagnosticSeverity::Error,
-                        QStringLiteral("首次接近轨迹未满足旋转安全约束。"),
-                        taskContext.operationContext,
-                        &inputEntity
-                    ));
-                    return result;
-                }
-                trajectory.transferSummaries.push_back(summary);
-            }
-            else if (!sameUnit)
-            {
-                const RotaryTransferRequest request = transferRequest
-                    (previousPose, first,
-                        previousSourcePose,
-                        inputEntity.path.vertices.front().position,
-                        &input.entities[index - 1U], inputEntity, policy,
+                        transferStart,
+                        execution.cutStart,
+                        hasPrevious
+                            ? previousSourcePose
+                            : execution.sourceStart,
+                        execution.sourceStart,
+                        hasPrevious ? previousEntity : nullptr,
+                        inputEntity,
+                        policy,
                         input.tubeSection,
-                        trajectory.rotaryContext.safeMachineZ);
-                auto transfer = RotaryTransferPlanner::preview
-                    (request, taskContext.operationContext);
-                result.mergeDiagnostics(transfer);
-                if (!transfer.succeeded() || !transfer.value.has_value())
-                {
-                    result.status = OperationStatus::Failed;
-                    return result;
-                }
-                const TransferMotionSummary summary =
-                    appendTransferPreview(entity.approachMoves, request,
-                        *transfer.value, inputEntity);
-                if (summary.hasPlannedPreview && !summary.previewMatched)
-                {
-                    result.status = OperationStatus::Conflict;
-                    Diagnostic mismatch = diagnostic
-                    (
-                        DiagnosticCode::
-                            MachineTrajectoryTransferPreviewMismatch,
-                        DiagnosticSeverity::Error,
-                        QStringLiteral("实际加工单元转移与加工计划预览不一致。"),
-                        taskContext.operationContext,
-                        &inputEntity
+                        trajectory.rotaryContext.safeMachineZ
                     );
-                    mismatch.context.insert(QStringLiteral("fromProcessUnit"),
-                        summary.fromProcessUnit);
-                    mismatch.context.insert(QStringLiteral("toProcessUnit"),
-                        summary.toProcessUnit);
-                    result.addDiagnostic(mismatch);
-                    return result;
+                    auto transfer = RotaryTransferPlanner::preview
+                        (request, taskContext.operationContext);
+                    result.mergeDiagnostics(transfer);
+                    if (!transfer.succeeded()
+                        || !transfer.value.has_value())
+                    {
+                        result.status = transfer.status;
+                        return result;
+                    }
+                    const TransferMotionSummary summary =
+                        appendTransferPreview
+                        (
+                            entity.approachMoves,
+                            request,
+                            *transfer.value,
+                            inputEntity
+                        );
+                    if (summary.hasPlannedPreview
+                        && !summary.previewMatched)
+                    {
+                        result.status = OperationStatus::Conflict;
+                        Diagnostic mismatch = diagnostic
+                        (
+                            DiagnosticCode::
+                                MachineTrajectoryTransferPreviewMismatch,
+                            DiagnosticSeverity::Error,
+                            hasPrevious
+                                ? QStringLiteral("实际加工单元转移与加工计划预览不一致。")
+                                : QStringLiteral("实际首次接近轨迹与加工计划预览不一致。"),
+                            taskContext.operationContext,
+                            &inputEntity
+                        );
+                        mismatch.context.insert
+                            (QStringLiteral("fromProcessUnit"),
+                                summary.fromProcessUnit);
+                        mismatch.context.insert
+                            (QStringLiteral("toProcessUnit"),
+                                summary.toProcessUnit);
+                        mismatch.context.insert
+                            (QStringLiteral("plannedPreviousCutEnd"),
+                                QStringLiteral("(%1,%2,%3,%4)")
+                                    .arg(summary.plannedPreviousCutEnd.x,
+                                        0, 'g', 15)
+                                    .arg(summary.plannedPreviousCutEnd.y,
+                                        0, 'g', 15)
+                                    .arg(summary.plannedPreviousCutEnd.z,
+                                        0, 'g', 15)
+                                    .arg(summary.plannedPreviousCutEnd
+                                        .aDegrees, 0, 'g', 15));
+                        mismatch.context.insert
+                            (QStringLiteral("actualPreviousCutEnd"),
+                                QStringLiteral("(%1,%2,%3,%4)")
+                                    .arg(summary.actualPreviousCutEnd.x,
+                                        0, 'g', 15)
+                                    .arg(summary.actualPreviousCutEnd.y,
+                                        0, 'g', 15)
+                                    .arg(summary.actualPreviousCutEnd.z,
+                                        0, 'g', 15)
+                                    .arg(summary.actualPreviousCutEnd
+                                        .aDegrees, 0, 'g', 15));
+                        mismatch.context.insert
+                            (QStringLiteral("plannedPreviousSourceEnd"),
+                                QStringLiteral("(%1,%2,%3)")
+                                    .arg(summary.plannedPreviousSourceEnd.x,
+                                        0, 'g', 15)
+                                    .arg(summary.plannedPreviousSourceEnd.y,
+                                        0, 'g', 15)
+                                    .arg(summary.plannedPreviousSourceEnd.z,
+                                        0, 'g', 15));
+                        mismatch.context.insert
+                            (QStringLiteral("actualPreviousSourceEnd"),
+                                QStringLiteral("(%1,%2,%3)")
+                                    .arg(summary.actualPreviousSourceEnd.x,
+                                        0, 'g', 15)
+                                    .arg(summary.actualPreviousSourceEnd.y,
+                                        0, 'g', 15)
+                                    .arg(summary.actualPreviousSourceEnd.z,
+                                        0, 'g', 15));
+                        mismatch.context.insert
+                            (QStringLiteral("poseDelta"),
+                                summary.poseDelta);
+                        mismatch.context.insert
+                            (QStringLiteral("sourceDelta"),
+                                summary.sourceDelta);
+                        mismatch.context.insert
+                            (QStringLiteral("plannedFinalApproachOrigin"),
+                                QStringLiteral("(%1,%2,%3,%4)")
+                                    .arg(summary
+                                        .plannedFinalApproachOrigin.x,
+                                        0, 'g', 15)
+                                    .arg(summary
+                                        .plannedFinalApproachOrigin.y,
+                                        0, 'g', 15)
+                                    .arg(summary
+                                        .plannedFinalApproachOrigin.z,
+                                        0, 'g', 15)
+                                    .arg(summary
+                                        .plannedFinalApproachOrigin
+                                        .aDegrees, 0, 'g', 15));
+                        mismatch.context.insert
+                            (QStringLiteral("actualFinalApproachOrigin"),
+                                QStringLiteral("(%1,%2,%3,%4)")
+                                    .arg(summary
+                                        .actualFinalApproachOrigin.x,
+                                        0, 'g', 15)
+                                    .arg(summary
+                                        .actualFinalApproachOrigin.y,
+                                        0, 'g', 15)
+                                    .arg(summary
+                                        .actualFinalApproachOrigin.z,
+                                        0, 'g', 15)
+                                    .arg(summary
+                                        .actualFinalApproachOrigin
+                                        .aDegrees, 0, 'g', 15));
+                        result.addDiagnostic(mismatch);
+                        return result;
+                    }
+                    if (!transferIsSafe
+                        (
+                            transferStart,
+                            execution.cutStart,
+                            entity.approachMoves,
+                            summary,
+                            policy.numericalEpsilon
+                        ))
+                    {
+                        result.status = OperationStatus::Failed;
+                        result.addDiagnostic(diagnostic
+                        (
+                            DiagnosticCode::
+                                MachineTrajectoryTransferSafetyViolation,
+                            DiagnosticSeverity::Error,
+                            hasPrevious
+                                ? QStringLiteral("加工单元间转移未满足旋转安全约束。")
+                                : QStringLiteral("首次接近轨迹未满足旋转安全约束。"),
+                            taskContext.operationContext,
+                            &inputEntity
+                        ));
+                        return result;
+                    }
+                    trajectory.transferSummaries.push_back(summary);
                 }
-                if (!transferIsSafe(previousPose, first,
-                    entity.approachMoves, summary,
-                    policy.numericalEpsilon))
+                else
                 {
-                    result.status = OperationStatus::Failed;
-                    result.addDiagnostic(diagnostic
+                    const double connectionDistance = sourceDistance
                     (
-                        DiagnosticCode::
-                            MachineTrajectoryTransferSafetyViolation,
-                        DiagnosticSeverity::Error,
-                        QStringLiteral("加工单元间转移未满足旋转安全约束。"),
-                        taskContext.operationContext,
-                        &inputEntity
-                    ));
-                    return result;
-                }
-                trajectory.transferSummaries.push_back(summary);
-            }
-            else if (connectionDistance > policy.numericalEpsilon)
-                entity.cuttingMoves.push_back(move(MachineMoveKind::CuttingConnection, first, inputEntity));
-
-            for (std::size_t pointIndex = 1; pointIndex < poses.size(); ++pointIndex)
-                entity.cuttingMoves.push_back(move(MachineMoveKind::Cutting, poses[pointIndex], inputEntity));
-
-            trajectory.entities.push_back(std::move(entity));
-            geometry::Vector3d entityFinalSource =
-                inputEntity.path.vertices.back().position;
-            const bool groupEnds = index + 1U == input.entities.size()
-                || input.entities[index + 1U].processGroupId != inputEntity.processGroupId;
-            const auto groupDefinition = groupDefinitions.find(inputEntity.processGroupId);
-            if (groupEnds && groupDefinition != groupDefinitions.end()
-                && groupDefinition->second != nullptr && groupDefinition->second->closed)
-            {
-                std::vector<geometry::Vector3d> groupSourcePath;
-                std::vector<MachinePose4D> groupMachinePath;
-                for (std::size_t entityIndex = groupStartIndex; entityIndex <= index; ++entityIndex)
-                {
-                    const auto& path = input.entities[entityIndex].path.vertices;
-                    const auto& groupPoses = posesByEntity[entityIndex];
-                    for (std::size_t pointIndex = 0; pointIndex < path.size(); ++pointIndex)
+                        input.entities[inputIndex - 1U]
+                            .path.vertices.back().position,
+                        inputEntity.path.vertices.front().position
+                    );
+                    if (connectionDistance > policy.numericalEpsilon)
                     {
-                        if (!groupSourcePath.empty() && pointIndex == 0
-                            && sourceDistance(groupSourcePath.back(), path.front().position)
-                                <= policy.numericalEpsilon) continue;
-                        groupSourcePath.push_back(path[pointIndex].position);
-                        groupMachinePath.push_back(groupPoses[pointIndex]);
+                        entity.cuttingMoves.push_back
+                            (move(MachineMoveKind::CuttingConnection,
+                                poses.front(), inputEntity));
                     }
                 }
-                if (groupSourcePath.size() < 2U || groupSourcePath.size() != groupMachinePath.size())
+
+                for (std::size_t pointIndex = 1U;
+                    pointIndex < poses.size(); ++pointIndex)
                 {
-                    result.status = OperationStatus::Failed;
-                    result.addDiagnostic(diagnostic(DiagnosticCode::MachineTrajectoryOvercutFailed,
-                        DiagnosticSeverity::Error, QStringLiteral("闭合加工组的源路径无效。"),
-                        taskContext.operationContext, &inputEntity));
-                    return result;
+                    entity.cuttingMoves.push_back
+                        (move(MachineMoveKind::Cutting,
+                            poses[pointIndex], inputEntity));
                 }
 
-                const MachinePose4D loopStart = groupMachinePath.front();
-                const MachinePose4D loopEnd = groupMachinePath.back();
-                entityFinalSource = groupSourcePath.front();
-                MachinePose4D alignedLoopStart = loopStart;
-                if (policy.keepContinuousAngle)
+                if (localIndex + 1U == execution.paths.size())
                 {
-                    while (alignedLoopStart.aDegrees - loopEnd.aDegrees > 180.0)
-                        alignedLoopStart.aDegrees -= 360.0;
-                    while (alignedLoopStart.aDegrees - loopEnd.aDegrees < -180.0)
-                        alignedLoopStart.aDegrees += 360.0;
-                }
-                if (loopEnd.x != alignedLoopStart.x || loopEnd.y != alignedLoopStart.y
-                    || loopEnd.z != alignedLoopStart.z
-                    || loopEnd.aDegrees != alignedLoopStart.aDegrees)
-                    trajectory.entities.back().cuttingMoves.push_back
-                        (move(MachineMoveKind::Cutting, alignedLoopStart, inputEntity));
-
-                if (policy.overcutDistance > policy.numericalEpsilon)
-                {
-                    double totalLength = 0.0;
-                    for (std::size_t pointIndex = 1; pointIndex < groupSourcePath.size(); ++pointIndex)
-                        totalLength += sourceDistance
-                            (groupSourcePath[pointIndex - 1], groupSourcePath[pointIndex]);
-                    totalLength += sourceDistance(groupSourcePath.back(), groupSourcePath.front());
-                    double remaining = std::min(policy.overcutDistance, totalLength);
-                    const double angleOffset = alignedLoopStart.aDegrees - loopStart.aDegrees;
-                    for (std::size_t pointIndex = 1;
-                        pointIndex < groupSourcePath.size() && remaining > policy.numericalEpsilon;
-                        ++pointIndex)
+                    if (execution.closurePose.has_value())
                     {
-                        const double length = sourceDistance
-                            (groupSourcePath[pointIndex - 1], groupSourcePath[pointIndex]);
-                        if (length <= policy.numericalEpsilon) continue;
-                        const double used = std::min(remaining, length);
-                        MachinePose4D start = groupMachinePath[pointIndex - 1];
-                        MachinePose4D end = groupMachinePath[pointIndex];
-                        start.aDegrees += angleOffset;
-                        end.aDegrees += angleOffset;
-                        trajectory.entities.back().overcutMoves.push_back
+                        entity.cuttingMoves.push_back
+                            (move(MachineMoveKind::Cutting,
+                                *execution.closurePose, inputEntity));
+                    }
+                    for (const ProcessUnitOvercutTarget& target :
+                        execution.overcutTargets)
+                    {
+                        entity.overcutMoves.push_back
                             (move(MachineMoveKind::Overcut,
-                                interpolate(start, end, used / length), inputEntity));
-                        entityFinalSource =
-                            geometry::Vector3d
-                            {
-                                groupSourcePath[pointIndex - 1U].x
-                                    + (groupSourcePath[pointIndex].x
-                                        - groupSourcePath[pointIndex - 1U].x)
-                                        * used / length,
-                                groupSourcePath[pointIndex - 1U].y
-                                    + (groupSourcePath[pointIndex].y
-                                        - groupSourcePath[pointIndex - 1U].y)
-                                        * used / length,
-                                groupSourcePath[pointIndex - 1U].z
-                                    + (groupSourcePath[pointIndex].z
-                                        - groupSourcePath[pointIndex - 1U].z)
-                                        * used / length
-                            };
-                        remaining -= used;
+                                target.pose, inputEntity));
                     }
-                    if (remaining > policy.numericalEpsilon)
+                    if (execution.overcutLimited)
                     {
-                        const double closureLength = sourceDistance
-                            (groupSourcePath.back(), groupSourcePath.front());
-                        if (closureLength > policy.numericalEpsilon)
-                        {
-                            MachinePose4D closureStart = groupMachinePath.back();
-                            closureStart.aDegrees += angleOffset;
-                            const double used = std::min(remaining, closureLength);
-                            trajectory.entities.back().overcutMoves.push_back
-                                (move(MachineMoveKind::Overcut,
-                                    interpolate(closureStart, alignedLoopStart, used / closureLength),
-                                    inputEntity));
-                            entityFinalSource =
-                            {
-                                groupSourcePath.back().x
-                                    + (groupSourcePath.front().x
-                                        - groupSourcePath.back().x)
-                                        * used / closureLength,
-                                groupSourcePath.back().y
-                                    + (groupSourcePath.front().y
-                                        - groupSourcePath.back().y)
-                                        * used / closureLength,
-                                groupSourcePath.back().z
-                                    + (groupSourcePath.front().z
-                                        - groupSourcePath.back().z)
-                                        * used / closureLength
-                            };
-                            remaining -= used;
-                        }
+                        result.addDiagnostic(diagnostic
+                        (
+                            DiagnosticCode::MachineTrajectoryOvercutFailed,
+                            DiagnosticSeverity::Warning,
+                            QStringLiteral("过切距离超过闭环总长，已限制为一圈。"),
+                            taskContext.operationContext,
+                            &inputEntity
+                        ));
                     }
-                    if (policy.overcutDistance > totalLength + policy.numericalEpsilon)
-                        result.addDiagnostic(diagnostic(DiagnosticCode::MachineTrajectoryOvercutFailed,
-                            DiagnosticSeverity::Warning, QStringLiteral("过切距离超过闭环总长，已限制为一圈。"),
-                            taskContext.operationContext, &inputEntity));
                 }
+
+                trajectory.entities.push_back(std::move(entity));
             }
 
-            previousPose = finalPose(trajectory.entities.back(), poses.back());
-            previousSourcePose = entityFinalSource;
+            previousPose = execution.finalCutPose;
+            previousSourcePose = execution.finalSourcePosition;
             hasPrevious = true;
+            previousEntity = &input.entities[unitEnd - 1U];
+            unitBegin = unitEnd;
         }
-
-        trajectory.surfaceSummaries = std::move(surfaceSummaries);
 
         for (const auto& entity : trajectory.entities)
         {

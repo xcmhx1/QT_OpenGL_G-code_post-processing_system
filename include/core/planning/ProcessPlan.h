@@ -56,6 +56,8 @@ namespace cadcam::planning
     {
         PlannedTransferMotionKind kind =
             PlannedTransferMotionKind::InitialApproach;
+        PlannedMachinePose4D previousCutEnd;
+        geometry::Vector3d previousSourceEnd;
         PlannedMachinePose4D finalApproachOrigin;
         PlannedMachinePose4D cutStart;
         std::vector<PlannedMachinePose4D> targets;
@@ -102,6 +104,7 @@ namespace cadcam::planning
         std::size_t sourceIndex = 0;
         geometry::SourceGeometryKind sourceKind = geometry::SourceGeometryKind::Unknown;
         std::optional<geometry::SourceEntity> sourceEntity;
+        geometry::SamplingPolicy executionSamplingPolicy;
         geometry::Path3D path;
         bool visible = true;
         bool processEnabled = true;

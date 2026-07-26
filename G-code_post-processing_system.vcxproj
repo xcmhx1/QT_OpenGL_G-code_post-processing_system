@@ -425,6 +425,9 @@ if exist "$(VCRuntimeRedistDir)\*.dll" copy /Y "$(VCRuntimeRedistDir)\*.dll" "$(
     <ClCompile Include="src\core\machine\RotaryKinematics.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
+    <ClCompile Include="src\core\machine\ProcessUnitExecutionResolver.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
     <ClCompile Include="src\core\machine\RotaryTransferPlanner.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
@@ -628,6 +631,7 @@ if exist "$(VCRuntimeRedistDir)\*.dll" copy /Y "$(VCRuntimeRedistDir)\*.dll" "$(
     <ClInclude Include="include\core\machining\TubeSectionProjector.h" />
     <ClInclude Include="include\core\machine\MachineTrajectory.h" />
     <ClInclude Include="include\core\machine\PlanarTrajectoryBuilder.h" />
+    <ClInclude Include="include\core\machine\ProcessUnitExecutionResolver.h" />
     <ClInclude Include="include\core\machine\RotaryKinematics.h" />
     <ClInclude Include="include\core\machine\RotaryTransferPlanner.h" />
     <ClInclude Include="include\core\machine\RotaryTrajectoryBuilder.h" />

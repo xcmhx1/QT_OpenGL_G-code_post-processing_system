@@ -74,6 +74,19 @@ namespace
         return policy;
     }
 
+    cadcam::geometry::SamplingPolicy trajectorySamplingPolicy(int dxfType)
+    {
+        cadcam::geometry::SamplingPolicy policy =
+            productionSamplingPolicy(dxfType);
+        if (static_cast<DRW::ETYPE>(dxfType) == DRW::ETYPE::ARC)
+        {
+            policy.minimumSegments = 8;
+            policy.maximumAngularStep =
+                5.0 * 6.28318530717958647692 / 360.0;
+        }
+        return policy;
+    }
+
     bool supportsProcessPath(SourceGeometryKind kind)
     {
         return kind == SourceGeometryKind::Line
@@ -280,6 +293,9 @@ DocumentProcessPlanningAdapter::captureRotary
             options.startParameter = entity.startParameter;
             geometry::SamplingPolicy pathPolicy =
                 productionSamplingPolicy(entry.attributes.originalDxfType);
+            entity.executionSamplingPolicy =
+                trajectorySamplingPolicy
+                    (entry.attributes.originalDxfType);
             auto path = compiler.compile(*entry.sourceEntity, pathPolicy, options, context);
             if (path.succeeded() && path.value.has_value())
             {

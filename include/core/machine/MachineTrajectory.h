@@ -81,12 +81,18 @@ namespace cadcam::machine
         std::optional<machining::TubeZone16> toOwnerZone;
         TransferMotionKind kind = TransferMotionKind::InitialApproach;
         MachinePose4D previousCutEnd;
+        MachinePose4D plannedPreviousCutEnd;
+        MachinePose4D actualPreviousCutEnd;
+        geometry::Vector3d plannedPreviousSourceEnd;
+        geometry::Vector3d actualPreviousSourceEnd;
         MachinePose4D nextCutStart;
         MachinePose4D departureTarget;
         MachinePose4D rotaryTransferTarget;
         MachinePose4D approachTarget;
         MachinePose4D plannedFinalApproachOrigin;
         MachinePose4D actualFinalApproachOrigin;
+        double poseDelta = 0.0;
+        double sourceDelta = 0.0;
         double deltaA = 0.0;
         double rotationSafetyClearance = 0.0;
         double sameZoneTransferClearance = 0.0;

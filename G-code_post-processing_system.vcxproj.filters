@@ -559,6 +559,9 @@
     <ClCompile Include="src\core\machine\RotaryKinematics.cpp">
       <Filter>Source Files\core\machine</Filter>
     </ClCompile>
+    <ClCompile Include="src\core\machine\ProcessUnitExecutionResolver.cpp">
+      <Filter>Source Files\core\machine</Filter>
+    </ClCompile>
     <ClCompile Include="src\core\machine\RotaryTransferPlanner.cpp">
       <Filter>Source Files\core\machine</Filter>
     </ClCompile>
@@ -832,6 +835,9 @@
       <Filter>Header Files\core\machine</Filter>
     </ClInclude>
     <ClInclude Include="include\core\machine\RotaryKinematics.h">
+      <Filter>Header Files\core\machine</Filter>
+    </ClInclude>
+    <ClInclude Include="include\core\machine\ProcessUnitExecutionResolver.h">
       <Filter>Header Files\core\machine</Filter>
     </ClInclude>
     <ClInclude Include="include\core\machine\RotaryTransferPlanner.h">

@@ -1,7 +1,7 @@
 #include "core/planning/SingleClosedEntryRefiner.h"
 
 #include "core/geometry/GeometryCompiler.h"
-#include "core/machine/RotaryKinematics.h"
+#include "core/machine/ProcessUnitExecutionResolver.h"
 #include "core/machine/RotaryTransferPlanner.h"
 #include "core/machining/TubeSectionProjector.h"
 
@@ -28,14 +28,6 @@ namespace cadcam::planning
             ClosestOwnerZoneParameterFallback
         };
 
-        struct UnitExecution
-        {
-            machine::MachinePose4D cutStart;
-            machine::MachinePose4D cutEnd;
-            geometry::Vector3d sourceStart;
-            geometry::Vector3d sourceEnd;
-        };
-
         struct EntryCandidate
         {
             double parameter = 0.0;
@@ -43,8 +35,9 @@ namespace cadcam::planning
             geometry::Path3D path;
             std::vector<machine::MachinePose4D> poses;
             machine::RotaryTransferPreview transfer;
-            UnitExecution execution;
+            machine::ProcessUnitExecutionResult execution;
             machine::MachinePose4D previousCutEnd;
+            geometry::Vector3d previousSourceEnd;
             double signedResidual = 0.0;
             double tangentResidual = 0.0;
             double approachCutDot = -1.0;
@@ -75,23 +68,6 @@ namespace cadcam::planning
             );
         }
 
-        machine::MachinePose4D interpolatePose
-        (
-            const machine::MachinePose4D& start,
-            const machine::MachinePose4D& end,
-            double factor
-        )
-        {
-            return
-            {
-                start.x + (end.x - start.x) * factor,
-                start.y + (end.y - start.y) * factor,
-                start.z + (end.z - start.z) * factor,
-                start.aDegrees
-                    + (end.aDegrees - start.aDegrees) * factor
-            };
-        }
-
         geometry::Vector3d interpolatePoint
         (
             const geometry::Vector3d& start,
@@ -105,68 +81,6 @@ namespace cadcam::planning
                 start.y + (end.y - start.y) * factor,
                 start.z + (end.z - start.z) * factor
             };
-        }
-
-        void alignPoses
-        (
-            std::vector<machine::MachinePose4D>& poses,
-            const std::optional<machine::MachinePose4D>& previous,
-            bool keepContinuousAngle
-        )
-        {
-            if (!keepContinuousAngle || !previous.has_value()
-                || poses.empty())
-            {
-                return;
-            }
-            double offset = 0.0;
-            while (poses.front().aDegrees + offset
-                - previous->aDegrees > 180.0)
-            {
-                offset -= 360.0;
-            }
-            while (poses.front().aDegrees + offset
-                - previous->aDegrees < -180.0)
-            {
-                offset += 360.0;
-            }
-            for (machine::MachinePose4D& pose : poses)
-                pose.aDegrees += offset;
-        }
-
-        geometry::SamplingPolicy samplingPolicy
-        (
-            geometry::SourceGeometryKind kind
-        )
-        {
-            geometry::SamplingPolicy policy;
-            policy.chordTolerance = 0.0;
-            switch (kind)
-            {
-            case geometry::SourceGeometryKind::Circle:
-                policy.minimumSegments = 128;
-                policy.fullTurnSegments = 128;
-                break;
-            case geometry::SourceGeometryKind::Arc:
-                policy.minimumSegments = 8;
-                policy.maximumAngularStep =
-                    5.0 * kTwoPi / 360.0;
-                policy.fullTurnSegments = 128;
-                break;
-            case geometry::SourceGeometryKind::Ellipse:
-                policy.minimumSegments = 16;
-                policy.fullTurnSegments = 128;
-                break;
-            case geometry::SourceGeometryKind::Polyline:
-                policy.minimumSegments = 1;
-                policy.minimumBulgeSegments = 4;
-                policy.fullTurnSegments = 128;
-                break;
-            default:
-                policy.minimumSegments = 1;
-                break;
-            }
-            return policy;
         }
 
         machine::RotaryMachinePolicy machinePolicy
@@ -408,11 +322,15 @@ namespace cadcam::planning
 
         PlannedTransferSignature plannedSignature
         (
-            const machine::RotaryTransferPreview& preview
+            const machine::RotaryTransferPreview& preview,
+            const machine::MachinePose4D& previousCutEnd,
+            const geometry::Vector3d& previousSourceEnd
         )
         {
             PlannedTransferSignature signature;
             signature.kind = plannedKind(preview.kind);
+            signature.previousCutEnd = plannedPose(previousCutEnd);
+            signature.previousSourceEnd = previousSourceEnd;
             signature.finalApproachOrigin =
                 plannedPose(preview.finalApproachOrigin);
             signature.cutStart = plannedPose(preview.cutStart);
@@ -423,175 +341,6 @@ namespace cadcam::planning
             for (const machine::TransferMotionPhase phase : preview.phases)
                 signature.phases.push_back(plannedPhase(phase));
             return signature;
-        }
-
-        UnitExecution closedExecution
-        (
-            const std::vector<geometry::Vector3d>& sourcePoints,
-            const std::vector<machine::MachinePose4D>& poses,
-            double overcutDistance,
-            double tolerance,
-            bool keepContinuousAngle
-        )
-        {
-            UnitExecution execution;
-            execution.cutStart = poses.front();
-            execution.sourceStart = sourcePoints.front();
-            machine::MachinePose4D alignedStart = poses.front();
-            if (keepContinuousAngle)
-            {
-                while (alignedStart.aDegrees
-                    - poses.back().aDegrees > 180.0)
-                {
-                    alignedStart.aDegrees -= 360.0;
-                }
-                while (alignedStart.aDegrees
-                    - poses.back().aDegrees < -180.0)
-                {
-                    alignedStart.aDegrees += 360.0;
-                }
-            }
-            execution.cutEnd = alignedStart;
-            execution.sourceEnd = sourcePoints.front();
-            if (overcutDistance <= tolerance) return execution;
-
-            double totalLength = 0.0;
-            for (std::size_t index = 1U; index < sourcePoints.size(); ++index)
-                totalLength += distance3D
-                    (sourcePoints[index - 1U], sourcePoints[index]);
-            totalLength += distance3D
-                (sourcePoints.back(), sourcePoints.front());
-            double remaining = std::min(overcutDistance, totalLength);
-            const double angleOffset =
-                alignedStart.aDegrees - poses.front().aDegrees;
-            for (std::size_t index = 1U;
-                index < sourcePoints.size() && remaining > tolerance;
-                ++index)
-            {
-                const double length = distance3D
-                    (sourcePoints[index - 1U], sourcePoints[index]);
-                if (length <= tolerance) continue;
-                const double used = std::min(remaining, length);
-                machine::MachinePose4D start = poses[index - 1U];
-                machine::MachinePose4D end = poses[index];
-                start.aDegrees += angleOffset;
-                end.aDegrees += angleOffset;
-                execution.cutEnd = interpolatePose
-                    (start, end, used / length);
-                execution.sourceEnd = interpolatePoint
-                    (sourcePoints[index - 1U], sourcePoints[index],
-                        used / length);
-                remaining -= used;
-            }
-            if (remaining > tolerance)
-            {
-                const double length = distance3D
-                    (sourcePoints.back(), sourcePoints.front());
-                if (length > tolerance)
-                {
-                    const double used = std::min(remaining, length);
-                    machine::MachinePose4D start = poses.back();
-                    start.aDegrees += angleOffset;
-                    execution.cutEnd = interpolatePose
-                        (start, alignedStart, used / length);
-                    execution.sourceEnd = interpolatePoint
-                        (sourcePoints.back(), sourcePoints.front(),
-                            used / length);
-                }
-            }
-            return execution;
-        }
-
-        std::optional<UnitExecution> executeUnit
-        (
-            const ProcessUnit& unit,
-            const ProcessPlan& plan,
-            const std::unordered_map<geometry::EntityId,
-                const PlanningEntity*>& entities,
-            const machine::RotaryMachinePolicy& policy,
-            const std::optional<machining::TubeSectionModel>& section,
-            const OperationContext& context,
-            const std::optional<machine::MachinePose4D>& previousPose
-        )
-        {
-            geometry::GeometryCompiler compiler;
-            std::vector<geometry::Vector3d> sourcePoints;
-            std::vector<machine::MachinePose4D> machinePoses;
-            std::optional<machine::MachinePose4D> alignmentPose =
-                previousPose;
-            for (const ProcessAssignment& assignment : plan.assignments)
-            {
-                if (assignment.processUnitIndex < 0
-                    || static_cast<std::size_t>
-                        (assignment.processUnitIndex)
-                        >= plan.processUnits.size()
-                    || !sameUnitKey(plan.processUnits
-                        [static_cast<std::size_t>
-                            (assignment.processUnitIndex)].key, unit.key))
-                {
-                    continue;
-                }
-                const auto found = entities.find(assignment.entityId);
-                if (found == entities.end()
-                    || found->second == nullptr
-                    || !found->second->sourceEntity.has_value())
-                {
-                    return std::nullopt;
-                }
-                geometry::PathCompileOptions options;
-                options.reverse = assignment.reverse;
-                options.startParameter = assignment.startParameter;
-                auto path = compiler.compile
-                (
-                    *found->second->sourceEntity,
-                    samplingPolicy(found->second->sourceKind),
-                    options,
-                    context
-                );
-                if (!path.succeeded() || !path.value.has_value())
-                    return std::nullopt;
-                auto transformed = machine::RotaryKinematics::transform
-                    (*path.value, policy, section, context);
-                if (!transformed.succeeded()
-                    || !transformed.value.has_value()
-                    || transformed.value->poses.empty())
-                {
-                    return std::nullopt;
-                }
-                auto poses = std::move(transformed.value->poses);
-                alignPoses(poses, alignmentPose,
-                    policy.keepContinuousAngle);
-                for (std::size_t index = 0U;
-                    index < path.value->vertices.size(); ++index)
-                {
-                    if (!sourcePoints.empty() && index == 0U
-                        && distance3D(sourcePoints.back(),
-                            path.value->vertices.front().position)
-                            <= policy.numericalEpsilon)
-                    {
-                        continue;
-                    }
-                    sourcePoints.push_back
-                        (path.value->vertices[index].position);
-                    machinePoses.push_back(poses[index]);
-                }
-                alignmentPose = poses.back();
-            }
-            if (sourcePoints.empty() || machinePoses.empty())
-                return std::nullopt;
-            if (unit.closed)
-            {
-                return closedExecution(sourcePoints, machinePoses,
-                    policy.overcutDistance, policy.numericalEpsilon,
-                    policy.keepContinuousAngle);
-            }
-            return UnitExecution
-            {
-                machinePoses.front(),
-                machinePoses.back(),
-                sourcePoints.front(),
-                sourcePoints.back()
-            };
         }
 
         bool candidateLess
@@ -647,7 +396,8 @@ namespace cadcam::planning
             int processUnitIndex,
             int previousProcessUnitIndex,
             const std::optional<machining::TubeZone16>& previousOwnerZone,
-            const std::optional<UnitExecution>& previousExecution,
+            const std::optional<machine::ProcessUnitExecutionResult>&
+                previousExecution,
             const machine::RotaryMachinePolicy& policy,
             const std::optional<machining::TubeSectionModel>& section,
             double projectionTolerance,
@@ -664,7 +414,7 @@ namespace cadcam::planning
             auto compiled = compiler.compile
             (
                 *entity.sourceEntity,
-                samplingPolicy(entity.sourceKind),
+                entity.executionSamplingPolicy,
                 options,
                 context
             );
@@ -704,34 +454,45 @@ namespace cadcam::planning
                 }
             }
 
-            auto transformed = machine::RotaryKinematics::transform
-                (*compiled.value, policy, section, context);
-            if (!transformed.succeeded()
-                || !transformed.value.has_value()
-                || transformed.value->poses.empty())
+            machine::ProcessUnitExecutionPath executionPath;
+            executionPath.entityId = entity.entityId;
+            executionPath.sourceIndex = entity.sourceIndex;
+            executionPath.sourceKind = entity.sourceKind;
+            executionPath.sourceProcessOrder = processUnitIndex;
+            executionPath.processUnitIndex = processUnitIndex;
+            executionPath.path = *compiled.value;
+            auto execution = machine::ProcessUnitExecutionResolver::resolve
+            (
+                { executionPath },
+                true,
+                policy,
+                section,
+                previousExecution.has_value()
+                    ? std::optional<machine::MachinePose4D>
+                        (previousExecution->finalCutPose)
+                    : std::nullopt,
+                context
+            );
+            if (!execution.succeeded()
+                || !execution.value.has_value()
+                || execution.value->posesByPath.empty()
+                || execution.value->posesByPath.front().empty())
             {
                 return std::nullopt;
             }
             std::vector<machine::MachinePose4D> poses =
-                std::move(transformed.value->poses);
-            const std::optional<machine::MachinePose4D> previousPose =
-                previousExecution.has_value()
-                ? std::optional<machine::MachinePose4D>
-                    (previousExecution->cutEnd)
-                : std::nullopt;
-            alignPoses(poses, previousPose,
-                policy.keepContinuousAngle);
+                execution.value->posesByPath.front();
 
             machine::RotaryTransferRequest request;
             request.previousCutEnd = previousExecution.has_value()
-                ? previousExecution->cutEnd
+                ? previousExecution->finalCutPose
                 : policy.useInitialMachinePoint
                     ? policy.initialMachinePoint
                     : machine::MachinePose4D
                         { poses.front().x, poses.front().y, 0.0, 0.0 };
             request.nextCutStart = poses.front();
             request.previousSourceEnd = previousExecution.has_value()
-                ? previousExecution->sourceEnd : sourceStart;
+                ? previousExecution->finalSourcePosition : sourceStart;
             request.nextSourceStart = sourceStart;
             request.previousProcessUnitIndex =
                 previousProcessUnitIndex;
@@ -803,20 +564,14 @@ namespace cadcam::planning
             candidate.poses = std::move(poses);
             candidate.transfer = std::move(*preview.value);
             candidate.previousCutEnd = request.previousCutEnd;
+            candidate.previousSourceEnd = request.previousSourceEnd;
             candidate.signedResidual = signedResidual;
             candidate.tangentResidual = std::abs(signedResidual);
             candidate.approachCutDot =
                 std::clamp(dot, -1.0, 1.0);
             candidate.approachCutAngle =
                 std::acos(candidate.approachCutDot);
-            std::vector<geometry::Vector3d> sourcePoints;
-            sourcePoints.reserve(candidate.path.vertices.size());
-            for (const auto& vertex : candidate.path.vertices)
-                sourcePoints.push_back(vertex.position);
-            candidate.execution = closedExecution(sourcePoints,
-                candidate.poses, policy.overcutDistance,
-                policy.numericalEpsilon,
-                policy.keepContinuousAngle);
+            candidate.execution = std::move(*execution.value);
             return candidate;
         }
 
@@ -827,7 +582,8 @@ namespace cadcam::planning
             int processUnitIndex,
             int previousProcessUnitIndex,
             const std::optional<machining::TubeZone16>& previousOwnerZone,
-            const std::optional<UnitExecution>& previousExecution,
+            const std::optional<machine::ProcessUnitExecutionResult>&
+                previousExecution,
             const machine::RotaryMachinePolicy& policy,
             const std::optional<machining::TubeSectionModel>& section,
             double projectionTolerance,
@@ -1126,8 +882,21 @@ namespace cadcam::planning
 
         std::unordered_map<geometry::EntityId, const PlanningEntity*>
             entities;
+        std::vector<machine::ProcessUnitExecutionSource> executionSources;
+        executionSources.reserve(input.entities.size());
         for (const PlanningEntity& entity : input.entities)
+        {
             entities.emplace(entity.entityId, &entity);
+            if (!entity.sourceEntity.has_value()) continue;
+            executionSources.push_back
+            ({
+                entity.entityId,
+                entity.sourceIndex,
+                entity.sourceKind,
+                &*entity.sourceEntity,
+                entity.executionSamplingPolicy
+            });
+        }
 
         const machine::RotaryMachinePolicy rotaryPolicy =
             machinePolicy(policy, *input.tubeSection);
@@ -1152,7 +921,8 @@ namespace cadcam::planning
                 input.tubeSection->geometry.zWidth) * 1.0e-6
         );
 
-        std::optional<UnitExecution> previousExecution;
+        std::optional<machine::ProcessUnitExecutionResult>
+            previousExecution;
         std::optional<machining::TubeZone16> previousOwnerZone;
         int previousProcessUnitIndex = -1;
         for (std::size_t unitIndex = 0U;
@@ -1226,7 +996,12 @@ namespace cadcam::planning
                     search.selected->parameter;
                 assignment->reverse = search.selected->reverse;
                 assignment->plannedIncomingTransfer =
-                    plannedSignature(search.selected->transfer);
+                    plannedSignature
+                    (
+                        search.selected->transfer,
+                        search.selected->previousCutEnd,
+                        search.selected->previousSourceEnd
+                    );
                 previousExecution =
                     search.selected->execution;
                 report.addDiagnostic(refinementDiagnostic
@@ -1235,18 +1010,46 @@ namespace cadcam::planning
             }
             else
             {
-                previousExecution = executeUnit
+                auto paths =
+                    machine::ProcessUnitExecutionResolver::compilePaths
                 (
-                    unit, plan, entities, rotaryPolicy,
-                    input.tubeSection, context,
+                    unit,
+                    static_cast<int>(unitIndex),
+                    plan.assignments,
+                    plan.plannedFragments,
+                    executionSources,
+                    context
+                );
+                report.mergeDiagnostics(paths);
+                if (!paths.succeeded() || !paths.value.has_value())
+                {
+                    report.status = paths.status;
+                    report.addDiagnostic(failureDiagnostic
+                    (
+                        context,
+                        QStringLiteral("无法展开既定加工单元的实际执行路径。"),
+                        QStringLiteral("Frozen unit path expansion failed before single-closed entry refinement.")
+                    ));
+                    return report;
+                }
+                auto execution =
+                    machine::ProcessUnitExecutionResolver::resolve
+                (
+                    *paths.value,
+                    unit.closed,
+                    rotaryPolicy,
+                    input.tubeSection,
                     previousExecution.has_value()
                     ? std::optional<machine::MachinePose4D>
-                        (previousExecution->cutEnd)
-                    : std::nullopt
+                        (previousExecution->finalCutPose)
+                    : std::nullopt,
+                    context
                 );
-                if (!previousExecution.has_value())
+                report.mergeDiagnostics(execution);
+                if (!execution.succeeded()
+                    || !execution.value.has_value())
                 {
-                    report.status = OperationStatus::Failed;
+                    report.status = execution.status;
                     report.addDiagnostic(failureDiagnostic
                     (
                         context,
@@ -1255,6 +1058,7 @@ namespace cadcam::planning
                     ));
                     return report;
                 }
+                previousExecution = std::move(*execution.value);
             }
             previousOwnerZone = unit.ownerZone;
             previousProcessUnitIndex = static_cast<int>(unitIndex);

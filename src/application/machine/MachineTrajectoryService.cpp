@@ -2,7 +2,7 @@
 
 #include "cad/document/CadDocument.h"
 #include "application/geometry/DocumentGeometrySnapshotBuilder.h"
-#include "core/geometry/GeometryCompiler.h"
+#include "core/machine/ProcessUnitExecutionResolver.h"
 #include "core/machine/RotaryTrajectoryBuilder.h"
 #include "core/machining/TubeSectionProjector.h"
 #include "drw_entities.h"
@@ -106,6 +106,14 @@ namespace
             .arg(pose.aDegrees, 0, 'g', 15);
     }
 
+    QString sourcePointText(const cadcam::geometry::Vector3d& point)
+    {
+        return QStringLiteral("(%1,%2,%3)")
+            .arg(point.x, 0, 'g', 15)
+            .arg(point.y, 0, 'g', 15)
+            .arg(point.z, 0, 'g', 15);
+    }
+
     void logTransferSummaries
     (
         const cadcam::machine::MachineTrajectory& trajectory
@@ -145,6 +153,21 @@ namespace
                         ? QStringLiteral("true")
                         : QStringLiteral("false"))
                     : QStringLiteral("not-planned"));
+            if (summary.hasPlannedPreview)
+            {
+                message += QStringLiteral(
+                    " plannedPreviousCutEnd=%1 actualPreviousCutEnd=%2 "
+                    "plannedPreviousSourceEnd=%3 actualPreviousSourceEnd=%4 "
+                    "poseDelta=%5 sourceDelta=%6")
+                    .arg(poseText(summary.plannedPreviousCutEnd))
+                    .arg(poseText(summary.actualPreviousCutEnd))
+                    .arg(sourcePointText
+                        (summary.plannedPreviousSourceEnd))
+                    .arg(sourcePointText
+                        (summary.actualPreviousSourceEnd))
+                    .arg(summary.poseDelta, 0, 'g', 15)
+                    .arg(summary.sourceDelta, 0, 'g', 15);
+            }
             if (summary.kind
                 == TransferMotionKind::CrossZoneRotaryTransfer
                 || summary.kind == TransferMotionKind::InitialApproach)
@@ -197,133 +220,6 @@ namespace
             break;
         }
         return policy;
-    }
-
-    double pathDistance
-    (
-        const cadcam::geometry::Vector3d& left,
-        const cadcam::geometry::Vector3d& right
-    )
-    {
-        return std::sqrt
-        (
-            (left.x - right.x) * (left.x - right.x)
-            + (left.y - right.y) * (left.y - right.y)
-            + (left.z - right.z) * (left.z - right.z)
-        );
-    }
-
-    cadcam::geometry::PathVertex3D interpolatePathVertex
-    (
-        const cadcam::geometry::PathVertex3D& start,
-        const cadcam::geometry::PathVertex3D& end,
-        double parameter
-    )
-    {
-        const double denominator =
-            end.sourceParameter - start.sourceParameter;
-        const double factor = std::abs(denominator) <= 1.0e-12
-            ? 0.0 : std::clamp
-                ((parameter - start.sourceParameter) / denominator,
-                    0.0, 1.0);
-        return
-        {
-            {
-                start.position.x
-                    + (end.position.x - start.position.x) * factor,
-                start.position.y
-                    + (end.position.y - start.position.y) * factor,
-                start.position.z
-                    + (end.position.z - start.position.z) * factor
-            },
-            parameter
-        };
-    }
-
-    struct PathParameterLocation
-    {
-        std::size_t segmentIndex = 0U;
-        cadcam::geometry::PathVertex3D vertex;
-    };
-
-    std::optional<PathParameterLocation> locatePathParameter
-    (
-        const std::vector<cadcam::geometry::PathVertex3D>& vertices,
-        double parameter
-    )
-    {
-        if (vertices.size() < 2U || !std::isfinite(parameter))
-            return std::nullopt;
-        constexpr double parameterEpsilon = 1.0e-10;
-        for (std::size_t index = 1U; index < vertices.size(); ++index)
-        {
-            const double minimum = std::min
-                (vertices[index - 1U].sourceParameter,
-                    vertices[index].sourceParameter)
-                - parameterEpsilon;
-            const double maximum = std::max
-                (vertices[index - 1U].sourceParameter,
-                    vertices[index].sourceParameter)
-                + parameterEpsilon;
-            if (parameter < minimum || parameter > maximum) continue;
-            return PathParameterLocation
-            {
-                index - 1U,
-                interpolatePathVertex
-                    (vertices[index - 1U], vertices[index], parameter)
-            };
-        }
-        return std::nullopt;
-    }
-
-    std::optional<cadcam::geometry::Path3D> slicePath
-    (
-        const cadcam::geometry::Path3D& source,
-        const cadcam::planning::ProcessPathFragment& fragment
-    )
-    {
-        std::vector<cadcam::geometry::PathVertex3D> vertices =
-            source.vertices;
-        if (fragment.reverse) std::reverse(vertices.begin(), vertices.end());
-        const auto begin = locatePathParameter
-            (vertices, fragment.sourceParameterBegin);
-        const auto end = locatePathParameter
-            (vertices, fragment.sourceParameterEnd);
-        if (!begin.has_value() || !end.has_value()
-            || begin->segmentIndex > end->segmentIndex)
-        {
-            return std::nullopt;
-        }
-
-        cadcam::geometry::Path3D result = source;
-        result.vertices.clear();
-        result.closed = false;
-        result.vertices.push_back(begin->vertex);
-        for (std::size_t index = begin->segmentIndex + 1U;
-            index <= end->segmentIndex && index < vertices.size(); ++index)
-        {
-            if (pathDistance(result.vertices.back().position,
-                vertices[index].position) > 1.0e-12)
-            {
-                result.vertices.push_back(vertices[index]);
-            }
-        }
-        if (pathDistance(result.vertices.back().position,
-            end->vertex.position) > 1.0e-12)
-        {
-            result.vertices.push_back(end->vertex);
-        }
-        else
-        {
-            result.vertices.back() = end->vertex;
-        }
-        if (result.vertices.size() < 2U
-            || pathDistance(result.vertices.front().position,
-                result.vertices.back().position) <= 1.0e-12)
-        {
-            return std::nullopt;
-        }
-        return result;
     }
 
     Diagnostic serviceDiagnostic
@@ -423,213 +319,97 @@ OperationResult<cadcam::machine::MachineTrajectory> MachineTrajectoryService::bu
         }
     }
 
-    std::map<geometry::EntityId, const GeometrySourceEntry*> entries;
-    for (const auto& entry : captured.value->entries) entries[entry.attributes.entityId] = &entry;
-    std::map<int, const planning::ProcessGroup*> groups;
-    for (const auto& group : plan.groups) groups[group.groupId] = &group;
-
     machine::RotaryTrajectoryInput input;
     input.contentRevision = plan.contentRevision;
     input.processStateRevision = plan.processStateRevision;
     input.processGroups = plan.groups;
     input.tubeSection = tubeSection;
-    geometry::GeometryCompiler compiler;
-    std::map<geometry::EntityId, const planning::ProcessAssignment*>
-        assignmentsById;
-    for (const auto& assignment : assignments)
-        assignmentsById.emplace(assignment.entityId, &assignment);
-    std::map<int, std::vector<const planning::ProcessPathFragment*>>
-        fragmentsByUnit;
-    for (const auto& fragment : plan.plannedFragments)
-        fragmentsByUnit[fragment.processUnitIndex].push_back(&fragment);
-    for (auto& [unitIndex, fragments] : fragmentsByUnit)
+
+    std::vector<machine::ProcessUnitExecutionSource> executionSources;
+    executionSources.reserve(captured.value->entries.size());
+    for (const GeometrySourceEntry& entry : captured.value->entries)
     {
-        std::sort(fragments.begin(), fragments.end(),
-            [](const auto* left, const auto* right)
-            {
-                return left->fragmentOrder < right->fragmentOrder;
-            });
+        if (!entry.sourceEntity.has_value()) continue;
+        executionSources.push_back
+        ({
+            entry.attributes.entityId,
+            entry.sourceIndex,
+            entry.sourceKind,
+            &*entry.sourceEntity,
+            productionSamplingPolicy(entry.attributes.originalDxfType)
+        });
     }
-    std::map<geometry::EntityId, geometry::Path3D> canonicalPaths;
-    std::set<int> emittedFragmentUnits;
+
     input.entities.reserve(assignments.size() + plan.plannedFragments.size());
-    for (std::size_t index = 0; index < assignments.size(); ++index)
+    for (std::size_t unitIndex = 0U;
+        unitIndex < plan.processUnits.size(); ++unitIndex)
     {
-        const auto& assignment = assignments[index];
-        const auto found = entries.find(assignment.entityId);
-        if (assignment.processOrder != static_cast<int>(index)
-            || assignment.processUnitIndex < 0
-            || static_cast<std::size_t>(assignment.processUnitIndex)
-                >= plan.processUnits.size()
-            || found == entries.end()
-            || found->second == nullptr || !found->second->sourceEntity.has_value())
-        {
-            result.status = OperationStatus::Failed;
-            if (found != entries.end() && found->second != nullptr)
-                result.addDiagnostic(serviceDiagnostic(DiagnosticCode::EmptyPath,
-                    QStringLiteral("图元加工路径为空。"), taskContext.operationContext, assignment.entityId));
-            result.addDiagnostic(serviceDiagnostic(DiagnosticCode::MachineTrajectoryEntityMissing,
-                QStringLiteral("加工计划中的图元在几何快照中不存在。"),
-                taskContext.operationContext, assignment.entityId));
-            return result;
-        }
-
-        const auto fragmentedUnit = fragmentsByUnit.find
-            (assignment.processUnitIndex);
-        if (fragmentedUnit != fragmentsByUnit.end())
-        {
-            if (!emittedFragmentUnits.insert
-                (assignment.processUnitIndex).second)
-            {
-                continue;
-            }
-            for (const planning::ProcessPathFragment* fragment :
-                fragmentedUnit->second)
-            {
-                if (fragment == nullptr) continue;
-                const auto sourceAssignment = assignmentsById.find
-                    (fragment->entityId);
-                const auto sourceEntry = entries.find
-                    (fragment->entityId);
-                if (sourceAssignment == assignmentsById.end()
-                    || sourceEntry == entries.end()
-                    || sourceEntry->second == nullptr
-                    || !sourceEntry->second->sourceEntity.has_value())
-                {
-                    result.status = OperationStatus::Failed;
-                    result.addDiagnostic(serviceDiagnostic
-                    (
-                        DiagnosticCode::MachineTrajectoryEntityMissing,
-                        QStringLiteral("计划片段对应的图元在几何快照中不存在。"),
-                        taskContext.operationContext,
-                        fragment->entityId
-                    ));
-                    return result;
-                }
-
-                auto canonical = canonicalPaths.find(fragment->entityId);
-                if (canonical == canonicalPaths.end())
-                {
-                    geometry::PathCompileOptions options;
-                    auto compiled = compiler.compile
-                    (
-                        *sourceEntry->second->sourceEntity,
-                        productionSamplingPolicy
-                            (sourceEntry->second->attributes.originalDxfType),
-                        options,
-                        taskContext.operationContext
-                    );
-                    result.mergeDiagnostics(compiled);
-                    if (!compiled.succeeded()
-                        || !compiled.value.has_value())
-                    {
-                        result.status = OperationStatus::Failed;
-                        result.addDiagnostic(serviceDiagnostic
-                        (
-                            DiagnosticCode::MachineTrajectoryGeometryCompileFailed,
-                            QStringLiteral("计划片段的源图元无法编译为四轴路径。"),
-                            taskContext.operationContext,
-                            fragment->entityId
-                        ));
-                        return result;
-                    }
-                    canonical = canonicalPaths.emplace
-                        (fragment->entityId,
-                            std::move(*compiled.value)).first;
-                }
-                const auto path = slicePath
-                    (canonical->second, *fragment);
-                if (!path.has_value())
-                {
-                    result.status = OperationStatus::Failed;
-                    result.addDiagnostic(serviceDiagnostic
-                    (
-                        DiagnosticCode::MachineTrajectoryInvalidPath,
-                        QStringLiteral("计划片段无法映射到完整源路径。"),
-                        taskContext.operationContext,
-                        fragment->entityId
-                    ));
-                    return result;
-                }
-
-                machine::TrajectoryEntityInput entity;
-                entity.entityId = fragment->entityId;
-                entity.sourceIndex = sourceEntry->second->sourceIndex;
-                entity.sourceKind = sourceEntry->second->sourceKind;
-                entity.processOrder =
-                    static_cast<int>(input.entities.size());
-                entity.sourceProcessOrder =
-                    sourceAssignment->second->processOrder;
-                entity.fragmentOrder = fragment->fragmentOrder;
-                entity.processGroupId =
-                    sourceAssignment->second->continuousGroupId;
-                entity.processUnitIndex =
-                    sourceAssignment->second->processUnitIndex;
-                if (entity.processUnitIndex >= 0
-                    && static_cast<std::size_t>(entity.processUnitIndex)
-                        < plan.processUnits.size())
-                {
-                    entity.ownerZone = plan.processUnits
-                        [static_cast<std::size_t>
-                            (entity.processUnitIndex)].ownerZone;
-                }
-                entity.path = *path;
-                const auto group = groups.find(entity.processGroupId);
-                entity.closed = group != groups.end()
-                    && group->second != nullptr
-                    ? group->second->closed : false;
-                input.entities.push_back(std::move(entity));
-            }
-            continue;
-        }
-
-        geometry::PathCompileOptions options;
-        options.reverse = assignment.reverse;
-        options.startParameter = assignment.startParameter;
-        auto compiled = compiler.compile
+        const planning::ProcessUnit& unit = plan.processUnits[unitIndex];
+        auto compiled = machine::ProcessUnitExecutionResolver::compilePaths
         (
-            *found->second->sourceEntity,
-            productionSamplingPolicy(found->second->attributes.originalDxfType),
-            options,
+            unit,
+            static_cast<int>(unitIndex),
+            assignments,
+            plan.plannedFragments,
+            executionSources,
             taskContext.operationContext
         );
         result.mergeDiagnostics(compiled);
         if (!compiled.succeeded() || !compiled.value.has_value())
         {
-            result.status = OperationStatus::Failed;
-            result.addDiagnostic(serviceDiagnostic(DiagnosticCode::EmptyPath,
-                QStringLiteral("图元加工路径为空。"),
-                taskContext.operationContext, assignment.entityId));
-            result.addDiagnostic(serviceDiagnostic(DiagnosticCode::MachineTrajectoryGeometryCompileFailed,
-                QStringLiteral("加工计划中的图元无法编译为四轴源路径。"),
-                taskContext.operationContext, assignment.entityId));
+            result.status = compiled.status;
             return result;
         }
-        machine::TrajectoryEntityInput entity;
-        entity.entityId = assignment.entityId;
-        entity.sourceIndex = found->second->sourceIndex;
-        entity.sourceKind = found->second->sourceKind;
-        entity.processOrder = static_cast<int>(input.entities.size());
-        entity.sourceProcessOrder = assignment.processOrder;
-        entity.processGroupId = assignment.continuousGroupId;
-        entity.processUnitIndex = assignment.processUnitIndex;
-        entity.plannedIncomingTransfer =
-            assignment.plannedIncomingTransfer;
-        if (entity.processUnitIndex >= 0
-            && static_cast<std::size_t>(entity.processUnitIndex)
-                < plan.processUnits.size())
+
+        const planning::ProcessAssignment* firstAssignment = nullptr;
+        for (const planning::ProcessAssignment& assignment : assignments)
         {
-            entity.ownerZone = plan.processUnits
-                [static_cast<std::size_t>(entity.processUnitIndex)].ownerZone;
+            if (assignment.processUnitIndex != static_cast<int>(unitIndex))
+            {
+                continue;
+            }
+            if (firstAssignment == nullptr
+                || assignment.processOrder < firstAssignment->processOrder)
+            {
+                firstAssignment = &assignment;
+            }
         }
-        entity.path = std::move(*compiled.value);
-        entity.closed = entity.path.closed;
-        const auto group = groups.find(entity.processGroupId);
-        if (group != groups.end() && group->second != nullptr)
+        if (firstAssignment == nullptr)
         {
-            entity.closed = group->second->closed;
+            result.status = OperationStatus::Failed;
+            result.addDiagnostic(serviceDiagnostic
+            (
+                DiagnosticCode::MachineTrajectoryEntityMissing,
+                QStringLiteral("加工单元缺少加工分配。"),
+                taskContext.operationContext
+            ));
+            return result;
         }
-        input.entities.push_back(std::move(entity));
+
+        for (std::size_t pathIndex = 0U;
+            pathIndex < compiled.value->size(); ++pathIndex)
+        {
+            machine::ProcessUnitExecutionPath& path =
+                (*compiled.value)[pathIndex];
+            machine::TrajectoryEntityInput entity;
+            entity.entityId = path.entityId;
+            entity.sourceIndex = path.sourceIndex;
+            entity.sourceKind = path.sourceKind;
+            entity.processOrder = static_cast<int>(input.entities.size());
+            entity.sourceProcessOrder = path.sourceProcessOrder;
+            entity.fragmentOrder = path.fragmentOrder;
+            entity.processGroupId = path.processGroupId;
+            entity.processUnitIndex = path.processUnitIndex;
+            entity.ownerZone = unit.ownerZone;
+            entity.closed = unit.closed;
+            if (pathIndex == 0U)
+            {
+                entity.plannedIncomingTransfer =
+                    firstAssignment->plannedIncomingTransfer;
+            }
+            entity.path = std::move(path.path);
+            input.entities.push_back(std::move(entity));
+        }
     }
     for (std::size_t index = 0; index < input.entities.size(); ++index)
     {

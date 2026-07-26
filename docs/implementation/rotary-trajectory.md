@@ -32,6 +32,7 @@
 - `TransferMotionPhase`：标识表面空移、联动离开、安全旋转和联动接近阶段。
 - `PlanarTrajectory`：按加工单元边界保存三轴抬刀、转移、接近和落刀姿态，NC 层只负责将这些已确定姿态编码为快速运动。
 - `RotaryMachinePolicy`：旋转轴、截面中心、四轴转移策略、Z 修正、过切和角度策略。
+- `ProcessUnitExecutionResult`：保存实际片段序列、逐片段机床姿态、切削起点、闭环补齐、过切目标及最终源空间和机床位置。
 - `RotarySurfaceRegion`：轨迹构建期间使用的顶、右、底、左、圆角、径向或未知表面分类。
 - `TubeZone16`：规划阶段确定的生产区位；轨迹输入携带每个加工单元的最终 `ownerZone`，仅用于转移分类。
 - `MachinePose4D`：单个 XYZ/A 机床姿态。
@@ -47,9 +48,8 @@ Rotary4Axis ProcessPlan
 + CadDocument
 + 旋转轴和运动配置
 → GeometrySourceSnapshot
-→ 按 assignment 重新编译 Path3D
-  或按 plannedFragments 裁切闭环互补 Path3D
-→ RotaryKinematics
+→ ProcessUnitExecutionResolver 按 assignment 或 plannedFragments 展开实际执行路径
+→ RotaryKinematics、连续 A 轴对齐、闭环补齐和过切终态
 → RotaryTrajectoryBuilder
 → MachineTrajectory
 ```
@@ -95,7 +95,7 @@ Rotary4Axis ProcessPlan
 - 每条路径使用计划确定的 `reverse` 和 `startParameter` 重新编译，轨迹不重新排序。
 - Break 断面和普通多图元闭环的计划片段使用与普通路径相同的生产采样策略编译完整源 `Path3D`，再按 `sourceParameterBegin`、`sourceParameterEnd` 和方向裁切。普通闭环内部入口可以来自 `Arc`/`Ellipse` 的真实几何切点，也可以来自 owner 区位可靠连续段的三维弧长中点；两者都通过真实源参数插值，不吸附到最近顶点。
 - 同一闭环起点成员可以在轨迹执行序列中出现两个互补片段。`ProcessAssignment`、`ProcessUnitKey` 和 Viewer 身份仍只保存一次稳定 `EntityId`；轨迹通过 `sourceProcessOrder` 与 `fragmentOrder` 区分源计划身份和执行位置。
-- `RotaryTrajectoryBuilder` 对片段执行标识进行唯一性校验，并按展开后的片段顺序执行原有源空间和机床空间连续性检查。闭合组回起点和过切基于完整片段序列，不复制完整源图元。
+- `ProcessUnitExecutionResolver` 按展开后的片段顺序执行源空间和机床空间连续性检查。闭合组回起点和过切基于完整片段序列，不复制完整源图元。
 - NC 构建器按通用轨迹执行块复用源图元元数据，并把块顺序重建为实际执行顺序；NC 与 G-code 层不判断 Break 类型。
 - 智能懒旋转计划在有效方管截面下先冻结唯一 owner、Break 分区、16 区位顺序和每区 X 顺序，再精化普通多图元闭环以及自动起点的单图元圆和完整椭圆。结果固化在 `ProcessPlan`、assignment、转移预览签名和可选片段中，轨迹层不再次进行区位调度、入口选择或方向评分。
 - 规划器使用前序实际切削终点、前后 `ownerZone` 和四轴转移策略计算 `previousTransferAnchor`。同区零离面时锚点为真实切削终点，同区离面时沿局部外法向偏移，跨区时使用旋转安全包络上的锚点；轨迹构建器复用同一组定义。
@@ -105,6 +105,8 @@ Rotary4Axis ProcessPlan
 - 规划阶段使用 Break 最终计划片段解析得到的强区位出口初始化下一分区，并按当前配置的顺时针或逆时针方向遍历全部 16 区位。区位扫描状态不进入 `DocumentProcessState`、轨迹或 NC。
 - 单图元闭合圆和完整椭圆的自动入口使用候选相关的动态转移预览。`SameZoneSurfaceTransfer` 的最终接近起点是前序切削终点；`SameZoneClearanceTransfer` 使用 75% 联动位置；`CrossZoneRotaryTransfer` 和首次接近使用已达到目标 A 角及旋转安全高度的安全旋转终点。
 - `RotaryTransferPlanner` 是规划与正式轨迹共用的唯一转移计算入口，保留既有 25%/75% 联动结构。规划器逐候选保存转移类型、最终接近起点、切削入口、目标姿态和阶段序列；正式轨迹重算后逐项校验，不一致时返回 `MachineTrajectoryTransferPreviewMismatch`。
+- 入口精化与正式轨迹共同使用 `ProcessUnitExecutionResolver`。转移预览中的前序位置包含计划片段、连续 A 轴对齐、闭环补齐和过切；预览签名同时保存前序机床终点和源空间终点。
+- 正式轨迹仍负责生成 `MachineMove`，但每个加工单元完成后的 `previousPose` 和 `previousSourcePose` 直接取共享执行结果。转移预览一致性检查保持硬失败，并报告规划值、实际值和对应差值。
 - 轨迹服务使用 Assignment 中的最终起点参数和方向重新编译同一源几何。圆和完整椭圆的首段切线来自精确源几何参数，自动起点不吸附到采样顶点。
 - 多图元闭合加工单元由规划阶段提供经过简单环验证的成员顺序和逐成员方向；轨迹层按该顺序连续编译，不重新执行最近端点选择。
 - 多图元闭环的计划结束位置是经过物理首尾连接验证的真实入口，异常闭环在计划发布前被拒绝，不会把错误结束位置传入后续轨迹。
@@ -134,7 +136,8 @@ Rotary4Axis ProcessPlan
 
 - `src/application/machine/MachineTrajectoryService.cpp`：校验计划并把文档几何和配置组装为轨迹输入。
 - `src/core/machine/RotaryKinematics.cpp`：将 `Path3D` 转换为连续 XYZ/A 姿态。
-- `src/core/machine/RotaryTrajectoryBuilder.cpp`：组织安全移动、连续切削、闭合和过切。
+- `src/core/machine/ProcessUnitExecutionResolver.cpp`：统一展开计划片段、对齐 A 轴并计算闭环和过切后的加工单元最终状态。
+- `src/core/machine/RotaryTrajectoryBuilder.cpp`：使用共享执行结果组织安全移动和连续切削。
 - `src/core/machining/TubeSectionProjector.cpp`：提供规划生产排序使用的静态 16 区位画像，不生成机床姿态。
 - `include/core/machine/MachineTrajectory.h`：定义三轴安全距离、四轴转移策略、转移阶段、轨迹和旋转上下文。
 - `src/core/machine/PlanarTrajectoryBuilder.cpp`：按三轴 `+Z` 语义和加工单元边界生成平面安全移动。

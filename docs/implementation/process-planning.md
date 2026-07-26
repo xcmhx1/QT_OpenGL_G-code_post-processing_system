@@ -211,6 +211,8 @@ Application 的 `DocumentProcessState` 持有当前 `ProcessUnitSequence`。Core
 - 前沿只允许单调推进。完整落在当前前沿之后的未加工单元会返回结构化回退诊断，不再通过回头扫描掩盖区位画像或分区问题。
 - 四轴单图元闭合圆和完整椭圆的 Auto 起点在规划输入中保持为空。最终自动参数由后置精化产生，人工起点不进入该分支。
 - 后置精化按冻结后的加工单元顺序传递真实切削终点。每个候选参数都通过共享动态转移预览器重新计算其 `finalApproachOrigin`，再在目标加工平面内求解 `cross(Q(u)-C(u), C'(u))=0` 或 `cross(Q(u)-E(u), E'(u))=0`。
+- 后置精化通过 `ProcessUnitExecutionResolver` 展开每个前序加工单元。存在 `ProcessPathFragment` 时严格按 `fragmentOrder` 执行真实源参数区间，不把 Break 或成员内部起刀图元按完整 assignment 重编译。
+- 前序加工单元终点包含连续 A 轴对齐、闭环回起点和过切后的最终机床姿态与源空间位置；该终点与正式四轴轨迹使用同一解析结果。
 - 周期参数搜索使用有限区间扫描和有限二分求根，最终起点来自源曲线参数，不使用极点、固定参数或最近离散顶点。每个切点同时比较正反方向，优先接近方向与首段切线同向，再依次比较明确的线性距离、A 轴反向次数、A 轴总变化和稳定参数。
 - owner 区位内没有真实动态切点时，仅在可靠参数段内部执行 `ClosestOwnerZoneParameterFallback`；该模式明确记录为角度最小回退，不伪装成几何切点。
 - 选中结果把 `startParameter`、`reverse` 和动态转移预览签名写入当前 `ProcessAssignment`。精化前后校验 `ProcessUnitKey` 序列和 `ownerZone` 完全一致，入口变化不反馈到区位、X 前沿或加工单元顺序。
@@ -255,6 +257,8 @@ Application 的 `DocumentProcessState` 持有当前 `ProcessUnitSequence`。Core
 - `src/application/planning/DocumentProcessPlanningAdapter.cpp`：将生产文档和加工状态转换为规划值对象。
 - `src/core/planning/PlanarProcessPlanBuilder.cpp`：构建三轴最近距离加工计划。
 - `src/core/planning/ProcessPlanBuilder.cpp`：构建四轴分组、断面约束和排序计划。
+- `src/core/planning/SingleClosedEntryRefiner.cpp`：在顺序和区位冻结后精化单图元圆与完整椭圆入口。
+- `src/core/machine/ProcessUnitExecutionResolver.cpp`：为入口精化和正式轨迹统一展开加工单元并计算真实最终执行状态。
 - `src/core/machining/TubeSectionProjector.cpp`：将 YZ 点投影到四个平面、四个圆角和八条分界母线，并生成加工单元区位画像。
 - `include/core/planning/ProcessPlan.h`：定义计划、分配、分组、排除和 revision。
 - `src/application/process/ProcessPresentationSnapshot.cpp`：将有效计划转换为 Viewer 展示数据。
