@@ -21,17 +21,6 @@ namespace cadcam::machine
             );
         }
 
-        double poseDistance(const MachinePose4D& left, const MachinePose4D& right)
-        {
-            return std::sqrt
-            (
-                (left.x - right.x) * (left.x - right.x)
-                + (left.y - right.y) * (left.y - right.y)
-                + (left.z - right.z) * (left.z - right.z)
-                + (left.aDegrees - right.aDegrees) * (left.aDegrees - right.aDegrees)
-            );
-        }
-
         double machinePositionDistance(const MachinePose4D& left, const MachinePose4D& right)
         {
             return std::sqrt
@@ -91,79 +80,12 @@ namespace cadcam::machine
             };
         }
 
-        MachinePose4D localClearancePose
-        (
-            const geometry::Vector3d& sourcePoint,
-            const MachinePose4D& pose,
-            double outwardDistance,
-            const RotaryMachinePolicy& policy,
-            const std::optional<machining::TubeSectionModel>& section
-        )
-        {
-            const geometry::Vector3d retract =
-                RotaryKinematics::sourceLocalClearancePose
-                (
-                    sourcePoint,
-                    outwardDistance,
-                    section,
-                    policy.tubeCenterY,
-                    policy.tubeCenterZ,
-                    policy.numericalEpsilon
-                );
-            const double resolvedDistance = sourceDistance(sourcePoint, retract);
-            MachinePose4D result = pose;
-            result.z += resolvedDistance;
-            return result;
-        }
-
         MachinePose4D interpolate
         (
             const MachinePose4D& start,
             const MachinePose4D& end,
             double factor
         );
-
-        TransferMotionKind classifyTransfer
-        (
-            const TransferClassificationInput& input,
-            const ToolTransferPolicy& policy
-        )
-        {
-            if (input.previousProcessUnitIndex < 0)
-                return TransferMotionKind::InitialApproach;
-            const bool ownerMissing =
-                !input.previousOwnerZone.has_value()
-                || !input.nextOwnerZone.has_value();
-            const bool zoneChanged = ownerMissing
-                || input.previousOwnerZone != input.nextOwnerZone;
-            const bool aRotationRequired =
-                std::abs(input.nextCutStart.aDegrees
-                    - input.previousCutEnd.aDegrees)
-                > input.aAxisTolerance;
-            if (zoneChanged || aRotationRequired)
-                return TransferMotionKind::CrossZoneRotaryTransfer;
-            return policy.sameZoneTransferClearance <= input.aAxisTolerance
-                ? TransferMotionKind::SameZoneSurfaceTransfer
-                : TransferMotionKind::SameZoneClearanceTransfer;
-        }
-
-        void appendDistinctRapid
-        (
-            std::vector<MachineMove>& moves,
-            const MachinePose4D& current,
-            const MachinePose4D& target,
-            const TrajectoryEntityInput& entity,
-            TransferMotionKind kind,
-            TransferMotionPhase phase,
-            double tolerance
-        )
-        {
-            const MachinePose4D& previous = moves.empty()
-                ? current : moves.back().target;
-            if (poseDistance(previous, target) <= tolerance) return;
-            moves.push_back(move(MachineMoveKind::Rapid, target, entity,
-                kind, phase));
-        }
 
         bool transferIsSafe
         (
@@ -217,7 +139,9 @@ namespace cadcam::machine
                 current = value.target;
             }
 
-            if (poseDistance(current, targetCutStart) > tolerance)
+            if (machinePositionDistance(current, targetCutStart) > tolerance
+                || std::abs(current.aDegrees - targetCutStart.aDegrees)
+                    > tolerance)
             {
                 return false;
             }
@@ -254,9 +178,8 @@ namespace cadcam::machine
                     >= summary.rotationSafeMachineZ - tolerance);
         }
 
-        TransferMotionSummary appendTransfer
+        RotaryTransferRequest transferRequest
         (
-            std::vector<MachineMove>& moves,
             const MachinePose4D& previousCutEnd,
             const MachinePose4D& nextCutStart,
             const geometry::Vector3d& previousSourceEnd,
@@ -268,122 +191,189 @@ namespace cadcam::machine
             double rotationSafeMachineZ
         )
         {
-            TransferClassificationInput classification;
-            classification.previousProcessUnitIndex = previousEntity != nullptr
+            RotaryTransferRequest request;
+            request.previousCutEnd = previousCutEnd;
+            request.nextCutStart = nextCutStart;
+            request.previousSourceEnd = previousSourceEnd;
+            request.nextSourceStart = nextSourceStart;
+            request.previousProcessUnitIndex = previousEntity != nullptr
                 ? previousEntity->processUnitIndex : -1;
-            classification.nextProcessUnitIndex = nextEntity.processUnitIndex;
-            classification.previousOwnerZone = previousEntity != nullptr
+            request.nextProcessUnitIndex = nextEntity.processUnitIndex;
+            request.previousOwnerZone = previousEntity != nullptr
                 ? previousEntity->ownerZone : std::nullopt;
-            classification.nextOwnerZone = nextEntity.ownerZone;
-            classification.previousCutEnd = previousCutEnd;
-            classification.nextCutStart = nextCutStart;
-            classification.aAxisTolerance = policy.numericalEpsilon;
+            request.nextOwnerZone = nextEntity.ownerZone;
+            request.policy = policy.transfer;
+            request.tubeSection = &section;
+            request.tubeCenterY = policy.tubeCenterY;
+            request.tubeCenterZ = policy.tubeCenterZ;
+            request.rotationSafeMachineZ = rotationSafeMachineZ;
+            request.numericalEpsilon = policy.numericalEpsilon;
+            return request;
+        }
+
+        bool poseMatches
+        (
+            const MachinePose4D& actual,
+            const planning::PlannedMachinePose4D& planned,
+            double tolerance
+        )
+        {
+            return machinePositionDistance(actual,
+                    { planned.x, planned.y, planned.z, planned.aDegrees })
+                    <= tolerance
+                && std::abs(actual.aDegrees - planned.aDegrees) <= tolerance;
+        }
+
+        bool plannedKindMatches
+        (
+            TransferMotionKind actual,
+            planning::PlannedTransferMotionKind planned
+        )
+        {
+            switch (actual)
+            {
+            case TransferMotionKind::InitialApproach:
+                return planned
+                    == planning::PlannedTransferMotionKind::InitialApproach;
+            case TransferMotionKind::SameZoneSurfaceTransfer:
+                return planned == planning::PlannedTransferMotionKind::
+                    SameZoneSurfaceTransfer;
+            case TransferMotionKind::SameZoneClearanceTransfer:
+                return planned == planning::PlannedTransferMotionKind::
+                    SameZoneClearanceTransfer;
+            case TransferMotionKind::CrossZoneRotaryTransfer:
+                return planned == planning::PlannedTransferMotionKind::
+                    CrossZoneRotaryTransfer;
+            }
+            return false;
+        }
+
+        bool plannedPhaseMatches
+        (
+            TransferMotionPhase actual,
+            planning::PlannedTransferMotionPhase planned
+        )
+        {
+            switch (actual)
+            {
+            case TransferMotionPhase::SurfaceTransfer:
+                return planned
+                    == planning::PlannedTransferMotionPhase::SurfaceTransfer;
+            case TransferMotionPhase::CoordinatedDeparture:
+                return planned == planning::PlannedTransferMotionPhase::
+                    CoordinatedDeparture;
+            case TransferMotionPhase::SafeRotaryTransfer:
+                return planned == planning::PlannedTransferMotionPhase::
+                    SafeRotaryTransfer;
+            case TransferMotionPhase::CoordinatedApproach:
+                return planned == planning::PlannedTransferMotionPhase::
+                    CoordinatedApproach;
+            case TransferMotionPhase::None:
+                return false;
+            }
+            return false;
+        }
+
+        bool previewMatchesPlan
+        (
+            const RotaryTransferPreview& preview,
+            const planning::PlannedTransferSignature& planned,
+            double tolerance
+        )
+        {
+            if (!plannedKindMatches(preview.kind, planned.kind)
+                || !poseMatches(preview.finalApproachOrigin,
+                    planned.finalApproachOrigin, tolerance)
+                || !poseMatches(preview.cutStart, planned.cutStart, tolerance)
+                || preview.targets.size() != planned.targets.size()
+                || preview.phases.size() != planned.phases.size())
+            {
+                return false;
+            }
+            for (std::size_t index = 0; index < preview.targets.size(); ++index)
+            {
+                if (!poseMatches(preview.targets[index],
+                        planned.targets[index], tolerance)
+                    || !plannedPhaseMatches(preview.phases[index],
+                        planned.phases[index]))
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        TransferMotionSummary appendTransferPreview
+        (
+            std::vector<MachineMove>& moves,
+            const RotaryTransferRequest& request,
+            const RotaryTransferPreview& preview,
+            const TrajectoryEntityInput& nextEntity
+        )
+        {
+            for (std::size_t index = 0; index < preview.targets.size(); ++index)
+            {
+                moves.push_back(move(MachineMoveKind::Rapid,
+                    preview.targets[index], nextEntity, preview.kind,
+                    preview.phases[index]));
+            }
 
             TransferMotionSummary summary;
-            summary.fromProcessUnit = classification.previousProcessUnitIndex;
-            summary.toProcessUnit = classification.nextProcessUnitIndex;
-            summary.fromOwnerZone = classification.previousOwnerZone;
-            summary.toOwnerZone = classification.nextOwnerZone;
-            summary.kind = classifyTransfer(classification, policy.transfer);
-            summary.previousCutEnd = previousCutEnd;
-            summary.nextCutStart = nextCutStart;
-            summary.deltaA = nextCutStart.aDegrees
-                - previousCutEnd.aDegrees;
+            summary.fromProcessUnit = request.previousProcessUnitIndex;
+            summary.toProcessUnit = request.nextProcessUnitIndex;
+            summary.fromOwnerZone = request.previousOwnerZone;
+            summary.toOwnerZone = request.nextOwnerZone;
+            summary.kind = preview.kind;
+            summary.previousCutEnd = request.previousCutEnd;
+            summary.nextCutStart = request.nextCutStart;
+            summary.actualFinalApproachOrigin =
+                preview.finalApproachOrigin;
+            summary.deltaA = request.nextCutStart.aDegrees
+                - request.previousCutEnd.aDegrees;
             summary.rotationSafetyClearance =
-                policy.transfer.rotationSafetyClearance;
+                request.policy.rotationSafetyClearance;
             summary.sameZoneTransferClearance =
-                policy.transfer.sameZoneTransferClearance;
-            summary.rotationSafeMachineZ = rotationSafeMachineZ;
+                request.policy.sameZoneTransferClearance;
+            summary.rotationSafeMachineZ =
+                request.rotationSafeMachineZ;
             summary.coordinated =
-                policy.transfer.coordinatedTransferEnabled;
-
-            if (summary.kind
-                == TransferMotionKind::SameZoneSurfaceTransfer)
+                request.policy.coordinatedTransferEnabled;
+            summary.surfaceTransfer = preview.kind
+                == TransferMotionKind::SameZoneSurfaceTransfer;
+            summary.segmentCount = static_cast<int>(preview.targets.size());
+            for (std::size_t index = 0; index < preview.targets.size(); ++index)
             {
-                MachinePose4D target = nextCutStart;
-                target.aDegrees = previousCutEnd.aDegrees;
-                appendDistinctRapid(moves, previousCutEnd, target, nextEntity,
-                    summary.kind, TransferMotionPhase::SurfaceTransfer,
-                    policy.numericalEpsilon);
-                summary.surfaceTransfer = true;
-                summary.approachTarget = target;
-                summary.segmentCount = static_cast<int>(moves.size());
-                return summary;
+                switch (preview.phases[index])
+                {
+                case TransferMotionPhase::CoordinatedDeparture:
+                    summary.departureTarget = preview.targets[index];
+                    break;
+                case TransferMotionPhase::SafeRotaryTransfer:
+                    summary.rotaryTransferTarget = preview.targets[index];
+                    break;
+                case TransferMotionPhase::CoordinatedApproach:
+                case TransferMotionPhase::SurfaceTransfer:
+                    summary.approachTarget = preview.targets[index];
+                    break;
+                case TransferMotionPhase::None:
+                    break;
+                }
             }
-
-            if (summary.kind
-                == TransferMotionKind::SameZoneClearanceTransfer)
+            if (nextEntity.plannedIncomingTransfer.has_value())
             {
-                const MachinePose4D previousClearance =
-                    localClearancePose(previousSourceEnd, previousCutEnd,
-                        policy.transfer.sameZoneTransferClearance,
-                        policy, section);
-                const MachinePose4D nextClearance =
-                    localClearancePose(nextSourceStart, nextCutStart,
-                        policy.transfer.sameZoneTransferClearance,
-                        policy, section);
-                const double departureFactor =
-                    policy.transfer.coordinatedTransferEnabled ? 0.25 : 0.0;
-                const double approachFactor =
-                    policy.transfer.coordinatedTransferEnabled ? 0.75 : 1.0;
-                MachinePose4D departure = interpolate
-                    (previousClearance, nextClearance, departureFactor);
-                departure.z = previousClearance.z;
-                departure.aDegrees = previousCutEnd.aDegrees;
-                MachinePose4D transfer = interpolate
-                    (previousClearance, nextClearance, approachFactor);
-                transfer.z = nextClearance.z;
-                transfer.aDegrees = previousCutEnd.aDegrees;
-                MachinePose4D approach = nextCutStart;
-                approach.aDegrees = previousCutEnd.aDegrees;
-                appendDistinctRapid(moves, previousCutEnd, departure,
-                    nextEntity, summary.kind,
-                    TransferMotionPhase::CoordinatedDeparture,
-                    policy.numericalEpsilon);
-                appendDistinctRapid(moves, previousCutEnd, transfer,
-                    nextEntity, summary.kind,
-                    TransferMotionPhase::SurfaceTransfer,
-                    policy.numericalEpsilon);
-                appendDistinctRapid(moves, previousCutEnd, approach,
-                    nextEntity, summary.kind,
-                    TransferMotionPhase::CoordinatedApproach,
-                    policy.numericalEpsilon);
-                summary.departureTarget = departure;
-                summary.rotaryTransferTarget = transfer;
-                summary.approachTarget = approach;
-                summary.segmentCount = static_cast<int>(moves.size());
-                return summary;
+                summary.hasPlannedPreview = true;
+                const auto& planned =
+                    *nextEntity.plannedIncomingTransfer;
+                summary.plannedFinalApproachOrigin =
+                {
+                    planned.finalApproachOrigin.x,
+                    planned.finalApproachOrigin.y,
+                    planned.finalApproachOrigin.z,
+                    planned.finalApproachOrigin.aDegrees
+                };
+                summary.previewMatched = previewMatchesPlan
+                    (preview, planned, request.numericalEpsilon);
             }
-
-            const double departureFactor =
-                policy.transfer.coordinatedTransferEnabled ? 0.25 : 0.0;
-            const double approachFactor =
-                policy.transfer.coordinatedTransferEnabled ? 0.75 : 1.0;
-            MachinePose4D departure = interpolate
-                (previousCutEnd, nextCutStart, departureFactor);
-            departure.z = rotationSafeMachineZ;
-            departure.aDegrees = previousCutEnd.aDegrees;
-            MachinePose4D rotary = interpolate
-                (previousCutEnd, nextCutStart, approachFactor);
-            rotary.z = rotationSafeMachineZ;
-            rotary.aDegrees = nextCutStart.aDegrees;
-            MachinePose4D approach = nextCutStart;
-            appendDistinctRapid(moves, previousCutEnd, departure,
-                nextEntity, summary.kind,
-                TransferMotionPhase::CoordinatedDeparture,
-                policy.numericalEpsilon);
-            appendDistinctRapid(moves, previousCutEnd, rotary,
-                nextEntity, summary.kind,
-                TransferMotionPhase::SafeRotaryTransfer,
-                policy.numericalEpsilon);
-            appendDistinctRapid(moves, previousCutEnd, approach,
-                nextEntity, summary.kind,
-                TransferMotionPhase::CoordinatedApproach,
-                policy.numericalEpsilon);
-            summary.departureTarget = departure;
-            summary.rotaryTransferTarget = rotary;
-            summary.approachTarget = approach;
-            summary.segmentCount = static_cast<int>(moves.size());
             return summary;
         }
 
@@ -609,6 +599,7 @@ namespace cadcam::machine
         trajectory.entities.reserve(input.entities.size());
         bool hasPrevious = false;
         MachinePose4D previousPose;
+        geometry::Vector3d previousSourcePose;
         std::size_t groupStartIndex = 0U;
         for (std::size_t index = 0; index < input.entities.size(); ++index)
         {
@@ -695,19 +686,37 @@ namespace cadcam::machine
                 const MachinePose4D initial = policy.useInitialMachinePoint
                     ? policy.initialMachinePoint
                     : MachinePose4D{ first.x, first.y, 0.0, 0.0 };
-                const TransferMotionSummary summary = appendTransfer
-                (
-                    entity.approachMoves,
-                    initial,
-                    first,
-                    inputEntity.path.vertices.front().position,
-                    inputEntity.path.vertices.front().position,
-                    nullptr,
-                    inputEntity,
-                    policy,
-                    input.tubeSection,
-                    trajectory.rotaryContext.safeMachineZ
-                );
+                const RotaryTransferRequest request = transferRequest
+                    (initial, first,
+                        inputEntity.path.vertices.front().position,
+                        inputEntity.path.vertices.front().position,
+                        nullptr, inputEntity, policy, input.tubeSection,
+                        trajectory.rotaryContext.safeMachineZ);
+                auto transfer = RotaryTransferPlanner::preview
+                    (request, taskContext.operationContext);
+                result.mergeDiagnostics(transfer);
+                if (!transfer.succeeded() || !transfer.value.has_value())
+                {
+                    result.status = OperationStatus::Failed;
+                    return result;
+                }
+                const TransferMotionSummary summary =
+                    appendTransferPreview(entity.approachMoves, request,
+                        *transfer.value, inputEntity);
+                if (summary.hasPlannedPreview && !summary.previewMatched)
+                {
+                    result.status = OperationStatus::Conflict;
+                    result.addDiagnostic(diagnostic
+                    (
+                        DiagnosticCode::
+                            MachineTrajectoryTransferPreviewMismatch,
+                        DiagnosticSeverity::Error,
+                        QStringLiteral("实际首次接近轨迹与加工计划预览不一致。"),
+                        taskContext.operationContext,
+                        &inputEntity
+                    ));
+                    return result;
+                }
                 if (!transferIsSafe(initial, first, entity.approachMoves,
                     summary, policy.numericalEpsilon))
                 {
@@ -727,19 +736,43 @@ namespace cadcam::machine
             }
             else if (!sameUnit)
             {
-                const TransferMotionSummary summary = appendTransfer
-                (
-                    entity.approachMoves,
-                    previousPose,
-                    first,
-                    input.entities[index - 1U].path.vertices.back().position,
-                    inputEntity.path.vertices.front().position,
-                    &input.entities[index - 1U],
-                    inputEntity,
-                    policy,
-                    input.tubeSection,
-                    trajectory.rotaryContext.safeMachineZ
-                );
+                const RotaryTransferRequest request = transferRequest
+                    (previousPose, first,
+                        previousSourcePose,
+                        inputEntity.path.vertices.front().position,
+                        &input.entities[index - 1U], inputEntity, policy,
+                        input.tubeSection,
+                        trajectory.rotaryContext.safeMachineZ);
+                auto transfer = RotaryTransferPlanner::preview
+                    (request, taskContext.operationContext);
+                result.mergeDiagnostics(transfer);
+                if (!transfer.succeeded() || !transfer.value.has_value())
+                {
+                    result.status = OperationStatus::Failed;
+                    return result;
+                }
+                const TransferMotionSummary summary =
+                    appendTransferPreview(entity.approachMoves, request,
+                        *transfer.value, inputEntity);
+                if (summary.hasPlannedPreview && !summary.previewMatched)
+                {
+                    result.status = OperationStatus::Conflict;
+                    Diagnostic mismatch = diagnostic
+                    (
+                        DiagnosticCode::
+                            MachineTrajectoryTransferPreviewMismatch,
+                        DiagnosticSeverity::Error,
+                        QStringLiteral("实际加工单元转移与加工计划预览不一致。"),
+                        taskContext.operationContext,
+                        &inputEntity
+                    );
+                    mismatch.context.insert(QStringLiteral("fromProcessUnit"),
+                        summary.fromProcessUnit);
+                    mismatch.context.insert(QStringLiteral("toProcessUnit"),
+                        summary.toProcessUnit);
+                    result.addDiagnostic(mismatch);
+                    return result;
+                }
                 if (!transferIsSafe(previousPose, first,
                     entity.approachMoves, summary,
                     policy.numericalEpsilon))
@@ -765,6 +798,8 @@ namespace cadcam::machine
                 entity.cuttingMoves.push_back(move(MachineMoveKind::Cutting, poses[pointIndex], inputEntity));
 
             trajectory.entities.push_back(std::move(entity));
+            geometry::Vector3d entityFinalSource =
+                inputEntity.path.vertices.back().position;
             const bool groupEnds = index + 1U == input.entities.size()
                 || input.entities[index + 1U].processGroupId != inputEntity.processGroupId;
             const auto groupDefinition = groupDefinitions.find(inputEntity.processGroupId);
@@ -797,6 +832,7 @@ namespace cadcam::machine
 
                 const MachinePose4D loopStart = groupMachinePath.front();
                 const MachinePose4D loopEnd = groupMachinePath.back();
+                entityFinalSource = groupSourcePath.front();
                 MachinePose4D alignedLoopStart = loopStart;
                 if (policy.keepContinuousAngle)
                 {
@@ -835,6 +871,22 @@ namespace cadcam::machine
                         trajectory.entities.back().overcutMoves.push_back
                             (move(MachineMoveKind::Overcut,
                                 interpolate(start, end, used / length), inputEntity));
+                        entityFinalSource =
+                            geometry::Vector3d
+                            {
+                                groupSourcePath[pointIndex - 1U].x
+                                    + (groupSourcePath[pointIndex].x
+                                        - groupSourcePath[pointIndex - 1U].x)
+                                        * used / length,
+                                groupSourcePath[pointIndex - 1U].y
+                                    + (groupSourcePath[pointIndex].y
+                                        - groupSourcePath[pointIndex - 1U].y)
+                                        * used / length,
+                                groupSourcePath[pointIndex - 1U].z
+                                    + (groupSourcePath[pointIndex].z
+                                        - groupSourcePath[pointIndex - 1U].z)
+                                        * used / length
+                            };
                         remaining -= used;
                     }
                     if (remaining > policy.numericalEpsilon)
@@ -850,6 +902,21 @@ namespace cadcam::machine
                                 (move(MachineMoveKind::Overcut,
                                     interpolate(closureStart, alignedLoopStart, used / closureLength),
                                     inputEntity));
+                            entityFinalSource =
+                            {
+                                groupSourcePath.back().x
+                                    + (groupSourcePath.front().x
+                                        - groupSourcePath.back().x)
+                                        * used / closureLength,
+                                groupSourcePath.back().y
+                                    + (groupSourcePath.front().y
+                                        - groupSourcePath.back().y)
+                                        * used / closureLength,
+                                groupSourcePath.back().z
+                                    + (groupSourcePath.front().z
+                                        - groupSourcePath.back().z)
+                                        * used / closureLength
+                            };
                             remaining -= used;
                         }
                     }
@@ -861,6 +928,7 @@ namespace cadcam::machine
             }
 
             previousPose = finalPose(trajectory.entities.back(), poses.back());
+            previousSourcePose = entityFinalSource;
             hasPrevious = true;
         }
 

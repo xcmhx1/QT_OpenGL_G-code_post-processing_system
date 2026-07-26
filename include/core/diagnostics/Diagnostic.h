@@ -154,6 +154,7 @@ enum class DiagnosticCode
     MachineTrajectoryContinuityFailure,
     MachineTrajectorySafeMoveFailed,
     MachineTrajectoryTransferSafetyViolation,
+    MachineTrajectoryTransferPreviewMismatch,
     MachineTrajectoryOvercutFailed,
     MachineTrajectoryInvariantViolation,
     NcProgramInputInvalid,

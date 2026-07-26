@@ -29,6 +29,38 @@ namespace cadcam::planning
     enum class ProcessGroupKind { SingleEntity, ConnectedChain, ClosedLoop, BreakBoundary, WasteBoundary };
     enum class ProcessExclusionReason { Hidden, UserDisabled, InternalGeometry, WasteRegion, UnsupportedGeometry, InvalidPath };
     enum class BoundarySide { Left, OnBoundary, Right, Mixed, Indeterminate };
+    enum class PlannedTransferMotionKind
+    {
+        InitialApproach,
+        SameZoneSurfaceTransfer,
+        SameZoneClearanceTransfer,
+        CrossZoneRotaryTransfer
+    };
+    enum class PlannedTransferMotionPhase
+    {
+        SurfaceTransfer,
+        CoordinatedDeparture,
+        SafeRotaryTransfer,
+        CoordinatedApproach
+    };
+
+    struct PlannedMachinePose4D
+    {
+        double x = 0.0;
+        double y = 0.0;
+        double z = 0.0;
+        double aDegrees = 0.0;
+    };
+
+    struct PlannedTransferSignature
+    {
+        PlannedTransferMotionKind kind =
+            PlannedTransferMotionKind::InitialApproach;
+        PlannedMachinePose4D finalApproachOrigin;
+        PlannedMachinePose4D cutStart;
+        std::vector<PlannedMachinePose4D> targets;
+        std::vector<PlannedTransferMotionPhase> phases;
+    };
 
     struct Zone16SweepPolicy
     {
@@ -51,6 +83,16 @@ namespace cadcam::planning
         bool allowReverse = true;
         bool preserveClosedLoopsAsAtomicGroups = true;
         geometry::Vector3d initialPosition{ 0.0, 0.0, 500.0 };
+        double rotaryAxisY = 0.0;
+        double rotaryAxisZ = 0.0;
+        bool invertAAxisDirection = false;
+        double aAxisOffsetDegrees = 0.0;
+        bool keepContinuousAngle = true;
+        bool useInitialMachinePoint = false;
+        PlannedMachinePose4D initialMachinePoint;
+        double machiningPlaneZOffset = 0.0;
+        double overcutDistance = 2.0;
+        double numericalEpsilon = 1.0e-5;
         Zone16SweepPolicy zone16Sweep;
     };
 
@@ -105,6 +147,7 @@ namespace cadcam::planning
         int continuousGroupId = -1;
         bool reverse = false;
         std::optional<double> startParameter;
+        std::optional<PlannedTransferSignature> plannedIncomingTransfer;
     };
 
     struct ProcessPathFragment

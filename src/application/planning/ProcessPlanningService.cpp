@@ -605,6 +605,47 @@ namespace
         for (const Diagnostic& diagnostic : diagnostics)
         {
             if (diagnostic.context.value
+                (QStringLiteral("singleClosedEntryRefinement")).toBool())
+            {
+                const QVariantMap& values = diagnostic.context;
+                const int transferKind =
+                    values.value(QStringLiteral("transferKind")).toInt();
+                const QString transferKindName =
+                    transferKind == 0
+                    ? QStringLiteral("InitialApproach")
+                    : transferKind == 1
+                        ? QStringLiteral("SameZoneSurfaceTransfer")
+                        : transferKind == 2
+                            ? QStringLiteral("SameZoneClearanceTransfer")
+                            : QStringLiteral("CrossZoneRotaryTransfer");
+                qInfo().noquote()
+                    << QStringLiteral("[ProcessPlanning][SingleClosedEntryRefinement] processUnitIndex=%1 unitKey=%2 entityId=%3 sourceKind=%4 ownerZone=%5 previousProcessUnitIndex=%6 fromProcessUnit=%7 toProcessUnit=%8 previousCutEnd=%9 transferKind=%10 searchIntervalCount=%11 rootCandidateCount=%12 validTangentCount=%13 mode=%14 selectedSourceParameter=%15 selectedReverse=%16 finalApproachOrigin=%17 selectedCutStart=%18 approachCutDot=%19 approachCutAngle=%20 tangentResidual=%21 previewSegmentCount=%22")
+                        .arg(values.value(QStringLiteral("processUnitIndex")).toInt())
+                        .arg(values.value(QStringLiteral("unitKey")).toString())
+                        .arg(values.value(QStringLiteral("entityId")).toULongLong())
+                        .arg(values.value(QStringLiteral("sourceKind")).toString())
+                        .arg(values.value(QStringLiteral("ownerZone")).toString())
+                        .arg(values.value(QStringLiteral("previousProcessUnitIndex")).toInt())
+                        .arg(values.value(QStringLiteral("fromProcessUnit")).toInt())
+                        .arg(values.value(QStringLiteral("toProcessUnit")).toInt())
+                        .arg(values.value(QStringLiteral("previousCutEnd")).toString())
+                        .arg(transferKindName)
+                        .arg(values.value(QStringLiteral("searchIntervalCount")).toInt())
+                        .arg(values.value(QStringLiteral("rootCandidateCount")).toInt())
+                        .arg(values.value(QStringLiteral("validTangentCount")).toInt())
+                        .arg(values.value(QStringLiteral("mode")).toString())
+                        .arg(values.value(QStringLiteral("selectedSourceParameter")).toDouble(), 0, 'g', 15)
+                        .arg(values.value(QStringLiteral("selectedReverse")).toBool()
+                            ? QStringLiteral("true") : QStringLiteral("false"))
+                        .arg(values.value(QStringLiteral("finalApproachOrigin")).toString())
+                        .arg(values.value(QStringLiteral("selectedCutStart")).toString())
+                        .arg(values.value(QStringLiteral("approachCutDot")).toDouble(), 0, 'g', 15)
+                        .arg(values.value(QStringLiteral("approachCutAngle")).toDouble(), 0, 'g', 15)
+                        .arg(values.value(QStringLiteral("tangentResidual")).toDouble(), 0, 'g', 15)
+                        .arg(values.value(QStringLiteral("previewSegmentCount")).toInt());
+                continue;
+            }
+            if (diagnostic.context.value
                 (QStringLiteral("entryZoneProfile")).toBool())
             {
                 const QVariantMap& values = diagnostic.context;

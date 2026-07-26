@@ -4318,6 +4318,27 @@ bool Gcode_postprocessing_system::sortEntitiesWithProcessPlan3D
         m_activeProfile.toolTransferConfig().sameZoneTransferClearance;
     policy.coordinatedTransferEnabled =
         m_activeProfile.toolTransferConfig().coordinatedTransferEnabled;
+    policy.rotaryAxisY = m_activeProfile.rotaryAxisConfig().centerY;
+    policy.rotaryAxisZ = m_activeProfile.rotaryAxisConfig().centerZ;
+    policy.invertAAxisDirection =
+        m_activeProfile.rotaryAxisConfig().invertAAxisDirection;
+    policy.aAxisOffsetDegrees =
+        m_activeProfile.rotaryAxisConfig().aAxisOffsetDegrees;
+    policy.keepContinuousAngle =
+        m_activeProfile.rotaryAxisConfig().keepContinuousAngle;
+    policy.useInitialMachinePoint =
+        m_activeProfile.rotaryAxisConfig().useInitialMachinePoint;
+    policy.initialMachinePoint =
+    {
+        m_activeProfile.rotaryAxisConfig().initialMachineX,
+        m_activeProfile.rotaryAxisConfig().initialMachineY,
+        m_activeProfile.rotaryAxisConfig().initialMachineZ,
+        0.0
+    };
+    policy.machiningPlaneZOffset =
+        m_activeProfile.rotaryAxisConfig().machiningPlaneZOffset;
+    policy.overcutDistance =
+        m_activeProfile.rotaryAxisConfig().overcutDistance;
     policy.allowReverse = true;
     policy.preserveClosedLoopsAsAtomicGroups = true;
     policy.initialPosition = { 0.0, 0.0, 500.0 };

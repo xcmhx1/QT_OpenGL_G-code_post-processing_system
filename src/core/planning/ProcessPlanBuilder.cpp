@@ -3,6 +3,7 @@
 #include "core/machining/TubeCutBoundary.h"
 #include "core/machining/TubeSectionProjector.h"
 #include "core/machine/RotaryKinematics.h"
+#include "core/planning/SingleClosedEntryRefiner.h"
 
 #include <QStringList>
 
@@ -8426,6 +8427,18 @@ namespace cadcam::planning
                 }
             }
         }
+
+        OperationReport entryRefinement =
+            SingleClosedEntryRefiner::refine
+            (plan, input, policy, context);
+        if (!entryRefinement.succeeded())
+        {
+            OperationResult<ProcessPlan> result;
+            result.status = entryRefinement.status;
+            result.mergeDiagnostics(entryRefinement.diagnostics);
+            return result;
+        }
+        closedLoopDiagnostics += entryRefinement.diagnostics;
 
         std::unordered_set<EntityId> assignedIds;
         std::unordered_set<EntityId> excludedIds;

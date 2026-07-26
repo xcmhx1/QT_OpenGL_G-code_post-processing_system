@@ -119,7 +119,9 @@ namespace
                 "toProcessUnit=%2 fromOwnerZone=%3 toOwnerZone=%4 "
                 "kind=%5 previousCutEnd=%6 nextCutStart=%7 deltaA=%8 "
                 "rotationSafetyClearance=%9 sameZoneTransferClearance=%10 "
-                "rotationSafeMachineZ=%11 coordinated=%12 segmentCount=%13")
+                "rotationSafeMachineZ=%11 coordinated=%12 segmentCount=%13 "
+                "plannedFinalApproachOrigin=%14 "
+                "actualFinalApproachOrigin=%15 previewMatched=%16")
                 .arg(summary.fromProcessUnit)
                 .arg(summary.toProcessUnit)
                 .arg(ownerZoneName(summary.fromOwnerZone))
@@ -133,7 +135,16 @@ namespace
                 .arg(summary.rotationSafeMachineZ, 0, 'g', 15)
                 .arg(summary.coordinated
                     ? QStringLiteral("true") : QStringLiteral("false"))
-                .arg(summary.segmentCount);
+                .arg(summary.segmentCount)
+                .arg(summary.hasPlannedPreview
+                    ? poseText(summary.plannedFinalApproachOrigin)
+                    : QStringLiteral("None"))
+                .arg(poseText(summary.actualFinalApproachOrigin))
+                .arg(summary.hasPlannedPreview
+                    ? (summary.previewMatched
+                        ? QStringLiteral("true")
+                        : QStringLiteral("false"))
+                    : QStringLiteral("not-planned"));
             if (summary.kind
                 == TransferMotionKind::CrossZoneRotaryTransfer
                 || summary.kind == TransferMotionKind::InitialApproach)
@@ -602,6 +613,8 @@ OperationResult<cadcam::machine::MachineTrajectory> MachineTrajectoryService::bu
         entity.sourceProcessOrder = assignment.processOrder;
         entity.processGroupId = assignment.continuousGroupId;
         entity.processUnitIndex = assignment.processUnitIndex;
+        entity.plannedIncomingTransfer =
+            assignment.plannedIncomingTransfer;
         if (entity.processUnitIndex >= 0
             && static_cast<std::size_t>(entity.processUnitIndex)
                 < plan.processUnits.size())

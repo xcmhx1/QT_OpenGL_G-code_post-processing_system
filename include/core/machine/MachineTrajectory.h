@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/geometry/Path3D.h"
+#include "core/machine/RotaryTransferPlanner.h"
 #include "core/machining/TubeSection.h"
 #include "core/planning/ProcessPlan.h"
 
@@ -12,30 +13,6 @@ namespace cadcam::machine
 {
     enum class MachineMoveKind { Rapid, Cutting, CuttingConnection, Overcut };
     enum class RotarySurfaceRegion { Top, Right, Bottom, Left, Corner, Radial, Unknown };
-    enum class TransferMotionKind
-    {
-        InitialApproach,
-        SameZoneSurfaceTransfer,
-        SameZoneClearanceTransfer,
-        CrossZoneRotaryTransfer
-    };
-    enum class TransferMotionPhase
-    {
-        None,
-        SurfaceTransfer,
-        CoordinatedDeparture,
-        SafeRotaryTransfer,
-        CoordinatedApproach
-    };
-
-    struct MachinePose4D
-    {
-        double x = 0.0;
-        double y = 0.0;
-        double z = 0.0;
-        double aDegrees = 0.0;
-    };
-
     struct MachineMove
     {
         MachineMoveKind kind = MachineMoveKind::Rapid;
@@ -108,12 +85,16 @@ namespace cadcam::machine
         MachinePose4D departureTarget;
         MachinePose4D rotaryTransferTarget;
         MachinePose4D approachTarget;
+        MachinePose4D plannedFinalApproachOrigin;
+        MachinePose4D actualFinalApproachOrigin;
         double deltaA = 0.0;
         double rotationSafetyClearance = 0.0;
         double sameZoneTransferClearance = 0.0;
         double rotationSafeMachineZ = 0.0;
         bool coordinated = false;
         bool surfaceTransfer = false;
+        bool hasPlannedPreview = false;
+        bool previewMatched = false;
         int segmentCount = 0;
     };
 
@@ -141,6 +122,8 @@ namespace cadcam::machine
         bool closed = false;
         bool firstInGroup = false;
         bool lastInGroup = false;
+        std::optional<planning::PlannedTransferSignature>
+            plannedIncomingTransfer;
         geometry::Path3D path;
     };
 
@@ -148,13 +131,6 @@ namespace cadcam::machine
     {
         double retractClearance = 5.0;
         double approachClearance = 0.0;
-    };
-
-    struct ToolTransferPolicy
-    {
-        double rotationSafetyClearance = 5.0;
-        double sameZoneTransferClearance = 0.0;
-        bool coordinatedTransferEnabled = true;
     };
 
     struct TransferClassificationInput

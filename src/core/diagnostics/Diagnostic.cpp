@@ -136,6 +136,7 @@ QString diagnosticCodeName(DiagnosticCode code)
     case DiagnosticCode::MachineTrajectoryContinuityFailure: return QStringLiteral("MachineTrajectoryContinuityFailure");
     case DiagnosticCode::MachineTrajectorySafeMoveFailed: return QStringLiteral("MachineTrajectorySafeMoveFailed");
     case DiagnosticCode::MachineTrajectoryTransferSafetyViolation: return QStringLiteral("MachineTrajectoryTransferSafetyViolation");
+    case DiagnosticCode::MachineTrajectoryTransferPreviewMismatch: return QStringLiteral("MachineTrajectoryTransferPreviewMismatch");
     case DiagnosticCode::MachineTrajectoryOvercutFailed: return QStringLiteral("MachineTrajectoryOvercutFailed");
     case DiagnosticCode::MachineTrajectoryInvariantViolation: return QStringLiteral("MachineTrajectoryInvariantViolation");
     case DiagnosticCode::NcProgramInputInvalid: return QStringLiteral("NcProgramInputInvalid");
