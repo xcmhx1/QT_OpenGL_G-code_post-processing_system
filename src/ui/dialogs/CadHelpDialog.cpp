@@ -52,6 +52,7 @@ code { font-family: Consolas, monospace; }
 <h2>典型 CAD / G-code 流程</h2>
 <ol>
 <li>通过“文件 -> 导入文件”导入 <code>DXF/DWG</code>，也可以直接把文件拖入视图区。</li>
+<li>“文件 -> 最近打开”可以快速重新打开最近使用的 <code>DXF/DWG</code> 文件，最多保留 15 项。</li>
 <li>在“默认”选项卡中绘制或修改图元，必要时调整图层和颜色。</li>
 <li>在“默认 -> 显示”中决定是否显示加工方向箭头与加工顺序标签。</li>
 <li>在“机加工 -> 配置”选择 <code>自动 / 3轴 / 4轴(绕A)</code> 和当前 G 代码配置。</li>

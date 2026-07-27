@@ -359,20 +359,29 @@ CadDocument::~CadDocument()
     clearAll();
 }
 
-void CadDocument::readDxfDocument(const QString& filePath)
+bool CadDocument::readDxfDocument(const QString& filePath)
 {
     ContentChangeBatch contentBatch(*this);
     // 导入新文件前先清空现有文档，避免旧实体与新实体混杂。
     clearAll();
 
     // dx_iface 负责把文件内容解析进 dx_data。
-    std::make_unique<dx_iface>()->fileImport(filePath.toLocal8Bit().constData(), m_data.get(), false);
+    const bool imported = std::make_unique<dx_iface>()->fileImport
+        (filePath.toLocal8Bit().constData(), m_data.get(), false);
+    if (!imported)
+    {
+        emit sceneChanged();
+        qWarning() << "CadDocument::readDxfDocument() ->"
+            << filePath << "导入失败";
+        return false;
+    }
 
     // 解析完成后再把支持的原始实体转换为内部 CadItem。
     init();
     emit sceneChanged();
 
     qDebug() << "CadDocument::readDxfDocument() ->" << filePath << "导入成功";
+    return true;
 }
 
 bool CadDocument::saveDxfDocument(const QString& filePath, bool safeMode)

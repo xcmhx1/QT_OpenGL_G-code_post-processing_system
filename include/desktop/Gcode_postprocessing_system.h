@@ -12,6 +12,7 @@
 #include "application/machining/RotaryTubeGeometryAnalyzer.h"
 #include "application/machining/RotaryPathTopology.h"
 #include "infrastructure/config/GProfile.h"
+#include "infrastructure/config/RecentDocumentStore.h"
 #include "core/planning/ProcessPlan.h"
 #include "application/process/DocumentProcessState.h"
 #include "application/process/ProcessPresentationSnapshot.h"
@@ -31,6 +32,7 @@ QT_END_NAMESPACE
 
 class QAction;
 class QDockWidget;
+class QMenu;
 class MachiningSettingsWidget;
 enum class CadHelpSection;
 
@@ -81,6 +83,11 @@ private:
 private:
     void initializeThemeMenu();
     void initializeHelpMenu();
+    void initializeRecentDocumentsMenu();
+    void refreshRecentDocumentsMenu();
+    void pruneAndRefreshRecentDocuments();
+    void openRecentDocument(QAction* action);
+    void clearRecentDocuments();
     void applyBranding();
     QString defaultDisplayTitle() const;
     QString loadDisplayTitle() const;
@@ -248,8 +255,10 @@ private:
     QAction* m_generationModeAutoAction = nullptr;
     QAction* m_generationMode2DAction = nullptr;
     QAction* m_generationMode3DAction = nullptr;
+    QMenu* m_recentDocumentsMenu = nullptr;
     CadEditer m_editer;
     CadDocument m_document;
+    RecentDocumentStore m_recentDocumentStore;
     AppBranding m_branding;
     AppLicense m_license;
     RotaryTubeSectionModel m_rotaryTubeSectionModel;

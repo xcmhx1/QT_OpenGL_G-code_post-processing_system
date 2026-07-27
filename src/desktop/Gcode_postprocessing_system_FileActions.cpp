@@ -70,7 +70,16 @@ bool Gcode_postprocessing_system::importDxfFile(const QString& filePath)
     m_editer.clearHistory();
     m_processState.clear();
     invalidateCurrentProcessPlan();
-    m_document.readDxfDocument(filePath);
+    if (!m_document.readDxfDocument(filePath))
+    {
+        QMessageBox::warning
+        (
+            this,
+            QStringLiteral("导入失败"),
+            QStringLiteral("无法读取该 DXF/DWG 文件。")
+        );
+        return false;
+    }
     m_rotaryTubeSectionModel = RotaryTubeSectionModel();
     m_currentDocumentPath = ensureDxfSuffix(filePath);
     ui->openGLWidget->setDocument(&m_document);
@@ -86,6 +95,8 @@ bool Gcode_postprocessing_system::importDxfFile(const QString& filePath)
     }
 
     syncToolPanelState();
+    m_recentDocumentStore.add(filePath);
+    refreshRecentDocumentsMenu();
     return true;
 }
 

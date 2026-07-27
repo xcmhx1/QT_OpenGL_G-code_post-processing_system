@@ -30,6 +30,7 @@
 #include <QStyleFactory>
 #include <QStandardPaths>
 #include <QSet>
+#include <QTimer>
 #include <QToolBar>
 #include <QVariant>
 #include <QVBoxLayout>
@@ -494,6 +495,9 @@ Gcode_postprocessing_system::Gcode_postprocessing_system(QWidget* parent)
     ui->action_FileExport->setShortcut(QKeySequence::Save);
     ui->action_FileExport->setShortcutContext(Qt::ApplicationShortcut);
     ui->menuFile->insertAction(ui->action_File_Export_G, ui->action_FileExport);
+    initializeRecentDocumentsMenu();
+    QTimer::singleShot(0, this,
+        [this]() { pruneAndRefreshRecentDocuments(); });
 
     QAction* exportDxfAction = new QAction(QStringLiteral("导出为DXF..."), this);
     QAction* exportSafeDxfAction = new QAction(QStringLiteral("导出为DXF（安全模式）..."), this);
@@ -607,6 +611,121 @@ Gcode_postprocessing_system::~Gcode_postprocessing_system()
     settings.setValue(QStringLiteral("ui/mainWindowGeometry"), saveGeometry());
     settings.setValue(QStringLiteral("ui/mainWindowState"), saveState());
     delete ui;
+}
+
+void Gcode_postprocessing_system::initializeRecentDocumentsMenu()
+{
+    if (m_recentDocumentsMenu != nullptr)
+    {
+        return;
+    }
+
+    m_recentDocumentsMenu =
+        new QMenu(QStringLiteral("最近打开"), ui->menuFile);
+    m_recentDocumentsMenu->setObjectName
+        (QStringLiteral("menuRecentDocuments"));
+    ui->menuFile->insertMenu
+        (ui->action_FileExport, m_recentDocumentsMenu);
+    connect
+    (
+        m_recentDocumentsMenu,
+        &QMenu::triggered,
+        this,
+        &Gcode_postprocessing_system::openRecentDocument
+    );
+    refreshRecentDocumentsMenu();
+}
+
+void Gcode_postprocessing_system::refreshRecentDocumentsMenu()
+{
+    if (m_recentDocumentsMenu == nullptr)
+    {
+        return;
+    }
+
+    m_recentDocumentsMenu->clear();
+    const QStringList paths = m_recentDocumentStore.load();
+
+    if (paths.isEmpty())
+    {
+        QAction* emptyAction =
+            m_recentDocumentsMenu->addAction(QStringLiteral("暂无最近文件"));
+        emptyAction->setEnabled(false);
+    }
+    else
+    {
+        for (int index = 0; index < paths.size(); ++index)
+        {
+            const QString& path = paths.at(index);
+            const QFileInfo fileInfo(path);
+            const QString nativePath = QDir::toNativeSeparators(path);
+            const QString nativeParentPath =
+                QDir::toNativeSeparators(fileInfo.absolutePath());
+            QAction* action = m_recentDocumentsMenu->addAction
+            (
+                QStringLiteral("%1  %2 — %3")
+                    .arg(index + 1)
+                    .arg(fileInfo.fileName(), nativeParentPath)
+            );
+            action->setData(path);
+            action->setToolTip(nativePath);
+            action->setStatusTip(nativePath);
+        }
+    }
+
+    m_recentDocumentsMenu->addSeparator();
+    QAction* clearAction =
+        m_recentDocumentsMenu->addAction(QStringLiteral("清除最近打开"));
+    clearAction->setProperty("recentDocumentsCommand",
+        QStringLiteral("clear"));
+    clearAction->setEnabled(!paths.isEmpty());
+}
+
+void Gcode_postprocessing_system::pruneAndRefreshRecentDocuments()
+{
+    m_recentDocumentStore.loadAndPrune();
+    refreshRecentDocumentsMenu();
+}
+
+void Gcode_postprocessing_system::openRecentDocument(QAction* action)
+{
+    if (action == nullptr)
+    {
+        return;
+    }
+
+    if (action->property("recentDocumentsCommand").toString()
+        == QStringLiteral("clear"))
+    {
+        clearRecentDocuments();
+        return;
+    }
+
+    const QString filePath = action->data().toString();
+    if (filePath.isEmpty())
+    {
+        return;
+    }
+
+    if (!QFileInfo::exists(filePath))
+    {
+        m_recentDocumentStore.remove(filePath);
+        refreshRecentDocumentsMenu();
+        const QString message =
+            QStringLiteral("文件不存在，已从最近打开中移除。");
+        statusBar()->showMessage(message, 5000);
+        ui->openGLWidget->appendCommandMessage(message);
+        ui->openGLWidget->refreshCommandPrompt();
+        return;
+    }
+
+    importCadFile(filePath);
+}
+
+void Gcode_postprocessing_system::clearRecentDocuments()
+{
+    m_recentDocumentStore.clear();
+    refreshRecentDocumentsMenu();
 }
 
 void Gcode_postprocessing_system::showMachiningContextMenu(const QPoint& globalPos)

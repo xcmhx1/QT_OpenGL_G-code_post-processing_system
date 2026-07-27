@@ -41,7 +41,7 @@ public:
     static std::unique_ptr<CadItem> createCadItemForEntity(DRW_Entity* entity);
 
     // 读取Dxf文档
-    void readDxfDocument(const QString& filePath);
+    bool readDxfDocument(const QString& filePath);
     // 保存Dxf文档
     bool saveDxfDocument(const QString& filePath, bool safeMode = false);
     // 另存为Dxf文档
