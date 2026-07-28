@@ -190,6 +190,8 @@ GProfileDialog::GProfileDialog
     QWidget* parent
 )
     : QDialog(parent)
+    , m_persistentToolTransferConfig(profile.toolTransferConfig())
+    , m_persistentRotaryAxisConfig(profile.rotaryAxisConfig())
     , m_availableLayerNames(availableLayerNames)
     , m_availableLayerColors(availableLayerColors)
     , m_theme(theme)
@@ -711,6 +713,17 @@ void GProfileDialog::applyProfile(const GProfile& profile)
     m_updatingUi = false;
 }
 
+void GProfileDialog::applyProfilePreservingMachiningParameters
+(
+    const GProfile& profile
+)
+{
+    GProfile updatedProfile = profile;
+    updatedProfile.setToolTransferConfig(m_persistentToolTransferConfig);
+    updatedProfile.setRotaryAxisConfig(m_persistentRotaryAxisConfig);
+    applyProfile(updatedProfile);
+}
+
 GProfile GProfileDialog::collectProfile() const
 {
     GProfile profile;
@@ -1167,7 +1180,7 @@ void GProfileDialog::importProfileFromFile()
 
     m_importedProfilePath = QFileInfo(filePath).absoluteFilePath();
     GProfilePathStore::recordDirectory(QFileInfo(filePath).absolutePath());
-    applyProfile(profile);
+    applyProfilePreservingMachiningParameters(profile);
 }
 
 void GProfileDialog::exportProfileToFile()
@@ -1209,13 +1222,15 @@ void GProfileDialog::exportProfileToFile()
 void GProfileDialog::resetToDefaultLaserProfile()
 {
     m_importedProfilePath.clear();
-    applyProfile(GProfile::createDefaultLaserProfile());
+    applyProfilePreservingMachiningParameters
+        (GProfile::createDefaultLaserProfile());
 }
 
 void GProfileDialog::resetToDefaultRotaryProfile()
 {
     m_importedProfilePath.clear();
-    applyProfile(GProfile::createDefaultRotaryProfile());
+    applyProfilePreservingMachiningParameters
+        (GProfile::createDefaultRotaryProfile());
 }
 
 QString GProfileDialog::currentEntityTypeKey() const

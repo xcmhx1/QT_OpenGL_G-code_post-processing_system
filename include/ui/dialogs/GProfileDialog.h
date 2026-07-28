@@ -40,6 +40,7 @@ private:
     void buildUi();
     void applyTheme();
     void applyProfile(const GProfile& profile);
+    void applyProfilePreservingMachiningParameters(const GProfile& profile);
     GProfile collectProfile() const;
 
     void refreshEntityTypeList(const QString& preferredEntityTypeKey = QString());
@@ -75,6 +76,8 @@ private:
 private:
     bool m_updatingUi = false;
     GProfile m_profile;
+    GProfileToolTransferConfig m_persistentToolTransferConfig;
+    GProfileRotaryAxisConfig m_persistentRotaryAxisConfig;
     QStringList m_availableLayerNames;
     QMap<QString, QColor> m_availableLayerColors;
     AppThemeColors m_theme = buildAppThemeColors(AppThemeMode::Light);

@@ -430,6 +430,9 @@
     <ClCompile Include="src\infrastructure\config\RecentDocumentStore.cpp">
       <Filter>Source Files\infrastructure\config</Filter>
     </ClCompile>
+    <ClCompile Include="src\infrastructure\config\MachiningParameterStore.cpp">
+      <Filter>Source Files\infrastructure\config</Filter>
+    </ClCompile>
     <ClCompile Include="src\ui\widgets\CadStatusPaneWidget.cpp">
       <Filter>Source Files\ui\widgets</Filter>
     </ClCompile>
@@ -724,6 +727,9 @@
       <Filter>Header Files\infrastructure\config</Filter>
     </ClInclude>
     <ClInclude Include="include\infrastructure\config\RecentDocumentStore.h">
+      <Filter>Header Files\infrastructure\config</Filter>
+    </ClInclude>
+    <ClInclude Include="include\infrastructure\config\MachiningParameterStore.h">
       <Filter>Header Files\infrastructure\config</Filter>
     </ClInclude>
     <ClInclude Include="include\ui\widgets\CadCommandLineWidget.h">

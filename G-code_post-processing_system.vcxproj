@@ -245,6 +245,10 @@ if exist "$(VCRuntimeRedistDir)\*.dll" copy /Y "$(VCRuntimeRedistDir)\*.dll" "$(
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>platform/pch.h</PrecompiledHeaderFile>
     </ClCompile>
+    <ClCompile Include="src\infrastructure\config\MachiningParameterStore.cpp">
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>platform/pch.h</PrecompiledHeaderFile>
+    </ClCompile>
     <ClCompile Include="src\ui\dialogs\CadBitmapImportDialog.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>platform/pch.h</PrecompiledHeaderFile>
@@ -581,6 +585,7 @@ if exist "$(VCRuntimeRedistDir)\*.dll" copy /Y "$(VCRuntimeRedistDir)\*.dll" "$(
     <ClInclude Include="include\ui\dialogs\GProfileManagerDialog.h" />
     <ClInclude Include="include\infrastructure\config\GProfilePathStore.h" />
     <ClInclude Include="include\infrastructure\config\RecentDocumentStore.h" />
+    <ClInclude Include="include\infrastructure\config\MachiningParameterStore.h" />
     <ClInclude Include="include\infrastructure\image\CadBitmapVectorizer.h" />
     <ClInclude Include="include\cad\editing\CadEditer.h" />
     <ClInclude Include="include\cad\editing\CadEditerWorkflowInternal.h" />

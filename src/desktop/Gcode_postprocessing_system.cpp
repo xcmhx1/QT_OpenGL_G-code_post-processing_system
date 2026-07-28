@@ -6,6 +6,7 @@
 #include "cad/items/CadItem.h"
 #include "ui/dialogs/GProfileDialog.h"
 #include "ui/dialogs/GProfileManagerDialog.h"
+#include "infrastructure/config/MachiningParameterStore.h"
 #include "infrastructure/config/GProfilePathStore.h"
 #include "ui/widgets/MachiningSettingsWidget.h"
 
@@ -1083,6 +1084,11 @@ void Gcode_postprocessing_system::openProfileSettingsDialog()
 
     const GProfile updatedProfile = dialog.profile();
     const QString importedProfilePath = dialog.importedProfilePath().trimmed();
+    MachiningParameterStore::save
+    (
+        updatedProfile.toolTransferConfig(),
+        updatedProfile.rotaryAxisConfig()
+    );
 
     if (!importedProfilePath.isEmpty())
     {
@@ -1122,6 +1128,7 @@ void Gcode_postprocessing_system::openProfileSettingsDialog()
     refreshAvailableProfilesUi();
     invalidateCurrentProcessPlan();
     saveSelectedProfileId(m_activeProfileId);
+    syncToolPanelState();
 
     const QString profileName = m_activeProfile.profileName().trimmed().isEmpty()
         ? QStringLiteral("未命名配置")
@@ -1245,11 +1252,13 @@ void Gcode_postprocessing_system::loadAvailableProfiles()
     {
         m_activeProfileId = preferredProfileId;
         m_activeProfile = m_loadedProfiles.value(preferredProfileId, GProfile::createDefaultLaserProfile());
+        MachiningParameterStore::applyTo(m_activeProfile);
         return;
     }
 
     m_activeProfileId = builtinThreeAxisProfileId;
     m_activeProfile = m_loadedProfiles.value(m_activeProfileId, GProfile::createDefaultLaserProfile());
+    MachiningParameterStore::applyTo(m_activeProfile);
     saveSelectedProfileId(m_activeProfileId);
 }
 
@@ -1281,9 +1290,11 @@ bool Gcode_postprocessing_system::applyLoadedProfileById(const QString& profileI
 
     m_activeProfileId = profileId;
     m_activeProfile = m_loadedProfiles.value(profileId, GProfile::createDefaultLaserProfile());
+    MachiningParameterStore::applyTo(m_activeProfile);
     invalidateCurrentProcessPlan();
     saveSelectedProfileId(m_activeProfileId);
     refreshAvailableProfilesUi();
+    syncToolPanelState();
 
     if (announceChange)
     {
