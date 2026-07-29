@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <map>
 #include <memory>
+#include <set>
 #include <utility>
 #include <vector>
 
@@ -404,38 +405,148 @@ bool CadViewer::handleProcessOrderLabelClick
         return true;
     }
 
-    const std::set<cadcam::geometry::EntityId> memberIds
-    (
-        clickedLabel.unitKey.memberEntityIds.cbegin(),
-        clickedLabel.unitKey.memberEntityIds.cend()
-    );
-    QSet<RenderEntityKey> selectedRenderKeys;
-    RenderEntityKey preferredRenderKey;
+    const cadcam::process::ProcessUnitPresentation* clickedUnit = nullptr;
+    if (m_processPresentation != nullptr)
+    {
+        const auto clickedUnitIterator = std::find_if
+        (
+            m_processPresentation->processUnits.cbegin(),
+            m_processPresentation->processUnits.cend(),
+            [&clickedLabel](const cadcam::process::ProcessUnitPresentation& unit)
+            {
+                return unit.key == clickedLabel.unitKey;
+            }
+        );
+        if (clickedUnitIterator != m_processPresentation->processUnits.cend())
+        {
+            clickedUnit = &*clickedUnitIterator;
+        }
+    }
+
+    std::map<cadcam::geometry::EntityId, RenderEntityKey> renderKeysByEntityId;
     for (const std::unique_ptr<CadItem>& entity : scene->m_entities)
     {
-        if (entity == nullptr || memberIds.find(entity->m_entityId) == memberIds.end())
+        if (entity != nullptr && entity->m_entityId != 0)
+        {
+            renderKeysByEntityId.emplace
+            (
+                entity->m_entityId,
+                CadViewerUtils::toRenderEntityKey(entity.get())
+            );
+        }
+    }
+
+    const std::vector<cadcam::geometry::EntityId>& orderedMemberEntityIds =
+        clickedUnit != nullptr
+        ? clickedUnit->orderedMemberEntityIds
+        : clickedLabel.unitKey.memberEntityIds;
+    QSet<RenderEntityKey> unitRenderKeys;
+    RenderEntityKey preferredRenderKey;
+    for (cadcam::geometry::EntityId entityId : orderedMemberEntityIds)
+    {
+        const auto renderKeyIterator = renderKeysByEntityId.find(entityId);
+        if (renderKeyIterator == renderKeysByEntityId.end())
         {
             continue;
         }
 
-        const RenderEntityKey renderKey = CadViewerUtils::toRenderEntityKey(entity.get());
-        selectedRenderKeys.insert(renderKey);
+        const RenderEntityKey renderKey = renderKeyIterator->second;
+        unitRenderKeys.insert(renderKey);
         if (!preferredRenderKey.valid())
         {
             preferredRenderKey = renderKey;
         }
     }
 
-    if (selectedRenderKeys.isEmpty())
+    if (unitRenderKeys.isEmpty())
     {
         return false;
     }
 
-    setSelectedRenderKeys(selectedRenderKeys, preferredRenderKey);
+    if ((modifiers & Qt::ShiftModifier) != 0)
+    {
+        const bool allSelected = std::all_of
+        (
+            unitRenderKeys.cbegin(),
+            unitRenderKeys.cend(),
+            [this](RenderEntityKey renderKey)
+            {
+                return m_selectedRenderKeys.contains(renderKey);
+            }
+        );
+        QSet<RenderEntityKey> updatedRenderKeys = m_selectedRenderKeys;
+        RenderEntityKey updatedPrimaryRenderKey = m_selectedRenderKey;
+
+        if (allSelected)
+        {
+            for (RenderEntityKey renderKey : unitRenderKeys)
+            {
+                updatedRenderKeys.remove(renderKey);
+            }
+            if (!updatedRenderKeys.contains(updatedPrimaryRenderKey))
+            {
+                updatedPrimaryRenderKey = {};
+            }
+        }
+        else
+        {
+            for (RenderEntityKey renderKey : unitRenderKeys)
+            {
+                updatedRenderKeys.insert(renderKey);
+            }
+            updatedPrimaryRenderKey = preferredRenderKey;
+        }
+
+        setSelectedRenderKeys(updatedRenderKeys, updatedPrimaryRenderKey);
+        update();
+
+        if (allSelected)
+        {
+            appendCommandMessage(QStringLiteral("已取消选择加工单元 %1。")
+                .arg(clickedLabel.unitOrder + 1));
+        }
+        else
+        {
+            std::set<std::vector<cadcam::geometry::EntityId>> selectedUnitKeys;
+            if (m_processPresentation != nullptr)
+            {
+                for (const cadcam::process::ProcessUnitPresentation& unit
+                    : m_processPresentation->processUnits)
+                {
+                    const bool selected = std::any_of
+                    (
+                        unit.orderedMemberEntityIds.cbegin(),
+                        unit.orderedMemberEntityIds.cend(),
+                        [&renderKeysByEntityId, &updatedRenderKeys]
+                        (cadcam::geometry::EntityId entityId)
+                        {
+                            const auto found = renderKeysByEntityId.find(entityId);
+                            return found != renderKeysByEntityId.end()
+                                && updatedRenderKeys.contains(found->second);
+                        }
+                    );
+                    if (selected)
+                    {
+                        selectedUnitKeys.insert(unit.key.memberEntityIds);
+                    }
+                }
+            }
+
+            appendCommandMessage
+            (
+                QStringLiteral("已追加选择加工单元 %1，共 %2 个加工单元。")
+                    .arg(clickedLabel.unitOrder + 1)
+                    .arg(selectedUnitKeys.size())
+            );
+        }
+        return true;
+    }
+
+    setSelectedRenderKeys(unitRenderKeys, preferredRenderKey);
     update();
     appendCommandMessage(QStringLiteral("已选中加工单元 %1，共 %2 个图元。")
         .arg(clickedLabel.unitOrder + 1)
-        .arg(selectedRenderKeys.size()));
+        .arg(unitRenderKeys.size()));
     return true;
 }
 
