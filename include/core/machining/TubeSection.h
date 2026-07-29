@@ -2,6 +2,7 @@
 
 #include "core/diagnostics/OperationContext.h"
 #include "core/diagnostics/OperationResult.h"
+#include "core/geometry/Path3D.h"
 #include "core/machining/TubeCutBoundary.h"
 #include "core/topology/PathTopology.h"
 
@@ -47,24 +48,20 @@ namespace cadcam::machining
         std::vector<TubeCornerGeometry> corners;
     };
 
-    enum class InternalPathClassificationMode
+    struct InternalPathCandidate
     {
-        BranchedClosedUnit,
-        TubeSectionInset
+        geometry::EntityId entityId = 0;
+        geometry::Path3D path;
     };
 
     struct InternalPathClassification
     {
-        InternalPathClassificationMode mode =
-            InternalPathClassificationMode::BranchedClosedUnit;
         std::vector<geometry::EntityId> removableEntityIds;
-        int candidateComponentCount = 0;
-        int eligibleComponentCount = 0;
+        int candidatePathCount = 0;
         int outerBoundaryEntityCount = 0;
         double insetDistance = 0.0;
         int preservedSafetyBandCount = 0;
-        int ambiguousComponentCount = 0;
-        int skippedComponentCount = 0;
+        int skippedPathCount = 0;
     };
 
     struct TubeSectionPolicy
@@ -99,17 +96,8 @@ namespace cadcam::machining
 
         static OperationResult<InternalPathClassification> classifyInternalPaths
         (
-            const topology::TopologyInput& input,
-            const topology::PathTopology& topology,
+            const std::vector<InternalPathCandidate>& candidates,
             const TubeSectionModel& section,
-            const TubeSectionPolicy& policy,
-            const OperationContext& context
-        );
-
-        static OperationResult<InternalPathClassification> classifyTopologicalInteriorPaths
-        (
-            const topology::TopologyInput& input,
-            const topology::PathTopology& topology,
             const TubeSectionPolicy& policy,
             const OperationContext& context
         );

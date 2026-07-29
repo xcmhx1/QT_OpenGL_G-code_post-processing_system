@@ -44,17 +44,14 @@ struct RotaryTubeSectionModel
 
 struct RotaryInternalPathResult
 {
-    cadcam::machining::InternalPathClassificationMode mode =
-        cadcam::machining::InternalPathClassificationMode::BranchedClosedUnit;
+    bool sectionAvailable = false;
     QVector<CadItem*> removableItems;
     QVector<Diagnostic> diagnostics;
-    int candidateComponentCount = 0;
-    int eligibleComponentCount = 0;
+    int candidatePathCount = 0;
     int outerBoundaryEntityCount = 0;
     double insetDistance = 0.0;
     int preservedSafetyBandCount = 0;
-    int ambiguousComponentCount = 0;
-    int skippedComponentCount = 0;
+    int skippedPathCount = 0;
 };
 
 class RotaryTubeGeometryAnalyzer

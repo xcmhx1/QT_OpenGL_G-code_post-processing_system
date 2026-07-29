@@ -2967,6 +2967,20 @@ bool Gcode_postprocessing_system::removeInternalMachiningPaths(bool interactive)
         sceneItems,
         kEndCutConnectionTolerance
     );
+    if (!result.sectionAvailable)
+    {
+        const QString message =
+            QStringLiteral("未识别有效方管截面，未执行内部线条排除。");
+        qInfo().noquote()
+            << QStringLiteral(
+                "[InternalPathClassification] mode=TubeSectionInset sectionAvailable=false "
+                "candidatePathCount=0 outerBoundaryEntityCount=0 insetDistance=0 "
+                "removedEntityCount=0 preservedSafetyBandCount=0 skippedPathCount=0");
+        ui->openGLWidget->appendCommandMessage(message);
+        statusBar()->showMessage(message, 6000);
+        return false;
+    }
+
     QSet<CadItem*> internalItems;
 
     for (CadItem* item : result.removableItems)
@@ -2991,34 +3005,22 @@ bool Gcode_postprocessing_system::removeInternalMachiningPaths(bool interactive)
 
     invalidateProcessOrdersAfterEndCutChange();
     refreshWasteProcessingExclusions();
-    const bool tubeSectionInsetMode =
-        result.mode == cadcam::machining::InternalPathClassificationMode::TubeSectionInset;
-    QString message = tubeSectionInsetMode
-        ? QStringLiteral("内部线条识别完成：按方管截面安全内缩 %1 mm，共排除 %2 个图元，安全带内保留 %3 个。")
-            .arg(result.insetDistance, 0, 'f', 3)
-            .arg(internalItems.size())
-            .arg(result.preservedSafetyBandCount)
-        : QStringLiteral("内部线条识别完成：符合条件的分支闭合单元 %1 个，共排除 %2 个图元，歧义单元 %3 个。")
-            .arg(result.eligibleComponentCount)
-            .arg(internalItems.size())
-            .arg(result.ambiguousComponentCount);
-
-    const QString classificationMode = tubeSectionInsetMode
-        ? QStringLiteral("TubeSectionInset")
-        : QStringLiteral("BranchedClosedUnit");
+    QString message =
+        QStringLiteral("内部线条识别完成：按方管截面安全内缩 %1 mm，共排除 %2 个图元，安全带内保留 %3 个。")
+        .arg(result.insetDistance, 0, 'f', 3)
+        .arg(internalItems.size())
+        .arg(result.preservedSafetyBandCount);
     qInfo().noquote()
         << QStringLiteral(
-            "[InternalPathClassification] mode=%1 candidateComponentCount=%2 "
-            "eligibleComponentCount=%3 outerBoundaryEntityCount=%4 insetDistance=%5 "
-            "removedEntityCount=%6 preservedSafetyBandCount=%7 ambiguousComponentCount=%8")
-            .arg(classificationMode)
-            .arg(result.candidateComponentCount)
-            .arg(result.eligibleComponentCount)
+            "[InternalPathClassification] mode=TubeSectionInset sectionAvailable=true "
+            "candidatePathCount=%1 outerBoundaryEntityCount=%2 insetDistance=%3 "
+            "removedEntityCount=%4 preservedSafetyBandCount=%5 skippedPathCount=%6")
+            .arg(result.candidatePathCount)
             .arg(result.outerBoundaryEntityCount)
             .arg(result.insetDistance, 0, 'f', 6)
             .arg(internalItems.size())
             .arg(result.preservedSafetyBandCount)
-            .arg(result.ambiguousComponentCount);
+            .arg(result.skippedPathCount);
     if (!internalItems.isEmpty()
         && (!ui->openGLWidget->processVisualsVisible()
             || !ui->openGLWidget->excludedEntitiesDimmed()))
