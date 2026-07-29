@@ -62,6 +62,12 @@ public:
         Toggle
     };
 
+    enum class WindowSelectionTarget
+    {
+        Entity,
+        ProcessUnit
+    };
+
     // 构造函数，初始化 CAD 视图
     explicit CadViewer(QWidget* parent = nullptr);
 
@@ -218,14 +224,20 @@ public:
         const QPoint& startScreenPos,
         const QPoint& endScreenPos,
         bool crossingSelection,
-        SelectionUpdateMode updateMode = SelectionUpdateMode::Replace
+        SelectionUpdateMode updateMode = SelectionUpdateMode::Replace,
+        WindowSelectionTarget target = WindowSelectionTarget::Entity
     );
 
     // 获取当前选中的实体集合（按场景遍历顺序）。
     QVector<CadItem*> selectedEntities() const;
 
     // 显示框选预览窗口。
-    void showSelectionWindowPreview(const QPoint& anchorScreenPos, const QPoint& currentScreenPos);
+    void showSelectionWindowPreview
+    (
+        const QPoint& anchorScreenPos,
+        const QPoint& currentScreenPos,
+        WindowSelectionTarget target = WindowSelectionTarget::Entity
+    );
 
     // 隐藏框选预览窗口。
     void hideSelectionWindowPreview();
@@ -488,6 +500,18 @@ private:
         RenderEntityKey preferredRenderKey = {}
     );
 
+    struct ProcessUnitSelectionExpansion
+    {
+        QSet<RenderEntityKey> expandedRenderKeys;
+        std::vector<QSet<RenderEntityKey>> processUnitRenderKeyGroups;
+        QSet<RenderEntityKey> unassignedRenderKeys;
+    };
+
+    ProcessUnitSelectionExpansion expandRenderKeysToProcessUnits
+    (
+        const QSet<RenderEntityKey>& renderKeys
+    ) const;
+
     // 简单屏幕空间拾取，返回命中的 Viewer 渲染键
     // @param screenPos 屏幕坐标
     // @return 命中的 Viewer 渲染键，无效键表示未命中
@@ -614,6 +638,7 @@ private:
     {
         bool visible = false;
         bool crossingSelection = false;
+        WindowSelectionTarget target = WindowSelectionTarget::Entity;
         QPoint anchorScreenPos;
         QPoint currentScreenPos;
     } m_selectionWindowPreview;

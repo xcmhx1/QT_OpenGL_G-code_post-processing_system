@@ -9,6 +9,8 @@
 #include "cad/items/CadItem.h"
 #include "cad/view/CadViewerUtils.h"
 
+#include <QHash>
+
 #include <memory>
 #include <vector>
 
@@ -64,7 +66,8 @@ void CadViewer::selectEntitiesInWindow
     const QPoint& startScreenPos,
     const QPoint& endScreenPos,
     bool crossingSelection,
-    SelectionUpdateMode updateMode
+    SelectionUpdateMode updateMode,
+    WindowSelectionTarget target
 )
 {
     CadDocument* scene = m_sceneCoordinator.document();
@@ -114,6 +117,14 @@ void CadViewer::selectEntitiesInWindow
         }
     }
 
+    ProcessUnitSelectionExpansion processUnitExpansion;
+
+    if (target == WindowSelectionTarget::ProcessUnit)
+    {
+        processUnitExpansion = expandRenderKeysToProcessUnits(selectedRenderKeys);
+        selectedRenderKeys = processUnitExpansion.expandedRenderKeys;
+    }
+
     RenderEntityKey preferredRenderKey = pickedRenderKeys.empty()
         ? RenderEntityKey{} : pickedRenderKeys.front();
 
@@ -121,15 +132,60 @@ void CadViewer::selectEntitiesInWindow
     {
         QSet<RenderEntityKey> mergedSelection = m_selectedRenderKeys;
 
-        for (RenderEntityKey renderKey : selectedRenderKeys)
+        if (target == WindowSelectionTarget::ProcessUnit
+            && !processUnitExpansion.processUnitRenderKeyGroups.empty())
         {
-            if (mergedSelection.contains(renderKey))
+            for (const QSet<RenderEntityKey>& unitRenderKeys
+                : processUnitExpansion.processUnitRenderKeyGroups)
             {
-                mergedSelection.remove(renderKey);
+                bool allSelected = !unitRenderKeys.isEmpty();
+
+                for (RenderEntityKey renderKey : unitRenderKeys)
+                {
+                    if (!m_selectedRenderKeys.contains(renderKey))
+                    {
+                        allSelected = false;
+                        break;
+                    }
+                }
+
+                if (allSelected)
+                {
+                    for (RenderEntityKey renderKey : unitRenderKeys)
+                    {
+                        mergedSelection.remove(renderKey);
+                    }
+                }
+                else
+                {
+                    mergedSelection.unite(unitRenderKeys);
+                }
             }
-            else
+
+            for (RenderEntityKey renderKey : processUnitExpansion.unassignedRenderKeys)
             {
-                mergedSelection.insert(renderKey);
+                if (mergedSelection.contains(renderKey))
+                {
+                    mergedSelection.remove(renderKey);
+                }
+                else
+                {
+                    mergedSelection.insert(renderKey);
+                }
+            }
+        }
+        else
+        {
+            for (RenderEntityKey renderKey : selectedRenderKeys)
+            {
+                if (mergedSelection.contains(renderKey))
+                {
+                    mergedSelection.remove(renderKey);
+                }
+                else
+                {
+                    mergedSelection.insert(renderKey);
+                }
             }
         }
 
@@ -158,6 +214,90 @@ void CadViewer::selectEntitiesInWindow
 
     m_windowPreviewRenderKeys.clear();
     update();
+}
+
+CadViewer::ProcessUnitSelectionExpansion CadViewer::expandRenderKeysToProcessUnits
+(
+    const QSet<RenderEntityKey>& renderKeys
+) const
+{
+    ProcessUnitSelectionExpansion expansion;
+    expansion.expandedRenderKeys = renderKeys;
+    expansion.unassignedRenderKeys = renderKeys;
+
+    CadDocument* scene = m_sceneCoordinator.document();
+
+    if (scene == nullptr || m_processPresentation == nullptr || renderKeys.isEmpty())
+    {
+        return expansion;
+    }
+
+    QHash<cadcam::geometry::EntityId, RenderEntityKey> renderKeyByEntityId;
+    renderKeyByEntityId.reserve(static_cast<qsizetype>(scene->m_entities.size()));
+
+    for (const std::unique_ptr<CadItem>& entity : scene->m_entities)
+    {
+        if (entity == nullptr || entity->m_entityId == 0)
+        {
+            continue;
+        }
+
+        const RenderEntityKey renderKey = CadViewerUtils::toRenderEntityKey(entity.get());
+
+        if (renderKey.valid())
+        {
+            renderKeyByEntityId.insert(entity->m_entityId, renderKey);
+        }
+    }
+
+    for (const cadcam::process::ProcessUnitPresentation& processUnit
+        : m_processPresentation->processUnits)
+    {
+        bool unitHit = false;
+
+        for (cadcam::geometry::EntityId entityId : processUnit.orderedMemberEntityIds)
+        {
+            const auto iterator = renderKeyByEntityId.constFind(entityId);
+
+            if (iterator != renderKeyByEntityId.cend() && renderKeys.contains(iterator.value()))
+            {
+                unitHit = true;
+                break;
+            }
+        }
+
+        if (!unitHit)
+        {
+            continue;
+        }
+
+        QSet<RenderEntityKey> unitRenderKeys;
+        unitRenderKeys.reserve
+        (
+            static_cast<qsizetype>(processUnit.orderedMemberEntityIds.size())
+        );
+
+        for (cadcam::geometry::EntityId entityId : processUnit.orderedMemberEntityIds)
+        {
+            const auto iterator = renderKeyByEntityId.constFind(entityId);
+
+            if (iterator == renderKeyByEntityId.cend())
+            {
+                continue;
+            }
+
+            unitRenderKeys.insert(iterator.value());
+            expansion.expandedRenderKeys.insert(iterator.value());
+            expansion.unassignedRenderKeys.remove(iterator.value());
+        }
+
+        if (!unitRenderKeys.isEmpty())
+        {
+            expansion.processUnitRenderKeyGroups.push_back(std::move(unitRenderKeys));
+        }
+    }
+
+    return expansion;
 }
 
 QVector<CadItem*> CadViewer::selectedEntities() const
@@ -190,12 +330,18 @@ QVector<CadItem*> CadViewer::selectedEntities() const
     return entities;
 }
 
-void CadViewer::showSelectionWindowPreview(const QPoint& anchorScreenPos, const QPoint& currentScreenPos)
+void CadViewer::showSelectionWindowPreview
+(
+    const QPoint& anchorScreenPos,
+    const QPoint& currentScreenPos,
+    WindowSelectionTarget target
+)
 {
     m_selectionWindowPreview.visible = true;
     m_selectionWindowPreview.anchorScreenPos = anchorScreenPos;
     m_selectionWindowPreview.currentScreenPos = currentScreenPos;
     m_selectionWindowPreview.crossingSelection = currentScreenPos.x() < anchorScreenPos.x();
+    m_selectionWindowPreview.target = target;
     updateSelectionWindowPreviewCandidates();
     update();
 }

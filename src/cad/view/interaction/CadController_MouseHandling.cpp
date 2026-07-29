@@ -204,7 +204,17 @@ void CadController::updateIdleWindowSelection(const QPoint& screenPos)
         m_idleWindowSelectionDragging = true;
     }
 
-    m_viewer->showSelectionWindowPreview(m_idleWindowSelectionAnchor, m_idleWindowSelectionCurrent);
+    const CadViewer::WindowSelectionTarget selectionTarget =
+        (m_drawState.keyboardModifiers & Qt::ControlModifier) != 0
+        ? CadViewer::WindowSelectionTarget::ProcessUnit
+        : CadViewer::WindowSelectionTarget::Entity;
+
+    m_viewer->showSelectionWindowPreview
+    (
+        m_idleWindowSelectionAnchor,
+        m_idleWindowSelectionCurrent,
+        selectionTarget
+    );
 }
 
 bool CadController::finishIdleWindowSelection(const QPoint& screenPos)
@@ -224,26 +234,45 @@ bool CadController::finishIdleWindowSelection(const QPoint& screenPos)
     m_idleWindowSelectionCurrent = QPoint();
     m_viewer->hideSelectionWindowPreview();
     const bool shiftSelectionToggle = (m_drawState.keyboardModifiers & Qt::ShiftModifier) != 0;
+    const bool processUnitSelection = (m_drawState.keyboardModifiers & Qt::ControlModifier) != 0;
 
     if (draggedSelection)
     {
         const bool crossingSelection = screenPos.x() < selectionAnchor.x();
+        const CadViewer::SelectionUpdateMode updateMode =
+            shiftSelectionToggle
+            ? CadViewer::SelectionUpdateMode::Toggle
+            : CadViewer::SelectionUpdateMode::Replace;
+        const CadViewer::WindowSelectionTarget selectionTarget =
+            processUnitSelection
+            ? CadViewer::WindowSelectionTarget::ProcessUnit
+            : CadViewer::WindowSelectionTarget::Entity;
+
         m_viewer->selectEntitiesInWindow
         (
             selectionAnchor,
             screenPos,
             crossingSelection,
-            shiftSelectionToggle ? CadViewer::SelectionUpdateMode::Toggle : CadViewer::SelectionUpdateMode::Replace
+            updateMode,
+            selectionTarget
         );
         m_viewer->appendCommandMessage
         (
-            shiftSelectionToggle
-                ? (crossingSelection
-                    ? QStringLiteral("框选增量切换完成（碰选）")
-                    : QStringLiteral("框选增量切换完成（包含选）"))
-                : (crossingSelection
-                    ? QStringLiteral("框选完成（碰选）")
-                    : QStringLiteral("框选完成（包含选）"))
+            processUnitSelection
+                ? (shiftSelectionToggle
+                    ? (crossingSelection
+                        ? QStringLiteral("加工单元框选增量切换完成（碰选）")
+                        : QStringLiteral("加工单元框选增量切换完成（包含选）"))
+                    : (crossingSelection
+                        ? QStringLiteral("加工单元框选完成（碰选）")
+                        : QStringLiteral("加工单元框选完成（包含选）")))
+                : (shiftSelectionToggle
+                    ? (crossingSelection
+                        ? QStringLiteral("框选增量切换完成（碰选）")
+                        : QStringLiteral("框选增量切换完成（包含选）"))
+                    : (crossingSelection
+                        ? QStringLiteral("框选完成（碰选）")
+                        : QStringLiteral("框选完成（包含选）")))
         );
         m_viewer->refreshCommandPrompt();
         return true;

@@ -69,6 +69,12 @@ void CadViewer::updateSelectionWindowPreviewCandidates()
             m_windowPreviewRenderKeys.insert(renderKey);
         }
     }
+
+    if (m_selectionWindowPreview.target == WindowSelectionTarget::ProcessUnit)
+    {
+        m_windowPreviewRenderKeys =
+            expandRenderKeysToProcessUnits(m_windowPreviewRenderKeys).expandedRenderKeys;
+    }
 }
 
 void CadViewer::renderEntitySelectionOverlays()
