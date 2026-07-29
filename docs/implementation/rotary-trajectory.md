@@ -128,6 +128,7 @@ Rotary4Axis ProcessPlan
 - `coordinatedTransferEnabled` 只控制平移与升降是否按 25%/75% 位置重叠；关闭时仍执行同一安全包络和转移分类。
 - 所有 A 轴变化只能出现在 `SafeRotaryTransfer`，且该段起止 Z 均不得低于旋转安全高度。轨迹发布前逐转移校验，失败返回 `MachineTrajectoryTransferSafetyViolation`，不回退为直接 Rapid。
 - 同一 `processUnitIndex` 内使用切削连接，不生成抬刀、空移或重新接近；加工单元边界不再通过 `processGroupId` 猜测。相邻源路径满足连接容差后，还要校验变换后的机床 XYZ 端点距离和展开后的 A 轴连续性。
+- 计划阶段已经通过正式执行解析器执行相同连续性校验。开放链中不满足源空间、机床空间或 A 轴连续性的相邻成员会被拆到不同 `processUnitIndex`，轨迹据此生成安全转移；该过程不放宽连接容差，也不插入切削连接强行跨越间隙。
 - 轨迹层保留每个执行实体和片段所属的 `processUnitIndex`。NC 层据此让一个加工单元内的切削、连续切削连接和过切共享一次启停；图元、片段和 `fragmentOrder` 均不形成额外启停边界。
 - 快速转移只位于加工单元之间。轨迹坐标和阶段由轨迹层确定，NC 与后处理层仅验证快速运动发生在切削关闭状态，不重新规划转移。
 - 每个联动目标仍是一个包含完整 XYZ/A 的 `MachineMoveKind::Rapid`。NC 层保持单块多轴 Rapid，不把联动目标拆成串行单轴指令。

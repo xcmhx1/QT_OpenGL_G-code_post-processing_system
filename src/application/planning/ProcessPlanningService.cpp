@@ -5,6 +5,7 @@
 #include "core/machining/TubeSectionProjector.h"
 #include "core/planning/PlanarProcessPlanBuilder.h"
 #include "core/planning/ProcessPlanBuilder.h"
+#include "core/planning/SingleClosedEntryRefiner.h"
 
 #include <QDebug>
 #include <QStringList>
@@ -562,6 +563,44 @@ namespace
         }
     }
 
+    void logProcessUnitContinuity(const QVector<Diagnostic>& diagnostics)
+    {
+        for (const Diagnostic& diagnostic : diagnostics)
+        {
+            if (diagnostic.code
+                    != DiagnosticCode::MachineTrajectoryContinuityFailure
+                && diagnostic.stage
+                    != QStringLiteral("split-discontinuous-process-unit"))
+            {
+                continue;
+            }
+            const QVariantMap& values = diagnostic.context;
+            qInfo().noquote()
+                << QStringLiteral(
+                    "[ProcessUnitContinuity] processUnitIndex=%1 "
+                    "previousEntityId=%2 nextEntityId=%3 "
+                    "sourceConnectionDistance=%4 machineConnectionDistance=%5 "
+                    "previousSurface=%6 nextSurface=%7 previousA=%8 nextA=%9 "
+                    "failure=%10 splitApplied=%11")
+                    .arg(values.value(QStringLiteral("processUnitIndex")).toInt())
+                    .arg(values.value(QStringLiteral("previousEntityId")).toULongLong())
+                    .arg(values.value(QStringLiteral("nextEntityId")).toULongLong())
+                    .arg(values.value(QStringLiteral("sourceConnectionDistance"))
+                        .toDouble(), 0, 'g', 15)
+                    .arg(values.value(QStringLiteral("machineConnectionDistance"))
+                        .toDouble(), 0, 'g', 15)
+                    .arg(values.value(QStringLiteral("previousSurface")).toString())
+                    .arg(values.value(QStringLiteral("nextSurface")).toString())
+                    .arg(values.value(QStringLiteral("previousA")).toDouble(),
+                        0, 'g', 15)
+                    .arg(values.value(QStringLiteral("nextA")).toDouble(),
+                        0, 'g', 15)
+                    .arg(values.value(QStringLiteral("failure")).toString())
+                    .arg(values.value(QStringLiteral("splitApplied")).toBool()
+                        ? QStringLiteral("true") : QStringLiteral("false"));
+        }
+    }
+
     void logBreakStartPlanningSummaries(const QVector<Diagnostic>& diagnostics)
     {
         for (const Diagnostic& diagnostic : diagnostics)
@@ -964,6 +1003,7 @@ OperationResult<cadcam::planning::ProcessPlan> ProcessPlanningService::buildRota
     }
     auto result = cadcam::planning::ProcessPlanBuilder::build
         (*capture.value, policy, context);
+    logProcessUnitContinuity(result.diagnostics);
     logClosedLoopPlanningSummaries(result.diagnostics);
     logBreakStartPlanningSummaries(result.diagnostics);
     logEntrySelectionSummaries(result.diagnostics);
@@ -983,6 +1023,21 @@ OperationResult<cadcam::planning::ProcessPlan> ProcessPlanningService::buildRota
             QStringLiteral("当前加工单元序列与四轴加工断面约束不一致，无法执行普通排序。")
         ));
         return result;
+    }
+    if (result.succeeded() && result.value.has_value()
+        && policy.sortIntent
+            == cadcam::planning::ProcessSortIntent::PreserveCurrentSequence)
+    {
+        auto continuity = cadcam::planning::SingleClosedEntryRefiner::refine
+            (*result.value, *capture.value, policy, context);
+        logProcessUnitContinuity(continuity.diagnostics);
+        result.mergeDiagnostics(continuity);
+        if (!continuity.succeeded())
+        {
+            result.status = continuity.status;
+            result.value.reset();
+            return result;
+        }
     }
     if (result.succeeded() && result.value.has_value()
         && (document.contentRevision() != result.value->contentRevision

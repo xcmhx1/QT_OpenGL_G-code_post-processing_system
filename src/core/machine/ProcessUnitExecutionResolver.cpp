@@ -228,6 +228,21 @@ namespace cadcam::machine
             }
             for (MachinePose4D& pose : poses) pose.aDegrees += offset;
         }
+
+        QString surfaceName(RotarySurfaceRegion region)
+        {
+            switch (region)
+            {
+            case RotarySurfaceRegion::Top: return QStringLiteral("Top");
+            case RotarySurfaceRegion::Right: return QStringLiteral("Right");
+            case RotarySurfaceRegion::Bottom: return QStringLiteral("Bottom");
+            case RotarySurfaceRegion::Left: return QStringLiteral("Left");
+            case RotarySurfaceRegion::Corner: return QStringLiteral("Corner");
+            case RotarySurfaceRegion::Radial: return QStringLiteral("Radial");
+            case RotarySurfaceRegion::Unknown: return QStringLiteral("Unknown");
+            }
+            return QStringLiteral("Unknown");
+        }
     }
 
     OperationResult<std::vector<ProcessUnitExecutionPath>>
@@ -536,6 +551,28 @@ namespace cadcam::machine
                             execution.posesByPath.back().back().aDegrees);
                     diagnostic.context.insert
                         (QStringLiteral("nextA"), poses.front().aDegrees);
+                    diagnostic.context.insert
+                        (QStringLiteral("processUnitIndex"),
+                            path.processUnitIndex);
+                    diagnostic.context.insert
+                        (QStringLiteral("previousSurface"),
+                            surfaceName(execution.surfaceSummaries.back()
+                                .classification));
+                    diagnostic.context.insert
+                        (QStringLiteral("nextSurface"),
+                            surfaceName(transformed.value->surface
+                                .classification));
+                    diagnostic.context.insert
+                    (
+                        QStringLiteral("failure"),
+                        sourceConnectionDistance
+                            > policy.continuousConnectionTolerance
+                            ? QStringLiteral("SourceGap")
+                            : machineConnectionDistance
+                                > policy.continuousConnectionTolerance
+                                ? QStringLiteral("MachineGap")
+                                : QStringLiteral("AngleJump")
+                    );
                     result.addDiagnostic(diagnostic);
                     return result;
                 }

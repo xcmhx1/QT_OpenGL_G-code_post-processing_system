@@ -1827,6 +1827,25 @@ namespace cadcam::planning
             return machining::tubeZoneIndex(zone) % 2U == 0U;
         }
 
+        bool reliableEntryProjection
+        (
+            const machining::TubeSectionProjection& projection,
+            double projectionTolerance
+        )
+        {
+            if (!projection.valid || projection.ambiguous
+                || projection.confidence < 0.5
+                || projection.absoluteDistanceToShell
+                    > projectionTolerance * 0.8)
+            {
+                return false;
+            }
+
+            return projection.onBoundary
+                ? !strongEntryZone(projection.zone)
+                : strongEntryZone(projection.zone);
+        }
+
         Vector3d interpolateEntryPoint
         (
             const Vector3d& start,
@@ -1875,12 +1894,8 @@ namespace cadcam::planning
                         section, { point.y, point.z },
                         projectionTolerance
                     );
-                if (!projection.valid || projection.ambiguous
-                    || projection.onBoundary
-                    || !strongEntryZone(projection.zone)
-                    || projection.confidence < 0.5
-                    || projection.absoluteDistanceToShell
-                        > projectionTolerance * 0.8)
+                if (!reliableEntryProjection
+                    (projection, projectionTolerance))
                 {
                     return std::nullopt;
                 }
@@ -6999,30 +7014,42 @@ namespace cadcam::planning
             });
             for (const int groupId : orderedGroupIds)
             {
+                const ProcessGroup& group =
+                    plan.groups[static_cast<std::size_t>(groupId)];
                 ProcessGroupZoneProfile& profile =
                     groupZoneProfiles.at(groupId);
                 const machining::TubeZoneMask strongZones =
                     strongTubeZoneMask();
+                const bool canCreateOwnerZoneEntry =
+                    group.kind == ProcessGroupKind::ClosedLoop
+                    && group.entityIds.size() > 1U;
+                const machining::TubeZoneMask requiredEntryMask =
+                    canCreateOwnerZoneEntry
+                    ? std::numeric_limits<machining::TubeZoneMask>::max()
+                    : profile.legalEntryMask;
                 machining::TubeZoneMask ownerCandidateMask =
-                    profile.certainMask & strongZones;
+                    profile.certainMask & strongZones & requiredEntryMask;
                 bool usedPossibleFallback = false;
                 bool usedBoundaryFallback = false;
                 if (ownerCandidateMask == 0U)
                 {
                     ownerCandidateMask =
-                        profile.possibleMask & strongZones;
+                        profile.possibleMask & strongZones
+                        & requiredEntryMask;
                     usedPossibleFallback = ownerCandidateMask != 0U;
                 }
                 if (ownerCandidateMask == 0U
                     && profile.certainMask != 0U)
                 {
-                    ownerCandidateMask = profile.certainMask;
+                    ownerCandidateMask =
+                        profile.certainMask & requiredEntryMask;
                     usedBoundaryFallback = true;
                 }
                 if (ownerCandidateMask == 0U
                     && profile.possibleMask != 0U)
                 {
-                    ownerCandidateMask = profile.possibleMask;
+                    ownerCandidateMask =
+                        profile.possibleMask & requiredEntryMask;
                     usedPossibleFallback = true;
                     usedBoundaryFallback = true;
                 }
@@ -7041,6 +7068,10 @@ namespace cadcam::planning
                         zoneMaskText(profile.certainMask));
                     values.insert(QStringLiteral("possibleMask"),
                         zoneMaskText(profile.possibleMask));
+                    values.insert(QStringLiteral("legalEntryMask"),
+                        zoneMaskText(profile.legalEntryMask));
+                    values.insert(QStringLiteral("requiredEntryMask"),
+                        zoneMaskText(requiredEntryMask));
                     values.insert(QStringLiteral("ownerCandidateMask"),
                         zoneMaskText(ownerCandidateMask));
                     setZoneSweepLifecycleFailure
@@ -7063,8 +7094,6 @@ namespace cadcam::planning
                     machining::tubeZoneBit(*ownerZone);
                 if ((profile.legalEntryMask & ownerBit) == 0U)
                 {
-                    const ProcessGroup& group =
-                        plan.groups[static_cast<std::size_t>(groupId)];
                     if (group.kind == ProcessGroupKind::ClosedLoop
                         && group.entityIds.size() > 1U
                         && surfaceSweepSection.has_value())

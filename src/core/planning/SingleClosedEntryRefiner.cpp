@@ -114,6 +114,8 @@ namespace cadcam::planning
             value.machiningPlaneZOffset =
                 policy.machiningPlaneZOffset;
             value.overcutDistance = policy.overcutDistance;
+            value.continuousConnectionTolerance =
+                policy.connectionTolerance;
             value.numericalEpsilon = policy.numericalEpsilon;
             value.surfaceClassificationTolerance =
                 std::max(policy.numericalEpsilon,
@@ -850,6 +852,225 @@ namespace cadcam::planning
             };
             return diagnostic;
         }
+
+        const Diagnostic* continuityFailure
+        (
+            const QVector<Diagnostic>& diagnostics
+        )
+        {
+            const auto found = std::find_if
+            (
+                diagnostics.cbegin(),
+                diagnostics.cend(),
+                [](const Diagnostic& diagnostic)
+                {
+                    return diagnostic.code
+                        == DiagnosticCode::MachineTrajectoryContinuityFailure;
+                }
+            );
+            return found == diagnostics.cend() ? nullptr : &*found;
+        }
+
+        ProcessUnit splitUnitPart
+        (
+            const ProcessUnit& source,
+            std::vector<geometry::EntityId> members
+        )
+        {
+            ProcessUnit result;
+            result.orderedMemberEntityIds = std::move(members);
+            result.key.memberEntityIds = result.orderedMemberEntityIds;
+            std::sort(result.key.memberEntityIds.begin(),
+                result.key.memberEntityIds.end());
+            result.ownerZone = source.ownerZone;
+            result.closed = false;
+            return result;
+        }
+
+        bool splitProcessUnit
+        (
+            ProcessPlan& plan,
+            std::size_t unitIndex,
+            geometry::EntityId nextEntityId
+        )
+        {
+            if (unitIndex >= plan.processUnits.size()) return false;
+            const ProcessUnit& source = plan.processUnits[unitIndex];
+            const auto split = std::find
+            (
+                source.orderedMemberEntityIds.cbegin() + 1,
+                source.orderedMemberEntityIds.cend(),
+                nextEntityId
+            );
+            if (source.closed || split == source.orderedMemberEntityIds.cend())
+                return false;
+            for (const ProcessPathFragment& fragment : plan.plannedFragments)
+            {
+                if (fragment.processUnitIndex
+                    == static_cast<int>(unitIndex))
+                {
+                    return false;
+                }
+            }
+
+            ProcessPlan updated = plan;
+            const std::size_t splitIndex = static_cast<std::size_t>
+                (std::distance(source.orderedMemberEntityIds.cbegin(), split));
+            ProcessUnit left = splitUnitPart
+            (
+                source,
+                std::vector<geometry::EntityId>
+                (
+                    source.orderedMemberEntityIds.cbegin(),
+                    source.orderedMemberEntityIds.cbegin() + splitIndex
+                )
+            );
+            ProcessUnit right = splitUnitPart
+            (
+                source,
+                std::vector<geometry::EntityId>
+                (
+                    source.orderedMemberEntityIds.cbegin() + splitIndex,
+                    source.orderedMemberEntityIds.cend()
+                )
+            );
+            updated.processUnits[unitIndex] = left;
+            updated.processUnits.insert
+                (updated.processUnits.begin() + unitIndex + 1U, right);
+            updated.processUnitSequence.units[unitIndex] = left.key;
+            updated.processUnitSequence.units.insert
+            (
+                updated.processUnitSequence.units.begin() + unitIndex + 1U,
+                right.key
+            );
+
+            std::unordered_map<geometry::EntityId, int> unitByEntity;
+            for (std::size_t index = 0U;
+                index < updated.processUnits.size(); ++index)
+            {
+                for (const geometry::EntityId entityId :
+                    updated.processUnits[index].orderedMemberEntityIds)
+                {
+                    if (!unitByEntity.emplace
+                        (entityId, static_cast<int>(index)).second)
+                    {
+                        return false;
+                    }
+                }
+            }
+            for (std::size_t index = 0U;
+                index < updated.assignments.size(); ++index)
+            {
+                ProcessAssignment& assignment = updated.assignments[index];
+                const auto unit = unitByEntity.find(assignment.entityId);
+                if (unit == unitByEntity.end()) return false;
+                assignment.processOrder = static_cast<int>(index);
+                assignment.processUnitIndex = unit->second;
+            }
+            for (ProcessPathFragment& fragment : updated.plannedFragments)
+            {
+                const auto unit = unitByEntity.find(fragment.entityId);
+                if (unit == unitByEntity.end()) return false;
+                fragment.processUnitIndex = unit->second;
+            }
+            if (!validateProcessUnitStructure(updated)) return false;
+            plan = std::move(updated);
+            return true;
+        }
+
+        OperationReport normalizeProcessUnitContinuity
+        (
+            ProcessPlan& plan,
+            const std::vector<machine::ProcessUnitExecutionSource>& sources,
+            const machine::RotaryMachinePolicy& policy,
+            const std::optional<machining::TubeSectionModel>& section,
+            const OperationContext& context
+        )
+        {
+            OperationReport report;
+            for (std::size_t unitIndex = 0U;
+                unitIndex < plan.processUnits.size();)
+            {
+                const ProcessUnit unit = plan.processUnits[unitIndex];
+                auto paths = machine::ProcessUnitExecutionResolver::compilePaths
+                (
+                    unit,
+                    static_cast<int>(unitIndex),
+                    plan.assignments,
+                    plan.plannedFragments,
+                    sources,
+                    context
+                );
+                report.mergeDiagnostics(paths);
+                if (!paths.succeeded() || !paths.value.has_value())
+                {
+                    report.status = paths.status;
+                    return report;
+                }
+
+                auto execution = machine::ProcessUnitExecutionResolver::resolve
+                (
+                    *paths.value,
+                    unit.closed,
+                    policy,
+                    section,
+                    std::nullopt,
+                    context
+                );
+                if (execution.succeeded() && execution.value.has_value())
+                {
+                    report.mergeDiagnostics(execution);
+                    ++unitIndex;
+                    continue;
+                }
+
+                const Diagnostic* failure =
+                    continuityFailure(execution.diagnostics);
+                if (failure == nullptr
+                    || unit.closed
+                    || unit.orderedMemberEntityIds.size() < 2U)
+                {
+                    report.mergeDiagnostics(execution);
+                    report.status = execution.status;
+                    return report;
+                }
+
+                const geometry::EntityId nextEntityId =
+                    failure->context.value(QStringLiteral("nextEntityId"))
+                    .toULongLong();
+                if (nextEntityId == 0U
+                    || !splitProcessUnit(plan, unitIndex, nextEntityId))
+                {
+                    report.mergeDiagnostics(execution);
+                    report.status = OperationStatus::Failed;
+                    return report;
+                }
+
+                Diagnostic splitDiagnostic = *failure;
+                splitDiagnostic.severity = DiagnosticSeverity::Notice;
+                splitDiagnostic.component =
+                    QStringLiteral("SingleClosedEntryRefiner");
+                splitDiagnostic.stage =
+                    QStringLiteral("split-discontinuous-process-unit");
+                splitDiagnostic.userMessage =
+                    QStringLiteral("连续加工单元存在实际执行间隙，已拆分并改用安全转移。");
+                splitDiagnostic.technicalDetail =
+                    QStringLiteral("Machine-space continuity failure split the open ProcessUnit before publication.");
+                splitDiagnostic.context.insert
+                    (QStringLiteral("splitApplied"), true);
+                splitDiagnostic.context.insert
+                    (QStringLiteral("leftProcessUnitIndex"),
+                        static_cast<int>(unitIndex));
+                splitDiagnostic.context.insert
+                    (QStringLiteral("rightProcessUnitIndex"),
+                        static_cast<int>(unitIndex + 1U));
+                report.addDiagnostic(splitDiagnostic);
+            }
+
+            report.status = OperationStatus::Success;
+            report.value = std::monostate{};
+            return report;
+        }
     }
 
     OperationReport SingleClosedEntryRefiner::refine
@@ -862,23 +1083,12 @@ namespace cadcam::planning
     {
         OperationReport report;
         if (plan.mode != ProcessPlanMode::Rotary4Axis
-            || policy.sortIntent != ProcessSortIntent::RebuildSequence
-            || policy.orderingStrategy
-                != ProcessOrderingStrategy::LazyRotation
             || !input.tubeSection.has_value())
         {
             report.status = OperationStatus::Success;
             report.value = std::monostate{};
             return report;
         }
-
-        const std::vector<ProcessUnitKey> originalSequence =
-            plan.processUnitSequence.units;
-        std::vector<std::optional<machining::TubeZone16>>
-            originalOwnerZones;
-        originalOwnerZones.reserve(plan.processUnits.size());
-        for (const ProcessUnit& unit : plan.processUnits)
-            originalOwnerZones.push_back(unit.ownerZone);
 
         std::unordered_map<geometry::EntityId, const PlanningEntity*>
             entities;
@@ -900,6 +1110,32 @@ namespace cadcam::planning
 
         const machine::RotaryMachinePolicy rotaryPolicy =
             machinePolicy(policy, *input.tubeSection);
+        OperationReport continuity = normalizeProcessUnitContinuity
+            (plan, executionSources, rotaryPolicy, input.tubeSection, context);
+        report.mergeDiagnostics(continuity.diagnostics);
+        if (!continuity.succeeded())
+        {
+            report.status = continuity.status;
+            return report;
+        }
+
+        if (policy.sortIntent != ProcessSortIntent::RebuildSequence
+            || policy.orderingStrategy
+                != ProcessOrderingStrategy::LazyRotation)
+        {
+            report.status = OperationStatus::Success;
+            report.value = std::monostate{};
+            return report;
+        }
+
+        const std::vector<ProcessUnitKey> originalSequence =
+            plan.processUnitSequence.units;
+        std::vector<std::optional<machining::TubeZone16>>
+            originalOwnerZones;
+        originalOwnerZones.reserve(plan.processUnits.size());
+        for (const ProcessUnit& unit : plan.processUnits)
+            originalOwnerZones.push_back(unit.ownerZone);
+
         const double maximumRadius =
             machine::RotaryKinematics::sectionMaximumCollisionRadius
             (
