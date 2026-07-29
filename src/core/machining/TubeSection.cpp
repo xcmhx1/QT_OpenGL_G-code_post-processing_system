@@ -214,6 +214,375 @@ namespace cadcam::machining
                 || (secondSideEnd == 0 && pointOnSegment(firstEnd, secondStart, secondEnd, epsilon));
         }
 
+        bool selfIntersects(const std::vector<Vector2d>& boundary, double epsilon);
+
+        double segmentDistance
+        (
+            const Vector2d& firstStart,
+            const Vector2d& firstEnd,
+            const Vector2d& secondStart,
+            const Vector2d& secondEnd,
+            double epsilon
+        )
+        {
+            if (segmentsIntersect
+            (
+                firstStart,
+                firstEnd,
+                secondStart,
+                secondEnd,
+                epsilon
+            ))
+            {
+                return 0.0;
+            }
+
+            return std::min
+            (
+                std::min
+                (
+                    pointSegmentDistance(firstStart, secondStart, secondEnd),
+                    pointSegmentDistance(firstEnd, secondStart, secondEnd)
+                ),
+                std::min
+                (
+                    pointSegmentDistance(secondStart, firstStart, firstEnd),
+                    pointSegmentDistance(secondEnd, firstStart, firstEnd)
+                )
+            );
+        }
+
+        Vector3d subtract3D(const Vector3d& left, const Vector3d& right)
+        {
+            return { left.x - right.x, left.y - right.y, left.z - right.z };
+        }
+
+        double dot3D(const Vector3d& left, const Vector3d& right)
+        {
+            return left.x * right.x + left.y * right.y + left.z * right.z;
+        }
+
+        Vector3d cross3D(const Vector3d& left, const Vector3d& right)
+        {
+            return
+            {
+                left.y * right.z - left.z * right.y,
+                left.z * right.x - left.x * right.z,
+                left.x * right.y - left.y * right.x
+            };
+        }
+
+        bool normalize3D(Vector3d& value, double epsilon)
+        {
+            const double length = std::sqrt(dot3D(value, value));
+
+            if (!std::isfinite(length) || length <= epsilon)
+            {
+                return false;
+            }
+
+            value.x /= length;
+            value.y /= length;
+            value.z /= length;
+            return true;
+        }
+
+        struct LoopProjection
+        {
+            bool valid = false;
+            Vector3d origin;
+            Vector3d axisU;
+            Vector3d axisV;
+            Vector3d normal;
+            std::vector<Vector2d> boundary;
+        };
+
+        Vector2d projectPoint(const Vector3d& point, const LoopProjection& projection)
+        {
+            const Vector3d local = subtract3D(point, projection.origin);
+            return { dot3D(local, projection.axisU), dot3D(local, projection.axisV) };
+        }
+
+        double distanceToPlane(const Vector3d& point, const LoopProjection& projection)
+        {
+            return std::abs(dot3D(subtract3D(point, projection.origin), projection.normal));
+        }
+
+        LoopProjection buildLoopProjection
+        (
+            const std::vector<Vector3d>& orderedPath,
+            double epsilon
+        )
+        {
+            LoopProjection projection;
+
+            if (orderedPath.size() < 3U)
+            {
+                return projection;
+            }
+
+            projection.origin = geometry::stableBoundsCenter(orderedPath);
+            Vector3d normal;
+
+            for (std::size_t index = 0; index < orderedPath.size(); ++index)
+            {
+                const Vector3d first = subtract3D(orderedPath[index], projection.origin);
+                const Vector3d second = subtract3D
+                (
+                    orderedPath[(index + 1U) % orderedPath.size()],
+                    projection.origin
+                );
+                const Vector3d contribution = cross3D(first, second);
+                normal.x += contribution.x;
+                normal.y += contribution.y;
+                normal.z += contribution.z;
+            }
+
+            if (!normalize3D(normal, epsilon))
+            {
+                return projection;
+            }
+
+            const Vector3d reference =
+                std::abs(normal.x) <= std::abs(normal.y)
+                    && std::abs(normal.x) <= std::abs(normal.z)
+                ? Vector3d{ 1.0, 0.0, 0.0 }
+                : (std::abs(normal.y) <= std::abs(normal.z)
+                    ? Vector3d{ 0.0, 1.0, 0.0 }
+                    : Vector3d{ 0.0, 0.0, 1.0 });
+            Vector3d axisU = cross3D(reference, normal);
+
+            if (!normalize3D(axisU, epsilon))
+            {
+                return projection;
+            }
+
+            Vector3d axisV = cross3D(normal, axisU);
+
+            if (!normalize3D(axisV, epsilon))
+            {
+                return projection;
+            }
+
+            projection.axisU = axisU;
+            projection.axisV = axisV;
+            projection.normal = normal;
+            projection.boundary.reserve(orderedPath.size());
+
+            for (const Vector3d& point : orderedPath)
+            {
+                const Vector2d projected = projectPoint(point, projection);
+
+                if (projection.boundary.empty()
+                    || distance2D(projection.boundary.back(), projected) > epsilon)
+                {
+                    projection.boundary.push_back(projected);
+                }
+            }
+
+            if (projection.boundary.size() > 1U
+                && distance2D
+                (
+                    projection.boundary.front(),
+                    projection.boundary.back()
+                ) <= epsilon)
+            {
+                projection.boundary.pop_back();
+            }
+
+            projection.valid = projection.boundary.size() >= 3U
+                && std::abs(signedArea(projection.boundary)) > epsilon
+                && !selfIntersects(projection.boundary, epsilon);
+            return projection;
+        }
+
+        bool projectedSegmentHasClearance
+        (
+            const Vector2d& start,
+            const Vector2d& end,
+            const std::vector<Vector2d>& boundary,
+            double minimumDistance,
+            double epsilon
+        )
+        {
+            for (std::size_t index = 0; index < boundary.size(); ++index)
+            {
+                if (segmentDistance
+                (
+                    start,
+                    end,
+                    boundary[index],
+                    boundary[(index + 1U) % boundary.size()],
+                    epsilon
+                ) <= minimumDistance)
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        bool recordStrictlyInsideBoundary
+        (
+            const TopologyPathRecord& record,
+            const std::vector<Vector2d>& boundary,
+            double minimumDistance,
+            double epsilon
+        )
+        {
+            if (record.points.size() < 2U || boundary.size() < 3U)
+            {
+                return false;
+            }
+
+            std::vector<Vector2d> projected;
+            projected.reserve(record.points.size());
+
+            for (const Vector3d& point : record.points)
+            {
+                const Vector2d sample{ point.y, point.z };
+
+                if (!pointInside(sample, boundary)
+                    || distanceToBoundary(sample, boundary) <= minimumDistance)
+                {
+                    return false;
+                }
+
+                projected.push_back(sample);
+            }
+
+            for (std::size_t index = 0; index + 1U < projected.size(); ++index)
+            {
+                if (!projectedSegmentHasClearance
+                (
+                    projected[index],
+                    projected[index + 1U],
+                    boundary,
+                    minimumDistance,
+                    epsilon
+                ))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        bool recordStrictlyInsideLoop
+        (
+            const TopologyPathRecord& record,
+            const LoopProjection& projection,
+            double minimumDistance,
+            double epsilon
+        )
+        {
+            if (!projection.valid || record.points.size() < 2U)
+            {
+                return false;
+            }
+
+            std::vector<Vector2d> projected;
+            projected.reserve(record.points.size());
+
+            for (const Vector3d& point : record.points)
+            {
+                if (distanceToPlane(point, projection) > epsilon)
+                {
+                    return false;
+                }
+
+                const Vector2d sample = projectPoint(point, projection);
+
+                if (!pointInside(sample, projection.boundary)
+                    || distanceToBoundary(sample, projection.boundary) <= minimumDistance)
+                {
+                    return false;
+                }
+
+                projected.push_back(sample);
+            }
+
+            for (std::size_t index = 0; index + 1U < projected.size(); ++index)
+            {
+                if (!projectedSegmentHasClearance
+                (
+                    projected[index],
+                    projected[index + 1U],
+                    projection.boundary,
+                    minimumDistance,
+                    epsilon
+                ))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        bool loopContainedByOuterBoundary
+        (
+            const std::vector<Vector3d>& candidatePath,
+            const LoopProjection& outerProjection,
+            double epsilon
+        )
+        {
+            if (!outerProjection.valid || candidatePath.size() < 3U)
+            {
+                return false;
+            }
+
+            bool hasStrictInteriorSample = false;
+
+            for (std::size_t index = 0; index < candidatePath.size(); ++index)
+            {
+                const Vector3d& point = candidatePath[index];
+                const Vector3d& next = candidatePath[(index + 1U) % candidatePath.size()];
+
+                for (const Vector3d& sample3D :
+                    { point,
+                      Vector3d
+                      {
+                          point.x + (next.x - point.x) * 0.5,
+                          point.y + (next.y - point.y) * 0.5,
+                          point.z + (next.z - point.z) * 0.5
+                      } })
+                {
+                    if (distanceToPlane(sample3D, outerProjection) > epsilon)
+                    {
+                        return false;
+                    }
+
+                    const Vector2d sample = projectPoint(sample3D, outerProjection);
+                    const double boundaryDistance =
+                        distanceToBoundary(sample, outerProjection.boundary);
+
+                    if (boundaryDistance <= epsilon)
+                    {
+                        continue;
+                    }
+
+                    if (!pointInside(sample, outerProjection.boundary))
+                    {
+                        return false;
+                    }
+
+                    hasStrictInteriorSample = true;
+                }
+            }
+
+            return hasStrictInteriorSample;
+        }
+
+        std::vector<EntityId> canonicalEntityIds(std::vector<EntityId> entityIds)
+        {
+            std::sort(entityIds.begin(), entityIds.end());
+            entityIds.erase(std::unique(entityIds.begin(), entityIds.end()), entityIds.end());
+            return entityIds;
+        }
+
         bool selfIntersects(const std::vector<Vector2d>& boundary, double epsilon)
         {
             for (std::size_t first = 0; first < boundary.size(); ++first)
@@ -706,50 +1075,6 @@ namespace cadcam::machining
             return hasStrictInteriorPoint;
         }
 
-        bool segmentEntersInterior
-        (
-            const Vector2d& start,
-            const Vector2d& end,
-            const std::vector<Vector2d>& boundary,
-            double interiorTolerance,
-            double epsilon
-        )
-        {
-            std::vector<double> parameters{ 0.0, 1.0 };
-            const Vector2d direction{ end.x - start.x, end.y - start.y };
-            for (std::size_t index = 0; index < boundary.size(); ++index)
-            {
-                const Vector2d& edgeStart = boundary[index];
-                const Vector2d& edgeEnd = boundary[(index + 1) % boundary.size()];
-                const Vector2d edge{ edgeEnd.x - edgeStart.x, edgeEnd.y - edgeStart.y };
-                const double denominator = direction.x * edge.y - direction.y * edge.x;
-                if (std::abs(denominator) <= epsilon) continue;
-                const Vector2d offset{ edgeStart.x - start.x, edgeStart.y - start.y };
-                const double parameter = (offset.x * edge.y - offset.y * edge.x) / denominator;
-                const double edgeParameter = (offset.x * direction.y - offset.y * direction.x) / denominator;
-                if (parameter > epsilon && parameter < 1.0 - epsilon
-                    && edgeParameter >= -epsilon && edgeParameter <= 1.0 + epsilon)
-                    parameters.push_back(parameter);
-            }
-            std::sort(parameters.begin(), parameters.end());
-            parameters.erase(std::unique(parameters.begin(), parameters.end(), [epsilon](double a, double b)
-            {
-                return std::abs(a - b) <= epsilon;
-            }), parameters.end());
-            for (std::size_t index = 0; index + 1 < parameters.size(); ++index)
-            {
-                const double parameter = (parameters[index] + parameters[index + 1]) * 0.5;
-                const Vector2d sample
-                {
-                    start.x + direction.x * parameter,
-                    start.y + direction.y * parameter
-                };
-                if (pointInside(sample, boundary)
-                    && distanceToBoundary(sample, boundary) > interiorTolerance) return true;
-            }
-            return false;
-        }
-
         double pointSegmentDistance3D
         (
             const Vector3d& point,
@@ -1066,56 +1391,103 @@ namespace cadcam::machining
             );
         }
 
-        OperationResult<InternalPathClassification> result =
-            classifyTopologicalInteriorPaths(input, topology, context);
-        if (!result.succeeded() || !result.value.has_value()) return result;
-
+        InternalPathClassification classification;
+        classification.mode = InternalPathClassificationMode::TubeSectionInset;
+        classification.candidateComponentCount = topology.statistics().componentCount;
+        classification.outerBoundaryEntityCount =
+            static_cast<int>(section.outerBoundaryEntityIds.size());
         const std::set<EntityId> outerIds
             (section.outerBoundaryEntityIds.begin(), section.outerBoundaryEntityIds.end());
-        const std::set<EntityId> topologicalIds
-        (
-            result.value->topologicalInteriorEntityIds.begin(),
-            result.value->topologicalInteriorEntityIds.end()
-        );
-        std::set<EntityId> physicalIds;
+        double insetDistance = 0.0;
+
+        if (std::isfinite(section.cornerRadius) && section.cornerRadius >= 0.0)
+        {
+            insetDistance = section.cornerRadius;
+        }
+
+        for (const double radius : section.cornerRadii)
+        {
+            if (std::isfinite(radius) && radius >= 0.0)
+            {
+                insetDistance = std::max(insetDistance, radius);
+            }
+        }
+
+        classification.insetDistance = insetDistance;
+        const double requiredDistance =
+            insetDistance + policy.interiorDistanceTolerance;
+        const Vector2d sectionCenter
+            { section.geometry.centerY, section.geometry.centerZ };
         const auto& boundary = section.geometry.boundary;
+        OperationResult<InternalPathClassification> result;
+
+        if (!pointInside(sectionCenter, boundary)
+            || distanceToBoundary(sectionCenter, boundary) <= requiredDistance)
+        {
+            classification.skippedComponentCount =
+                classification.candidateComponentCount;
+            result.status = OperationStatus::PartialSuccess;
+            result.value = classification;
+            QVariantMap values = contextValues
+                (input.contentRevision, 0, 0, &section, std::abs(signedArea(boundary)));
+            values.insert(QStringLiteral("insetDistance"), insetDistance);
+            values.insert(QStringLiteral("interiorDistanceTolerance"),
+                policy.interiorDistanceTolerance);
+            result.addDiagnostic(diagnostic
+            (
+                DiagnosticCode::TubeSectionInteriorClassificationFailed,
+                DiagnosticSeverity::Warning,
+                QStringLiteral("方管截面安全内缩区域已坍缩，本次未排除任何内部图元。"),
+                QStringLiteral("Tube section inset leaves no valid interior region."),
+                context,
+                values
+            ));
+            return result;
+        }
+
+        classification.eligibleComponentCount =
+            classification.candidateComponentCount;
+        std::set<EntityId> physicalIds;
 
         for (const TopologyPathRecord& record : input.records)
         {
             if (outerIds.count(record.entityId) != 0U
-                || topologicalIds.count(record.entityId) != 0U
-                || record.points.empty()) continue;
-            bool physicalInterior = false;
-            for (const Vector3d& point : record.points)
+                || record.points.empty())
             {
-                const Vector2d projected{ point.y, point.z };
-                if (pointInside(projected, boundary)
-                    && distanceToBoundary(projected, boundary) > policy.numericalEpsilon)
-                {
-                    physicalInterior = true;
-                    break;
-                }
+                continue;
             }
-            for (std::size_t index = 0; !physicalInterior && index + 1 < record.points.size(); ++index)
+
+            if (recordStrictlyInsideBoundary
+            (
+                record,
+                boundary,
+                requiredDistance,
+                policy.numericalEpsilon
+            ))
             {
-                physicalInterior = segmentEntersInterior
-                (
-                    { record.points[index].y, record.points[index].z },
-                    { record.points[index + 1].y, record.points[index + 1].z },
-                    boundary,
-                    policy.numericalEpsilon,
-                    policy.numericalEpsilon
-                );
+                physicalIds.insert(record.entityId);
             }
-            if (physicalInterior) physicalIds.insert(record.entityId);
+            else if (recordStrictlyInsideBoundary
+            (
+                record,
+                boundary,
+                policy.numericalEpsilon,
+                policy.numericalEpsilon
+            ))
+            {
+                ++classification.preservedSafetyBandCount;
+            }
         }
-        result.value->physicalInteriorEntityIds = stableIds(physicalIds, input);
+
+        classification.removableEntityIds = stableIds(physicalIds, input);
+        result.status = OperationStatus::Success;
+        result.value = classification;
         result.addDiagnostic(diagnostic
         (
             DiagnosticCode::None,
             DiagnosticSeverity::Info,
-            QStringLiteral("方管内部图元识别完成。"),
-            QStringLiteral("Physical and topological interior classifications completed."),
+            QStringLiteral("方管安全内缩区域内部图元识别完成。"),
+            QStringLiteral("Tube section inset interior classification completed."),
             context,
             contextValues
             (
@@ -1124,8 +1496,8 @@ namespace cadcam::machining
                 0,
                 &section,
                 std::abs(signedArea(section.geometry.boundary)),
-                static_cast<int>(result.value->physicalInteriorEntityIds.size()),
-                static_cast<int>(result.value->topologicalInteriorEntityIds.size())
+                static_cast<int>(classification.removableEntityIds.size()),
+                0
             )
         ));
         return result;
@@ -1136,10 +1508,12 @@ namespace cadcam::machining
     (
         const TopologyInput& input,
         const topology::PathTopology& topology,
+        const TubeSectionPolicy& policy,
         const OperationContext& context
     )
     {
         InternalPathClassification classification;
+        classification.mode = InternalPathClassificationMode::BranchedClosedUnit;
         OperationResult<InternalPathClassification> result;
         const std::vector<int> componentIds = topology.componentIds();
         if (componentIds.size() != input.records.size())
@@ -1164,16 +1538,36 @@ namespace cadcam::machining
 
         std::set<EntityId> topologicalIds;
         bool hasWarning = false;
+        classification.candidateComponentCount =
+            static_cast<int>(components.size());
+
         for (const auto& [componentId, ids] : components)
         {
+            if (ids.size() <= 1U)
+            {
+                ++classification.skippedComponentCount;
+                continue;
+            }
+
             const OperationResult<TopologyLoopResult> loop = topology.extractBestLoop(ids);
             if (!loop.succeeded() || !loop.value.has_value() || !loop.value->connectedLoop)
             {
-                ++classification.skippedComponentCount;
+                if (loop.value.has_value() && loop.value->branchNodeCount > 0)
+                {
+                    ++classification.ambiguousComponentCount;
+                }
+                else
+                {
+                    ++classification.skippedComponentCount;
+                }
+
                 QVariantMap values = contextValues
                     (input.contentRevision, 0, static_cast<int>(ids.size()), nullptr, 0.0);
                 values.insert(QStringLiteral("componentId"), componentId);
-                values.insert(QStringLiteral("reason"), QStringLiteral("no-strict-outer-loop"));
+                values.insert(QStringLiteral("reason"),
+                    loop.value.has_value() && loop.value->branchNodeCount > 0
+                    ? QStringLiteral("ambiguous-outer-loop")
+                    : QStringLiteral("no-strict-outer-loop"));
                 result.addDiagnostic(diagnostic
                 (
                     DiagnosticCode::None,
@@ -1186,13 +1580,113 @@ namespace cadcam::machining
                 continue;
             }
 
+            if (loop.value->branchNodeCount <= 0)
+            {
+                ++classification.skippedComponentCount;
+                continue;
+            }
+
+            const LoopProjection outerProjection = buildLoopProjection
+                (loop.value->orderedPath, policy.numericalEpsilon);
+
+            if (!outerProjection.valid)
+            {
+                ++classification.ambiguousComponentCount;
+                continue;
+            }
+
+            const std::vector<EntityId> outerKey =
+                canonicalEntityIds(loop.value->usedEntityIds);
+            std::set<std::vector<EntityId>> inspectedLoopKeys{ outerKey };
+            bool ambiguousOuterBoundary = false;
+
+            for (const EntityId seed : ids)
+            {
+                const OperationResult<TopologyLoopResult> seeded =
+                    topology.extractSeededLoop({ seed });
+
+                if (!seeded.succeeded() || !seeded.value.has_value()
+                    || !seeded.value->connectedLoop)
+                {
+                    continue;
+                }
+
+                const std::vector<EntityId> candidateKey =
+                    canonicalEntityIds(seeded.value->usedEntityIds);
+
+                if (!inspectedLoopKeys.insert(candidateKey).second)
+                {
+                    continue;
+                }
+
+                std::vector<Vector2d> projectedCandidate;
+                projectedCandidate.reserve(seeded.value->orderedPath.size());
+
+                for (const Vector3d& point : seeded.value->orderedPath)
+                {
+                    projectedCandidate.push_back(projectPoint(point, outerProjection));
+                }
+
+                const double candidateArea = std::abs(signedArea(projectedCandidate));
+                const double outerArea =
+                    std::abs(signedArea(outerProjection.boundary));
+
+                if (candidateArea >= outerArea - policy.minimumSectionArea
+                    || !loopContainedByOuterBoundary
+                    (
+                        seeded.value->orderedPath,
+                        outerProjection,
+                        policy.numericalEpsilon
+                    ))
+                {
+                    ambiguousOuterBoundary = true;
+                    break;
+                }
+            }
+
+            if (ambiguousOuterBoundary)
+            {
+                ++classification.ambiguousComponentCount;
+                QVariantMap values = contextValues
+                    (input.contentRevision, 0, static_cast<int>(ids.size()), nullptr, 0.0);
+                values.insert(QStringLiteral("componentId"), componentId);
+                values.insert(QStringLiteral("reason"),
+                    QStringLiteral("outer-loop-not-unique"));
+                result.addDiagnostic(diagnostic
+                (
+                    DiagnosticCode::TubeSectionInteriorClassificationFailed,
+                    DiagnosticSeverity::Warning,
+                    QStringLiteral("图元组无法唯一确定最外围闭合边界，已跳过内部线排除。"),
+                    QStringLiteral("Connected component has no unique containing outer loop."),
+                    context,
+                    values
+                ));
+                hasWarning = true;
+                continue;
+            }
+
+            ++classification.eligibleComponentCount;
             const std::set<EntityId> used
                 (loop.value->usedEntityIds.begin(), loop.value->usedEntityIds.end());
+            classification.outerBoundaryEntityCount += static_cast<int>(used.size());
+
             for (EntityId entityId : ids)
             {
                 if (used.count(entityId) == 0U)
                 {
-                    topologicalIds.insert(entityId);
+                    const auto record = recordsById.find(entityId);
+
+                    if (record != recordsById.end() && recordStrictlyInsideLoop
+                    (
+                        *record->second,
+                        outerProjection,
+                        policy.numericalEpsilon,
+                        policy.numericalEpsilon
+                    ))
+                    {
+                        topologicalIds.insert(entityId);
+                    }
+
                     continue;
                 }
 
@@ -1226,7 +1720,7 @@ namespace cadcam::machining
             }
         }
 
-        classification.topologicalInteriorEntityIds = stableIds(topologicalIds, input);
+        classification.removableEntityIds = stableIds(topologicalIds, input);
         result.status = hasWarning ? OperationStatus::PartialSuccess : OperationStatus::Success;
         result.value = std::move(classification);
         return result;

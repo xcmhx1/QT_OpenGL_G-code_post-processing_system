@@ -14,6 +14,7 @@ namespace
 {
     using cadcam::geometry::EntityId;
     using cadcam::machining::InternalPathClassification;
+    using cadcam::machining::InternalPathClassificationMode;
     using cadcam::machining::TubeCornerGeometry;
     using cadcam::machining::TubeCutBoundaryClassifier;
     using cadcam::machining::TubeSectionGeometry;
@@ -580,6 +581,10 @@ RotaryInternalPathResult RotaryTubeGeometryAnalyzer::findInternalPaths
 )
 {
     RotaryInternalPathResult result;
+    const bool hasValidSection = model.valid && model.coreModel.has_value();
+    result.mode = hasValidSection
+        ? InternalPathClassificationMode::TubeSectionInset
+        : InternalPathClassificationMode::BranchedClosedUnit;
 
     const OperationContext context = createOperationContext
         (QStringLiteral("ClassifyTubeInternalPaths"));
@@ -594,19 +599,21 @@ RotaryInternalPathResult RotaryTubeGeometryAnalyzer::findInternalPaths
         return result;
     }
 
-    const OperationResult<InternalPathClassification> classified = model.coreModel.has_value()
+    const TubeSectionPolicy policy = buildPolicy(connectionTolerance);
+    const OperationResult<InternalPathClassification> classified = hasValidSection
         ? TubeSectionAnalyzer::classifyInternalPaths
         (
             prepared.input,
             prepared.topology,
             *model.coreModel,
-            buildPolicy(connectionTolerance),
+            policy,
             context
         )
         : TubeSectionAnalyzer::classifyTopologicalInteriorPaths
         (
             prepared.input,
             prepared.topology,
+            policy,
             context
         );
     result.diagnostics += classified.diagnostics;
@@ -615,20 +622,21 @@ RotaryInternalPathResult RotaryTubeGeometryAnalyzer::findInternalPaths
     {
         return result;
     }
+    result.mode = classified.value->mode;
+    result.candidateComponentCount = classified.value->candidateComponentCount;
+    result.eligibleComponentCount = classified.value->eligibleComponentCount;
+    result.outerBoundaryEntityCount = classified.value->outerBoundaryEntityCount;
+    result.insetDistance = classified.value->insetDistance;
+    result.preservedSafetyBandCount = classified.value->preservedSafetyBandCount;
+    result.ambiguousComponentCount = classified.value->ambiguousComponentCount;
     result.skippedComponentCount = classified.value->skippedComponentCount;
 
     const QHash<EntityId, CadItem*> byId = itemMap(sceneItems);
 
-    for (const EntityId entityId : classified.value->physicalInteriorEntityIds)
+    for (const EntityId entityId : classified.value->removableEntityIds)
     {
         const auto item = byId.constFind(entityId);
-        if (item != byId.cend()) result.physicalInteriorItems.push_back(item.value());
-    }
-
-    for (const EntityId entityId : classified.value->topologicalInteriorEntityIds)
-    {
-        const auto item = byId.constFind(entityId);
-        if (item != byId.cend()) result.topologicalInteriorItems.push_back(item.value());
+        if (item != byId.cend()) result.removableItems.push_back(item.value());
     }
 
     return result;

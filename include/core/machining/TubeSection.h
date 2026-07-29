@@ -47,10 +47,23 @@ namespace cadcam::machining
         std::vector<TubeCornerGeometry> corners;
     };
 
+    enum class InternalPathClassificationMode
+    {
+        BranchedClosedUnit,
+        TubeSectionInset
+    };
+
     struct InternalPathClassification
     {
-        std::vector<geometry::EntityId> physicalInteriorEntityIds;
-        std::vector<geometry::EntityId> topologicalInteriorEntityIds;
+        InternalPathClassificationMode mode =
+            InternalPathClassificationMode::BranchedClosedUnit;
+        std::vector<geometry::EntityId> removableEntityIds;
+        int candidateComponentCount = 0;
+        int eligibleComponentCount = 0;
+        int outerBoundaryEntityCount = 0;
+        double insetDistance = 0.0;
+        int preservedSafetyBandCount = 0;
+        int ambiguousComponentCount = 0;
         int skippedComponentCount = 0;
     };
 
@@ -97,6 +110,7 @@ namespace cadcam::machining
         (
             const topology::TopologyInput& input,
             const topology::PathTopology& topology,
+            const TubeSectionPolicy& policy,
             const OperationContext& context
         );
     };

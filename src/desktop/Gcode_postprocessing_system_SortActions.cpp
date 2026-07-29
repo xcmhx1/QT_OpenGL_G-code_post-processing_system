@@ -2967,29 +2967,17 @@ bool Gcode_postprocessing_system::removeInternalMachiningPaths(bool interactive)
         sceneItems,
         kEndCutConnectionTolerance
     );
-    QSet<CadItem*> topologicalItems;
-    QSet<CadItem*> physicalItems;
+    QSet<CadItem*> internalItems;
 
-    for (CadItem* item : result.physicalInteriorItems)
+    for (CadItem* item : result.removableItems)
     {
         if (item != nullptr && m_processState.stateOrDefault(item->m_entityId)
             .overrideData.boundaryRole == cadcam::planning::BoundaryRole::None)
         {
-            physicalItems.insert(item);
+            internalItems.insert(item);
         }
     }
 
-    for (CadItem* item : result.topologicalInteriorItems)
-    {
-        if (item != nullptr && m_processState.stateOrDefault(item->m_entityId)
-            .overrideData.boundaryRole == cadcam::planning::BoundaryRole::None)
-        {
-            topologicalItems.insert(item);
-        }
-    }
-
-    QSet<CadItem*> internalItems = topologicalItems;
-    internalItems.unite(physicalItems);
     m_processState.beginBatch();
     for (const std::unique_ptr<CadItem>& entity : m_document.m_entities)
     {
@@ -3003,15 +2991,34 @@ bool Gcode_postprocessing_system::removeInternalMachiningPaths(bool interactive)
 
     invalidateProcessOrdersAfterEndCutChange();
     refreshWasteProcessingExclusions();
-    QString message = m_rotaryTubeSectionModel.valid
-        ? QStringLiteral("内部线条识别完成：拓扑内部 %1 个，进入方管内部 %2 个，去重后共排除 %3 个图元。")
-            .arg(topologicalItems.size())
-            .arg(physicalItems.size())
+    const bool tubeSectionInsetMode =
+        result.mode == cadcam::machining::InternalPathClassificationMode::TubeSectionInset;
+    QString message = tubeSectionInsetMode
+        ? QStringLiteral("内部线条识别完成：按方管截面安全内缩 %1 mm，共排除 %2 个图元，安全带内保留 %3 个。")
+            .arg(result.insetDistance, 0, 'f', 3)
             .arg(internalItems.size())
-        : QStringLiteral("内部线条识别完成：未识别方管截面，仅执行拓扑分析；拓扑内部 %1 个，去重后共排除 %2 个图元，跳过开放组件 %3 个。")
-            .arg(topologicalItems.size())
+            .arg(result.preservedSafetyBandCount)
+        : QStringLiteral("内部线条识别完成：符合条件的分支闭合单元 %1 个，共排除 %2 个图元，歧义单元 %3 个。")
+            .arg(result.eligibleComponentCount)
             .arg(internalItems.size())
-            .arg(result.skippedComponentCount);
+            .arg(result.ambiguousComponentCount);
+
+    const QString classificationMode = tubeSectionInsetMode
+        ? QStringLiteral("TubeSectionInset")
+        : QStringLiteral("BranchedClosedUnit");
+    qInfo().noquote()
+        << QStringLiteral(
+            "[InternalPathClassification] mode=%1 candidateComponentCount=%2 "
+            "eligibleComponentCount=%3 outerBoundaryEntityCount=%4 insetDistance=%5 "
+            "removedEntityCount=%6 preservedSafetyBandCount=%7 ambiguousComponentCount=%8")
+            .arg(classificationMode)
+            .arg(result.candidateComponentCount)
+            .arg(result.eligibleComponentCount)
+            .arg(result.outerBoundaryEntityCount)
+            .arg(result.insetDistance, 0, 'f', 6)
+            .arg(internalItems.size())
+            .arg(result.preservedSafetyBandCount)
+            .arg(result.ambiguousComponentCount);
     if (!internalItems.isEmpty()
         && (!ui->openGLWidget->processVisualsVisible()
             || !ui->openGLWidget->excludedEntitiesDimmed()))
