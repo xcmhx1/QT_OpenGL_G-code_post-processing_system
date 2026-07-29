@@ -6248,30 +6248,96 @@ namespace cadcam::planning
                 const int componentId = componentIds[index] >= 0 ? componentIds[index] : syntheticComponent--;
                 components[componentId].push_back(ordinaryIds[index]);
             }
-            for (auto& [componentId, ids] : components)
+            const auto appendOrdinaryGroup =
+                [&plan, &entities]
+                (const std::vector<EntityId>& ids, bool closed)
             {
-                (void)componentId;
+                if (ids.empty()) return;
                 ProcessGroup group;
                 group.groupId = static_cast<int>(plan.groups.size());
                 group.entityIds = ids;
-                if (ids.size() == 1U && entities.at(ids.front())->path.closed)
+                group.closed = closed
+                    || (ids.size() == 1U
+                        && entities.at(ids.front())->path.closed);
+                group.kind = group.closed
+                    ? ProcessGroupKind::ClosedLoop
+                    : ids.size() == 1U
+                        ? ProcessGroupKind::SingleEntity
+                        : ProcessGroupKind::ConnectedChain;
+                plan.groups.push_back(std::move(group));
+            };
+            for (auto& [componentId, ids] : components)
+            {
+                (void)componentId;
+                if (!policy.preserveClosedLoopsAsAtomicGroups)
                 {
-                    group.kind = ProcessGroupKind::ClosedLoop;
-                    group.closed = true;
+                    appendOrdinaryGroup(ids, false);
+                    continue;
                 }
-                else if (ids.size() == 1U)
+
+                std::vector<std::vector<EntityId>> pendingComponents
+                    { std::move(ids) };
+                for (std::size_t pendingIndex = 0U;
+                    pendingIndex < pendingComponents.size(); ++pendingIndex)
                 {
-                    group.kind = ProcessGroupKind::SingleEntity;
+                    std::vector<EntityId> currentIds =
+                        std::move(pendingComponents[pendingIndex]);
+                    const auto loop = input.topology->extractBestLoop
+                        (currentIds, currentIds);
+                    if (!loop.succeeded() || !loop.value.has_value()
+                        || !loop.value->connectedLoop
+                        || loop.value->usedEntityIds.empty())
+                    {
+                        appendOrdinaryGroup(currentIds, false);
+                        continue;
+                    }
+
+                    const std::unordered_set<EntityId> loopIds
+                        (loop.value->usedEntityIds.cbegin(),
+                            loop.value->usedEntityIds.cend());
+                    std::vector<EntityId> closedIds;
+                    std::vector<EntityId> remainingIds;
+                    closedIds.reserve(loopIds.size());
+                    remainingIds.reserve(currentIds.size() - loopIds.size());
+                    for (const EntityId entityId : currentIds)
+                    {
+                        (loopIds.count(entityId) != 0U
+                            ? closedIds : remainingIds).push_back(entityId);
+                    }
+                    if (closedIds.empty())
+                    {
+                        appendOrdinaryGroup(currentIds, false);
+                        continue;
+                    }
+                    appendOrdinaryGroup(closedIds, true);
+                    if (remainingIds.empty()) continue;
+
+                    const std::vector<int> remainingComponentIds =
+                        input.topology->componentIds(remainingIds);
+                    if (remainingComponentIds.size() != remainingIds.size())
+                    {
+                        appendOrdinaryGroup(remainingIds, false);
+                        continue;
+                    }
+                    std::map<int, std::vector<EntityId>> remainingComponents;
+                    int remainingSyntheticComponent = -1;
+                    for (std::size_t index = 0U;
+                        index < remainingIds.size(); ++index)
+                    {
+                        const int remainingComponentId =
+                            remainingComponentIds[index] >= 0
+                            ? remainingComponentIds[index]
+                            : remainingSyntheticComponent--;
+                        remainingComponents[remainingComponentId].push_back
+                            (remainingIds[index]);
+                    }
+                    for (auto& [remainingComponentId, remaining] :
+                        remainingComponents)
+                    {
+                        (void)remainingComponentId;
+                        pendingComponents.push_back(std::move(remaining));
+                    }
                 }
-                else
-                {
-                    const auto loop = input.topology->extractBestLoop(ids, ids);
-                    group.closed = policy.preserveClosedLoopsAsAtomicGroups
-                        && loop.succeeded() && loop.value.has_value() && loop.value->connectedLoop
-                        && sameEntitySet(loop.value->usedEntityIds, ids);
-                    group.kind = group.closed ? ProcessGroupKind::ClosedLoop : ProcessGroupKind::ConnectedChain;
-                }
-                plan.groups.push_back(group);
             }
         }
 
@@ -7064,6 +7130,10 @@ namespace cadcam::planning
                     values.insert(QStringLiteral("unitKey"),
                         processGroupKeyText(plan.groups
                             [static_cast<std::size_t>(groupId)]));
+                    values.insert(QStringLiteral("groupKind"),
+                        groupKindName(group.kind));
+                    values.insert(QStringLiteral("memberCount"),
+                        static_cast<int>(group.entityIds.size()));
                     values.insert(QStringLiteral("certainMask"),
                         zoneMaskText(profile.certainMask));
                     values.insert(QStringLiteral("possibleMask"),
