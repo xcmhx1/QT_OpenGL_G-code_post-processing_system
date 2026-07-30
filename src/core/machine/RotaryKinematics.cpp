@@ -27,7 +27,7 @@ namespace cadcam::machine
         struct SurfaceClassification
         {
             RotarySurfaceRegion region = RotarySurfaceRegion::Unknown;
-            const machining::TubeCornerGeometry* corner = nullptr;
+            std::optional<geometry::Vector2d> cornerCenter;
         };
 
         double normalizeAngle(double value)
@@ -148,53 +148,6 @@ namespace cadcam::machine
             return statistics;
         }
 
-        std::optional<PathStatistics> combinedPathStatistics
-        (
-            const std::vector<const geometry::Path3D*>& paths
-        )
-        {
-            if (paths.empty()) return std::nullopt;
-            PathStatistics combined;
-            bool initialized = false;
-            double sumY = 0.0;
-            double sumZ = 0.0;
-            std::size_t pointCount = 0U;
-            for (const geometry::Path3D* path : paths)
-            {
-                if (path == nullptr || path->vertices.empty())
-                    return std::nullopt;
-                for (const auto& vertex : path->vertices)
-                {
-                    const auto& point = vertex.position;
-                    if (!std::isfinite(point.x) || !std::isfinite(point.y)
-                        || !std::isfinite(point.z))
-                    {
-                        return std::nullopt;
-                    }
-                    if (!initialized)
-                    {
-                        combined.minimumY = combined.maximumY = point.y;
-                        combined.minimumZ = combined.maximumZ = point.z;
-                        initialized = true;
-                    }
-                    else
-                    {
-                        combined.minimumY = std::min(combined.minimumY, point.y);
-                        combined.maximumY = std::max(combined.maximumY, point.y);
-                        combined.minimumZ = std::min(combined.minimumZ, point.z);
-                        combined.maximumZ = std::max(combined.maximumZ, point.z);
-                    }
-                    sumY += point.y;
-                    sumZ += point.z;
-                    ++pointCount;
-                }
-            }
-            if (!initialized || pointCount == 0U) return std::nullopt;
-            combined.averageY = sumY / static_cast<double>(pointCount);
-            combined.averageZ = sumZ / static_cast<double>(pointCount);
-            return combined;
-        }
-
         SurfaceClassification classifyWithoutSection
         (
             const PathStatistics& statistics,
@@ -214,31 +167,35 @@ namespace cadcam::machine
                 const double absoluteZ = std::abs(relativeZ);
                 if (absoluteZ > absoluteY + tolerance)
                     return { relativeZ >= 0.0
-                        ? RotarySurfaceRegion::Top : RotarySurfaceRegion::Bottom, nullptr };
+                        ? RotarySurfaceRegion::Top : RotarySurfaceRegion::Bottom,
+                        std::nullopt };
                 if (absoluteY > absoluteZ + tolerance)
                     return { relativeY >= 0.0
-                        ? RotarySurfaceRegion::Right : RotarySurfaceRegion::Left, nullptr };
+                        ? RotarySurfaceRegion::Right : RotarySurfaceRegion::Left,
+                        std::nullopt };
                 return {};
             }
             if (yConstant)
             {
                 if (statistics.averageY > policy.tubeCenterY + tolerance)
-                    return { RotarySurfaceRegion::Right, nullptr };
+                    return { RotarySurfaceRegion::Right, std::nullopt };
                 if (statistics.averageY < policy.tubeCenterY - tolerance)
-                    return { RotarySurfaceRegion::Left, nullptr };
+                    return { RotarySurfaceRegion::Left, std::nullopt };
                 return { statistics.averageZ >= policy.tubeCenterZ
-                    ? RotarySurfaceRegion::Top : RotarySurfaceRegion::Bottom, nullptr };
+                    ? RotarySurfaceRegion::Top : RotarySurfaceRegion::Bottom,
+                    std::nullopt };
             }
             if (zConstant)
             {
                 if (statistics.averageZ > policy.tubeCenterZ + tolerance)
-                    return { RotarySurfaceRegion::Top, nullptr };
+                    return { RotarySurfaceRegion::Top, std::nullopt };
                 if (statistics.averageZ < policy.tubeCenterZ - tolerance)
-                    return { RotarySurfaceRegion::Bottom, nullptr };
+                    return { RotarySurfaceRegion::Bottom, std::nullopt };
                 return { statistics.averageY >= policy.tubeCenterY
-                    ? RotarySurfaceRegion::Right : RotarySurfaceRegion::Left, nullptr };
+                    ? RotarySurfaceRegion::Right : RotarySurfaceRegion::Left,
+                    std::nullopt };
             }
-            return { RotarySurfaceRegion::Radial, nullptr };
+            return { RotarySurfaceRegion::Radial, std::nullopt };
         }
 
         std::optional<RotarySurfaceRegion> classifyFlatSurface
@@ -353,11 +310,12 @@ namespace cadcam::machine
                     path, *section, policy.surfaceClassificationTolerance,
                     policy.numericalEpsilon, flatAmbiguous
                 );
-                if (flat.has_value()) return { *flat, nullptr };
+                if (flat.has_value()) return { *flat, std::nullopt };
                 if (const auto* corner = classifyCorner(path, section))
-                    return { RotarySurfaceRegion::Corner, corner };
+                    return { RotarySurfaceRegion::Corner, corner->center };
                 return { flatAmbiguous
-                    ? RotarySurfaceRegion::Unknown : RotarySurfaceRegion::Radial, nullptr };
+                    ? RotarySurfaceRegion::Unknown : RotarySurfaceRegion::Radial,
+                    std::nullopt };
             }
 
             return classifyWithoutSection(statistics, policy);
@@ -373,6 +331,28 @@ namespace cadcam::machine
             case RotarySurfaceRegion::Left: angle = -90.0; return true;
             default: return false;
             }
+        }
+
+        bool horizontalSurface(RotarySurfaceRegion region)
+        {
+            return region == RotarySurfaceRegion::Top
+                || region == RotarySurfaceRegion::Bottom;
+        }
+
+        bool verticalSurface(RotarySurfaceRegion region)
+        {
+            return region == RotarySurfaceRegion::Right
+                || region == RotarySurfaceRegion::Left;
+        }
+
+        bool orthogonalSurfaces
+        (
+            RotarySurfaceRegion left,
+            RotarySurfaceRegion right
+        )
+        {
+            return (horizontalSurface(left) && verticalSurface(right))
+                || (verticalSurface(left) && horizontalSurface(right));
         }
     }
 
@@ -503,21 +483,21 @@ namespace cadcam::machine
             + rotationSafetyClearance;
     }
 
-    OperationResult<RotarySurfaceRegion>
-        RotaryKinematics::classifyNoSectionUnitSurface
+    OperationResult<std::vector<RotarySurfaceOverride>>
+        RotaryKinematics::classifyNoSectionUnitSurfaces
         (
             const std::vector<const geometry::Path3D*>& paths,
+            bool closed,
             const RotaryMachinePolicy& policy,
             const OperationContext& context
         )
     {
-        OperationResult<RotarySurfaceRegion> result;
-        const auto statistics = combinedPathStatistics(paths);
-        if (!statistics.has_value())
+        OperationResult<std::vector<RotarySurfaceOverride>> result;
+        if (paths.empty()
+            || std::any_of(paths.cbegin(), paths.cend(),
+                [](const geometry::Path3D* path) { return path == nullptr; }))
         {
             result.status = OperationStatus::InvalidInput;
-            if (!paths.empty() && paths.front() != nullptr)
-                result.addDiagnostic(failureDiagnostic(*paths.front(), context));
             return result;
         }
         if (!std::isfinite(policy.surfaceClassificationTolerance)
@@ -533,29 +513,148 @@ namespace cadcam::machine
             return result;
         }
 
-        const SurfaceClassification classification =
-            classifyWithoutSection(*statistics, policy);
-        if (classification.region == RotarySurfaceRegion::Unknown)
+        std::vector<RotarySurfaceOverride> overrides;
+        overrides.reserve(paths.size());
+        for (const geometry::Path3D* path : paths)
         {
-            result.status = OperationStatus::Failed;
-            Diagnostic diagnostic = failureDiagnostic
-            (
-                *paths.front(), context,
-                DiagnosticCode::RotarySurfaceClassificationFailed,
-                QStringLiteral("Process unit is equally close to multiple surface regions.")
-            );
-            diagnostic.context.insert(QStringLiteral("ySpan"),
-                statistics->maximumY - statistics->minimumY);
-            diagnostic.context.insert(QStringLiteral("zSpan"),
-                statistics->maximumZ - statistics->minimumZ);
-            diagnostic.context.insert(QStringLiteral("surfaceTolerance"),
-                policy.surfaceClassificationTolerance);
-            result.addDiagnostic(diagnostic);
-            return result;
+            const auto statistics = pathStatistics(*path);
+            if (!statistics.has_value())
+            {
+                result.status = OperationStatus::InvalidInput;
+                result.addDiagnostic(failureDiagnostic(*path, context));
+                return result;
+            }
+            const SurfaceClassification classification =
+                classifyWithoutSection(*statistics, policy);
+            if (classification.region == RotarySurfaceRegion::Unknown)
+            {
+                result.status = OperationStatus::Failed;
+                Diagnostic diagnostic = failureDiagnostic
+                (
+                    *path, context,
+                    DiagnosticCode::RotarySurfaceClassificationFailed,
+                    QStringLiteral("Path is equally close to multiple surface regions.")
+                );
+                diagnostic.context.insert(QStringLiteral("ySpan"),
+                    statistics->maximumY - statistics->minimumY);
+                diagnostic.context.insert(QStringLiteral("zSpan"),
+                    statistics->maximumZ - statistics->minimumZ);
+                diagnostic.context.insert(QStringLiteral("surfaceTolerance"),
+                    policy.surfaceClassificationTolerance);
+                result.addDiagnostic(diagnostic);
+                return result;
+            }
+            overrides.push_back({ classification.region, std::nullopt });
+        }
+
+        if (closed && paths.size() > 2U)
+        {
+            const std::size_t pathCount = paths.size();
+            for (std::size_t pathIndex = 0U;
+                pathIndex < pathCount; ++pathIndex)
+            {
+                if (overrides[pathIndex].region != RotarySurfaceRegion::Radial)
+                    continue;
+
+                std::optional<std::size_t> previousFlat;
+                std::optional<std::size_t> nextFlat;
+                for (std::size_t offset = 1U; offset < pathCount; ++offset)
+                {
+                    const std::size_t index =
+                        (pathIndex + pathCount - offset) % pathCount;
+                    double unusedAngle = 0.0;
+                    if (fixedSurfaceAngle(overrides[index].region, unusedAngle))
+                    {
+                        previousFlat = index;
+                        break;
+                    }
+                }
+                for (std::size_t offset = 1U; offset < pathCount; ++offset)
+                {
+                    const std::size_t index = (pathIndex + offset) % pathCount;
+                    double unusedAngle = 0.0;
+                    if (fixedSurfaceAngle(overrides[index].region, unusedAngle))
+                    {
+                        nextFlat = index;
+                        break;
+                    }
+                }
+                if (!previousFlat.has_value() || !nextFlat.has_value()
+                    || *previousFlat == *nextFlat
+                    || !orthogonalSurfaces(overrides[*previousFlat].region,
+                        overrides[*nextFlat].region))
+                {
+                    continue;
+                }
+
+                const std::size_t runStart =
+                    (*previousFlat + 1U) % pathCount;
+                const std::size_t runEnd =
+                    (*nextFlat + pathCount - 1U) % pathCount;
+                const geometry::Vector3d& start =
+                    paths[runStart]->vertices.front().position;
+                const geometry::Vector3d& end =
+                    paths[runEnd]->vertices.back().position;
+                geometry::Vector2d center;
+                if (horizontalSurface(overrides[*previousFlat].region))
+                    center.x = start.y;
+                else
+                    center.y = start.z;
+                if (horizontalSurface(overrides[*nextFlat].region))
+                    center.x = end.y;
+                else
+                    center.y = end.z;
+
+                const double startRadius =
+                    std::hypot(start.y - center.x, start.z - center.y);
+                const double endRadius =
+                    std::hypot(end.y - center.x, end.z - center.y);
+                const double radius = (startRadius + endRadius) * 0.5;
+                const double radiusTolerance = std::max
+                ({
+                    0.01,
+                    radius * 0.01,
+                    policy.surfaceClassificationTolerance * 10.0
+                });
+                if (!std::isfinite(radius)
+                    || radius <= policy.numericalEpsilon
+                    || std::abs(startRadius - endRadius) > radiusTolerance)
+                {
+                    continue;
+                }
+
+                bool circularRun = true;
+                std::size_t current = runStart;
+                while (true)
+                {
+                    for (const auto& vertex : paths[current]->vertices)
+                    {
+                        const double pointRadius = std::hypot
+                        (
+                            vertex.position.y - center.x,
+                            vertex.position.z - center.y
+                        );
+                        if (!std::isfinite(pointRadius)
+                            || std::abs(pointRadius - radius)
+                                > radiusTolerance)
+                        {
+                            circularRun = false;
+                            break;
+                        }
+                    }
+                    if (!circularRun || current == runEnd) break;
+                    current = (current + 1U) % pathCount;
+                }
+                if (circularRun)
+                {
+                    overrides[pathIndex].region = RotarySurfaceRegion::Corner;
+                    overrides[pathIndex].cornerCenter = center;
+                }
+            }
         }
 
         result.status = OperationStatus::Success;
-        result.value = classification.region;
+        result.value = std::move(overrides);
         return result;
     }
 
@@ -600,7 +699,7 @@ namespace cadcam::machine
         const geometry::Path3D& path,
         const RotaryMachinePolicy& policy,
         const std::optional<machining::TubeSectionModel>& section,
-        const std::optional<RotarySurfaceRegion>& surfaceOverride,
+        const std::optional<RotarySurfaceOverride>& surfaceOverride,
         const OperationContext& context
     )
     {
@@ -623,7 +722,8 @@ namespace cadcam::machine
         }
 
         const SurfaceClassification classification = surfaceOverride.has_value()
-            ? SurfaceClassification{ *surfaceOverride, nullptr }
+            ? SurfaceClassification
+                { surfaceOverride->region, surfaceOverride->cornerCenter }
             : classifySurface(path, *statistics, policy, section);
         if (classification.region == RotarySurfaceRegion::Unknown)
         {
@@ -653,12 +753,12 @@ namespace cadcam::machine
                 rawAngles.push_back(fixedAngle);
             }
             else if (classification.region == RotarySurfaceRegion::Corner
-                && classification.corner != nullptr)
+                && classification.cornerCenter.has_value())
             {
                 rawAngles.push_back(std::atan2
                 (
-                    point.y - classification.corner->center.x,
-                    point.z - classification.corner->center.y
+                    point.y - classification.cornerCenter->x,
+                    point.z - classification.cornerCenter->y
                 ) * kRadiansToDegrees);
             }
             else

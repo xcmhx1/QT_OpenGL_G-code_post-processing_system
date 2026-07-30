@@ -6,6 +6,12 @@
 
 namespace cadcam::machine
 {
+    struct RotarySurfaceOverride
+    {
+        RotarySurfaceRegion region = RotarySurfaceRegion::Unknown;
+        std::optional<geometry::Vector2d> cornerCenter;
+    };
+
     struct RotaryKinematicsResult
     {
         std::vector<MachinePose4D> poses;
@@ -39,9 +45,11 @@ namespace cadcam::machine
             double rotationSafetyClearance
         );
 
-        static OperationResult<RotarySurfaceRegion> classifyNoSectionUnitSurface
+        static OperationResult<std::vector<RotarySurfaceOverride>>
+            classifyNoSectionUnitSurfaces
         (
             const std::vector<const geometry::Path3D*>& paths,
+            bool closed,
             const RotaryMachinePolicy& policy,
             const OperationContext& context
         );
@@ -63,7 +71,7 @@ namespace cadcam::machine
             const geometry::Path3D& path,
             const RotaryMachinePolicy& policy,
             const std::optional<machining::TubeSectionModel>& section,
-            const std::optional<RotarySurfaceRegion>& surfaceOverride,
+            const std::optional<RotarySurfaceOverride>& surfaceOverride,
             const OperationContext& context
         );
     };

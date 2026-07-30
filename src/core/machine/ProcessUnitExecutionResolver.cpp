@@ -475,7 +475,7 @@ namespace cadcam::machine
         std::optional<MachinePose4D> alignmentPose = previousPose;
         std::vector<geometry::Vector3d> sourcePath;
         std::vector<MachinePose4D> machinePath;
-        std::optional<RotarySurfaceRegion> unitSurface;
+        std::vector<RotarySurfaceOverride> unitSurfaces;
         const bool hasSectionGeometry = section.has_value()
             && !section->geometry.boundary.empty();
         if (!hasSectionGeometry && paths.size() > 1U)
@@ -484,22 +484,27 @@ namespace cadcam::machine
             unitPaths.reserve(paths.size());
             for (const ProcessUnitExecutionPath& path : paths)
                 unitPaths.push_back(&path.path);
-            auto classified = RotaryKinematics::classifyNoSectionUnitSurface
-                (unitPaths, policy, context);
+            auto classified = RotaryKinematics::classifyNoSectionUnitSurfaces
+                (unitPaths, closed, policy, context);
             result.mergeDiagnostics(classified);
             if (!classified.succeeded() || !classified.value.has_value())
             {
                 result.status = classified.status;
                 return result;
             }
-            unitSurface = *classified.value;
+            unitSurfaces = std::move(*classified.value);
         }
         for (std::size_t pathIndex = 0U;
             pathIndex < paths.size(); ++pathIndex)
         {
             const ProcessUnitExecutionPath& path = paths[pathIndex];
+            const std::optional<RotarySurfaceOverride> surfaceOverride =
+                unitSurfaces.empty()
+                ? std::nullopt
+                : std::optional<RotarySurfaceOverride>
+                    (unitSurfaces[pathIndex]);
             auto transformed = RotaryKinematics::transform
-                (path.path, policy, section, unitSurface, context);
+                (path.path, policy, section, surfaceOverride, context);
             result.mergeDiagnostics(transformed);
             if (!transformed.succeeded() || !transformed.value.has_value()
                 || transformed.value->poses.size()
