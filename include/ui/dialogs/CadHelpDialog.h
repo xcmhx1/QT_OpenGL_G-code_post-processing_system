@@ -15,8 +15,10 @@ enum class CadHelpSection
     Drawing,
     Editing,
     Machining,
+    RotaryMachining,
     BitmapImport,
     Appearance,
+    Troubleshooting,
     About
 };
 

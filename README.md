@@ -75,9 +75,13 @@ G-code Post-processing System 是运行于 Windows 的桌面 CAD/CAM 软件，�
 x64/Release/
 ```
 
-## 4. 需求文档
+## 4. 文档导航
 
 - [文档入口](./docs/index.md)
+- [用户指南](./docs/user-guide/index.md)
+- [快速开始](./docs/user-guide/getting-started.md)
+- [方管四轴使用指南](./docs/user-guide/rotary-four-axis.md)
+- [常见问题排查](./docs/user-guide/troubleshooting.md)
 - [需求索引](./docs/requirements/index.md)
 - [概要设计](./docs/architecture/index.md)
 - [产品范围](./docs/requirements/product-scope.md)

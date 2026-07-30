@@ -1,5 +1,14 @@
 # 项目文档
 
+## 用户指南
+
+- [用户指南导航](./user-guide/index.md)
+- [快速开始](./user-guide/getting-started.md)
+- [CAD 编辑与视图](./user-guide/cad-editing.md)
+- [加工排序与导出](./user-guide/machining-and-export.md)
+- [方管四轴](./user-guide/rotary-four-axis.md)
+- [问题排查](./user-guide/troubleshooting.md)
+
 ## 需求
 
 - [产品范围](./requirements/product-scope.md)
