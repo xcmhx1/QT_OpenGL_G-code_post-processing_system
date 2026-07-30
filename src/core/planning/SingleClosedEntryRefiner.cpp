@@ -42,6 +42,7 @@ namespace cadcam::planning
             double tangentResidual = 0.0;
             double approachCutDot = -1.0;
             double approachCutAngle = 3.14159265358979323846;
+            bool tangentComparable = true;
         };
 
         struct SearchResult
@@ -52,6 +53,23 @@ namespace cadcam::planning
             int intervalCount = 0;
             int rootCandidateCount = 0;
             int validTangentCount = 0;
+            int evaluationCount = 0;
+            int validEvaluationCount = 0;
+            int missingInputRejectedCount = 0;
+            int pathCompileRejectedCount = 0;
+            int invalidProjectionRejectedCount = 0;
+            int ambiguousProjectionRejectedCount = 0;
+            int wrongOwnerZoneRejectedCount = 0;
+            int executionRejectedCount = 0;
+            int transferPreviewRejectedCount = 0;
+            int curveEvaluationRejectedCount = 0;
+            int invalidTangentRejectedCount = 0;
+            int nonPlanarApproachCount = 0;
+            int fallbackCandidateCount = 0;
+            int initialApproachCount = 0;
+            int sameZoneSurfaceTransferCount = 0;
+            int sameZoneClearanceTransferCount = 0;
+            int crossZoneRotaryTransferCount = 0;
         };
 
         double distance3D
@@ -274,6 +292,118 @@ namespace cadcam::planning
             return diagnostic;
         }
 
+        void appendSearchContext
+        (
+            QVariantMap& values,
+            const SearchResult& search,
+            const ProcessUnit& unit,
+            int processUnitIndex,
+            int previousProcessUnitIndex,
+            const std::optional<machining::TubeZone16>& previousOwnerZone,
+            const machine::RotaryMachinePolicy& policy,
+            double projectionTolerance,
+            bool selected
+        )
+        {
+            values.insert(QStringLiteral("singleClosedEntrySearch"), true);
+            values.insert(QStringLiteral("searchOutcome"),
+                selected ? QStringLiteral("Selected")
+                    : QStringLiteral("Failed"));
+            values.insert(QStringLiteral("processUnitIndex"),
+                processUnitIndex);
+            values.insert(QStringLiteral("unitKey"), unitKeyText(unit.key));
+            values.insert(QStringLiteral("ownerZone"),
+                unit.ownerZone.has_value()
+                    ? machining::tubeZoneName(*unit.ownerZone)
+                    : QStringLiteral("None"));
+            values.insert(QStringLiteral("previousProcessUnitIndex"),
+                previousProcessUnitIndex);
+            values.insert(QStringLiteral("previousOwnerZone"),
+                previousOwnerZone.has_value()
+                    ? machining::tubeZoneName(*previousOwnerZone)
+                    : QStringLiteral("None"));
+            values.insert(QStringLiteral("sameZoneTransferClearance"),
+                policy.transfer.sameZoneTransferClearance);
+            values.insert(QStringLiteral("rotationSafetyClearance"),
+                policy.transfer.rotationSafetyClearance);
+            values.insert(QStringLiteral("coordinatedTransferEnabled"),
+                policy.transfer.coordinatedTransferEnabled);
+            values.insert(QStringLiteral("projectionTolerance"),
+                projectionTolerance);
+            values.insert(QStringLiteral("evaluationCount"),
+                search.evaluationCount);
+            values.insert(QStringLiteral("validEvaluationCount"),
+                search.validEvaluationCount);
+            values.insert(QStringLiteral("searchIntervalCount"),
+                search.intervalCount);
+            values.insert(QStringLiteral("rootCandidateCount"),
+                search.rootCandidateCount);
+            values.insert(QStringLiteral("validTangentCount"),
+                search.validTangentCount);
+            values.insert(QStringLiteral("fallbackCandidateCount"),
+                search.fallbackCandidateCount);
+            values.insert(QStringLiteral("missingInputRejectedCount"),
+                search.missingInputRejectedCount);
+            values.insert(QStringLiteral("pathCompileRejectedCount"),
+                search.pathCompileRejectedCount);
+            values.insert(QStringLiteral("invalidProjectionRejectedCount"),
+                search.invalidProjectionRejectedCount);
+            values.insert(QStringLiteral("ambiguousProjectionRejectedCount"),
+                search.ambiguousProjectionRejectedCount);
+            values.insert(QStringLiteral("wrongOwnerZoneRejectedCount"),
+                search.wrongOwnerZoneRejectedCount);
+            values.insert(QStringLiteral("executionRejectedCount"),
+                search.executionRejectedCount);
+            values.insert(QStringLiteral("transferPreviewRejectedCount"),
+                search.transferPreviewRejectedCount);
+            values.insert(QStringLiteral("curveEvaluationRejectedCount"),
+                search.curveEvaluationRejectedCount);
+            values.insert(QStringLiteral("invalidTangentRejectedCount"),
+                search.invalidTangentRejectedCount);
+            values.insert(QStringLiteral("nonPlanarApproachCount"),
+                search.nonPlanarApproachCount);
+            values.insert(QStringLiteral("initialApproachCount"),
+                search.initialApproachCount);
+            values.insert(QStringLiteral("sameZoneSurfaceTransferCount"),
+                search.sameZoneSurfaceTransferCount);
+            values.insert(QStringLiteral("sameZoneClearanceTransferCount"),
+                search.sameZoneClearanceTransferCount);
+            values.insert(QStringLiteral("crossZoneRotaryTransferCount"),
+                search.crossZoneRotaryTransferCount);
+        }
+
+        Diagnostic failedSearchDiagnostic
+        (
+            const OperationContext& context,
+            const ProcessUnit& unit,
+            int processUnitIndex,
+            int previousProcessUnitIndex,
+            const std::optional<machining::TubeZone16>& previousOwnerZone,
+            const PlanningEntity& entity,
+            const machine::RotaryMachinePolicy& policy,
+            double projectionTolerance,
+            const SearchResult& search
+        )
+        {
+            Diagnostic diagnostic = failureDiagnostic
+            (
+                context,
+                QStringLiteral("单图元闭合曲线在所属区位内没有可用动态起刀点。"),
+                QStringLiteral("No exact tangent or stable owner-zone fallback parameter was found."),
+                entity.entityId
+            );
+            appendSearchContext(diagnostic.context, search, unit,
+                processUnitIndex, previousProcessUnitIndex,
+                previousOwnerZone, policy, projectionTolerance, false);
+            diagnostic.context.insert(QStringLiteral("entityId"),
+                QVariant::fromValue<qulonglong>(entity.entityId));
+            diagnostic.context.insert(QStringLiteral("sourceKind"),
+                entity.sourceKind == geometry::SourceGeometryKind::Circle
+                    ? QStringLiteral("Circle")
+                    : QStringLiteral("Ellipse"));
+            return diagnostic;
+        }
+
         PlannedMachinePose4D plannedPose
         (
             const machine::MachinePose4D& pose
@@ -404,11 +534,17 @@ namespace cadcam::planning
             const std::optional<machining::TubeSectionModel>& section,
             double projectionTolerance,
             double rotationSafeMachineZ,
+            SearchResult& search,
             const OperationContext& context
         )
         {
+            ++search.evaluationCount;
             if (!unit.ownerZone.has_value()
-                || !entity.sourceEntity.has_value()) return std::nullopt;
+                || !entity.sourceEntity.has_value())
+            {
+                ++search.missingInputRejectedCount;
+                return std::nullopt;
+            }
             geometry::GeometryCompiler compiler;
             geometry::PathCompileOptions options;
             options.reverse = reverse;
@@ -423,6 +559,7 @@ namespace cadcam::planning
             if (!compiled.succeeded() || !compiled.value.has_value()
                 || compiled.value->vertices.size() < 2U)
             {
+                ++search.pathCompileRejectedCount;
                 return std::nullopt;
             }
             const geometry::Vector3d& sourceStart =
@@ -440,7 +577,11 @@ namespace cadcam::planning
                     break;
                 }
             }
-            if (!firstCutPoint.has_value()) return std::nullopt;
+            if (!firstCutPoint.has_value())
+            {
+                ++search.pathCompileRejectedCount;
+                return std::nullopt;
+            }
             for (const double factor : { 0.0, 0.25, 0.5, 0.75 })
             {
                 const geometry::Vector3d point = interpolatePoint
@@ -449,9 +590,19 @@ namespace cadcam::planning
                     machining::TubeSectionProjector::project
                     (*section, { point.y, point.z },
                         projectionTolerance);
-                if (!projection.valid || projection.ambiguous
-                    || projection.zone != *unit.ownerZone)
+                if (!projection.valid)
                 {
+                    ++search.invalidProjectionRejectedCount;
+                    return std::nullopt;
+                }
+                if (projection.ambiguous)
+                {
+                    ++search.ambiguousProjectionRejectedCount;
+                    return std::nullopt;
+                }
+                if (projection.zone != *unit.ownerZone)
+                {
+                    ++search.wrongOwnerZoneRejectedCount;
                     return std::nullopt;
                 }
             }
@@ -480,6 +631,7 @@ namespace cadcam::planning
                 || execution.value->posesByPath.empty()
                 || execution.value->posesByPath.front().empty())
             {
+                ++search.executionRejectedCount;
                 return std::nullopt;
             }
             std::vector<machine::MachinePose4D> poses =
@@ -510,13 +662,32 @@ namespace cadcam::planning
             auto preview = machine::RotaryTransferPlanner::preview
                 (request, context);
             if (!preview.succeeded() || !preview.value.has_value())
+            {
+                ++search.transferPreviewRejectedCount;
                 return std::nullopt;
+            }
+            switch (preview.value->kind)
+            {
+            case machine::TransferMotionKind::InitialApproach:
+                ++search.initialApproachCount;
+                break;
+            case machine::TransferMotionKind::SameZoneSurfaceTransfer:
+                ++search.sameZoneSurfaceTransferCount;
+                break;
+            case machine::TransferMotionKind::SameZoneClearanceTransfer:
+                ++search.sameZoneClearanceTransferCount;
+                break;
+            case machine::TransferMotionKind::CrossZoneRotaryTransfer:
+                ++search.crossZoneRotaryTransferCount;
+                break;
+            }
 
             geometry::Vector3d sourcePoint;
             geometry::Vector3d sourceDerivative;
             if (!curvePointAndDerivative(entity, parameter,
                 sourcePoint, sourceDerivative))
             {
+                ++search.curveEvaluationRejectedCount;
                 return std::nullopt;
             }
             if (reverse)
@@ -542,22 +713,11 @@ namespace cadcam::planning
                 std::hypot(approachX, approachY);
             if (!std::isfinite(tangentLength)
                 || !std::isfinite(approachLength)
-                || tangentLength <= policy.numericalEpsilon
-                || approachLength <= policy.numericalEpsilon)
+                || tangentLength <= policy.numericalEpsilon)
             {
+                ++search.invalidTangentRejectedCount;
                 return std::nullopt;
             }
-            const double signedResidual =
-                ((preview.value->finalApproachOrigin.x
-                        - poses.front().x) * tangentY
-                    - (preview.value->finalApproachOrigin.y
-                        - poses.front().y) * tangentX)
-                / (approachLength * tangentLength);
-            const double dot =
-                (approachX * tangentX + approachY * tangentY)
-                / (approachLength * tangentLength);
-            if (!std::isfinite(signedResidual)
-                || !std::isfinite(dot)) return std::nullopt;
 
             EntryCandidate candidate;
             candidate.parameter = parameter;
@@ -567,13 +727,45 @@ namespace cadcam::planning
             candidate.transfer = std::move(*preview.value);
             candidate.previousCutEnd = request.previousCutEnd;
             candidate.previousSourceEnd = request.previousSourceEnd;
-            candidate.signedResidual = signedResidual;
-            candidate.tangentResidual = std::abs(signedResidual);
-            candidate.approachCutDot =
-                std::clamp(dot, -1.0, 1.0);
-            candidate.approachCutAngle =
-                std::acos(candidate.approachCutDot);
+            if (approachLength <= policy.numericalEpsilon)
+            {
+                // A non-coordinated clearance transfer approaches only in Z,
+                // so no machine-XY tangent exists to compare.
+                candidate.signedResidual = 0.0;
+                candidate.tangentResidual =
+                    std::numeric_limits<double>::infinity();
+                candidate.approachCutDot = 0.0;
+                candidate.approachCutAngle =
+                    3.14159265358979323846 * 0.5;
+                candidate.tangentComparable = false;
+                ++search.nonPlanarApproachCount;
+            }
+            else
+            {
+                const double signedResidual =
+                    ((candidate.transfer.finalApproachOrigin.x
+                            - candidate.poses.front().x) * tangentY
+                        - (candidate.transfer.finalApproachOrigin.y
+                            - candidate.poses.front().y) * tangentX)
+                    / (approachLength * tangentLength);
+                const double dot =
+                    (approachX * tangentX + approachY * tangentY)
+                    / (approachLength * tangentLength);
+                if (!std::isfinite(signedResidual)
+                    || !std::isfinite(dot))
+                {
+                    ++search.invalidTangentRejectedCount;
+                    return std::nullopt;
+                }
+                candidate.signedResidual = signedResidual;
+                candidate.tangentResidual = std::abs(signedResidual);
+                candidate.approachCutDot =
+                    std::clamp(dot, -1.0, 1.0);
+                candidate.approachCutAngle =
+                    std::acos(candidate.approachCutDot);
+            }
             candidate.execution = std::move(*execution.value);
+            ++search.validEvaluationCount;
             return candidate;
         }
 
@@ -629,9 +821,10 @@ namespace cadcam::planning
                         previousProcessUnitIndex, previousOwnerZone,
                         previousExecution, policy, section,
                         projectionTolerance, rotationSafeMachineZ,
-                        context
+                        result, context
                     );
                     if (current.has_value()
+                        && current->tangentComparable
                         && current->tangentResidual
                             <= kRootResidualTolerance)
                     {
@@ -649,13 +842,15 @@ namespace cadcam::planning
                             previousProcessUnitIndex, previousOwnerZone,
                             previousExecution, policy, section,
                             projectionTolerance, rotationSafeMachineZ,
-                            context
+                            result, context
                         );
                         if (fallback.has_value())
                             fallbackCandidates.push_back
                                 (std::move(*fallback));
 
-                        if (previous->signedResidual
+                        if (previous->tangentComparable
+                            && current->tangentComparable
+                            && previous->signedResidual
                             * current->signedResidual < 0.0)
                         {
                             double left = previousParameter;
@@ -677,7 +872,7 @@ namespace cadcam::planning
                                     previousOwnerZone, previousExecution,
                                     policy, section,
                                     projectionTolerance,
-                                    rotationSafeMachineZ, context
+                                    rotationSafeMachineZ, result, context
                                 );
                                 if (!middleCandidate.has_value())
                                     break;
@@ -736,6 +931,8 @@ namespace cadcam::planning
                 static_cast<int>(exactCandidates.size());
             result.validTangentCount =
                 static_cast<int>(exactCandidates.size());
+            result.fallbackCandidateCount =
+                static_cast<int>(fallbackCandidates.size());
             if (!exactCandidates.empty())
             {
                 result.mode =
@@ -776,8 +973,11 @@ namespace cadcam::planning
             const ProcessUnit& unit,
             int processUnitIndex,
             int previousProcessUnitIndex,
+            const std::optional<machining::TubeZone16>& previousOwnerZone,
             const PlanningEntity& entity,
-            const SearchResult& search
+            const SearchResult& search,
+            const machine::RotaryMachinePolicy& policy,
+            double projectionTolerance
         )
         {
             const EntryCandidate& selected = *search.selected;
@@ -850,6 +1050,9 @@ namespace cadcam::planning
                     static_cast<int>
                         (selected.transfer.targets.size()) }
             };
+            appendSearchContext(diagnostic.context, search, unit,
+                processUnitIndex, previousProcessUnitIndex,
+                previousOwnerZone, policy, projectionTolerance, true);
             return diagnostic;
         }
 
@@ -1200,12 +1403,11 @@ namespace cadcam::planning
                 if (!search.selected.has_value())
                 {
                     report.status = OperationStatus::Failed;
-                    report.addDiagnostic(failureDiagnostic
+                    report.addDiagnostic(failedSearchDiagnostic
                     (
-                        context,
-                        QStringLiteral("单图元闭合曲线在所属区位内没有可用动态起刀点。"),
-                        QStringLiteral("No exact tangent or stable owner-zone fallback parameter was found."),
-                        entity->entityId
+                        context, unit, static_cast<int>(unitIndex),
+                        previousProcessUnitIndex, previousOwnerZone,
+                        *entity, rotaryPolicy, projectionTolerance, search
                     ));
                     return report;
                 }
@@ -1242,7 +1444,9 @@ namespace cadcam::planning
                     search.selected->execution;
                 report.addDiagnostic(refinementDiagnostic
                     (context, unit, static_cast<int>(unitIndex),
-                        previousProcessUnitIndex, *entity, search));
+                        previousProcessUnitIndex, previousOwnerZone,
+                        *entity, search, rotaryPolicy,
+                        projectionTolerance));
             }
             else
             {

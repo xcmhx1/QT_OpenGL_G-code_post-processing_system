@@ -644,6 +644,112 @@ namespace
         for (const Diagnostic& diagnostic : diagnostics)
         {
             if (diagnostic.context.value
+                (QStringLiteral("singleClosedEntrySearch")).toBool())
+            {
+                const QVariantMap& values = diagnostic.context;
+                qInfo().noquote()
+                    << QStringLiteral(
+                        "[ProcessPlanning][SingleClosedEntrySearch] "
+                        "outcome=%1 processUnitIndex=%2 unitKey=%3 "
+                        "entityId=%4 sourceKind=%5 ownerZone=%6 "
+                        "previousProcessUnitIndex=%7 previousOwnerZone=%8 "
+                        "sameZoneTransferClearance=%9 "
+                        "rotationSafetyClearance=%10 "
+                        "coordinatedTransferEnabled=%11 "
+                        "projectionTolerance=%12 evaluationCount=%13 "
+                        "validEvaluationCount=%14 searchIntervalCount=%15 "
+                        "rootCandidateCount=%16 validTangentCount=%17 "
+                        "fallbackCandidateCount=%18 "
+                        "missingInputRejectedCount=%19 "
+                        "pathCompileRejectedCount=%20 "
+                        "invalidProjectionRejectedCount=%21 "
+                        "ambiguousProjectionRejectedCount=%22 "
+                        "wrongOwnerZoneRejectedCount=%23 "
+                        "executionRejectedCount=%24 "
+                        "transferPreviewRejectedCount=%25 "
+                        "curveEvaluationRejectedCount=%26 "
+                        "invalidTangentRejectedCount=%27 "
+                        "nonPlanarApproachCount=%28 "
+                        "initialApproachCount=%29 "
+                        "sameZoneSurfaceTransferCount=%30 "
+                        "sameZoneClearanceTransferCount=%31 "
+                        "crossZoneRotaryTransferCount=%32")
+                        .arg(values.value(QStringLiteral("searchOutcome"))
+                            .toString())
+                        .arg(values.value(QStringLiteral("processUnitIndex"))
+                            .toInt())
+                        .arg(values.value(QStringLiteral("unitKey"))
+                            .toString())
+                        .arg(values.value(QStringLiteral("entityId"))
+                            .toULongLong())
+                        .arg(values.value(QStringLiteral("sourceKind"))
+                            .toString())
+                        .arg(values.value(QStringLiteral("ownerZone"))
+                            .toString())
+                        .arg(values.value(
+                            QStringLiteral("previousProcessUnitIndex"))
+                            .toInt())
+                        .arg(values.value(QStringLiteral("previousOwnerZone"))
+                            .toString())
+                        .arg(values.value(
+                            QStringLiteral("sameZoneTransferClearance"))
+                            .toDouble(), 0, 'g', 15)
+                        .arg(values.value(
+                            QStringLiteral("rotationSafetyClearance"))
+                            .toDouble(), 0, 'g', 15)
+                        .arg(values.value(
+                            QStringLiteral("coordinatedTransferEnabled"))
+                            .toBool() ? QStringLiteral("true")
+                                : QStringLiteral("false"))
+                        .arg(values.value(QStringLiteral(
+                            "projectionTolerance")).toDouble(), 0, 'g', 15)
+                        .arg(values.value(QStringLiteral("evaluationCount"))
+                            .toInt())
+                        .arg(values.value(
+                            QStringLiteral("validEvaluationCount")).toInt())
+                        .arg(values.value(
+                            QStringLiteral("searchIntervalCount")).toInt())
+                        .arg(values.value(
+                            QStringLiteral("rootCandidateCount")).toInt())
+                        .arg(values.value(
+                            QStringLiteral("validTangentCount")).toInt())
+                        .arg(values.value(
+                            QStringLiteral("fallbackCandidateCount")).toInt())
+                        .arg(values.value(QStringLiteral(
+                            "missingInputRejectedCount")).toInt())
+                        .arg(values.value(QStringLiteral(
+                            "pathCompileRejectedCount")).toInt())
+                        .arg(values.value(QStringLiteral(
+                            "invalidProjectionRejectedCount")).toInt())
+                        .arg(values.value(QStringLiteral(
+                            "ambiguousProjectionRejectedCount")).toInt())
+                        .arg(values.value(QStringLiteral(
+                            "wrongOwnerZoneRejectedCount")).toInt())
+                        .arg(values.value(QStringLiteral(
+                            "executionRejectedCount")).toInt())
+                        .arg(values.value(QStringLiteral(
+                            "transferPreviewRejectedCount")).toInt())
+                        .arg(values.value(QStringLiteral(
+                            "curveEvaluationRejectedCount")).toInt())
+                        .arg(values.value(QStringLiteral(
+                            "invalidTangentRejectedCount")).toInt())
+                        .arg(values.value(QStringLiteral(
+                            "nonPlanarApproachCount")).toInt())
+                        .arg(values.value(
+                            QStringLiteral("initialApproachCount")).toInt())
+                        .arg(values.value(QStringLiteral(
+                            "sameZoneSurfaceTransferCount")).toInt())
+                        .arg(values.value(QStringLiteral(
+                            "sameZoneClearanceTransferCount")).toInt())
+                        .arg(values.value(QStringLiteral(
+                            "crossZoneRotaryTransferCount")).toInt());
+                if (values.value(QStringLiteral("searchOutcome")).toString()
+                    == QStringLiteral("Failed"))
+                {
+                    continue;
+                }
+            }
+            if (diagnostic.context.value
                 (QStringLiteral("singleClosedEntryRefinement")).toBool())
             {
                 const QVariantMap& values = diagnostic.context;

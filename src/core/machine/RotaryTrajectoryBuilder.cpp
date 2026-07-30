@@ -353,8 +353,19 @@ namespace cadcam::machine
                     summary.rotaryTransferTarget = preview.targets[index];
                     break;
                 case TransferMotionPhase::CoordinatedApproach:
-                case TransferMotionPhase::SurfaceTransfer:
                     summary.approachTarget = preview.targets[index];
+                    break;
+                case TransferMotionPhase::SurfaceTransfer:
+                    if (preview.kind
+                        == TransferMotionKind::SameZoneClearanceTransfer)
+                    {
+                        summary.rotaryTransferTarget =
+                            preview.targets[index];
+                    }
+                    else
+                    {
+                        summary.approachTarget = preview.targets[index];
+                    }
                     break;
                 case TransferMotionPhase::None:
                     break;
@@ -824,7 +835,7 @@ namespace cadcam::machine
                         ))
                     {
                         result.status = OperationStatus::Failed;
-                        result.addDiagnostic(diagnostic
+                        Diagnostic safetyFailure = diagnostic
                         (
                             DiagnosticCode::
                                 MachineTrajectoryTransferSafetyViolation,
@@ -834,7 +845,37 @@ namespace cadcam::machine
                                 : QStringLiteral("首次接近轨迹未满足旋转安全约束。"),
                             taskContext.operationContext,
                             &inputEntity
-                        ));
+                        );
+                        safetyFailure.context.insert
+                            (QStringLiteral("fromProcessUnit"),
+                                summary.fromProcessUnit);
+                        safetyFailure.context.insert
+                            (QStringLiteral("toProcessUnit"),
+                                summary.toProcessUnit);
+                        safetyFailure.context.insert
+                            (QStringLiteral("transferKind"),
+                                static_cast<int>(summary.kind));
+                        safetyFailure.context.insert
+                            (QStringLiteral("startZ"), transferStart.z);
+                        safetyFailure.context.insert
+                            (QStringLiteral("targetCutStartZ"),
+                                execution.cutStart.z);
+                        safetyFailure.context.insert
+                            (QStringLiteral("departureTargetZ"),
+                                summary.departureTarget.z);
+                        safetyFailure.context.insert
+                            (QStringLiteral("arrivalClearanceTargetZ"),
+                                summary.rotaryTransferTarget.z);
+                        safetyFailure.context.insert
+                            (QStringLiteral("rotationSafeMachineZ"),
+                                summary.rotationSafeMachineZ);
+                        safetyFailure.context.insert
+                            (QStringLiteral("sameZoneTransferClearance"),
+                                summary.sameZoneTransferClearance);
+                        safetyFailure.context.insert
+                            (QStringLiteral("segmentCount"),
+                                summary.segmentCount);
+                        result.addDiagnostic(safetyFailure);
                         return result;
                     }
                     trajectory.transferSummaries.push_back(summary);

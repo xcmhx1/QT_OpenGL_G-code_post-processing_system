@@ -186,6 +186,16 @@ namespace
                     .arg(summary.surfaceTransfer
                         ? QStringLiteral("true") : QStringLiteral("false"));
             }
+            else if (summary.kind
+                == TransferMotionKind::SameZoneClearanceTransfer)
+            {
+                message += QStringLiteral(
+                    " departureTarget=%1 arrivalClearanceTarget=%2 "
+                    "approachTarget=%3")
+                    .arg(poseText(summary.departureTarget))
+                    .arg(poseText(summary.rotaryTransferTarget))
+                    .arg(poseText(summary.approachTarget));
+            }
             qInfo().noquote() << message;
         }
     }
