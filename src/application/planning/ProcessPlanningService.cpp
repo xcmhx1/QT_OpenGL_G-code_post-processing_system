@@ -889,6 +889,21 @@ namespace
         for (const Diagnostic& diagnostic : diagnostics)
         {
             const QVariantMap& values = diagnostic.context;
+            if (values.value(QStringLiteral("zoneOwnershipFailure")).toBool())
+            {
+                qInfo().noquote()
+                    << QStringLiteral("[ProcessPlanning][ZoneOwnershipFailure] partitionId=%1 unitKey=%2 groupKind=%3 memberCount=%4 certainMask=%5 possibleMask=%6 legalEntryMask=%7 requiredEntryMask=%8 ownerCandidateMask=%9")
+                        .arg(values.value(QStringLiteral("partitionId"), -1).toInt())
+                        .arg(values.value(QStringLiteral("unitKey")).toString())
+                        .arg(values.value(QStringLiteral("groupKind")).toString())
+                        .arg(values.value(QStringLiteral("memberCount"), 0).toInt())
+                        .arg(values.value(QStringLiteral("certainMask")).toString())
+                        .arg(values.value(QStringLiteral("possibleMask")).toString())
+                        .arg(values.value(QStringLiteral("legalEntryMask")).toString())
+                        .arg(values.value(QStringLiteral("requiredEntryMask")).toString())
+                        .arg(values.value(QStringLiteral("ownerCandidateMask")).toString());
+                continue;
+            }
             if (values.value(QStringLiteral("zoneOwnership")).toBool())
             {
                 qInfo().noquote()

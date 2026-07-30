@@ -2030,6 +2030,7 @@ namespace cadcam::planning
             return group.entityIds.size() == 1U && entity.path.closed
                 && (entity.sourceKind == geometry::SourceGeometryKind::Circle
                     || entity.sourceKind == geometry::SourceGeometryKind::Ellipse
+                    || entity.sourceKind == geometry::SourceGeometryKind::Polyline
                     || entity.sourceKind == geometry::SourceGeometryKind::Spline);
         }
 
@@ -7144,6 +7145,7 @@ namespace cadcam::planning
                         zoneMaskText(requiredEntryMask));
                     values.insert(QStringLiteral("ownerCandidateMask"),
                         zoneMaskText(ownerCandidateMask));
+                    values.insert(QStringLiteral("zoneOwnershipFailure"), true);
                     setZoneSweepLifecycleFailure
                     (
                         DiagnosticCode::ProcessPlanningZoneSweepProfileInvalid,

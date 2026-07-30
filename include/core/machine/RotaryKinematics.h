@@ -39,6 +39,13 @@ namespace cadcam::machine
             double rotationSafetyClearance
         );
 
+        static OperationResult<RotarySurfaceRegion> classifyNoSectionUnitSurface
+        (
+            const std::vector<const geometry::Path3D*>& paths,
+            const RotaryMachinePolicy& policy,
+            const OperationContext& context
+        );
+
         static geometry::Vector3d sourceTransferAnchor
         (
             const geometry::Vector3d& cutEnd,
@@ -56,6 +63,7 @@ namespace cadcam::machine
             const geometry::Path3D& path,
             const RotaryMachinePolicy& policy,
             const std::optional<machining::TubeSectionModel>& section,
+            const std::optional<RotarySurfaceRegion>& surfaceOverride,
             const OperationContext& context
         );
     };

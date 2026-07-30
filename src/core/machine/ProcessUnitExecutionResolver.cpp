@@ -475,12 +475,31 @@ namespace cadcam::machine
         std::optional<MachinePose4D> alignmentPose = previousPose;
         std::vector<geometry::Vector3d> sourcePath;
         std::vector<MachinePose4D> machinePath;
+        std::optional<RotarySurfaceRegion> unitSurface;
+        const bool hasSectionGeometry = section.has_value()
+            && !section->geometry.boundary.empty();
+        if (!hasSectionGeometry && paths.size() > 1U)
+        {
+            std::vector<const geometry::Path3D*> unitPaths;
+            unitPaths.reserve(paths.size());
+            for (const ProcessUnitExecutionPath& path : paths)
+                unitPaths.push_back(&path.path);
+            auto classified = RotaryKinematics::classifyNoSectionUnitSurface
+                (unitPaths, policy, context);
+            result.mergeDiagnostics(classified);
+            if (!classified.succeeded() || !classified.value.has_value())
+            {
+                result.status = classified.status;
+                return result;
+            }
+            unitSurface = *classified.value;
+        }
         for (std::size_t pathIndex = 0U;
             pathIndex < paths.size(); ++pathIndex)
         {
             const ProcessUnitExecutionPath& path = paths[pathIndex];
             auto transformed = RotaryKinematics::transform
-                (path.path, policy, section, context);
+                (path.path, policy, section, unitSurface, context);
             result.mergeDiagnostics(transformed);
             if (!transformed.succeeded() || !transformed.value.has_value()
                 || transformed.value->poses.size()
