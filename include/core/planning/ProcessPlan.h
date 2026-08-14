@@ -27,7 +27,7 @@ namespace cadcam::planning
     enum class LongitudinalSweepDirection { PositiveX, NegativeX };
     enum class BoundaryRole { None, Break, Waste };
     enum class ProcessGroupKind { SingleEntity, ConnectedChain, ClosedLoop, BreakBoundary, WasteBoundary };
-    enum class ProcessExclusionReason { Hidden, UserDisabled, InternalGeometry, WasteRegion, UnsupportedGeometry, InvalidPath };
+    enum class ProcessExclusionReason { Hidden, UserDisabled, WasteRegion, UnsupportedGeometry, InvalidPath };
     enum class BoundarySide { Left, OnBoundary, Right, Mixed, Indeterminate };
     enum class PlannedTransferMotionKind
     {
@@ -108,7 +108,6 @@ namespace cadcam::planning
         geometry::Path3D path;
         bool visible = true;
         bool processEnabled = true;
-        bool excludedAsInternalGeometry = false;
         BoundaryRole boundaryRole = BoundaryRole::None;
         int boundaryPairId = -1;
         process::DirectionPreference directionPreference = process::DirectionPreference::Auto;

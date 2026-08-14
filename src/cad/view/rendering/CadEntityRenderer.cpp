@@ -102,7 +102,6 @@ void CadEntityRenderer::renderEntities
     RenderEntityKey selectedRenderKey,
     const AppThemeColors& theme,
     bool dimExcludedEntities,
-    const cadcam::process::DocumentProcessState* processState,
     const cadcam::process::ProcessPresentationSnapshot* presentation
 )
 {
@@ -137,18 +136,11 @@ void CadEntityRenderer::renderEntities
         // 保持实体原始显示色；选中效果改由 Viewer 的叠加层统一绘制。
         const bool isSelected = entity->m_isSelected || renderKey == selectedRenderKey;
         const CadProcessExclusionVisual exclusionVisual = dimExcludedEntities
-            ? resolveProcessExclusionVisual(entity.get(), processState, presentation)
+            ? resolveProcessExclusionVisual(entity.get(), presentation)
             : CadProcessExclusionVisual::None;
         QVector3D color = resolveDisplayColor(buffer.color, theme);
         float opacity = 1.0f;
-        if (exclusionVisual == CadProcessExclusionVisual::InternalGeometry)
-        {
-            color = theme.dark
-                ? QVector3D(0.56f, 0.30f, 0.44f)
-                : QVector3D(0.43f, 0.22f, 0.34f);
-            opacity = 0.36f;
-        }
-        else if (exclusionVisual == CadProcessExclusionVisual::PlannedExclusion)
+        if (exclusionVisual == CadProcessExclusionVisual::PlannedExclusion)
         {
             color = theme.dark
                 ? QVector3D(0.58f, 0.48f, 0.34f)

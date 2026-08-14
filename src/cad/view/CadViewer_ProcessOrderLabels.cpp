@@ -225,7 +225,7 @@ std::vector<CadViewer::ProcessOrderLabelOverlay> CadViewer::buildProcessOrderLab
 
         CadItem* anchorEntity = anchorIterator->second;
         const auto* presentation = m_processPresentation->find(unit.anchorEntityId);
-        if (resolveProcessExclusionVisual(anchorEntity, m_processState, m_processPresentation)
+        if (resolveProcessExclusionVisual(anchorEntity, m_processPresentation)
             != CadProcessExclusionVisual::None)
         {
             continue;

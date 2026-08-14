@@ -131,16 +131,11 @@ namespace cadcam::planning
                 ? ProcessExclusionReason::Hidden
                 : !entity.processEnabled
                     ? ProcessExclusionReason::UserDisabled
-                    : entity.excludedAsInternalGeometry && entity.boundaryRole == BoundaryRole::None
-                        ? ProcessExclusionReason::InternalGeometry
-                        : entity.sourceKind == geometry::SourceGeometryKind::Point
-                            || entity.sourceKind == geometry::SourceGeometryKind::Unknown
-                            ? ProcessExclusionReason::UnsupportedGeometry
-                            : entity.path.vertices.size() < 2U
-                                ? ProcessExclusionReason::InvalidPath
-                                : ProcessExclusionReason::InvalidPath;
+                    : entity.sourceKind == geometry::SourceGeometryKind::Point
+                        || entity.sourceKind == geometry::SourceGeometryKind::Unknown
+                        ? ProcessExclusionReason::UnsupportedGeometry
+                        : ProcessExclusionReason::InvalidPath;
             const bool excluded = !entity.visible || !entity.processEnabled
-                || (entity.excludedAsInternalGeometry && entity.boundaryRole == BoundaryRole::None)
                 || entity.sourceKind == geometry::SourceGeometryKind::Point
                 || entity.sourceKind == geometry::SourceGeometryKind::Unknown
                 || entity.path.vertices.size() < 2U;

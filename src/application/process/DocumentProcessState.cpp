@@ -94,42 +94,6 @@ namespace cadcam::process
         return store(id, state);
     }
 
-    bool DocumentProcessState::setAutomaticInternalExclusion(geometry::EntityId id, bool value)
-    {
-        EntityProcessState state = stateOrDefault(id);
-        state.analysis.automaticInternalExclusion = value;
-        return store(id, state);
-    }
-
-    bool DocumentProcessState::automaticInternalExclusion(geometry::EntityId id) const
-    {
-        return stateOrDefault(id).analysis.automaticInternalExclusion;
-    }
-
-    bool DocumentProcessState::setManualInternalExclusionOverride
-    (geometry::EntityId id, std::optional<bool> value)
-    {
-        EntityProcessState state = stateOrDefault(id);
-        state.overrideData.manualInternalExclusionOverride = value;
-        return store(id, state);
-    }
-
-    bool DocumentProcessState::clearManualInternalExclusionOverride(geometry::EntityId id)
-    {
-        return setManualInternalExclusionOverride(id, std::nullopt);
-    }
-
-    std::optional<bool> DocumentProcessState::manualInternalExclusionOverride
-        (geometry::EntityId id) const
-    {
-        return stateOrDefault(id).overrideData.manualInternalExclusionOverride;
-    }
-
-    bool DocumentProcessState::effectiveInternalExclusion(geometry::EntityId id) const
-    {
-        return stateOrDefault(id).effectiveInternalExclusion();
-    }
-
     const planning::ProcessUnitSequence& DocumentProcessState::processUnitSequence() const
     {
         return m_processUnitSequence;
@@ -189,11 +153,6 @@ namespace cadcam::process
         }
         markChanged();
         return true;
-    }
-
-    bool DocumentProcessState::setInternalGeometryExcluded(geometry::EntityId id, bool value)
-    {
-        return setAutomaticInternalExclusion(id, value);
     }
 
     bool DocumentProcessState::setState(geometry::EntityId id, const EntityProcessState& state)

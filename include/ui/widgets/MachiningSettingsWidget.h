@@ -27,7 +27,6 @@ public:
         bool manuallyConfigured
     );
     void setRotaryEndCutCount(int count);
-    void setInternalPathCount(int count);
 
 signals:
     void autoDeduplicateOnImportChanged(bool enabled);
@@ -56,7 +55,6 @@ private:
     QPushButton* m_applyManualSectionButton = nullptr;
     QLabel* m_roundedCornerCountValue = nullptr;
     QLabel* m_rotaryEndCutCountValue = nullptr;
-    QLabel* m_internalPathCountValue = nullptr;
     QTimer* m_sectionBlinkTimer = nullptr;
     bool m_sectionRecognized = false;
     bool m_sectionBlinkVisible = true;

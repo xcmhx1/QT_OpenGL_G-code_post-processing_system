@@ -2523,8 +2523,7 @@ Gcode_postprocessing_system::buildRotaryBoundaryOperationGeometry
             continue;
         }
         const auto processState = m_processState.stateOrDefault(entity->m_entityId);
-        if (!processState.effectiveInternalExclusion()
-            || processState.overrideData.boundaryRole != cadcam::planning::BoundaryRole::None
+        if (processState.overrideData.boundaryRole != cadcam::planning::BoundaryRole::None
             || requiredSet.contains(entity.get()))
         {
             geometry.sceneItems.push_back(entity.get());
@@ -3059,46 +3058,6 @@ bool Gcode_postprocessing_system::removeInternalMachiningPaths(bool interactive)
     return true;
 }
 
-bool Gcode_postprocessing_system::restoreInternalMachiningPaths(bool interactive)
-{
-    Q_UNUSED(interactive);
-    int restoredCount = 0;
-
-    {
-        BoundaryPerformanceTimer stateTimer
-            (m_boundaryAssignmentPerformanceReport != nullptr
-                ? &m_boundaryAssignmentPerformanceReport->processStateUpdateMs : nullptr);
-        m_processState.beginBatch();
-        for (const std::unique_ptr<CadItem>& entity : m_document.m_entities)
-        {
-            if (entity != nullptr)
-            {
-                const auto state = m_processState.stateOrDefault(entity->m_entityId);
-                if (state.analysis.automaticInternalExclusion
-                    || state.overrideData.manualInternalExclusionOverride.has_value())
-                {
-                    m_processState.setAutomaticInternalExclusion(entity->m_entityId, false);
-                    m_processState.setManualInternalExclusionOverride
-                        (entity->m_entityId, std::nullopt);
-                    ++restoredCount;
-                }
-            }
-        }
-        m_processState.endBatch();
-    }
-
-    if (restoredCount > 0) invalidateProcessOrdersAfterEndCutChange();
-    refreshWasteProcessingExclusions();
-    updateBoundaryViewer(ui->openGLWidget, m_boundaryAssignmentPerformanceReport);
-
-    const QString message = restoredCount > 0
-        ? QStringLiteral("已恢复 %1 个手动标记的内部线条参与状态。").arg(restoredCount)
-        : QStringLiteral("当前没有带内部线条标记的图元。");
-    ui->openGLWidget->appendCommandMessage(message);
-    statusBar()->showMessage(message, 4000);
-    return restoredCount > 0;
-}
-
 bool Gcode_postprocessing_system::toggleSelectedRotaryEndCutAssignment()
 {
     const QVector<CadItem*> selectedItems = ui->openGLWidget->selectedEntities();
@@ -3352,66 +3311,6 @@ bool Gcode_postprocessing_system::recognizeAllRotaryEndCuts(bool interactive)
 
     syncMachiningSettingsState();
     return recognizedCount > 0;
-}
-
-bool Gcode_postprocessing_system::toggleSelectedInternalPathAssignment()
-{
-    const QVector<CadItem*> selectedItems = ui->openGLWidget->selectedEntities();
-
-    if (selectedItems.isEmpty())
-    {
-        return false;
-    }
-
-    const bool hasOrdinaryItem = std::any_of(selectedItems.begin(), selectedItems.end(), [this](const CadItem* item)
-    {
-        return item != nullptr && !m_processState.stateOrDefault(item->m_entityId)
-            .effectiveInternalExclusion();
-    });
-
-    m_processState.beginBatch();
-    for (CadItem* item : selectedItems)
-    {
-        if (item != nullptr)
-        {
-            m_processState.setManualInternalExclusionOverride
-                (item->m_entityId, hasOrdinaryItem);
-        }
-    }
-    m_processState.endBatch();
-
-    invalidateProcessOrdersAfterEndCutChange();
-    refreshWasteProcessingExclusions();
-    QString message = hasOrdinaryItem
-        ? QStringLiteral("已将选中图元指定为内部线条。")
-        : QStringLiteral("已恢复选中的内部线条。");
-    if (hasOrdinaryItem
-        && (!ui->openGLWidget->processVisualsVisible()
-            || !ui->openGLWidget->excludedEntitiesDimmed()))
-    {
-        message += QStringLiteral(" 内部线状态已标记；当前排除图元显示已关闭。");
-    }
-    ui->openGLWidget->appendCommandMessage(message);
-    ui->openGLWidget->update();
-    statusBar()->showMessage(message, 4000);
-    return true;
-}
-
-bool Gcode_postprocessing_system::clearAllMachiningFaceAndLineAssignments()
-{
-    BoundaryAssignmentPerformanceOperation performance
-    (
-        m_boundaryAssignmentPerformanceReport,
-        QStringLiteral("ClearAllBoundaryAndInternalAssignments"),
-        static_cast<std::uint64_t>(m_document.m_entities.size()),
-        static_cast<std::uint64_t>(ui->openGLWidget->selectedEntities().size())
-    );
-    const bool clearedSections = clearRotaryEndCutAssignments();
-    const bool restoredLines = restoreInternalMachiningPaths();
-    const QString message = QStringLiteral("已清空所有加工断面和内部线条状态，未删除 CAD 图元。");
-    ui->openGLWidget->appendCommandMessage(message);
-    statusBar()->showMessage(message, 5000);
-    return clearedSections || restoredLines;
 }
 
 bool Gcode_postprocessing_system::clearSelectedRotaryEndCutAssignments()

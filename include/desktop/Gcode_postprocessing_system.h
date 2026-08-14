@@ -210,11 +210,8 @@ private:
     bool setRotaryTubeSectionUserCenter
         (std::optional<cadcam::geometry::Vector2d> center);
     bool removeInternalMachiningPaths(bool interactive = true);
-    bool restoreInternalMachiningPaths(bool interactive = true);
     bool toggleSelectedRotaryEndCutAssignment();
     bool recognizeAllRotaryEndCuts(bool interactive = true);
-    bool toggleSelectedInternalPathAssignment();
-    bool clearAllMachiningFaceAndLineAssignments();
     void showMachiningContextMenu(const QPoint& globalPos);
     int refreshWasteProcessingExclusions();
     int refreshWasteProcessingExclusions

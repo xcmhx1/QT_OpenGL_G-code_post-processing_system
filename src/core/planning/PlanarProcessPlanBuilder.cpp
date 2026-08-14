@@ -381,7 +381,6 @@ namespace cadcam::planning
             std::optional<ProcessExclusionReason> exclusion;
             if (!entity.visible) exclusion = ProcessExclusionReason::Hidden;
             else if (!entity.processEnabled) exclusion = ProcessExclusionReason::UserDisabled;
-            else if (entity.excludedAsInternalGeometry) exclusion = ProcessExclusionReason::InternalGeometry;
             else if (!processableKind(entity.sourceKind)) exclusion = ProcessExclusionReason::UnsupportedGeometry;
             else if (!validPath(entity.path, policy.numericalEpsilon)) exclusion = ProcessExclusionReason::InvalidPath;
             if (exclusion.has_value())

@@ -49,7 +49,6 @@ namespace cadcam::process
         bool processEnabled = true;
         DirectionPreference direction = DirectionPreference::Auto;
         std::optional<double> startParameter;
-        std::optional<bool> manualInternalExclusionOverride;
         planning::BoundaryRole boundaryRole = planning::BoundaryRole::None;
         int boundaryPairId = -1;
 
@@ -58,36 +57,18 @@ namespace cadcam::process
             return processEnabled == other.processEnabled
                 && direction == other.direction
                 && startParameter == other.startParameter
-                && manualInternalExclusionOverride == other.manualInternalExclusionOverride
                 && boundaryRole == other.boundaryRole
                 && boundaryPairId == other.boundaryPairId;
-        }
-    };
-
-    struct ProcessAnalysisState
-    {
-        bool automaticInternalExclusion = false;
-
-        bool operator==(const ProcessAnalysisState& other) const
-        {
-            return automaticInternalExclusion == other.automaticInternalExclusion;
         }
     };
 
     struct EntityProcessState
     {
         ProcessOverride overrideData;
-        ProcessAnalysisState analysis;
-
-        bool effectiveInternalExclusion() const
-        {
-            return overrideData.manualInternalExclusionOverride.value_or
-                (analysis.automaticInternalExclusion);
-        }
 
         bool operator==(const EntityProcessState& other) const
         {
-            return overrideData == other.overrideData && analysis == other.analysis;
+            return overrideData == other.overrideData;
         }
     };
 
@@ -102,14 +83,6 @@ namespace cadcam::process
         bool setStartParameter(geometry::EntityId entityId, std::optional<double> parameter);
         bool setProcessEnabled(geometry::EntityId entityId, bool enabled);
         bool setBoundary(geometry::EntityId entityId, planning::BoundaryRole role, int pairId);
-        bool setAutomaticInternalExclusion(geometry::EntityId entityId, bool excluded);
-        bool automaticInternalExclusion(geometry::EntityId entityId) const;
-        bool setManualInternalExclusionOverride
-            (geometry::EntityId entityId, std::optional<bool> excluded);
-        bool clearManualInternalExclusionOverride(geometry::EntityId entityId);
-        std::optional<bool> manualInternalExclusionOverride
-            (geometry::EntityId entityId) const;
-        bool effectiveInternalExclusion(geometry::EntityId entityId) const;
         const planning::ProcessUnitSequence& processUnitSequence() const;
         bool setProcessUnitSequence(const std::vector<planning::ProcessUnitKey>& units);
         bool clearProcessUnitSequence();
@@ -121,8 +94,6 @@ namespace cadcam::process
             const std::optional<ProcessUnitTraversalOverride>& traversal
         );
 
-        // Compatibility wrapper: legacy callers set the automatic analysis result.
-        bool setInternalGeometryExcluded(geometry::EntityId entityId, bool excluded);
         bool setState(geometry::EntityId entityId, const EntityProcessState& state);
         bool erase(geometry::EntityId entityId);
         void retainOnly(const std::vector<geometry::EntityId>& validEntityIds);

@@ -1,4 +1,4 @@
-﻿#include "platform/pch.h"
+#include "platform/pch.h"
 
 // CadViewer 实现文件
 // 实现 CadViewer 模块，对应头文件中声明的主要行为和协作流程。
@@ -692,7 +692,6 @@ void CadViewer::renderEntities(const QMatrix4x4& viewProjection)
         m_selectedRenderKey,
         m_theme,
         m_processVisualsVisible && m_excludedEntitiesDimmed,
-        m_processState,
         m_processPresentation
     );
 }

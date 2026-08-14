@@ -91,7 +91,6 @@ MachiningSettingsWidget::MachiningSettingsWidget(QWidget* parent)
         (QStringLiteral("手动设置优先用于后续内部线识别、加工断面、排序和导出。"));
     m_roundedCornerCountValue = createStatusValue(statusGroup);
     m_rotaryEndCutCountValue = createStatusValue(statusGroup);
-    m_internalPathCountValue = createStatusValue(statusGroup);
     statusLayout->addRow(QStringLiteral("截面状态："), m_sectionStatusValue);
     statusLayout->addRow(QStringLiteral("Y 长："), m_yLengthInput);
     statusLayout->addRow(QStringLiteral("Z 宽："), m_zWidthInput);
@@ -99,7 +98,6 @@ MachiningSettingsWidget::MachiningSettingsWidget(QWidget* parent)
     statusLayout->addRow(QString(), m_applyManualSectionButton);
     statusLayout->addRow(QStringLiteral("圆角数量："), m_roundedCornerCountValue);
     statusLayout->addRow(QStringLiteral("加工断面："), m_rotaryEndCutCountValue);
-    statusLayout->addRow(QStringLiteral("手动内部线条："), m_internalPathCountValue);
     contentLayout->addWidget(statusGroup);
     contentLayout->addStretch(1);
     scrollArea->setWidget(content);
@@ -239,13 +237,6 @@ void MachiningSettingsWidget::setRotaryEndCutCount(int count)
     m_rotaryEndCutCountValue->setText(count > 0
         ? QStringLiteral("已识别 %1 个").arg(count)
         : QStringLiteral("未识别"));
-}
-
-void MachiningSettingsWidget::setInternalPathCount(int count)
-{
-    m_internalPathCountValue->setText(count > 0
-        ? QStringLiteral("已排除 %1 个").arg(count)
-        : QStringLiteral("未处理"));
 }
 
 void MachiningSettingsWidget::updateAutomaticOptionDependencies()

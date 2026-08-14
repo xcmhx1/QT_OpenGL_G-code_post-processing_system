@@ -176,7 +176,6 @@ DocumentProcessPlanningAdapter::capturePlanar
         entity.visible = entry.attributes.visible;
         const process::EntityProcessState state = processState.stateOrDefault(entity.entityId);
         entity.processEnabled = state.overrideData.processEnabled;
-        entity.excludedAsInternalGeometry = state.effectiveInternalExclusion();
         entity.directionPreference = rebuildSequence
             ? process::DirectionPreference::Auto : state.overrideData.direction;
         entity.startParameter = rebuildSequence
@@ -276,7 +275,6 @@ DocumentProcessPlanningAdapter::captureRotary
         entity.visible = entry.attributes.visible;
         const process::EntityProcessState state = processState.stateOrDefault(entity.entityId);
         entity.processEnabled = state.overrideData.processEnabled;
-        entity.excludedAsInternalGeometry = state.effectiveInternalExclusion();
         entity.boundaryRole = state.overrideData.boundaryRole;
         entity.boundaryPairId = state.overrideData.boundaryPairId;
         entity.directionPreference = rebuildSequence

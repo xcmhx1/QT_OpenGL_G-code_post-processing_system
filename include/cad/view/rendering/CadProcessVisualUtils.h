@@ -25,7 +25,6 @@ struct CadProcessVisualInfo
 enum class CadProcessExclusionVisual
 {
     None,
-    InternalGeometry,
     PlannedExclusion
 };
 
@@ -50,7 +49,6 @@ bool isProcessVisualizable(const CadItem* item);
 CadProcessExclusionVisual resolveProcessExclusionVisual
 (
     const CadItem* item,
-    const cadcam::process::DocumentProcessState* processState,
     const cadcam::process::ProcessPresentationSnapshot* presentation
 );
 

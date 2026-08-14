@@ -15,7 +15,6 @@ namespace cadcam::planning
         geometry::Path3D path;
         bool visible = true;
         bool processEnabled = true;
-        bool excludedAsInternalGeometry = false;
         process::DirectionPreference directionPreference = process::DirectionPreference::Auto;
         std::optional<double> startParameter;
     };

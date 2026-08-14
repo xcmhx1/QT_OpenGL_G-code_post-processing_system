@@ -516,7 +516,6 @@ Gcode_postprocessing_system::Gcode_postprocessing_system(QWidget* parent)
     QAction* assignWasteRotaryEndCutAction = new QAction(QStringLiteral("指定为废面"), this);
     QAction* recognizeRotaryTubeSectionAction = new QAction(QStringLiteral("识别方管垂直截面（外轮廓）"), this);
     QAction* removeInternalPathsAction = new QAction(QStringLiteral("清理内部线条"), this);
-    QAction* restoreInternalPathsAction = new QAction(QStringLiteral("清除内部线条标记"), this);
     QAction* clearSelectedRotaryEndCutAssignmentsAction = new QAction(QStringLiteral("清除选中加工断面指定"), this);
     QAction* clearRotaryEndCutAssignmentsAction = new QAction(QStringLiteral("清除全部加工断面指定"), this);
 
@@ -539,7 +538,6 @@ Gcode_postprocessing_system::Gcode_postprocessing_system(QWidget* parent)
     ui->menuSort->addSeparator();
     ui->menuSort->addAction(recognizeRotaryTubeSectionAction);
     ui->menuSort->addAction(removeInternalPathsAction);
-    ui->menuSort->addAction(restoreInternalPathsAction);
     ui->menuSort->addAction(clearSelectedRotaryEndCutAssignmentsAction);
     ui->menuSort->addAction(clearRotaryEndCutAssignmentsAction);
 
@@ -563,7 +561,6 @@ Gcode_postprocessing_system::Gcode_postprocessing_system(QWidget* parent)
     connect(assignWasteRotaryEndCutAction, &QAction::triggered, this, [this]() { assignSelectedWasteEndCut(); });
     connect(recognizeRotaryTubeSectionAction, &QAction::triggered, this, [this]() { recognizeRotaryTubeSection(); });
     connect(removeInternalPathsAction, &QAction::triggered, this, [this]() { removeInternalMachiningPaths(); });
-    connect(restoreInternalPathsAction, &QAction::triggered, this, [this]() { restoreInternalMachiningPaths(); });
     connect(clearSelectedRotaryEndCutAssignmentsAction, &QAction::triggered, this, [this]() { clearSelectedRotaryEndCutAssignments(); });
     connect(clearRotaryEndCutAssignmentsAction, &QAction::triggered, this, [this]() { clearRotaryEndCutAssignments(); });
     connect(ui->action_Sort_2D_Assign, &QAction::triggered, this, [this]()
@@ -738,30 +735,24 @@ void Gcode_postprocessing_system::showMachiningContextMenu(const QPoint& globalP
     QAction* toggleProcessSectionAction = processSectionMenu->addAction(QStringLiteral("加工断面指定/恢复"));
     QAction* recognizeAllProcessSectionsAction = processSectionMenu->addAction(QStringLiteral("所有断面识别"));
     QAction* restoreAllProcessSectionsAction = processSectionMenu->addAction(QStringLiteral("所有断面恢复"));
-    QMenu* internalLineMenu = menu.addMenu(QStringLiteral("内部线条"));
-    QAction* toggleInternalLineAction = internalLineMenu->addAction(QStringLiteral("内部线条指定/恢复"));
-    QAction* recognizeAllInternalLinesAction = internalLineMenu->addAction(QStringLiteral("自动清理内部线条"));
-    QAction* restoreAllInternalLinesAction = internalLineMenu->addAction(QStringLiteral("清除所有内部线条标记"));
+    QAction* clearInternalLinesAction = menu.addAction(QStringLiteral("清理内部线条"));
     menu.addSeparator();
-    QAction* clearAllAction = menu.addAction(QStringLiteral("清空所有面线"));
+    QAction* clearAllAction = menu.addAction(QStringLiteral("清空全部加工断面"));
 
     const bool documentEmpty = m_document.m_entities.empty();
     const bool hasSelection = !ui->openGLWidget->selectedEntities().isEmpty();
     recognizeSectionAction->setEnabled(!documentEmpty && hasSelection);
     toggleProcessSectionAction->setEnabled(!documentEmpty && hasSelection);
-    toggleInternalLineAction->setEnabled(!documentEmpty && hasSelection);
     processSectionMenu->setEnabled(!documentEmpty);
-    internalLineMenu->setEnabled(!documentEmpty);
+    clearInternalLinesAction->setEnabled(!documentEmpty);
     clearAllAction->setEnabled(!documentEmpty);
 
     connect(recognizeSectionAction, &QAction::triggered, this, [this]() { recognizeRotaryTubeSection(); });
     connect(toggleProcessSectionAction, &QAction::triggered, this, [this]() { toggleSelectedRotaryEndCutAssignment(); });
     connect(recognizeAllProcessSectionsAction, &QAction::triggered, this, [this]() { recognizeAllRotaryEndCuts(); });
     connect(restoreAllProcessSectionsAction, &QAction::triggered, this, [this]() { clearRotaryEndCutAssignments(); });
-    connect(toggleInternalLineAction, &QAction::triggered, this, [this]() { toggleSelectedInternalPathAssignment(); });
-    connect(recognizeAllInternalLinesAction, &QAction::triggered, this, [this]() { removeInternalMachiningPaths(); });
-    connect(restoreAllInternalLinesAction, &QAction::triggered, this, [this]() { restoreInternalMachiningPaths(); });
-    connect(clearAllAction, &QAction::triggered, this, [this]() { clearAllMachiningFaceAndLineAssignments(); });
+    connect(clearInternalLinesAction, &QAction::triggered, this, [this]() { removeInternalMachiningPaths(); });
+    connect(clearAllAction, &QAction::triggered, this, [this]() { clearRotaryEndCutAssignments(); });
     menu.exec(globalPos);
 }
 
@@ -2251,7 +2242,6 @@ void Gcode_postprocessing_system::syncMachiningSettingsState()
     );
 
     QSet<int> rotaryEndCutIds;
-    int internalPathCount = 0;
 
     for (const std::unique_ptr<CadItem>& entity : m_document.m_entities)
     {
@@ -2266,15 +2256,9 @@ void Gcode_postprocessing_system::syncMachiningSettingsState()
         {
             rotaryEndCutIds.insert(state.overrideData.boundaryPairId);
         }
-
-        if (state.effectiveInternalExclusion())
-        {
-            ++internalPathCount;
-        }
     }
 
     m_machiningSettingsWidget->setRotaryEndCutCount(rotaryEndCutIds.size());
-    m_machiningSettingsWidget->setInternalPathCount(internalPathCount);
     if (measurePerformance)
     {
         m_boundaryAssignmentPerformanceReport->settingsSyncMs +=
