@@ -1127,6 +1127,9 @@
     <ClInclude Include="include\core\diagnostics\OperationResult.h">
       <Filter>Header Files\core\diagnostics</Filter>
     </ClInclude>
+    <ClInclude Include="include\core\diagnostics\SummaryLog.h">
+      <Filter>Header Files\core\diagnostics</Filter>
+    </ClInclude>
     <ClInclude Include="include\core\geometry\GeometryTypes.h">
       <Filter>Header Files\core\geometry</Filter>
     </ClInclude>

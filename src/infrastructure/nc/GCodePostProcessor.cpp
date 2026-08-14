@@ -1,6 +1,7 @@
 #include "infrastructure/nc/GCodePostProcessor.h"
 
 #include "infrastructure/config/GProfile.h"
+#include "core/diagnostics/SummaryLog.h"
 
 #include <QDebug>
 #include <QRegularExpression>
@@ -580,16 +581,19 @@ namespace cadcam::infrastructure::nc
                     ));
                     return false;
                 }
-                qInfo().noquote() << QStringLiteral(
-                    "[GCode][CuttingState] processUnitCount=%1 enableCount=%2 "
-                    "disableCount=%3 rapidWhileEnabledCount=%4 "
-                    "cuttingWhileDisabledCount=%5 "
-                    "legacyRestartOptimization=false status=Success")
-                    .arg(m_processUnitIndices.size())
+                cadcam::core::emitSummaryLog
+                (
+                    QStringLiteral("GCode"),
+                    QStringLiteral("CuttingState"),
+                    QStringLiteral("processUnitCount=%1 enableCount=%2 "
+                        "disableCount=%3 rapidWhileEnabledCount=%4 "
+                        "cuttingWhileDisabledCount=%5 "
+                        "legacyRestartOptimization=false status=Success")
+                        .arg(m_processUnitIndices.size())
                     .arg(m_enableCount)
                     .arg(m_disableCount)
                     .arg(m_rapidWhileEnabledCount)
-                    .arg(m_cuttingWhileDisabledCount);
+                    .arg(m_cuttingWhileDisabledCount));
                 return true;
             }
 

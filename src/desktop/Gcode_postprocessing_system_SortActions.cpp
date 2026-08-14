@@ -1,6 +1,7 @@
 #include "platform/pch.h"
 
 #include "desktop/Gcode_postprocessing_system.h"
+#include "core/diagnostics/SummaryLog.h"
 
 #include "cad/items/CadItem.h"
 #include "cad/items/CadCircleItem.h"
@@ -103,9 +104,11 @@ namespace
             BoundaryAssignmentPerformanceReport& report = *m_ownedReport;
             report.totalMs =
                 static_cast<double>(m_totalTimer.nsecsElapsed()) / 1000000.0;
-            qInfo().noquote() << QStringLiteral
+            cadcam::core::emitSummaryLog
             (
-                "[Performance][BoundaryAssignment] operation=%1 totalMs=%2 "
+                QStringLiteral("Performance"),
+                QStringLiteral("BoundaryAssignment"),
+                QStringLiteral("operation=%1 totalMs=%2 "
                 "selectionExpansionMs=%3 boundaryAnalysisMs=%4 boundaryOrderingMs=%5 "
                 "wasteRefreshMs=%6 topologyBuildMs=%7 topologyAdapterMs=%8 "
                 "endpointCompileMs=%9 pathCleanupMs=%10 coreTopologyBuildMs=%11 "
@@ -162,7 +165,7 @@ namespace
                 .arg(static_cast<qulonglong>(report.reusedPathCount))
                 .arg(static_cast<qulonglong>(report.classifiedEntityCount))
                 .arg(static_cast<qulonglong>(report.classificationCallCount))
-                .arg(static_cast<qulonglong>(report.samplePointCount));
+                .arg(static_cast<qulonglong>(report.samplePointCount)));
             m_activeReport = nullptr;
         }
 
@@ -2602,10 +2605,10 @@ QVector<CadItem*> Gcode_postprocessing_system::expandedSelectedRotaryEndCut
         return {};
     }
 
-    qInfo().noquote() << QStringLiteral("[断面候选] 选择集：%1")
-        .arg(describeRotaryPathItems(selectedItems));
-    qInfo().noquote() << QStringLiteral("[断面候选] sceneItems 过滤后：%1")
-        .arg(describeRotaryPathItems(geometry.sceneItems));
+    cadcam::core::emitSummaryLog(QStringLiteral("断面候选"), QString(), QStringLiteral("选择集：%1")
+        .arg(describeRotaryPathItems(selectedItems)));
+    cadcam::core::emitSummaryLog(QStringLiteral("断面候选"), QString(), QStringLiteral("sceneItems 过滤后：%1")
+        .arg(describeRotaryPathItems(geometry.sceneItems)));
     QVector<CadItem*> connectedItems;
     RotaryPathLoopResult loop;
     {
@@ -2618,8 +2621,8 @@ QVector<CadItem*> Gcode_postprocessing_system::expandedSelectedRotaryEndCut
         }
         loop = geometry.topology->extractSeededLoop(selectedItems, &connectedItems);
     }
-    qInfo().noquote() << QStringLiteral("[断面候选] 连通扩展：%1")
-        .arg(describeRotaryPathItems(connectedItems));
+    cadcam::core::emitSummaryLog(QStringLiteral("断面候选"), QString(), QStringLiteral("连通扩展：%1")
+        .arg(describeRotaryPathItems(connectedItems)));
 
     if (!loop.valid || loop.usedItems.isEmpty())
     {
@@ -2967,10 +2970,12 @@ bool Gcode_postprocessing_system::removeInternalMachiningPaths(bool interactive)
     {
         const QString message =
             QStringLiteral("未识别有效方管截面，未执行内部线条清理。");
-        qInfo().noquote()
-            << QStringLiteral(
-                "[InternalPathWindow] sectionAvailable=false windowCollapsed=false "
-                "removedEntityCount=0 candidatePathCount=0");
+        cadcam::core::emitSummaryLog
+        (
+            QStringLiteral("InternalPathWindow"),
+            QStringLiteral("Status"),
+            QStringLiteral("sectionAvailable=false windowCollapsed=false "
+                "removedEntityCount=0 candidatePathCount=0"));
         ui->openGLWidget->appendCommandMessage(message);
         statusBar()->showMessage(message, 6000);
         return false;
@@ -2985,12 +2990,14 @@ bool Gcode_postprocessing_system::removeInternalMachiningPaths(bool interactive)
                 ui->openGLWidget->appendCommandMessage(diagnostic.userMessage);
             }
         }
-        qInfo().noquote()
-            << QStringLiteral(
-                "[InternalPathWindow] sectionAvailable=true windowCollapsed=true "
+        cadcam::core::emitSummaryLog
+        (
+            QStringLiteral("InternalPathWindow"),
+            QStringLiteral("Status"),
+            QStringLiteral("sectionAvailable=true windowCollapsed=true "
                 "insetDistance=%1 windowExtraInset=%2 removedEntityCount=0")
                 .arg(result.insetDistance, 0, 'f', 6)
-                .arg(result.windowExtraInset, 0, 'f', 6);
+                .arg(result.windowExtraInset, 0, 'f', 6));
         statusBar()->showMessage
             (QStringLiteral("内部线条清理窗口已坍缩，未删除任何图元。"), 6000);
         return false;
@@ -3031,9 +3038,11 @@ bool Gcode_postprocessing_system::removeInternalMachiningPaths(bool interactive)
             .arg(result.windowHalfY, 0, 'f', 3)
             .arg(result.windowHalfZ, 0, 'f', 3)
             .arg(removableItems.size());
-    qInfo().noquote()
-        << QStringLiteral(
-            "[InternalPathWindow] sectionAvailable=true windowCollapsed=false "
+    cadcam::core::emitSummaryLog
+    (
+        QStringLiteral("InternalPathWindow"),
+        QStringLiteral("Status"),
+        QStringLiteral("sectionAvailable=true windowCollapsed=false "
             "insetDistance=%1 windowExtraInset=%2 windowHalfY=%3 windowHalfZ=%4 "
             "candidatePathCount=%5 skippedPathCount=%6 outsideWindowCount=%7 "
             "removedEntityCount=%8")
@@ -3044,7 +3053,7 @@ bool Gcode_postprocessing_system::removeInternalMachiningPaths(bool interactive)
             .arg(result.candidatePathCount)
             .arg(result.skippedPathCount)
             .arg(result.outsideWindowCount)
-            .arg(removableItems.size());
+            .arg(removableItems.size()));
     for (const Diagnostic& diagnostic : result.diagnostics)
     {
         if (diagnostic.severity == DiagnosticSeverity::Warning
@@ -3186,8 +3195,8 @@ bool Gcode_postprocessing_system::recognizeAllRotaryEndCuts(bool interactive)
         return false;
     }
 
-    qInfo().noquote() << QStringLiteral("[断面候选] sceneItems 过滤后：%1")
-        .arg(describeRotaryPathItems(operationGeometry.value->sceneItems));
+    cadcam::core::emitSummaryLog(QStringLiteral("断面候选"), QString(), QStringLiteral("sceneItems 过滤后：%1")
+        .arg(describeRotaryPathItems(operationGeometry.value->sceneItems)));
     int nextBoundaryId = 0;
 
     for (CadItem* item : documentItems)
@@ -3229,16 +3238,16 @@ bool Gcode_postprocessing_system::recognizeAllRotaryEndCuts(bool interactive)
 
         if (!loop.valid || loop.usedItems.isEmpty())
         {
-            qInfo().noquote() << QStringLiteral("[自动识别加工断面] 种子 %1 提取失败：%2")
+            cadcam::core::emitSummaryLog(QStringLiteral("自动识别加工断面"), QString(), QStringLiteral("种子 %1 提取失败：%2")
                 .arg(describeRotaryPathItems(seedItems))
-                .arg(loop.errorMessage);
+                .arg(loop.errorMessage));
             continue;
         }
 
-        qInfo().noquote() << QStringLiteral("[断面候选] 选择集：%1")
-            .arg(describeRotaryPathItems(seedItems));
-        qInfo().noquote() << QStringLiteral("[断面候选] 连通扩展：%1")
-            .arg(describeRotaryPathItems(connectedItems));
+        cadcam::core::emitSummaryLog(QStringLiteral("断面候选"), QString(), QStringLiteral("选择集：%1")
+            .arg(describeRotaryPathItems(seedItems)));
+        cadcam::core::emitSummaryLog(QStringLiteral("断面候选"), QString(), QStringLiteral("连通扩展：%1")
+            .arg(describeRotaryPathItems(connectedItems)));
 
         for (CadItem* item : loop.usedItems)
         {
@@ -3265,8 +3274,8 @@ bool Gcode_postprocessing_system::recognizeAllRotaryEndCuts(bool interactive)
 
         if (!analysis.valid)
         {
-            qInfo().noquote() << QStringLiteral("[自动识别加工断面] 周向验证失败：%1")
-                .arg(analysis.errorMessage);
+            cadcam::core::emitSummaryLog(QStringLiteral("自动识别加工断面"), QString(), QStringLiteral("周向验证失败：%1")
+                .arg(analysis.errorMessage));
             continue;
         }
 

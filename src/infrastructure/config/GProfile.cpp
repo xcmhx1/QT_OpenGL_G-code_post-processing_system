@@ -1,6 +1,7 @@
 #include "platform/pch.h"
 
 #include "infrastructure/config/GProfile.h"
+#include "core/diagnostics/SummaryLog.h"
 
 #include <QDebug>
 #include <QFile>
@@ -440,11 +441,14 @@ GProfile GProfile::loadFromFile(const QString& filePath, QString* errorMessage)
             migrateLegacyCuttingControlBlock
                 (it.value(), removedStandaloneCount, migratedMixedCount);
         }
-        qInfo().noquote() << QStringLiteral(
-            "[GProfile][Migration] processUnitCode=M03/M05 "
-            "removedStandaloneCuttingCodes=%1 migratedMixedLines=%2")
+        cadcam::core::emitSummaryLog
+        (
+            QStringLiteral("GProfile"),
+            QStringLiteral("Migration"),
+            QStringLiteral("processUnitCode=M03/M05 "
+                "removedStandaloneCuttingCodes=%1 migratedMixedLines=%2")
             .arg(removedStandaloneCount)
-            .arg(migratedMixedCount);
+            .arg(migratedMixedCount));
         if (migratedMixedCount > 0)
         {
             qWarning().noquote() << QStringLiteral(

@@ -625,6 +625,7 @@ if exist "$(VCRuntimeRedistDir)\*.dll" copy /Y "$(VCRuntimeRedistDir)\*.dll" "$(
     <ClInclude Include="include\core\diagnostics\Diagnostic.h" />
     <ClInclude Include="include\core\diagnostics\OperationContext.h" />
     <ClInclude Include="include\core\diagnostics\OperationResult.h" />
+    <ClInclude Include="include\core\diagnostics\SummaryLog.h" />
     <ClInclude Include="include\core\geometry\GeometryTypes.h" />
     <ClInclude Include="include\core\geometry\EntityIdAllocator.h" />
     <ClInclude Include="include\core\geometry\Path3D.h" />

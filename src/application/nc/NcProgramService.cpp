@@ -1,4 +1,5 @@
 #include "application/nc/NcProgramService.h"
+#include "core/diagnostics/SummaryLog.h"
 
 #include "cad/document/CadDocument.h"
 #include "application/machine/MachineTrajectoryService.h"
@@ -61,10 +62,13 @@ OperationResult<cadcam::nc::NcProgram> NcProgramService::buildPlanarProgram
         processConfig.rotationSafetyClearance;
     policy.clearance.approachClearance =
         processConfig.sameZoneTransferClearance;
-    qInfo().noquote()
-        << QStringLiteral("[MachineTrajectory][Clearance] mode=Planar3Axis retractClearance=%1 approachClearance=%2")
+    cadcam::core::emitSummaryLog
+    (
+        QStringLiteral("MachineTrajectory"),
+        QStringLiteral("Clearance"),
+        QStringLiteral("mode=Planar3Axis retractClearance=%1 approachClearance=%2")
             .arg(policy.clearance.retractClearance, 0, 'g', 15)
-            .arg(policy.clearance.approachClearance, 0, 'g', 15);
+            .arg(policy.clearance.approachClearance, 0, 'g', 15));
     auto program = cadcam::nc::PlanarNcProgramBuilder::build
         (capture.value->contentRevision, capture.value->entities, policy, context,
             processPlan.processStateRevision);

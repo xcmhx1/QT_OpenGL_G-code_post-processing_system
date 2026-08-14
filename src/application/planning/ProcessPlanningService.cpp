@@ -1,4 +1,5 @@
 #include "application/planning/ProcessPlanningService.h"
+#include "core/diagnostics/SummaryLog.h"
 
 #include "cad/document/CadDocument.h"
 #include "application/planning/DocumentProcessPlanningAdapter.h"
@@ -549,8 +550,11 @@ namespace
         {
             if (!diagnostic.context.value(QStringLiteral("closedLoopSummary")).toBool()) continue;
             const QVariantMap& values = diagnostic.context;
-            qInfo().noquote()
-                << QStringLiteral("[ProcessPlanning][ClosedLoop] groupId=%1 memberCount=%2 memberEntityIds=%3 nodeCount=%4 branchNodeCount=%5 candidateCount=%6 selectedOrder=%7 selectedReverse=%8 status=%9")
+            cadcam::core::emitSummaryLog
+            (
+                QStringLiteral("ProcessPlanning"),
+                QStringLiteral("ClosedLoop"),
+                QStringLiteral("groupId=%1 memberCount=%2 memberEntityIds=%3 nodeCount=%4 branchNodeCount=%5 candidateCount=%6 selectedOrder=%7 selectedReverse=%8 status=%9")
                     .arg(values.value(QStringLiteral("groupId"), -1).toInt())
                     .arg(values.value(QStringLiteral("memberCount"), 0).toInt())
                     .arg(values.value(QStringLiteral("memberEntityIds")).toString())
@@ -559,7 +563,7 @@ namespace
                     .arg(values.value(QStringLiteral("candidateCount"), 0).toInt())
                     .arg(values.value(QStringLiteral("selectedOrder")).toString())
                     .arg(values.value(QStringLiteral("selectedReverse")).toString())
-                    .arg(values.value(QStringLiteral("status"), QStringLiteral("Failed")).toString());
+                    .arg(values.value(QStringLiteral("status"), QStringLiteral("Failed")).toString()));
         }
     }
 
@@ -575,9 +579,11 @@ namespace
                 continue;
             }
             const QVariantMap& values = diagnostic.context;
-            qInfo().noquote()
-                << QStringLiteral(
-                    "[ProcessUnitContinuity] processUnitIndex=%1 "
+            cadcam::core::emitSummaryLog
+            (
+                QStringLiteral("ProcessUnitContinuity"),
+                QString(),
+                QStringLiteral("processUnitIndex=%1 "
                     "previousEntityId=%2 nextEntityId=%3 "
                     "sourceConnectionDistance=%4 machineConnectionDistance=%5 "
                     "previousSurface=%6 nextSurface=%7 previousA=%8 nextA=%9 "
@@ -597,7 +603,7 @@ namespace
                         0, 'g', 15)
                     .arg(values.value(QStringLiteral("failure")).toString())
                     .arg(values.value(QStringLiteral("splitApplied")).toBool()
-                        ? QStringLiteral("true") : QStringLiteral("false"));
+                        ? QStringLiteral("true") : QStringLiteral("false")));
         }
     }
 
@@ -611,8 +617,11 @@ namespace
                 continue;
             }
             const QVariantMap& values = diagnostic.context;
-            qInfo().noquote()
-                << QStringLiteral("[ProcessPlanning][BreakStart] groupId=%1 boundaryRank=%2 strategy=%3 preferredStartZone=%4 startZone=%5 startEntityId=%6 startParameter=%7 startPosition=%8 runLength=%9 direction=%10 exitZone=%11 exitConfidence=%12 fragmentCount=%13 midpointFragmentUsed=%14 status=%15")
+            cadcam::core::emitSummaryLog
+            (
+                QStringLiteral("ProcessPlanning"),
+                QStringLiteral("BreakStart"),
+                QStringLiteral("groupId=%1 boundaryRank=%2 strategy=%3 preferredStartZone=%4 startZone=%5 startEntityId=%6 startParameter=%7 startPosition=%8 runLength=%9 direction=%10 exitZone=%11 exitConfidence=%12 fragmentCount=%13 midpointFragmentUsed=%14 status=%15")
                     .arg(values.value(QStringLiteral("groupId"), -1).toInt())
                     .arg(values.value(QStringLiteral("boundaryRank"), -1).toInt())
                     .arg(values.value(QStringLiteral("strategy")).toString())
@@ -635,7 +644,7 @@ namespace
                     .arg(values.value(QStringLiteral("midpointFragmentUsed"))
                         .toBool() ? 1 : 0)
                     .arg(values.value(QStringLiteral("status"),
-                        QStringLiteral("Unknown")).toString());
+                        QStringLiteral("Unknown")).toString()));
         }
     }
 
@@ -647,9 +656,11 @@ namespace
                 (QStringLiteral("singleClosedEntrySearch")).toBool())
             {
                 const QVariantMap& values = diagnostic.context;
-                qInfo().noquote()
-                    << QStringLiteral(
-                        "[ProcessPlanning][SingleClosedEntrySearch] "
+                cadcam::core::emitSummaryLog
+                (
+                    QStringLiteral("ProcessPlanning"),
+                    QStringLiteral("SingleClosedEntrySearch"),
+                    QStringLiteral(
                         "outcome=%1 processUnitIndex=%2 unitKey=%3 "
                         "entityId=%4 sourceKind=%5 ownerZone=%6 "
                         "previousProcessUnitIndex=%7 previousOwnerZone=%8 "
@@ -742,7 +753,7 @@ namespace
                         .arg(values.value(QStringLiteral(
                             "sameZoneClearanceTransferCount")).toInt())
                         .arg(values.value(QStringLiteral(
-                            "crossZoneRotaryTransferCount")).toInt());
+                            "crossZoneRotaryTransferCount")).toInt()));
                 if (values.value(QStringLiteral("searchOutcome")).toString()
                     == QStringLiteral("Failed"))
                 {
@@ -763,8 +774,11 @@ namespace
                         : transferKind == 2
                             ? QStringLiteral("SameZoneClearanceTransfer")
                             : QStringLiteral("CrossZoneRotaryTransfer");
-                qInfo().noquote()
-                    << QStringLiteral("[ProcessPlanning][SingleClosedEntryRefinement] processUnitIndex=%1 unitKey=%2 entityId=%3 sourceKind=%4 ownerZone=%5 previousProcessUnitIndex=%6 fromProcessUnit=%7 toProcessUnit=%8 previousCutEnd=%9 transferKind=%10 searchIntervalCount=%11 rootCandidateCount=%12 validTangentCount=%13 mode=%14 selectedSourceParameter=%15 selectedReverse=%16 finalApproachOrigin=%17 selectedCutStart=%18 approachCutDot=%19 approachCutAngle=%20 tangentResidual=%21 previewSegmentCount=%22")
+                cadcam::core::emitSummaryLog
+                (
+                    QStringLiteral("ProcessPlanning"),
+                    QStringLiteral("SingleClosedEntryRefinement"),
+                    QStringLiteral("processUnitIndex=%1 unitKey=%2 entityId=%3 sourceKind=%4 ownerZone=%5 previousProcessUnitIndex=%6 fromProcessUnit=%7 toProcessUnit=%8 previousCutEnd=%9 transferKind=%10 searchIntervalCount=%11 rootCandidateCount=%12 validTangentCount=%13 mode=%14 selectedSourceParameter=%15 selectedReverse=%16 finalApproachOrigin=%17 selectedCutStart=%18 approachCutDot=%19 approachCutAngle=%20 tangentResidual=%21 previewSegmentCount=%22")
                         .arg(values.value(QStringLiteral("processUnitIndex")).toInt())
                         .arg(values.value(QStringLiteral("unitKey")).toString())
                         .arg(values.value(QStringLiteral("entityId")).toULongLong())
@@ -787,15 +801,18 @@ namespace
                         .arg(values.value(QStringLiteral("approachCutDot")).toDouble(), 0, 'g', 15)
                         .arg(values.value(QStringLiteral("approachCutAngle")).toDouble(), 0, 'g', 15)
                         .arg(values.value(QStringLiteral("tangentResidual")).toDouble(), 0, 'g', 15)
-                        .arg(values.value(QStringLiteral("previewSegmentCount")).toInt());
+                        .arg(values.value(QStringLiteral("previewSegmentCount")).toInt()));
                 continue;
             }
             if (diagnostic.context.value
                 (QStringLiteral("entryZoneProfile")).toBool())
             {
                 const QVariantMap& values = diagnostic.context;
-                qInfo().noquote()
-                    << QStringLiteral("[ProcessPlanning][EntryZoneProfile] unitKey=%1 groupKind=%2 memberSourceKinds=%3 certainMask=%4 possibleMask=%5 connectionEntryMask=%6 curveInteriorEntryMask=%7 zoneRunMidpointEntryMask=%8 legalEntryMask=%9 candidateCountsByZone=%10 arcMemberIdsByZone=%11 ellipseMemberIdsByZone=%12")
+                cadcam::core::emitSummaryLog
+                (
+                    QStringLiteral("ProcessPlanning"),
+                    QStringLiteral("EntryZoneProfile"),
+                    QStringLiteral("unitKey=%1 groupKind=%2 memberSourceKinds=%3 certainMask=%4 possibleMask=%5 connectionEntryMask=%6 curveInteriorEntryMask=%7 zoneRunMidpointEntryMask=%8 legalEntryMask=%9 candidateCountsByZone=%10 arcMemberIdsByZone=%11 ellipseMemberIdsByZone=%12")
                         .arg(values.value(QStringLiteral("unitKey")).toString())
                         .arg(values.value(QStringLiteral("groupKind")).toString())
                         .arg(values.value(QStringLiteral("memberSourceKinds")).toString())
@@ -807,7 +824,7 @@ namespace
                         .arg(values.value(QStringLiteral("legalEntryMask")).toString())
                         .arg(values.value(QStringLiteral("candidateCountsByZone")).toString())
                         .arg(values.value(QStringLiteral("arcMemberIdsByZone")).toString())
-                        .arg(values.value(QStringLiteral("ellipseMemberIdsByZone")).toString());
+                        .arg(values.value(QStringLiteral("ellipseMemberIdsByZone")).toString()));
                 continue;
             }
             if (!diagnostic.context.value
@@ -819,8 +836,11 @@ namespace
             if (values.value
                 (QStringLiteral("entryRefinementSummary")).toBool())
             {
-                qInfo().noquote()
-        << QStringLiteral("[ProcessPlanning][EntryRefinement] unitKey=%1 ownerZone=%2 previousCutEnd=%3 previousTransferAnchor=%4 mode=%5 curveMemberCount=%6 arcTangentRootCount=%7 ellipseTangentRootCount=%8 validTangentCount=%9 connectionCandidateCount=%10 selectedEntityId=%11 selectedSourceKind=%12 selectedSourceParameter=%13 travelDistance=%14 approachCutAngle=%15 selectedReverse=%16 fragmentCount=%17 nearestConnectionDistance=%18 forwardAngle=%19 reverseAngle=%20 tangentResidual=%21 approachCutDot=%22")
+                cadcam::core::emitSummaryLog
+                (
+                    QStringLiteral("ProcessPlanning"),
+                    QStringLiteral("EntryRefinement"),
+                    QStringLiteral("unitKey=%1 ownerZone=%2 previousCutEnd=%3 previousTransferAnchor=%4 mode=%5 curveMemberCount=%6 arcTangentRootCount=%7 ellipseTangentRootCount=%8 validTangentCount=%9 connectionCandidateCount=%10 selectedEntityId=%11 selectedSourceKind=%12 selectedSourceParameter=%13 travelDistance=%14 approachCutAngle=%15 selectedReverse=%16 fragmentCount=%17 nearestConnectionDistance=%18 forwardAngle=%19 reverseAngle=%20 tangentResidual=%21 approachCutDot=%22")
                         .arg(values.value(QStringLiteral("unitKey")).toString())
                         .arg(values.value(QStringLiteral("ownerZone")).toString())
                         .arg(values.value(QStringLiteral("previousCutEnd")).toString())
@@ -843,11 +863,14 @@ namespace
                         .arg(values.value(QStringLiteral("forwardAngle")).toDouble(), 0, 'g', 15)
                         .arg(values.value(QStringLiteral("reverseAngle")).toDouble(), 0, 'g', 15)
                         .arg(values.value(QStringLiteral("tangentResidual")).toDouble(), 0, 'g', 15)
-                        .arg(values.value(QStringLiteral("approachCutDot")).toDouble(), 0, 'g', 15);
+                        .arg(values.value(QStringLiteral("approachCutDot")).toDouble(), 0, 'g', 15));
                 continue;
             }
-            qInfo().noquote()
-                << QStringLiteral("[ProcessPlanning][EntrySelection] unitKey=%1 ownerZone=%2 scheduledZone=%3 selectedEntryZone=%4 selectionMode=%5 candidateKind=%6 connectionCandidateCount=%7 arcInteriorCandidateCount=%8 ellipseInteriorCandidateCount=%9 zoneRunMidpointCandidateCount=%10 curveCandidateRejectedCount=%11 candidateCount=%12 wrongZoneRejectedCount=%13 selectedEntityId=%14 selectedSourceKind=%15 selectedSourceParameter=%16 selectedReverse=%17 entryPosition=%18 firstCutTangent=%19 distanceToMemberEndpoint=%20 distanceToZoneBoundary=%21 axisReversalCount=%22 tangentCost=%23 rotationCost=%24 movementDistance=%25 fragmentCount=%26")
+            cadcam::core::emitSummaryLog
+            (
+                QStringLiteral("ProcessPlanning"),
+                QStringLiteral("EntrySelection"),
+                QStringLiteral("unitKey=%1 ownerZone=%2 scheduledZone=%3 selectedEntryZone=%4 selectionMode=%5 candidateKind=%6 connectionCandidateCount=%7 arcInteriorCandidateCount=%8 ellipseInteriorCandidateCount=%9 zoneRunMidpointCandidateCount=%10 curveCandidateRejectedCount=%11 candidateCount=%12 wrongZoneRejectedCount=%13 selectedEntityId=%14 selectedSourceKind=%15 selectedSourceParameter=%16 selectedReverse=%17 entryPosition=%18 firstCutTangent=%19 distanceToMemberEndpoint=%20 distanceToZoneBoundary=%21 axisReversalCount=%22 tangentCost=%23 rotationCost=%24 movementDistance=%25 fragmentCount=%26")
                     .arg(values.value(QStringLiteral("unitKey")).toString())
                     .arg(values.value(QStringLiteral("ownerZone")).toString())
                     .arg(values.value(QStringLiteral("scheduledZone")).toString())
@@ -880,7 +903,7 @@ namespace
                         .toDouble(), 0, 'g', 15)
                     .arg(values.value(QStringLiteral("movementDistance"))
                         .toDouble(), 0, 'g', 15)
-                    .arg(values.value(QStringLiteral("fragmentCount")).toInt());
+                    .arg(values.value(QStringLiteral("fragmentCount")).toInt()));
         }
     }
 
@@ -891,8 +914,11 @@ namespace
             const QVariantMap& values = diagnostic.context;
             if (values.value(QStringLiteral("zoneOwnershipFailure")).toBool())
             {
-                qInfo().noquote()
-                    << QStringLiteral("[ProcessPlanning][ZoneOwnershipFailure] partitionId=%1 unitKey=%2 groupKind=%3 memberCount=%4 certainMask=%5 possibleMask=%6 legalEntryMask=%7 requiredEntryMask=%8 ownerCandidateMask=%9")
+                cadcam::core::emitSummaryLog
+                (
+                    QStringLiteral("ProcessPlanning"),
+                    QStringLiteral("ZoneOwnershipFailure"),
+                    QStringLiteral("partitionId=%1 unitKey=%2 groupKind=%3 memberCount=%4 certainMask=%5 possibleMask=%6 legalEntryMask=%7 requiredEntryMask=%8 ownerCandidateMask=%9")
                         .arg(values.value(QStringLiteral("partitionId"), -1).toInt())
                         .arg(values.value(QStringLiteral("unitKey")).toString())
                         .arg(values.value(QStringLiteral("groupKind")).toString())
@@ -901,13 +927,16 @@ namespace
                         .arg(values.value(QStringLiteral("possibleMask")).toString())
                         .arg(values.value(QStringLiteral("legalEntryMask")).toString())
                         .arg(values.value(QStringLiteral("requiredEntryMask")).toString())
-                        .arg(values.value(QStringLiteral("ownerCandidateMask")).toString());
+                        .arg(values.value(QStringLiteral("ownerCandidateMask")).toString()));
                 continue;
             }
             if (values.value(QStringLiteral("zoneOwnership")).toBool())
             {
-                qInfo().noquote()
-                    << QStringLiteral("[ProcessPlanning][ZoneOwnership] partitionId=%1 unitKey=%2 certainMask=%3 possibleMask=%4 ownerCandidateMask=%5 ownerZone=%6 ownerBasis=%7 legalEntryMaskBefore=%8 usedBoundaryFallback=%9")
+                cadcam::core::emitSummaryLog
+                (
+                    QStringLiteral("ProcessPlanning"),
+                    QStringLiteral("ZoneOwnership"),
+                    QStringLiteral("partitionId=%1 unitKey=%2 certainMask=%3 possibleMask=%4 ownerCandidateMask=%5 ownerZone=%6 ownerBasis=%7 legalEntryMaskBefore=%8 usedBoundaryFallback=%9")
                         .arg(values.value(QStringLiteral("partitionId"), -1).toInt())
                         .arg(values.value(QStringLiteral("unitKey")).toString())
                         .arg(values.value(QStringLiteral("certainMask")).toString())
@@ -918,26 +947,32 @@ namespace
                         .arg(values.value(QStringLiteral("ownerBasis")).toString())
                         .arg(values.value(QStringLiteral("legalEntryMaskBefore")).toString())
                         .arg(values.value(QStringLiteral("usedBoundaryFallback")).toBool()
-                            ? QStringLiteral("true") : QStringLiteral("false"));
+                            ? QStringLiteral("true") : QStringLiteral("false")));
                 continue;
             }
             if (values.value(QStringLiteral("zonePhase")).toBool())
             {
-                qInfo().noquote()
-                    << QStringLiteral("[ProcessPlanning][ZonePhase] partitionId=%1 zone=%2 event=%3 ownedUnitCount=%4 processedUnitCount=%5 remainingUnitCount=%6")
+                cadcam::core::emitSummaryLog
+                (
+                    QStringLiteral("ProcessPlanning"),
+                    QStringLiteral("ZonePhase"),
+                    QStringLiteral("partitionId=%1 zone=%2 event=%3 ownedUnitCount=%4 processedUnitCount=%5 remainingUnitCount=%6")
                         .arg(values.value(QStringLiteral("partitionId"), -1).toInt())
                         .arg(values.value(QStringLiteral("zone"),
                             QStringLiteral("Unknown")).toString())
                         .arg(values.value(QStringLiteral("event")).toString())
                         .arg(values.value(QStringLiteral("ownedUnitCount"), 0).toInt())
                         .arg(values.value(QStringLiteral("processedUnitCount"), 0).toInt())
-                        .arg(values.value(QStringLiteral("remainingUnitCount"), 0).toInt());
+                        .arg(values.value(QStringLiteral("remainingUnitCount"), 0).toInt()));
                 continue;
             }
             if (values.value(QStringLiteral("zoneBlocked")).toBool())
             {
-                qInfo().noquote()
-                    << QStringLiteral("[ProcessPlanning][ZoneBlocked] partitionId=%1 zone=%2 frontierX=%3 unfinishedUnitKeys=%4 blockedUnitKeys=%5 remainingPredecessors=%6")
+                cadcam::core::emitSummaryLog
+                (
+                    QStringLiteral("ProcessPlanning"),
+                    QStringLiteral("ZoneBlocked"),
+                    QStringLiteral("partitionId=%1 zone=%2 frontierX=%3 unfinishedUnitKeys=%4 blockedUnitKeys=%5 remainingPredecessors=%6")
                         .arg(values.value(QStringLiteral("partitionId"), -1).toInt())
                         .arg(values.value(QStringLiteral("zone"),
                             QStringLiteral("Unknown")).toString())
@@ -945,13 +980,16 @@ namespace
                             .toDouble(), 0, 'f', 6)
                         .arg(values.value(QStringLiteral("unfinishedUnitKeys")).toString())
                         .arg(values.value(QStringLiteral("blockedUnitKeys")).toString())
-                        .arg(values.value(QStringLiteral("remainingPredecessors")).toString());
+                        .arg(values.value(QStringLiteral("remainingPredecessors")).toString()));
                 continue;
             }
             if (!values.value(QStringLiteral("zone16SweepSummary")).toBool())
                 continue;
-            qInfo().noquote()
-                << QStringLiteral("[ProcessPlanning][Zone16Sweep] partitionId=%1 initialZone=%2 perimeterDirection=%3 longitudinalDirection=%4 partitionMinimumX=%5 partitionMaximumX=%6 processedUnitCount=%7 zoneTransitions=%8 backtrackCount=%9 status=%10")
+            cadcam::core::emitSummaryLog
+            (
+                QStringLiteral("ProcessPlanning"),
+                QStringLiteral("Zone16Sweep"),
+                QStringLiteral("partitionId=%1 initialZone=%2 perimeterDirection=%3 longitudinalDirection=%4 partitionMinimumX=%5 partitionMaximumX=%6 processedUnitCount=%7 zoneTransitions=%8 backtrackCount=%9 status=%10")
                     .arg(values.value(QStringLiteral("partitionId"), -1).toInt())
                     .arg(values.value(QStringLiteral("initialZone"),
                         QStringLiteral("Unknown")).toString())
@@ -966,14 +1004,17 @@ namespace
                     .arg(values.value(QStringLiteral("zoneTransitions"), 0).toInt())
                     .arg(values.value(QStringLiteral("backtrackCount"), 0).toInt())
                     .arg(values.value(QStringLiteral("status"),
-                        QStringLiteral("Unknown")).toString());
+                        QStringLiteral("Unknown")).toString()));
             const QStringList selectedUnits =
                 values.value(QStringLiteral("selectedUnits")).toStringList();
             for (const QString& selectedUnit : selectedUnits)
             {
-                qInfo().noquote()
-                    << QStringLiteral("[ProcessPlanning][Zone16SweepUnit] %1")
-                        .arg(selectedUnit);
+                cadcam::core::emitSummaryLog
+                (
+                    QStringLiteral("ProcessPlanning"),
+                    QStringLiteral("Zone16SweepUnit"),
+                    QStringLiteral("%1")
+                        .arg(selectedUnit));
             }
         }
     }
@@ -985,8 +1026,11 @@ namespace
             const QVariantMap& values = diagnostic.context;
             if (values.value(QStringLiteral("zone16Profile")).toBool())
             {
-                qInfo().noquote()
-                    << QStringLiteral("[ProcessPlanning][Zone16Profile] unitKey=%1 groupId=%2 mask=%3 certainMask=%4 possibleMask=%5 zones=%6 entryZone=%7 exitZone=%8 entryPerimeter=%9 exitPerimeter=%10 xSpans=%11 maximumShellDeviation=%12 averageShellDeviation=%13 uncertain=%14 status=%15")
+                cadcam::core::emitSummaryLog
+                (
+                    QStringLiteral("ProcessPlanning"),
+                    QStringLiteral("Zone16Profile"),
+                    QStringLiteral("unitKey=%1 groupId=%2 mask=%3 certainMask=%4 possibleMask=%5 zones=%6 entryZone=%7 exitZone=%8 entryPerimeter=%9 exitPerimeter=%10 xSpans=%11 maximumShellDeviation=%12 averageShellDeviation=%13 uncertain=%14 status=%15")
                         .arg(values.value(QStringLiteral("unitKey")).toString())
                         .arg(values.value(QStringLiteral("groupId"), -1).toInt())
                         .arg(values.value(QStringLiteral("mask"),
@@ -1012,19 +1056,22 @@ namespace
                         .arg(values.value(QStringLiteral("uncertain")).toBool()
                             ? QStringLiteral("true") : QStringLiteral("false"))
                         .arg(values.value(QStringLiteral("status"),
-                            QStringLiteral("Unknown")).toString());
+                            QStringLiteral("Unknown")).toString()));
             }
             else if (values.value(QStringLiteral("zone16Summary")).toBool())
             {
-                qInfo().noquote()
-                    << QStringLiteral("[ProcessPlanning][Zone16Summary] unitCount=%1 singleZoneUnitCount=%2 multiZoneUnitCount=%3 uncertainUnitCount=%4 zeroMaskUnitCount=%5 status=%6")
+                cadcam::core::emitSummaryLog
+                (
+                    QStringLiteral("ProcessPlanning"),
+                    QStringLiteral("Zone16Summary"),
+                    QStringLiteral("unitCount=%1 singleZoneUnitCount=%2 multiZoneUnitCount=%3 uncertainUnitCount=%4 zeroMaskUnitCount=%5 status=%6")
                         .arg(values.value(QStringLiteral("unitCount"), 0).toInt())
                         .arg(values.value(QStringLiteral("singleZoneUnitCount"), 0).toInt())
                         .arg(values.value(QStringLiteral("multiZoneUnitCount"), 0).toInt())
                         .arg(values.value(QStringLiteral("uncertainUnitCount"), 0).toInt())
                         .arg(values.value(QStringLiteral("zeroMaskUnitCount"), 0).toInt())
                         .arg(values.value(QStringLiteral("status"),
-                            QStringLiteral("Unknown")).toString());
+                            QStringLiteral("Unknown")).toString()));
             }
         }
     }
@@ -1098,8 +1145,11 @@ OperationResult<cadcam::planning::ProcessPlan> ProcessPlanningService::buildRota
     const OperationContext& context
 ) const
 {
-    qInfo().noquote()
-        << QStringLiteral("[ProcessPlanning][Zone16Policy] initialZone=%1 perimeterDirection=%2 longitudinalDirection=%3")
+    cadcam::core::emitSummaryLog
+    (
+        QStringLiteral("ProcessPlanning"),
+        QStringLiteral("Zone16Policy"),
+        QStringLiteral("initialZone=%1 perimeterDirection=%2 longitudinalDirection=%3")
             .arg(cadcam::machining::tubeZoneName
                 (policy.zone16Sweep.initialZone))
             .arg(policy.zone16Sweep.perimeterDirection
@@ -1109,7 +1159,7 @@ OperationResult<cadcam::planning::ProcessPlan> ProcessPlanningService::buildRota
             .arg(policy.zone16Sweep.longitudinalDirection
                 == cadcam::planning::LongitudinalSweepDirection::PositiveX
                 ? QStringLiteral("PositiveX")
-                : QStringLiteral("NegativeX"));
+                : QStringLiteral("NegativeX")));
     cadcam::topology::PathTopology topology;
     DocumentProcessPlanningAdapter adapter;
     auto capture = adapter.captureRotary

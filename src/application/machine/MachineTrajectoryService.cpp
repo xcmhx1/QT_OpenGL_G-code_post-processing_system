@@ -1,4 +1,5 @@
 #include "application/machine/MachineTrajectoryService.h"
+#include "core/diagnostics/SummaryLog.h"
 
 #include "cad/document/CadDocument.h"
 #include "application/geometry/DocumentGeometrySnapshotBuilder.h"
@@ -53,8 +54,11 @@ namespace
     {
         for (const auto& summary : trajectory.surfaceSummaries)
         {
-            qInfo().noquote()
-                << QStringLiteral("[RotaryKinematics][Surface] entityId=%1 processGroupId=%2 sourceKind=%3 pointCount=%4 ySpan=%5 zSpan=%6 classification=%7 surfaceTolerance=%8 rawAStart=%9 rawAEnd=%10 alignedAStart=%11 alignedAEnd=%12")
+            cadcam::core::emitSummaryLog
+            (
+                QStringLiteral("RotaryKinematics"),
+                QStringLiteral("Surface"),
+                QStringLiteral("entityId=%1 processGroupId=%2 sourceKind=%3 pointCount=%4 ySpan=%5 zSpan=%6 classification=%7 surfaceTolerance=%8 rawAStart=%9 rawAEnd=%10 alignedAStart=%11 alignedAEnd=%12")
                     .arg(summary.entityId)
                     .arg(summary.processGroupId)
                     .arg(sourceKindName(summary.sourceKind))
@@ -66,7 +70,7 @@ namespace
                     .arg(summary.rawAStart, 0, 'g', 15)
                     .arg(summary.rawAEnd, 0, 'g', 15)
                     .arg(summary.alignedAStart, 0, 'g', 15)
-                    .arg(summary.alignedAEnd, 0, 'g', 15);
+                    .arg(summary.alignedAEnd, 0, 'g', 15));
         }
     }
 
@@ -123,7 +127,7 @@ namespace
         for (const auto& summary : trajectory.transferSummaries)
         {
             QString message = QStringLiteral(
-                "[MachineTrajectory][Transfer] fromProcessUnit=%1 "
+                "fromProcessUnit=%1 "
                 "toProcessUnit=%2 fromOwnerZone=%3 toOwnerZone=%4 "
                 "kind=%5 previousCutEnd=%6 nextCutStart=%7 deltaA=%8 "
                 "rotationSafetyClearance=%9 sameZoneTransferClearance=%10 "
@@ -196,7 +200,12 @@ namespace
                     .arg(poseText(summary.rotaryTransferTarget))
                     .arg(poseText(summary.approachTarget));
             }
-            qInfo().noquote() << message;
+            cadcam::core::emitSummaryLog
+            (
+                QStringLiteral("MachineTrajectory"),
+                QStringLiteral("Transfer"),
+                message
+            );
         }
     }
 
@@ -503,12 +512,15 @@ OperationResult<cadcam::machine::MachineTrajectory> MachineTrajectoryService::bu
         return result;
     }
 
-    qInfo().noquote()
-        << QStringLiteral("[MachineTrajectory][TransferPolicy] mode=Rotary4Axis rotationSafetyClearance=%1 sameZoneTransferClearance=%2 coordinated=%3")
+    cadcam::core::emitSummaryLog
+    (
+        QStringLiteral("MachineTrajectory"),
+        QStringLiteral("TransferPolicy"),
+        QStringLiteral("mode=Rotary4Axis rotationSafetyClearance=%1 sameZoneTransferClearance=%2 coordinated=%3")
             .arg(policy.transfer.rotationSafetyClearance, 0, 'g', 15)
             .arg(policy.transfer.sameZoneTransferClearance, 0, 'g', 15)
             .arg(policy.transfer.coordinatedTransferEnabled
-                ? QStringLiteral("true") : QStringLiteral("false"));
+                ? QStringLiteral("true") : QStringLiteral("false")));
     auto built = machine::RotaryTrajectoryBuilder::build(input, policy, taskContext);
     result.mergeDiagnostics(built);
     result.status = built.status;

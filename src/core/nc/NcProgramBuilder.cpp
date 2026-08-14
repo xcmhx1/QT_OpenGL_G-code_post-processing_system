@@ -1,4 +1,5 @@
 #include "core/nc/NcProgramBuilder.h"
+#include "core/diagnostics/SummaryLog.h"
 
 #include <QDebug>
 
@@ -458,12 +459,15 @@ OperationResult<cadcam::nc::NcProgram> cadcam::nc::NcProgramBuilder::buildRotary
             ));
             return result;
         }
-        qInfo().noquote() << QStringLiteral(
-            "[NcProgram][CuttingControl] processUnitIndex=%1 "
-            "firstProcessOrder=%2 lastProcessOrder=%3 "
-            "memberBlockCount=%4 fragmentBlockCount=%5 "
-            "cuttingMotionCount=%6 connectionMotionCount=%7 "
-            "overcutMotionCount=%8 enableCount=%9 disableCount=%10")
+        cadcam::core::emitSummaryLog
+        (
+            QStringLiteral("NcProgram"),
+            QStringLiteral("CuttingControl"),
+            QStringLiteral("processUnitIndex=%1 "
+                "firstProcessOrder=%2 lastProcessOrder=%3 "
+                "memberBlockCount=%4 fragmentBlockCount=%5 "
+                "cuttingMotionCount=%6 connectionMotionCount=%7 "
+                "overcutMotionCount=%8 enableCount=%9 disableCount=%10")
             .arg(summary.processUnitIndex)
             .arg(summary.firstProcessOrder)
             .arg(summary.lastProcessOrder)
@@ -473,7 +477,7 @@ OperationResult<cadcam::nc::NcProgram> cadcam::nc::NcProgramBuilder::buildRotary
             .arg(summary.connectionMotionCount)
             .arg(summary.overcutMotionCount)
             .arg(summary.enableCount)
-            .arg(summary.disableCount);
+            .arg(summary.disableCount));
     }
 
     std::set<geometry::EntityId> usedEntityIds;
