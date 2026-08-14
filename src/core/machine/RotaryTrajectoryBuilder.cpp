@@ -418,273 +418,349 @@ namespace cadcam::machine
 
     }
 
-    OperationResult<MachineTrajectory> RotaryTrajectoryBuilder::build
-    (
-        const RotaryTrajectoryInput& input,
-        const RotaryMachinePolicy& policy,
-        const TaskContext& taskContext
-    )
+    namespace
     {
-        OperationResult<MachineTrajectory> result;
-        if (input.entities.empty() || input.contentRevision == 0
-            || !std::isfinite(policy.rotaryAxisY) || !std::isfinite(policy.rotaryAxisZ)
-            || !std::isfinite(policy.tubeCenterY) || !std::isfinite(policy.tubeCenterZ)
-            || !std::isfinite(policy.transfer.rotationSafetyClearance)
-            || policy.transfer.rotationSafetyClearance <= 0.0
-            || !std::isfinite(policy.transfer.sameZoneTransferClearance)
-            || policy.transfer.sameZoneTransferClearance < 0.0
-            || !std::isfinite(policy.continuousConnectionTolerance)
-            || policy.continuousConnectionTolerance <= 0.0
-            || !std::isfinite(policy.numericalEpsilon) || policy.numericalEpsilon <= 0.0
-            || !std::isfinite(policy.surfaceClassificationTolerance)
-            || policy.surfaceClassificationTolerance <= 0.0)
+        // 轨迹构建上下文：各工艺阶段共享的窄接口状态。
+        struct RotaryTrajectoryBuildContext
         {
-            result.status = OperationStatus::InvalidInput;
-            result.addDiagnostic(diagnostic(DiagnosticCode::MachineTrajectoryInputInvalid,
-                DiagnosticSeverity::Error, QStringLiteral("四轴轨迹输入为空或版本无效。"), taskContext.operationContext));
-            return result;
-        }
+            const RotaryTrajectoryInput& input;
+            const RotaryMachinePolicy& policy;
+            const TaskContext& taskContext;
+            OperationResult<MachineTrajectory>& result;
+            MachineTrajectory trajectory;
 
-        std::set<geometry::EntityId> wholeEntityIds;
-        std::set<std::pair<geometry::EntityId, int>> fragmentIds;
-        std::set<geometry::EntityId> fragmentedEntityIds;
-        for (std::size_t index = 0; index < input.entities.size(); ++index)
-        {
-            const auto& entity = input.entities[index];
-            if (entity.processOrder != static_cast<int>(index) || entity.entityId == 0
-                || entity.sourceProcessOrder < 0
-                || entity.processUnitIndex < 0
-                || entity.path.vertices.empty())
+            struct ResolvedUnit
             {
-                result.status = OperationStatus::InvalidInput;
-                result.addDiagnostic(diagnostic(DiagnosticCode::MachineTrajectoryInputInvalid,
-                    DiagnosticSeverity::Error, QStringLiteral("四轴轨迹的加工顺序、图元标识或路径无效。"),
-                    taskContext.operationContext, &entity));
-                return result;
-            }
-            bool identityValid = false;
-            if (entity.fragmentOrder >= 0)
-            {
-                identityValid =
-                    wholeEntityIds.count(entity.entityId) == 0U
-                    && fragmentIds.emplace(entity.entityId,
-                        entity.fragmentOrder).second;
-                fragmentedEntityIds.insert(entity.entityId);
-            }
-            else
-            {
-                identityValid =
-                    fragmentedEntityIds.count(entity.entityId) == 0U
-                    && wholeEntityIds.insert(entity.entityId).second;
-            }
-            if (!identityValid)
-            {
-                result.status = OperationStatus::InvalidInput;
-                result.addDiagnostic(diagnostic
-                (
-                    DiagnosticCode::MachineTrajectoryInputInvalid,
-                    DiagnosticSeverity::Error,
-                    QStringLiteral("四轴轨迹包含重复的完整图元或片段执行标识。"),
-                    taskContext.operationContext, &entity
-                ));
-                return result;
-            }
-        }
+                std::size_t begin = 0U;
+                std::size_t end = 0U;
+                ProcessUnitExecutionResult execution;
+            };
+            std::vector<ResolvedUnit> resolvedUnits;
+        };
 
-        std::map<int, const planning::ProcessGroup*> groupDefinitions;
-        for (const auto& group : input.processGroups) groupDefinitions[group.groupId] = &group;
-        std::map<int, std::vector<geometry::EntityId>> actualGroupMembers;
-        for (const auto& entity : input.entities)
-            if (entity.processGroupId >= 0) actualGroupMembers[entity.processGroupId].push_back(entity.entityId);
-        for (const auto& [groupId, entityIds] : actualGroupMembers)
+        // 工艺阶段：对上下文做一次变换。返回 false 表示失败并已写入 ctx.result，
+        // 构建立即终止。新增加工工艺时实现新阶段并注册到 defaultRotaryStages()。
+        class RotaryTrajectoryStage
         {
-            const auto found = groupDefinitions.find(groupId);
-            const std::set<geometry::EntityId> actualIds(entityIds.begin(), entityIds.end());
-            const std::set<geometry::EntityId> plannedIds = found != groupDefinitions.end()
-                && found->second != nullptr
-                ? std::set<geometry::EntityId>
-                    (found->second->entityIds.begin(), found->second->entityIds.end())
-                : std::set<geometry::EntityId>{};
-            std::size_t firstIndex = input.entities.size();
-            std::size_t lastIndex = 0;
-            for (std::size_t index = 0; index < input.entities.size(); ++index)
-                if (input.entities[index].processGroupId == groupId)
+        public:
+            virtual ~RotaryTrajectoryStage() = default;
+            virtual QString stageName() const = 0;
+            virtual bool apply(RotaryTrajectoryBuildContext& ctx) = 0;
+        };
+
+        class ValidateTrajectoryInputStage final : public RotaryTrajectoryStage
+        {
+        public:
+            QString stageName() const override
+            {
+                return QStringLiteral("ValidateTrajectoryInput");
+            }
+
+            bool apply(RotaryTrajectoryBuildContext& ctx) override
+            {
+                OperationResult<MachineTrajectory>& result = ctx.result;
+                const RotaryTrajectoryInput& input = ctx.input;
+                std::set<geometry::EntityId> wholeEntityIds;
+                std::set<std::pair<geometry::EntityId, int>> fragmentIds;
+                std::set<geometry::EntityId> fragmentedEntityIds;
+                for (std::size_t index = 0; index < input.entities.size(); ++index)
                 {
-                    firstIndex = std::min(firstIndex, index);
-                    lastIndex = index;
+                    const auto& entity = input.entities[index];
+                    if (entity.processOrder != static_cast<int>(index) || entity.entityId == 0
+                        || entity.sourceProcessOrder < 0
+                        || entity.processUnitIndex < 0
+                        || entity.path.vertices.empty())
+                    {
+                        result.status = OperationStatus::InvalidInput;
+                        result.addDiagnostic(diagnostic(DiagnosticCode::MachineTrajectoryInputInvalid,
+                            DiagnosticSeverity::Error, QStringLiteral("四轴轨迹的加工顺序、图元标识或路径无效。"),
+                            ctx.taskContext.operationContext, &entity));
+                        return false;
+                    }
+                    bool identityValid = false;
+                    if (entity.fragmentOrder >= 0)
+                    {
+                        identityValid =
+                            wholeEntityIds.count(entity.entityId) == 0U
+                            && fragmentIds.emplace(entity.entityId,
+                                entity.fragmentOrder).second;
+                        fragmentedEntityIds.insert(entity.entityId);
+                    }
+                    else
+                    {
+                        identityValid =
+                            fragmentedEntityIds.count(entity.entityId) == 0U
+                            && wholeEntityIds.insert(entity.entityId).second;
+                    }
+                    if (!identityValid)
+                    {
+                        result.status = OperationStatus::InvalidInput;
+                        result.addDiagnostic(diagnostic
+                        (
+                            DiagnosticCode::MachineTrajectoryInputInvalid,
+                            DiagnosticSeverity::Error,
+                            QStringLiteral("四轴轨迹包含重复的完整图元或片段执行标识。"),
+                            ctx.taskContext.operationContext, &entity
+                        ));
+                        return false;
+                    }
                 }
-            const bool contiguous = firstIndex < input.entities.size()
-                && lastIndex - firstIndex + 1U == entityIds.size();
-            if (found == groupDefinitions.end() || found->second == nullptr
-                || actualIds != plannedIds || !contiguous)
-            {
-                result.status = OperationStatus::Conflict;
-                result.addDiagnostic(diagnostic(DiagnosticCode::MachineTrajectoryInvariantViolation,
-                    DiagnosticSeverity::Error, QStringLiteral("连续加工组的成员或顺序与加工计划不一致。"),
-                    taskContext.operationContext));
-                return result;
-            }
-        }
 
-        MachineTrajectory trajectory;
-        trajectory.contentRevision = input.contentRevision;
-        trajectory.processStateRevision = input.processStateRevision;
-        trajectory.rotaryContext.rotaryAxisY = policy.rotaryAxisY;
-        trajectory.rotaryContext.rotaryAxisZ = policy.rotaryAxisZ;
-        trajectory.rotaryContext.tubeCenterY = policy.tubeCenterY;
-        trajectory.rotaryContext.tubeCenterZ = policy.tubeCenterZ;
-        if (input.tubeSection.has_value() && !input.tubeSection->geometry.boundary.empty())
-        {
-            const auto& boundary = input.tubeSection->geometry.boundary;
-            trajectory.rotaryContext.hasSectionBounds = true;
-            trajectory.rotaryContext.sectionMinimumY = trajectory.rotaryContext.sectionMaximumY = boundary.front().x;
-            trajectory.rotaryContext.sectionMinimumZ = trajectory.rotaryContext.sectionMaximumZ = boundary.front().y;
-            for (const auto& point : boundary)
-            {
-                trajectory.rotaryContext.sectionMinimumY = std::min(trajectory.rotaryContext.sectionMinimumY, point.x);
-                trajectory.rotaryContext.sectionMaximumY = std::max(trajectory.rotaryContext.sectionMaximumY, point.x);
-                trajectory.rotaryContext.sectionMinimumZ = std::min(trajectory.rotaryContext.sectionMinimumZ, point.y);
-                trajectory.rotaryContext.sectionMaximumZ = std::max(trajectory.rotaryContext.sectionMaximumZ, point.y);
-            }
-        }
-        else
-        {
-            const auto& first = input.entities.front().path.vertices.front().position;
-            trajectory.rotaryContext.hasSectionBounds = true;
-            trajectory.rotaryContext.sectionMinimumY = trajectory.rotaryContext.sectionMaximumY = first.y;
-            trajectory.rotaryContext.sectionMinimumZ = trajectory.rotaryContext.sectionMaximumZ = first.z;
-            for (const auto& entity : input.entities)
-                for (const auto& vertex : entity.path.vertices)
+                std::map<int, const planning::ProcessGroup*> groupDefinitions;
+                for (const auto& group : input.processGroups) groupDefinitions[group.groupId] = &group;
+                std::map<int, std::vector<geometry::EntityId>> actualGroupMembers;
+                for (const auto& entity : input.entities)
+                    if (entity.processGroupId >= 0) actualGroupMembers[entity.processGroupId].push_back(entity.entityId);
+                for (const auto& [groupId, entityIds] : actualGroupMembers)
                 {
-                    trajectory.rotaryContext.sectionMinimumY = std::min(trajectory.rotaryContext.sectionMinimumY, vertex.position.y);
-                    trajectory.rotaryContext.sectionMaximumY = std::max(trajectory.rotaryContext.sectionMaximumY, vertex.position.y);
-                    trajectory.rotaryContext.sectionMinimumZ = std::min(trajectory.rotaryContext.sectionMinimumZ, vertex.position.z);
-                    trajectory.rotaryContext.sectionMaximumZ = std::max(trajectory.rotaryContext.sectionMaximumZ, vertex.position.z);
+                    const auto found = groupDefinitions.find(groupId);
+                    const std::set<geometry::EntityId> actualIds(entityIds.begin(), entityIds.end());
+                    const std::set<geometry::EntityId> plannedIds = found != groupDefinitions.end()
+                        && found->second != nullptr
+                        ? std::set<geometry::EntityId>
+                            (found->second->entityIds.begin(), found->second->entityIds.end())
+                        : std::set<geometry::EntityId>{};
+                    std::size_t firstIndex = input.entities.size();
+                    std::size_t lastIndex = 0;
+                    for (std::size_t index = 0; index < input.entities.size(); ++index)
+                        if (input.entities[index].processGroupId == groupId)
+                        {
+                            firstIndex = std::min(firstIndex, index);
+                            lastIndex = index;
+                        }
+                    const bool contiguous = firstIndex < input.entities.size()
+                        && lastIndex - firstIndex + 1U == entityIds.size();
+                    if (found == groupDefinitions.end() || found->second == nullptr
+                        || actualIds != plannedIds || !contiguous)
+                    {
+                        result.status = OperationStatus::Conflict;
+                        result.addDiagnostic(diagnostic(DiagnosticCode::MachineTrajectoryInvariantViolation,
+                            DiagnosticSeverity::Error, QStringLiteral("连续加工组的成员或顺序与加工计划不一致。"),
+                            ctx.taskContext.operationContext));
+                        return false;
+                    }
                 }
-        }
-        if (input.tubeSection.has_value()
-            && !input.tubeSection->geometry.boundary.empty())
+                return true;
+            }
+        };
+
+        class BuildRotaryContextStage final : public RotaryTrajectoryStage
         {
-            trajectory.rotaryContext.maximumCollisionRadius =
-                RotaryKinematics::sectionMaximumCollisionRadius
-                (
-                    *input.tubeSection,
-                    policy.tubeCenterY,
-                    policy.tubeCenterZ
-                );
-        }
-        else
-        {
-            for (const auto& entity : input.entities)
-                for (const auto& vertex : entity.path.vertices)
-                    trajectory.rotaryContext.maximumCollisionRadius = std::max
+        public:
+            QString stageName() const override
+            {
+                return QStringLiteral("BuildRotaryContext");
+            }
+
+            bool apply(RotaryTrajectoryBuildContext& ctx) override
+            {
+                MachineTrajectory& trajectory = ctx.trajectory;
+                const RotaryMachinePolicy& policy = ctx.policy;
+                const RotaryTrajectoryInput& input = ctx.input;
+                trajectory.contentRevision = input.contentRevision;
+                trajectory.processStateRevision = input.processStateRevision;
+                trajectory.rotaryContext.rotaryAxisY = policy.rotaryAxisY;
+                trajectory.rotaryContext.rotaryAxisZ = policy.rotaryAxisZ;
+                trajectory.rotaryContext.tubeCenterY = policy.tubeCenterY;
+                trajectory.rotaryContext.tubeCenterZ = policy.tubeCenterZ;
+                if (input.tubeSection.has_value() && !input.tubeSection->geometry.boundary.empty())
+                {
+                    const auto& boundary = input.tubeSection->geometry.boundary;
+                    trajectory.rotaryContext.hasSectionBounds = true;
+                    trajectory.rotaryContext.sectionMinimumY = trajectory.rotaryContext.sectionMaximumY = boundary.front().x;
+                    trajectory.rotaryContext.sectionMinimumZ = trajectory.rotaryContext.sectionMaximumZ = boundary.front().y;
+                    for (const auto& point : boundary)
+                    {
+                        trajectory.rotaryContext.sectionMinimumY = std::min(trajectory.rotaryContext.sectionMinimumY, point.x);
+                        trajectory.rotaryContext.sectionMaximumY = std::max(trajectory.rotaryContext.sectionMaximumY, point.x);
+                        trajectory.rotaryContext.sectionMinimumZ = std::min(trajectory.rotaryContext.sectionMinimumZ, point.y);
+                        trajectory.rotaryContext.sectionMaximumZ = std::max(trajectory.rotaryContext.sectionMaximumZ, point.y);
+                    }
+                }
+                else
+                {
+                    const auto& first = input.entities.front().path.vertices.front().position;
+                    trajectory.rotaryContext.hasSectionBounds = true;
+                    trajectory.rotaryContext.sectionMinimumY = trajectory.rotaryContext.sectionMaximumY = first.y;
+                    trajectory.rotaryContext.sectionMinimumZ = trajectory.rotaryContext.sectionMaximumZ = first.z;
+                    for (const auto& entity : input.entities)
+                        for (const auto& vertex : entity.path.vertices)
+                        {
+                            trajectory.rotaryContext.sectionMinimumY = std::min(trajectory.rotaryContext.sectionMinimumY, vertex.position.y);
+                            trajectory.rotaryContext.sectionMaximumY = std::max(trajectory.rotaryContext.sectionMaximumY, vertex.position.y);
+                            trajectory.rotaryContext.sectionMinimumZ = std::min(trajectory.rotaryContext.sectionMinimumZ, vertex.position.z);
+                            trajectory.rotaryContext.sectionMaximumZ = std::max(trajectory.rotaryContext.sectionMaximumZ, vertex.position.z);
+                        }
+                }
+                if (input.tubeSection.has_value()
+                    && !input.tubeSection->geometry.boundary.empty())
+                {
+                    trajectory.rotaryContext.maximumCollisionRadius =
+                        RotaryKinematics::sectionMaximumCollisionRadius
+                        (
+                            *input.tubeSection,
+                            policy.tubeCenterY,
+                            policy.tubeCenterZ
+                        );
+                }
+                else
+                {
+                    for (const auto& entity : input.entities)
+                        for (const auto& vertex : entity.path.vertices)
+                            trajectory.rotaryContext.maximumCollisionRadius = std::max
+                            (
+                                trajectory.rotaryContext.maximumCollisionRadius,
+                                std::hypot(vertex.position.y - policy.tubeCenterY,
+                                           vertex.position.z - policy.tubeCenterZ)
+                            );
+                }
+                trajectory.rotaryContext.safeMachineZ =
+                    RotaryKinematics::rotationSafeMachineZ
                     (
+                        policy.tubeCenterZ,
                         trajectory.rotaryContext.maximumCollisionRadius,
-                        std::hypot(vertex.position.y - policy.tubeCenterY,
-                                   vertex.position.z - policy.tubeCenterZ)
+                        policy.transfer.rotationSafetyClearance
                     );
-        }
-        trajectory.rotaryContext.safeMachineZ =
-            RotaryKinematics::rotationSafeMachineZ
-            (
-                policy.tubeCenterZ,
-                trajectory.rotaryContext.maximumCollisionRadius,
-                policy.transfer.rotationSafetyClearance
-            );
-
-        trajectory.entities.reserve(input.entities.size());
-        bool hasPrevious = false;
-        MachinePose4D previousPose;
-        geometry::Vector3d previousSourcePose;
-        const TrajectoryEntityInput* previousEntity = nullptr;
-        std::size_t unitBegin = 0U;
-        while (unitBegin < input.entities.size())
-        {
-            const int processUnitIndex =
-                input.entities[unitBegin].processUnitIndex;
-            std::size_t unitEnd = unitBegin + 1U;
-            while (unitEnd < input.entities.size()
-                && input.entities[unitEnd].processUnitIndex
-                    == processUnitIndex)
-            {
-                ++unitEnd;
-            }
-
-            std::vector<ProcessUnitExecutionPath> executionPaths;
-            executionPaths.reserve(unitEnd - unitBegin);
-            for (std::size_t index = unitBegin; index < unitEnd; ++index)
-            {
-                const TrajectoryEntityInput& entity = input.entities[index];
-                executionPaths.push_back
-                ({
-                    entity.entityId,
-                    entity.sourceIndex,
-                    entity.sourceKind,
-                    entity.sourceProcessOrder,
-                    entity.fragmentOrder,
-                    entity.processGroupId,
-                    entity.processUnitIndex,
-                    entity.path
-                });
-            }
-
-            auto resolved = ProcessUnitExecutionResolver::resolve
-            (
-                executionPaths,
-                input.entities[unitBegin].closed,
-                policy,
-                input.tubeSection,
-                hasPrevious
-                    ? std::optional<MachinePose4D>(previousPose)
-                    : std::nullopt,
-                taskContext.operationContext
-            );
-            result.mergeDiagnostics(resolved);
-            if (!resolved.succeeded() || !resolved.value.has_value())
-            {
-                result.status = resolved.status;
-                return result;
-            }
-
-            ProcessUnitExecutionResult& execution = *resolved.value;
-            trajectory.surfaceSummaries.insert
-            (
-                trajectory.surfaceSummaries.end(),
-                execution.surfaceSummaries.begin(),
-                execution.surfaceSummaries.end()
-            );
-
-            for (std::size_t localIndex = 0U;
-                localIndex < execution.paths.size(); ++localIndex)
-            {
-                const std::size_t inputIndex = unitBegin + localIndex;
-                const TrajectoryEntityInput& inputEntity =
-                    input.entities[inputIndex];
-                const std::vector<MachinePose4D>& poses =
-                    execution.posesByPath[localIndex];
-
-                EntityTrajectory entity;
-                entity.entityId = inputEntity.entityId;
-                entity.sourceKind = inputEntity.sourceKind;
-                entity.sourceIndex = inputEntity.sourceIndex;
-                entity.processOrder = inputEntity.processOrder;
-                entity.sourceProcessOrder =
-                    inputEntity.sourceProcessOrder;
-                entity.fragmentOrder = inputEntity.fragmentOrder;
-                entity.processGroupId = inputEntity.processGroupId;
-                entity.processUnitIndex = inputEntity.processUnitIndex;
-                entity.closed = inputEntity.closed;
-                entity.continuousFromPrevious = localIndex > 0U;
-                entity.firstInGroup = inputEntity.firstInGroup;
-                entity.lastInGroup = inputEntity.lastInGroup;
-                for (const auto& vertex : inputEntity.path.vertices)
-                    entity.sourcePath.push_back(vertex.position);
-
-                if (localIndex == 0U)
+                trajectory.entities.reserve(input.entities.size());
+                for (const TrajectoryEntityInput& inputEntity : input.entities)
                 {
+                    EntityTrajectory entity;
+                    entity.entityId = inputEntity.entityId;
+                    entity.sourceKind = inputEntity.sourceKind;
+                    entity.sourceIndex = inputEntity.sourceIndex;
+                    entity.processOrder = inputEntity.processOrder;
+                    entity.sourceProcessOrder = inputEntity.sourceProcessOrder;
+                    entity.fragmentOrder = inputEntity.fragmentOrder;
+                    entity.processGroupId = inputEntity.processGroupId;
+                    entity.processUnitIndex = inputEntity.processUnitIndex;
+                    entity.closed = inputEntity.closed;
+                    entity.firstInGroup = inputEntity.firstInGroup;
+                    entity.lastInGroup = inputEntity.lastInGroup;
+                    for (const auto& vertex : inputEntity.path.vertices)
+                        entity.sourcePath.push_back(vertex.position);
+                    trajectory.entities.push_back(std::move(entity));
+                }
+                return true;
+            }
+        };
+
+        class ResolveUnitStage final : public RotaryTrajectoryStage
+        {
+        public:
+            QString stageName() const override
+            {
+                return QStringLiteral("ResolveUnit");
+            }
+
+            bool apply(RotaryTrajectoryBuildContext& ctx) override
+            {
+                MachinePose4D previousPose;
+                bool hasPrevious = false;
+                std::size_t unitBegin = 0U;
+                while (unitBegin < ctx.input.entities.size())
+                {
+                    const int processUnitIndex =
+                        ctx.input.entities[unitBegin].processUnitIndex;
+                    std::size_t unitEnd = unitBegin + 1U;
+                    while (unitEnd < ctx.input.entities.size()
+                        && ctx.input.entities[unitEnd].processUnitIndex
+                            == processUnitIndex)
+                    {
+                        ++unitEnd;
+                    }
+
+                    std::vector<ProcessUnitExecutionPath> executionPaths;
+                    executionPaths.reserve(unitEnd - unitBegin);
+                    for (std::size_t index = unitBegin; index < unitEnd; ++index)
+                    {
+                        const TrajectoryEntityInput& entity = ctx.input.entities[index];
+                        executionPaths.push_back
+                        ({
+                            entity.entityId,
+                            entity.sourceIndex,
+                            entity.sourceKind,
+                            entity.sourceProcessOrder,
+                            entity.fragmentOrder,
+                            entity.processGroupId,
+                            entity.processUnitIndex,
+                            entity.path
+                        });
+                    }
+
+                    auto resolved = ProcessUnitExecutionResolver::resolve
+                    (
+                        executionPaths,
+                        ctx.input.entities[unitBegin].closed,
+                        ctx.policy,
+                        ctx.input.tubeSection,
+                        hasPrevious
+                            ? std::optional<MachinePose4D>(previousPose)
+                            : std::nullopt,
+                        ctx.taskContext.operationContext
+                    );
+                    ctx.result.mergeDiagnostics(resolved);
+                    if (!resolved.succeeded() || !resolved.value.has_value())
+                    {
+                        ctx.result.status = resolved.status;
+                        return false;
+                    }
+
+                    RotaryTrajectoryBuildContext::ResolvedUnit unit;
+                    unit.begin = unitBegin;
+                    unit.end = unitEnd;
+                    unit.execution = std::move(*resolved.value);
+                    ctx.trajectory.surfaceSummaries.insert
+                    (
+                        ctx.trajectory.surfaceSummaries.end(),
+                        unit.execution.surfaceSummaries.begin(),
+                        unit.execution.surfaceSummaries.end()
+                    );
+                    previousPose = unit.execution.finalCutPose;
+                    hasPrevious = true;
+                    ctx.resolvedUnits.push_back(std::move(unit));
+                    unitBegin = unitEnd;
+                }
+                return true;
+            }
+        };
+
+        class TransferStage final : public RotaryTrajectoryStage
+        {
+        public:
+            QString stageName() const override
+            {
+                return QStringLiteral("Transfer");
+            }
+
+            bool apply(RotaryTrajectoryBuildContext& ctx) override
+            {
+                for (std::size_t unitOrder = 0U;
+                    unitOrder < ctx.resolvedUnits.size(); ++unitOrder)
+                {
+                    const auto& unit = ctx.resolvedUnits[unitOrder];
+                    const std::size_t inputIndex = unit.begin;
+                    const TrajectoryEntityInput& inputEntity =
+                        ctx.input.entities[inputIndex];
+                    const ProcessUnitExecutionResult& execution =
+                        unit.execution;
+                    const bool hasPrevious = unitOrder > 0U;
+                    const MachinePose4D previousPose = hasPrevious
+                        ? ctx.resolvedUnits[unitOrder - 1U].execution.finalCutPose
+                        : MachinePose4D{};
+                    const geometry::Vector3d previousSourcePose =
+                        hasPrevious
+                        ? ctx.resolvedUnits[unitOrder - 1U]
+                            .execution.finalSourcePosition
+                        : geometry::Vector3d{};
+                    const TrajectoryEntityInput* previousEntity =
+                        hasPrevious
+                        ? &ctx.input.entities
+                            [ctx.resolvedUnits[unitOrder - 1U].end - 1U]
+                        : nullptr;
+
                     const MachinePose4D initial =
-                        policy.useInitialMachinePoint
-                        ? policy.initialMachinePoint
+                        ctx.policy.useInitialMachinePoint
+                        ? ctx.policy.initialMachinePoint
                         : MachinePose4D
                             {
                                 execution.cutStart.x,
@@ -702,25 +778,25 @@ namespace cadcam::machine
                             ? previousSourcePose
                             : execution.sourceStart,
                         execution.sourceStart,
-                        hasPrevious ? previousEntity : nullptr,
+                        previousEntity,
                         inputEntity,
-                        policy,
-                        input.tubeSection,
-                        trajectory.rotaryContext.safeMachineZ
+                        ctx.policy,
+                        ctx.input.tubeSection,
+                        ctx.trajectory.rotaryContext.safeMachineZ
                     );
                     auto transfer = RotaryTransferPlanner::preview
-                        (request, taskContext.operationContext);
-                    result.mergeDiagnostics(transfer);
+                        (request, ctx.taskContext.operationContext);
+                    ctx.result.mergeDiagnostics(transfer);
                     if (!transfer.succeeded()
                         || !transfer.value.has_value())
                     {
-                        result.status = transfer.status;
-                        return result;
+                        ctx.result.status = transfer.status;
+                        return false;
                     }
                     const TransferMotionSummary summary =
                         appendTransferPreview
                         (
-                            entity.approachMoves,
+                            ctx.trajectory.entities[inputIndex].approachMoves,
                             request,
                             *transfer.value,
                             inputEntity
@@ -728,7 +804,7 @@ namespace cadcam::machine
                     if (summary.hasPlannedPreview
                         && !summary.previewMatched)
                     {
-                        result.status = OperationStatus::Conflict;
+                        ctx.result.status = OperationStatus::Conflict;
                         Diagnostic mismatch = diagnostic
                         (
                             DiagnosticCode::
@@ -737,7 +813,7 @@ namespace cadcam::machine
                             hasPrevious
                                 ? QStringLiteral("实际加工单元转移与加工计划预览不一致。")
                                 : QStringLiteral("实际首次接近轨迹与加工计划预览不一致。"),
-                            taskContext.operationContext,
+                            ctx.taskContext.operationContext,
                             &inputEntity
                         );
                         mismatch.context.insert
@@ -822,19 +898,19 @@ namespace cadcam::machine
                                     .arg(summary
                                         .actualFinalApproachOrigin
                                         .aDegrees, 0, 'g', 15));
-                        result.addDiagnostic(mismatch);
-                        return result;
+                        ctx.result.addDiagnostic(mismatch);
+                        return false;
                     }
                     if (!transferIsSafe
                         (
                             transferStart,
                             execution.cutStart,
-                            entity.approachMoves,
+                            ctx.trajectory.entities[inputIndex].approachMoves,
                             summary,
-                            policy.numericalEpsilon
+                            ctx.policy.numericalEpsilon
                         ))
                     {
-                        result.status = OperationStatus::Failed;
+                        ctx.result.status = OperationStatus::Failed;
                         Diagnostic safetyFailure = diagnostic
                         (
                             DiagnosticCode::
@@ -843,7 +919,7 @@ namespace cadcam::machine
                             hasPrevious
                                 ? QStringLiteral("加工单元间转移未满足旋转安全约束。")
                                 : QStringLiteral("首次接近轨迹未满足旋转安全约束。"),
-                            taskContext.operationContext,
+                            ctx.taskContext.operationContext,
                             &inputEntity
                         );
                         safetyFailure.context.insert
@@ -875,96 +951,183 @@ namespace cadcam::machine
                         safetyFailure.context.insert
                             (QStringLiteral("segmentCount"),
                                 summary.segmentCount);
-                        result.addDiagnostic(safetyFailure);
-                        return result;
+                        ctx.result.addDiagnostic(safetyFailure);
+                        return false;
                     }
-                    trajectory.transferSummaries.push_back(summary);
+                    ctx.trajectory.transferSummaries.push_back(summary);
                 }
-                else
-                {
-                    const double connectionDistance = sourceDistance
-                    (
-                        input.entities[inputIndex - 1U]
-                            .path.vertices.back().position,
-                        inputEntity.path.vertices.front().position
-                    );
-                    if (connectionDistance > policy.numericalEpsilon)
-                    {
-                        entity.cuttingMoves.push_back
-                            (move(MachineMoveKind::CuttingConnection,
-                                poses.front(), inputEntity));
-                    }
-                }
+                return true;
+            }
+        };
 
-                for (std::size_t pointIndex = 1U;
-                    pointIndex < poses.size(); ++pointIndex)
-                {
-                    entity.cuttingMoves.push_back
-                        (move(MachineMoveKind::Cutting,
-                            poses[pointIndex], inputEntity));
-                }
-
-                if (localIndex + 1U == execution.paths.size())
-                {
-                    if (execution.closurePose.has_value())
-                    {
-                        entity.cuttingMoves.push_back
-                            (move(MachineMoveKind::Cutting,
-                                *execution.closurePose, inputEntity));
-                    }
-                    for (const ProcessUnitOvercutTarget& target :
-                        execution.overcutTargets)
-                    {
-                        entity.overcutMoves.push_back
-                            (move(MachineMoveKind::Overcut,
-                                target.pose, inputEntity));
-                    }
-                    if (execution.overcutLimited)
-                    {
-                        result.addDiagnostic(diagnostic
-                        (
-                            DiagnosticCode::MachineTrajectoryOvercutFailed,
-                            DiagnosticSeverity::Warning,
-                            QStringLiteral("过切距离超过闭环总长，已限制为一圈。"),
-                            taskContext.operationContext,
-                            &inputEntity
-                        ));
-                    }
-                }
-
-                trajectory.entities.push_back(std::move(entity));
+        class CuttingStage final : public RotaryTrajectoryStage
+        {
+        public:
+            QString stageName() const override
+            {
+                return QStringLiteral("Cutting");
             }
 
-            previousPose = execution.finalCutPose;
-            previousSourcePose = execution.finalSourcePosition;
-            hasPrevious = true;
-            previousEntity = &input.entities[unitEnd - 1U];
-            unitBegin = unitEnd;
+            bool apply(RotaryTrajectoryBuildContext& ctx) override
+            {
+                for (const auto& unit : ctx.resolvedUnits)
+                {
+                    const ProcessUnitExecutionResult& execution =
+                        unit.execution;
+                    for (std::size_t localIndex = 0U;
+                        localIndex < execution.paths.size(); ++localIndex)
+                    {
+                        const std::size_t inputIndex =
+                            unit.begin + localIndex;
+                        const TrajectoryEntityInput& inputEntity =
+                            ctx.input.entities[inputIndex];
+                        EntityTrajectory& entity =
+                            ctx.trajectory.entities[inputIndex];
+                        entity.continuousFromPrevious = localIndex > 0U;
+                        const std::vector<MachinePose4D>& poses =
+                            execution.posesByPath[localIndex];
+
+                        if (localIndex > 0U)
+                        {
+                            const double connectionDistance = sourceDistance
+                            (
+                                ctx.input.entities[inputIndex - 1U]
+                                    .path.vertices.back().position,
+                                inputEntity.path.vertices.front().position
+                            );
+                            if (connectionDistance > ctx.policy.numericalEpsilon)
+                            {
+                                entity.cuttingMoves.push_back
+                                    (move(MachineMoveKind::CuttingConnection,
+                                        poses.front(), inputEntity));
+                            }
+                        }
+
+                        for (std::size_t pointIndex = 1U;
+                            pointIndex < poses.size(); ++pointIndex)
+                        {
+                            entity.cuttingMoves.push_back
+                                (move(MachineMoveKind::Cutting,
+                                    poses[pointIndex], inputEntity));
+                        }
+
+                        if (localIndex + 1U == execution.paths.size())
+                        {
+                            if (execution.closurePose.has_value())
+                            {
+                                entity.cuttingMoves.push_back
+                                    (move(MachineMoveKind::Cutting,
+                                        *execution.closurePose, inputEntity));
+                            }
+                            for (const ProcessUnitOvercutTarget& target :
+                                execution.overcutTargets)
+                            {
+                                entity.overcutMoves.push_back
+                                    (move(MachineMoveKind::Overcut,
+                                        target.pose, inputEntity));
+                            }
+                            if (execution.overcutLimited)
+                            {
+                                ctx.result.addDiagnostic(diagnostic
+                                (
+                                    DiagnosticCode::MachineTrajectoryOvercutFailed,
+                                    DiagnosticSeverity::Warning,
+                                    QStringLiteral("过切距离超过闭环总长，已限制为一圈。"),
+                                    ctx.taskContext.operationContext,
+                                    &inputEntity
+                                ));
+                            }
+                        }
+                    }
+                }
+                return true;
+            }
+        };
+
+        class FinalizeStage final : public RotaryTrajectoryStage
+        {
+        public:
+            QString stageName() const override
+            {
+                return QStringLiteral("Finalize");
+            }
+
+            bool apply(RotaryTrajectoryBuildContext& ctx) override
+            {
+                for (const auto& entity : ctx.trajectory.entities)
+                {
+                    const auto validMoves = [](const std::vector<MachineMove>& moves)
+                    {
+                        return std::all_of(moves.cbegin(), moves.cend(), [](const MachineMove& value)
+                        {
+                            return finitePose(value.target);
+                        });
+                    };
+                    if (!validMoves(entity.approachMoves) || !validMoves(entity.cuttingMoves)
+                        || !validMoves(entity.overcutMoves))
+                    {
+                        ctx.result.status = OperationStatus::Failed;
+                        ctx.result.value.reset();
+                        ctx.result.addDiagnostic(diagnostic(DiagnosticCode::MachineTrajectoryInvariantViolation,
+                            DiagnosticSeverity::Error, QStringLiteral("四轴轨迹包含非有限机床坐标。"),
+                            ctx.taskContext.operationContext));
+                        return false;
+                    }
+                }
+                ctx.result.status = ctx.result.diagnostics.isEmpty() ? OperationStatus::Success : OperationStatus::PartialSuccess;
+                ctx.result.value = std::move(ctx.trajectory);
+                return true;
+            }
+        };
+
+        std::vector<std::unique_ptr<RotaryTrajectoryStage>> defaultRotaryStages()
+        {
+            std::vector<std::unique_ptr<RotaryTrajectoryStage>> stages;
+            stages.push_back(std::make_unique<ValidateTrajectoryInputStage>());
+            stages.push_back(std::make_unique<BuildRotaryContextStage>());
+            stages.push_back(std::make_unique<ResolveUnitStage>());
+            stages.push_back(std::make_unique<TransferStage>());
+            stages.push_back(std::make_unique<CuttingStage>());
+            stages.push_back(std::make_unique<FinalizeStage>());
+            return stages;
+        }
+    }
+
+    OperationResult<MachineTrajectory> RotaryTrajectoryBuilder::build
+    (
+        const RotaryTrajectoryInput& input,
+        const RotaryMachinePolicy& policy,
+        const TaskContext& taskContext
+    )
+    {
+        OperationResult<MachineTrajectory> result;
+        if (input.entities.empty() || input.contentRevision == 0
+            || !std::isfinite(policy.rotaryAxisY) || !std::isfinite(policy.rotaryAxisZ)
+            || !std::isfinite(policy.tubeCenterY) || !std::isfinite(policy.tubeCenterZ)
+            || !std::isfinite(policy.transfer.rotationSafetyClearance)
+            || policy.transfer.rotationSafetyClearance <= 0.0
+            || !std::isfinite(policy.transfer.sameZoneTransferClearance)
+            || policy.transfer.sameZoneTransferClearance < 0.0
+            || !std::isfinite(policy.continuousConnectionTolerance)
+            || policy.continuousConnectionTolerance <= 0.0
+            || !std::isfinite(policy.numericalEpsilon) || policy.numericalEpsilon <= 0.0
+            || !std::isfinite(policy.surfaceClassificationTolerance)
+            || policy.surfaceClassificationTolerance <= 0.0)
+        {
+            result.status = OperationStatus::InvalidInput;
+            result.addDiagnostic(diagnostic(DiagnosticCode::MachineTrajectoryInputInvalid,
+                DiagnosticSeverity::Error, QStringLiteral("四轴轨迹输入为空或版本无效。"), taskContext.operationContext));
+            return result;
         }
 
-        for (const auto& entity : trajectory.entities)
+        RotaryTrajectoryBuildContext ctx{ input, policy, taskContext, result, {} };
+        for (const auto& stage : defaultRotaryStages())
         {
-            const auto validMoves = [](const std::vector<MachineMove>& moves)
+            if (!stage->apply(ctx))
             {
-                return std::all_of(moves.cbegin(), moves.cend(), [](const MachineMove& value)
-                {
-                    return finitePose(value.target);
-                });
-            };
-            if (!validMoves(entity.approachMoves) || !validMoves(entity.cuttingMoves)
-                || !validMoves(entity.overcutMoves))
-            {
-                result.status = OperationStatus::Failed;
-                result.value.reset();
-                result.addDiagnostic(diagnostic(DiagnosticCode::MachineTrajectoryInvariantViolation,
-                    DiagnosticSeverity::Error, QStringLiteral("四轴轨迹包含非有限机床坐标。"),
-                    taskContext.operationContext));
                 return result;
             }
         }
-
-        result.status = result.diagnostics.isEmpty() ? OperationStatus::Success : OperationStatus::PartialSuccess;
-        result.value = std::move(trajectory);
         return result;
     }
 }
