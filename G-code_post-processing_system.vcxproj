@@ -132,10 +132,6 @@ if exist "$(VCRuntimeRedistDir)\*.dll" copy /Y "$(VCRuntimeRedistDir)\*.dll" "$(
   </ItemGroup>
   <ItemGroup>
     <None Include="AGENTS.md" />
-    <None Include="branding.example.json" />
-    <None Include="COMMERCIAL_RELEASE.md" />
-    <None Include="license_request.bat" />
-    <None Include="license.example.json" />
     <None Include="README.md" />
     <None Include="resources\G.ico" />
     <None Include="resources\G.svg" />

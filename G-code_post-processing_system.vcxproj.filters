@@ -110,6 +110,9 @@
     <Filter Include="Header Files\core\planning">
       <UniqueIdentifier>{EE3D1924-1EC1-1C40-8FC0-3D0084A2AA89}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Header Files\core\planning\internal">
+      <UniqueIdentifier>{4E1C17A3-9B42-46C8-BE05-7A9D3F2C51B0}</UniqueIdentifier>
+    </Filter>
     <Filter Include="Header Files\core\topology">
       <UniqueIdentifier>{9D14E7BA-A440-9D7D-EE4C-5285C4C10E72}</UniqueIdentifier>
     </Filter>
@@ -301,18 +304,6 @@
       <Filter>Documentation</Filter>
     </None>
     <None Include="AGENTS.md">
-      <Filter>Documentation</Filter>
-    </None>
-    <None Include="branding.example.json">
-      <Filter>Documentation</Filter>
-    </None>
-    <None Include="license.example.json">
-      <Filter>Documentation</Filter>
-    </None>
-    <None Include="COMMERCIAL_RELEASE.md">
-      <Filter>Documentation</Filter>
-    </None>
-    <None Include="license_request.bat">
       <Filter>Documentation</Filter>
     </None>
     <None Include="tools\Generate-License.ps1">
@@ -880,25 +871,25 @@
       <Filter>Header Files\core\planning</Filter>
     </ClInclude>
     <ClInclude Include="src\core\planning\internal\ProcessPlanBuilder_InternalTypesAndCurves.inl">
-      <Filter>Source Files\core\planning</Filter>
+      <Filter>Header Files\core\planning\internal</Filter>
     </ClInclude>
     <ClInclude Include="src\core\planning\internal\ProcessPlanBuilder_SectionAndSurface.inl">
-      <Filter>Source Files\core\planning</Filter>
+      <Filter>Header Files\core\planning\internal</Filter>
     </ClInclude>
     <ClInclude Include="src\core\planning\internal\ProcessPlanBuilder_TraversalAndZones.inl">
-      <Filter>Source Files\core\planning</Filter>
+      <Filter>Header Files\core\planning\internal</Filter>
     </ClInclude>
     <ClInclude Include="src\core\planning\internal\ProcessPlanBuilder_ZoneProfilesAndDiagnostics.inl">
-      <Filter>Source Files\core\planning</Filter>
+      <Filter>Header Files\core\planning\internal</Filter>
     </ClInclude>
     <ClInclude Include="src\core\planning\internal\ProcessPlanBuilder_ClosedLoopTraversal.inl">
-      <Filter>Source Files\core\planning</Filter>
+      <Filter>Header Files\core\planning\internal</Filter>
     </ClInclude>
     <ClInclude Include="src\core\planning\internal\ProcessPlanBuilder_ClosedLoopZoneRun.inl">
-      <Filter>Source Files\core\planning</Filter>
+      <Filter>Header Files\core\planning\internal</Filter>
     </ClInclude>
     <ClInclude Include="src\core\planning\internal\ProcessPlanBuilder_EntrySelectionAndValidation.inl">
-      <Filter>Source Files\core\planning</Filter>
+      <Filter>Header Files\core\planning\internal</Filter>
     </ClInclude>
     <ClInclude Include="include\application\planning\ProcessPlanningService.h">
       <Filter>Header Files\application\planning</Filter>
