@@ -181,9 +181,21 @@ namespace cadcam::nc
         void applyPlanarTrajectory
         (
             NcEntityBlock& block,
-            const machine::PlanarEntityTrajectory& trajectory
+            const machine::PlanarEntityTrajectory& trajectory,
+            bool continuousAfterPreviousMember
         )
         {
+            if (continuousAfterPreviousMember)
+            {
+                // 连续链成员：起始快速定位与上一成员终点同点，去掉后切削直接接续。
+                if (block.motions.size() > 1U)
+                {
+                    std::vector<NcMotion> motions
+                        (block.motions.cbegin() + 1, block.motions.cend());
+                    block.motions = std::move(motions);
+                }
+                return;
+            }
             const NcMotion prototype = block.motions.front();
             std::vector<NcMotion> motions;
             motions.reserve
@@ -412,12 +424,17 @@ namespace cadcam::nc
         program.processStateRevision = processStateRevision;
         program.mode = NcProgramMode::Planar3Axis;
         bool skipped = false;
+        bool previousInputKept = false;
+        int previousInputUnitIndex = -1;
+        std::vector<bool> chainMemberFlags;
         std::vector<machine::PlanarTrajectoryEntityInput> trajectoryInput;
         trajectoryInput.reserve(entities.size());
+        chainMemberFlags.reserve(entities.size());
         for (const PlanarNcEntityInput& input : entities)
         {
             NcEntityBlock block;
             block.metadata = input.metadata;
+            block.processUnitIndex = input.processUnitIndex;
             bool built = false;
             if (input.sourceEntity.id != input.metadata.entityId
                 || input.sourceEntity.id == 0
@@ -427,6 +444,8 @@ namespace cadcam::nc
                     DiagnosticSeverity::Warning, QStringLiteral("图元编号与 NC 元数据不一致，已跳过。"),
                     input, context));
                 skipped = true;
+                previousInputKept = false;
+                previousInputUnitIndex = input.processUnitIndex;
                 continue;
             }
 
@@ -518,6 +537,8 @@ namespace cadcam::nc
                     DiagnosticSeverity::Warning,
                     QStringLiteral("图元无法生成有效的三轴 NC 运动，已跳过。"), input, context));
                 skipped = true;
+                previousInputKept = false;
+                previousInputUnitIndex = input.processUnitIndex;
                 continue;
             }
             machine::PlanarTrajectoryEntityInput trajectoryEntity;
@@ -529,6 +550,12 @@ namespace cadcam::nc
             trajectoryEntity.cutEnd = finalCutPosition(block);
             trajectoryInput.push_back(trajectoryEntity);
             block.metadata.processOrder = static_cast<int>(program.entities.size());
+            const bool chainMember = previousInputKept
+                && previousInputUnitIndex >= 0
+                && previousInputUnitIndex == input.processUnitIndex;
+            chainMemberFlags.push_back(chainMember);
+            previousInputKept = true;
+            previousInputUnitIndex = input.processUnitIndex;
             program.entities.push_back(std::move(block));
         }
         auto trajectory = machine::PlanarTrajectoryBuilder::build
@@ -544,7 +571,12 @@ namespace cadcam::nc
         for (std::size_t index = 0; index < program.entities.size(); ++index)
         {
             applyPlanarTrajectory
-                (program.entities[index], trajectory.value->entities[index]);
+            (
+                program.entities[index],
+                trajectory.value->entities[index],
+                index < chainMemberFlags.size()
+                    && chainMemberFlags[index]
+            );
         }
 
         if (program.entities.empty())
