@@ -104,9 +104,10 @@ Rotary4Axis ProcessPlan
 - 16 区位画像使用理想壳层投影记录跨面、跨圆角、分界母线接触和 X 范围。它属于规划派生数据，不替换 `RotaryKinematics` 对单条路径的生产表面分类。
 - 规划阶段使用 Break 最终计划片段解析得到的强区位出口初始化下一分区，并按当前配置的顺时针或逆时针方向遍历全部 16 区位。区位扫描状态不进入 `DocumentProcessState`、轨迹或 NC。
 - 单图元闭合圆和完整椭圆的自动入口使用候选相关的动态转移预览。`SameZoneSurfaceTransfer` 的最终接近起点是前序切削终点；`SameZoneClearanceTransfer` 使用 75% 联动位置；`CrossZoneRotaryTransfer` 和首次接近使用已达到目标 A 角及旋转安全高度的安全旋转终点。
-- `RotaryTransferPlanner` 是规划与正式轨迹共用的唯一转移计算入口，保留既有 25%/75% 联动结构。规划器逐候选保存转移类型、最终接近起点、切削入口、目标姿态和阶段序列；正式轨迹重算后逐项校验，不一致时返回 `MachineTrajectoryTransferPreviewMismatch`。
-- 入口精化与正式轨迹共同使用 `ProcessUnitExecutionResolver`。转移预览中的前序位置包含计划片段、连续 A 轴对齐、闭环补齐和过切；预览签名同时保存前序机床终点和源空间终点。
-- 正式轨迹仍负责生成 `MachineMove`，但每个加工单元完成后的 `previousPose` 和 `previousSourcePose` 直接取共享执行结果。转移预览一致性检查保持硬失败，并报告规划值、实际值和对应差值。
+- `RotaryTransferPlanner` 是转移计算的唯一入口，保留既有 25%/75% 联动结构。规划器逐候选保存转移类型、最终接近起点、切削入口、目标姿态和阶段序列，形成 `PlannedTransferSignature`。
+- 入口精化与正式轨迹共同使用 `ProcessUnitExecutionResolver`，并按相同顺序链式传递前序单元的最终机床姿态。转移预览中的前序位置包含计划片段、连续 A 轴对齐、闭环补齐和过切；预览签名同时保存前序机床终点和源空间终点。
+- 正式轨迹对有签名的单元直接消费 `PlannedTransferSignature` 生成 `MachineMove`，不再重新计算转移；仅在签名边界（前序终点、源空间终点、切削入口）与共享执行结果不一致时硬失败。没有签名的单元仍由轨迹层直接调用 `RotaryTransferPlanner`。
+- 每个加工单元完成后的 `previousPose` 和 `previousSourcePose` 直接取共享执行结果，与规划精化使用同一来源。
 - 轨迹服务使用 Assignment 中的最终起点参数和方向重新编译同一源几何。圆和完整椭圆的首段切线来自精确源几何参数，自动起点不吸附到采样顶点。
 - 多图元闭合加工单元由规划阶段提供经过简单环验证的成员顺序和逐成员方向；轨迹层按该顺序连续编译，不重新执行最近端点选择。
 - 多图元闭环的计划结束位置是经过物理首尾连接验证的真实入口，异常闭环在计划发布前被拒绝，不会把错误结束位置传入后续轨迹。

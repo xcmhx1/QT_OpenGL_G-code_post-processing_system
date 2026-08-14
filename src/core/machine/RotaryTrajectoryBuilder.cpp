@@ -268,6 +268,79 @@ namespace cadcam::machine
             return false;
         }
 
+        TransferMotionKind machineTransferKind
+        (
+            planning::PlannedTransferMotionKind kind
+        )
+        {
+            switch (kind)
+            {
+            case planning::PlannedTransferMotionKind::InitialApproach:
+                return TransferMotionKind::InitialApproach;
+            case planning::PlannedTransferMotionKind::SameZoneSurfaceTransfer:
+                return TransferMotionKind::SameZoneSurfaceTransfer;
+            case planning::PlannedTransferMotionKind::SameZoneClearanceTransfer:
+                return TransferMotionKind::SameZoneClearanceTransfer;
+            case planning::PlannedTransferMotionKind::CrossZoneRotaryTransfer:
+                return TransferMotionKind::CrossZoneRotaryTransfer;
+            }
+            return TransferMotionKind::InitialApproach;
+        }
+
+        TransferMotionPhase machineTransferPhase
+        (
+            planning::PlannedTransferMotionPhase phase
+        )
+        {
+            switch (phase)
+            {
+            case planning::PlannedTransferMotionPhase::SurfaceTransfer:
+                return TransferMotionPhase::SurfaceTransfer;
+            case planning::PlannedTransferMotionPhase::CoordinatedDeparture:
+                return TransferMotionPhase::CoordinatedDeparture;
+            case planning::PlannedTransferMotionPhase::SafeRotaryTransfer:
+                return TransferMotionPhase::SafeRotaryTransfer;
+            case planning::PlannedTransferMotionPhase::CoordinatedApproach:
+                return TransferMotionPhase::CoordinatedApproach;
+            }
+            return TransferMotionPhase::None;
+        }
+
+        RotaryTransferPreview previewFromSignature
+        (
+            const planning::PlannedTransferSignature& planned
+        )
+        {
+            RotaryTransferPreview preview;
+            preview.kind = machineTransferKind(planned.kind);
+            preview.finalApproachOrigin =
+            {
+                planned.finalApproachOrigin.x,
+                planned.finalApproachOrigin.y,
+                planned.finalApproachOrigin.z,
+                planned.finalApproachOrigin.aDegrees
+            };
+            preview.cutStart =
+            {
+                planned.cutStart.x,
+                planned.cutStart.y,
+                planned.cutStart.z,
+                planned.cutStart.aDegrees
+            };
+            preview.targets.reserve(planned.targets.size());
+            for (const planning::PlannedMachinePose4D& target : planned.targets)
+            {
+                preview.targets.push_back
+                ({ target.x, target.y, target.z, target.aDegrees });
+            }
+            preview.phases.reserve(planned.phases.size());
+            for (const planning::PlannedTransferMotionPhase phase : planned.phases)
+            {
+                preview.phases.push_back(machineTransferPhase(phase));
+            }
+            return preview;
+        }
+
         bool previewMatchesPlan
         (
             const RotaryTransferPreview& preview,
@@ -784,23 +857,63 @@ namespace cadcam::machine
                         ctx.input.tubeSection,
                         ctx.trajectory.rotaryContext.safeMachineZ
                     );
-                    auto transfer = RotaryTransferPlanner::preview
-                        (request, ctx.taskContext.operationContext);
-                    ctx.result.mergeDiagnostics(transfer);
-                    if (!transfer.succeeded()
-                        || !transfer.value.has_value())
+                    TransferMotionSummary summary;
+                    if (inputEntity.plannedIncomingTransfer.has_value())
                     {
-                        ctx.result.status = transfer.status;
-                        return false;
+                        // 单一实现：直接消费计划中保存的转移签名，不再重新计算。
+                        const auto& planned =
+                            *inputEntity.plannedIncomingTransfer;
+                        if (!poseMatches(transferStart,
+                                planned.previousCutEnd,
+                                ctx.policy.numericalEpsilon)
+                            || sourceDistance(previousSourcePose,
+                                planned.previousSourceEnd)
+                                > ctx.policy.numericalEpsilon
+                            || !poseMatches(execution.cutStart,
+                                planned.cutStart,
+                                ctx.policy.numericalEpsilon))
+                        {
+                            ctx.result.status = OperationStatus::Conflict;
+                            ctx.result.addDiagnostic(diagnostic
+                            (
+                                DiagnosticCode::
+                                    MachineTrajectoryTransferPreviewMismatch,
+                                DiagnosticSeverity::Error,
+                                hasPrevious
+                                    ? QStringLiteral("实际前序终点与加工计划记录的转移起点不一致。")
+                                    : QStringLiteral("实际首次接近起点与加工计划记录不一致。"),
+                                ctx.taskContext.operationContext,
+                                &inputEntity
+                            ));
+                            return false;
+                        }
+                        summary = appendTransferPreview
+                        (
+                            ctx.trajectory.entities[inputIndex].approachMoves,
+                            request,
+                            previewFromSignature(planned),
+                            inputEntity
+                        );
                     }
-                    const TransferMotionSummary summary =
-                        appendTransferPreview
+                    else
+                    {
+                        auto transfer = RotaryTransferPlanner::preview
+                            (request, ctx.taskContext.operationContext);
+                        ctx.result.mergeDiagnostics(transfer);
+                        if (!transfer.succeeded()
+                            || !transfer.value.has_value())
+                        {
+                            ctx.result.status = transfer.status;
+                            return false;
+                        }
+                        summary = appendTransferPreview
                         (
                             ctx.trajectory.entities[inputIndex].approachMoves,
                             request,
                             *transfer.value,
                             inputEntity
                         );
+                    }
                     if (summary.hasPlannedPreview
                         && !summary.previewMatched)
                     {
