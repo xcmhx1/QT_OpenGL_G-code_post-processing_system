@@ -7,6 +7,7 @@
 #include <QStringList>
 
 #include <cmath>
+#include <memory>
 #include <set>
 
 namespace cadcam::infrastructure::nc
@@ -219,77 +220,518 @@ namespace cadcam::infrastructure::nc
         }
         const bool rotary =
             program.mode == cadcam::nc::NcProgramMode::Rotary4Axis;
-        if (rotary
-            && (profile.processUnitBlock.header.trimmed().isEmpty()
-                || profile.processUnitBlock.footer.trimmed().isEmpty()))
+
+        struct RenderState
         {
-            result.status = OperationStatus::InvalidInput;
-            result.addDiagnostic(postDiagnostic
+            enum class CuttingState { Off, On };
+            CuttingState cuttingState = CuttingState::Off;
+            int enableCount = 0;
+            int disableCount = 0;
+            int rapidWhileEnabledCount = 0;
+            int cuttingWhileDisabledCount = 0;
+            std::set<int> processUnitIndices;
+        };
+
+        class GCodeRenderStrategy
+        {
+        public:
+            explicit GCodeRenderStrategy(cadcam::nc::NcProgramMode mode)
+                : m_mode(mode)
+            {
+            }
+
+            virtual ~GCodeRenderStrategy() = default;
+
+            virtual bool validateProgram
             (
-                DiagnosticCode::GCodeProfileInvalid,
-                QStringLiteral("四轴加工单元开始或结束代码为空。"),
-                context
-            ));
-            return result;
-        }
-        if (rotary)
+                const GCodePostProcessorProfile& profile,
+                OperationResult<QString>& result,
+                const OperationContext& context
+            ) = 0;
+
+            virtual bool validateEntity
+            (
+                const cadcam::nc::NcEntityBlock& entity,
+                OperationResult<QString>& result,
+                const OperationContext& context
+            ) = 0;
+
+            virtual bool onLeadingRapid
+            (
+                const cadcam::nc::NcEntityBlock& entity,
+                std::size_t motionIndex,
+                RenderState& state,
+                OperationResult<QString>& result,
+                const OperationContext& context
+            ) = 0;
+
+            virtual bool beforeCuttingMotions
+            (
+                const cadcam::nc::NcEntityBlock& entity,
+                QStringList& lines,
+                RenderState& state,
+                OperationResult<QString>& result,
+                const OperationContext& context
+            ) = 0;
+
+            virtual bool validateCuttingMotion
+            (
+                const cadcam::nc::NcEntityBlock& entity,
+                std::size_t motionIndex,
+                RenderState& state,
+                OperationResult<QString>& result,
+                const OperationContext& context
+            ) = 0;
+
+            virtual bool afterCuttingMotions
+            (
+                const cadcam::nc::NcEntityBlock& entity,
+                QStringList& lines,
+                RenderState& state,
+                OperationResult<QString>& result,
+                const OperationContext& context
+            ) = 0;
+
+            virtual bool finalize
+            (
+                RenderState& state,
+                OperationResult<QString>& result,
+                const OperationContext& context
+            ) = 0;
+
+            bool preserveLegacyOutputQuantization
+                (const cadcam::nc::NcEntityBlock& entity) const
+            {
+                return m_mode == cadcam::nc::NcProgramMode::Planar3Axis
+                    || entity.metadata.sourceKind == geometry::SourceGeometryKind::Circle
+                    || entity.metadata.sourceKind == geometry::SourceGeometryKind::Ellipse
+                    || entity.metadata.sourceKind == geometry::SourceGeometryKind::Arc;
+            }
+
+            bool isValidMotion
+                (const cadcam::nc::NcMotion& motion, bool rapid) const
+            {
+                return validMotion(motion, m_mode, rapid);
+            }
+
+        protected:
+            cadcam::nc::NcProgramMode m_mode;
+        };
+
+        class PlanarRenderStrategy final : public GCodeRenderStrategy
         {
-            const auto invalidRule = [](const auto& blocks)
+        public:
+            PlanarRenderStrategy()
+                : GCodeRenderStrategy(cadcam::nc::NcProgramMode::Planar3Axis)
             {
-                for (auto it = blocks.cbegin(); it != blocks.cend(); ++it)
+            }
+
+            bool validateProgram
+            (
+                const GCodePostProcessorProfile& profile,
+                OperationResult<QString>& result,
+                const OperationContext& context
+            ) override
+            {
+                Q_UNUSED(profile);
+                Q_UNUSED(result);
+                Q_UNUSED(context);
+                return true;
+            }
+
+            bool validateEntity
+            (
+                const cadcam::nc::NcEntityBlock& entity,
+                OperationResult<QString>& result,
+                const OperationContext& context
+            ) override
+            {
+                Q_UNUSED(entity);
+                Q_UNUSED(result);
+                Q_UNUSED(context);
+                return true;
+            }
+
+            bool onLeadingRapid
+            (
+                const cadcam::nc::NcEntityBlock& entity,
+                std::size_t motionIndex,
+                RenderState& state,
+                OperationResult<QString>& result,
+                const OperationContext& context
+            ) override
+            {
+                Q_UNUSED(entity);
+                Q_UNUSED(motionIndex);
+                Q_UNUSED(state);
+                Q_UNUSED(result);
+                Q_UNUSED(context);
+                return true;
+            }
+
+            bool beforeCuttingMotions
+            (
+                const cadcam::nc::NcEntityBlock& entity,
+                QStringList& lines,
+                RenderState& state,
+                OperationResult<QString>& result,
+                const OperationContext& context
+            ) override
+            {
+                Q_UNUSED(entity);
+                Q_UNUSED(lines);
+                Q_UNUSED(state);
+                Q_UNUSED(result);
+                Q_UNUSED(context);
+                return true;
+            }
+
+            bool validateCuttingMotion
+            (
+                const cadcam::nc::NcEntityBlock& entity,
+                std::size_t motionIndex,
+                RenderState& state,
+                OperationResult<QString>& result,
+                const OperationContext& context
+            ) override
+            {
+                Q_UNUSED(entity);
+                Q_UNUSED(motionIndex);
+                Q_UNUSED(state);
+                Q_UNUSED(result);
+                Q_UNUSED(context);
+                return true;
+            }
+
+            bool afterCuttingMotions
+            (
+                const cadcam::nc::NcEntityBlock& entity,
+                QStringList& lines,
+                RenderState& state,
+                OperationResult<QString>& result,
+                const OperationContext& context
+            ) override
+            {
+                Q_UNUSED(entity);
+                Q_UNUSED(lines);
+                Q_UNUSED(state);
+                Q_UNUSED(result);
+                Q_UNUSED(context);
+                return true;
+            }
+
+            bool finalize
+            (
+                RenderState& state,
+                OperationResult<QString>& result,
+                const OperationContext& context
+            ) override
+            {
+                Q_UNUSED(state);
+                Q_UNUSED(result);
+                Q_UNUSED(context);
+                return true;
+            }
+        };
+
+        class RotaryRenderStrategy final : public GCodeRenderStrategy
+        {
+        public:
+            explicit RotaryRenderStrategy(const GCodePostProcessorProfile& profile)
+                : GCodeRenderStrategy(cadcam::nc::NcProgramMode::Rotary4Axis)
+                , m_profile(profile)
+            {
+            }
+
+            bool validateProgram
+            (
+                const GCodePostProcessorProfile& profile,
+                OperationResult<QString>& result,
+                const OperationContext& context
+            ) override
+            {
+                if (profile.processUnitBlock.header.trimmed().isEmpty()
+                    || profile.processUnitBlock.footer.trimmed().isEmpty())
                 {
-                    if (containsCuttingControlCode(it.value().header)
-                        || containsCuttingControlCode(it.value().footer))
-                    {
-                        return it.key();
-                    }
+                    result.status = OperationStatus::InvalidInput;
+                    result.addDiagnostic(postDiagnostic
+                    (
+                        DiagnosticCode::GCodeProfileInvalid,
+                        QStringLiteral("四轴加工单元开始或结束代码为空。"),
+                        context
+                    ));
+                    return false;
                 }
-                return QString();
-            };
-            QString invalidRuleKey = invalidRule(profile.layerBlocks);
-            if (invalidRuleKey.isEmpty())
-                invalidRuleKey = invalidRule(profile.colorBlocks);
-            if (invalidRuleKey.isEmpty())
-                invalidRuleKey = invalidRule(profile.entityTypeBlocks);
-            if (!invalidRuleKey.isEmpty())
+
+                const auto invalidRule = [](const auto& blocks)
+                {
+                    for (auto it = blocks.cbegin(); it != blocks.cend(); ++it)
+                    {
+                        if (containsCuttingControlCode(it.value().header)
+                            || containsCuttingControlCode(it.value().footer))
+                        {
+                            return it.key();
+                        }
+                    }
+                    return QString();
+                };
+                QString invalidRuleKey = invalidRule(profile.layerBlocks);
+                if (invalidRuleKey.isEmpty())
+                    invalidRuleKey = invalidRule(profile.colorBlocks);
+                if (invalidRuleKey.isEmpty())
+                    invalidRuleKey = invalidRule(profile.entityTypeBlocks);
+                if (!invalidRuleKey.isEmpty())
+                {
+                    result.status = OperationStatus::InvalidInput;
+                    result.addDiagnostic(postDiagnostic
+                    (
+                        DiagnosticCode::GCodeProfileInvalid,
+                        QStringLiteral("图层、颜色或图元类型规则仍包含 M03/M05。"),
+                        context,
+                        0,
+                        { { QStringLiteral("ruleKey"), invalidRuleKey } }
+                    ));
+                    return false;
+                }
+                return true;
+            }
+
+            bool validateEntity
+            (
+                const cadcam::nc::NcEntityBlock& entity,
+                OperationResult<QString>& result,
+                const OperationContext& context
+            ) override
             {
-                result.status = OperationStatus::InvalidInput;
+                if (entity.processUnitIndex >= 0) return true;
+                result.status = OperationStatus::Failed;
+                result.addDiagnostic(postDiagnostic(DiagnosticCode::NcProgramInvariantViolation,
+                    QStringLiteral("NC 图元块的加工顺序或运动数据无效。"), context,
+                    entity.metadata.entityId,
+                    {
+                        { QStringLiteral("sourceIndex"), static_cast<qulonglong>(entity.metadata.sourceIndex) },
+                        { QStringLiteral("processOrder"), entity.metadata.processOrder },
+                        { QStringLiteral("processGroupId"), entity.metadata.processGroupId }
+                    }));
+                return false;
+            }
+
+            bool onLeadingRapid
+            (
+                const cadcam::nc::NcEntityBlock& entity,
+                std::size_t motionIndex,
+                RenderState& state,
+                OperationResult<QString>& result,
+                const OperationContext& context
+            ) override
+            {
+                if (state.cuttingState == RenderState::CuttingState::Off) return true;
+                ++state.rapidWhileEnabledCount;
+                result.status = OperationStatus::Conflict;
                 result.addDiagnostic(postDiagnostic
                 (
-                    DiagnosticCode::GCodeProfileInvalid,
-                    QStringLiteral("图层、颜色或图元类型规则仍包含 M03/M05。"),
+                    DiagnosticCode::GCodeCuttingStateViolation,
+                    QStringLiteral("切削开启状态下出现了快速运动。"),
                     context,
-                    0,
-                    { { QStringLiteral("ruleKey"), invalidRuleKey } }
+                    entity.metadata.entityId,
+                    {
+                        { QStringLiteral("processUnitIndex"),
+                            entity.processUnitIndex },
+                        { QStringLiteral("motionIndex"),
+                            static_cast<qulonglong>(motionIndex) }
+                    }
                 ));
-                return result;
+                return false;
             }
-        }
+
+            bool beforeCuttingMotions
+            (
+                const cadcam::nc::NcEntityBlock& entity,
+                QStringList& lines,
+                RenderState& state,
+                OperationResult<QString>& result,
+                const OperationContext& context
+            ) override
+            {
+                state.processUnitIndices.insert(entity.processUnitIndex);
+                if (entity.beforeCutting
+                    == cadcam::nc::NcCuttingControl::Enable)
+                {
+                    if (state.cuttingState != RenderState::CuttingState::Off)
+                    {
+                        result.status = OperationStatus::Conflict;
+                        result.addDiagnostic(postDiagnostic
+                        (
+                            DiagnosticCode::GCodeCuttingStateViolation,
+                            QStringLiteral("加工单元重复开启切削状态。"),
+                            context,
+                            entity.metadata.entityId,
+                            {
+                                { QStringLiteral("processUnitIndex"),
+                                    entity.processUnitIndex }
+                            }
+                        ));
+                        return false;
+                    }
+                    appendTextBlock(lines, m_profile.processUnitBlock.header);
+                    state.cuttingState = RenderState::CuttingState::On;
+                    ++state.enableCount;
+                }
+                else if (entity.beforeCutting
+                    == cadcam::nc::NcCuttingControl::Disable)
+                {
+                    result.status = OperationStatus::Conflict;
+                    result.addDiagnostic(postDiagnostic
+                    (
+                        DiagnosticCode::GCodeCuttingStateViolation,
+                        QStringLiteral("加工单元切削前控制语义无效。"),
+                        context,
+                        entity.metadata.entityId
+                    ));
+                    return false;
+                }
+                return true;
+            }
+
+            bool validateCuttingMotion
+            (
+                const cadcam::nc::NcEntityBlock& entity,
+                std::size_t motionIndex,
+                RenderState& state,
+                OperationResult<QString>& result,
+                const OperationContext& context
+            ) override
+            {
+                if (state.cuttingState == RenderState::CuttingState::On) return true;
+                ++state.cuttingWhileDisabledCount;
+                result.status = OperationStatus::Conflict;
+                result.addDiagnostic(postDiagnostic
+                (
+                    DiagnosticCode::GCodeCuttingStateViolation,
+                    QStringLiteral("切削关闭状态下出现了切削运动。"),
+                    context,
+                    entity.metadata.entityId,
+                    {
+                        { QStringLiteral("processUnitIndex"),
+                            entity.processUnitIndex },
+                        { QStringLiteral("motionIndex"),
+                            static_cast<qulonglong>(motionIndex) }
+                    }
+                ));
+                return false;
+            }
+
+            bool afterCuttingMotions
+            (
+                const cadcam::nc::NcEntityBlock& entity,
+                QStringList& lines,
+                RenderState& state,
+                OperationResult<QString>& result,
+                const OperationContext& context
+            ) override
+            {
+                if (entity.afterCutting
+                    == cadcam::nc::NcCuttingControl::Disable)
+                {
+                    if (state.cuttingState != RenderState::CuttingState::On)
+                    {
+                        result.status = OperationStatus::Conflict;
+                        result.addDiagnostic(postDiagnostic
+                        (
+                            DiagnosticCode::GCodeCuttingStateViolation,
+                            QStringLiteral("加工单元结束时切削状态未开启。"),
+                            context,
+                            entity.metadata.entityId,
+                            {
+                                { QStringLiteral("processUnitIndex"),
+                                    entity.processUnitIndex }
+                            }
+                        ));
+                        return false;
+                    }
+                    appendTextBlock(lines, m_profile.processUnitBlock.footer);
+                    state.cuttingState = RenderState::CuttingState::Off;
+                    ++state.disableCount;
+                }
+                else if (entity.afterCutting
+                    == cadcam::nc::NcCuttingControl::Enable)
+                {
+                    result.status = OperationStatus::Conflict;
+                    result.addDiagnostic(postDiagnostic
+                    (
+                        DiagnosticCode::GCodeCuttingStateViolation,
+                        QStringLiteral("加工单元切削后控制语义无效。"),
+                        context,
+                        entity.metadata.entityId
+                    ));
+                    return false;
+                }
+                return true;
+            }
+
+            bool finalize
+            (
+                RenderState& state,
+                OperationResult<QString>& result,
+                const OperationContext& context
+            ) override
+            {
+                if (state.cuttingState != RenderState::CuttingState::Off
+                    || state.enableCount != static_cast<int>(state.processUnitIndices.size())
+                    || state.disableCount != static_cast<int>(state.processUnitIndices.size()))
+                {
+                    result.status = OperationStatus::Conflict;
+                    result.addDiagnostic(postDiagnostic
+                    (
+                        DiagnosticCode::GCodeCuttingStateViolation,
+                        QStringLiteral("四轴程序结束时加工单元启停状态不完整。"),
+                        context,
+                        0,
+                        {
+                            { QStringLiteral("processUnitCount"),
+                                static_cast<int>(state.processUnitIndices.size()) },
+                            { QStringLiteral("enableCount"), state.enableCount },
+                            { QStringLiteral("disableCount"), state.disableCount }
+                        }
+                    ));
+                    return false;
+                }
+                qInfo().noquote() << QStringLiteral(
+                    "[GCode][CuttingState] processUnitCount=%1 enableCount=%2 "
+                    "disableCount=%3 rapidWhileEnabledCount=%4 "
+                    "cuttingWhileDisabledCount=%5 "
+                    "legacyRestartOptimization=false status=Success")
+                    .arg(state.processUnitIndices.size())
+                    .arg(state.enableCount)
+                    .arg(state.disableCount)
+                    .arg(state.rapidWhileEnabledCount)
+                    .arg(state.cuttingWhileDisabledCount);
+                return true;
+            }
+
+        private:
+            const GCodePostProcessorProfile& m_profile;
+        };
+
+        std::unique_ptr<GCodeRenderStrategy> strategy = rotary
+            ? std::unique_ptr<GCodeRenderStrategy>(new RotaryRenderStrategy(profile))
+            : std::unique_ptr<GCodeRenderStrategy>(new PlanarRenderStrategy());
+        if (!strategy->validateProgram(profile, result, context)) return result;
 
         QStringList lines;
         appendTextBlock(lines, profile.programHeader);
         for (const auto& comment : program.leadingComments)
             lines.push_back(QLatin1Char('(') + QString::fromStdString(comment.text) + QLatin1Char(')'));
 
-        enum class CuttingState { Off, On };
-        CuttingState cuttingState = CuttingState::Off;
-        int enableCount = 0;
-        int disableCount = 0;
-        int rapidWhileEnabledCount = 0;
-        int cuttingWhileDisabledCount = 0;
-        std::set<int> processUnitIndices;
+        RenderState state;
         for (std::size_t entityIndex = 0; entityIndex < program.entities.size(); ++entityIndex)
         {
             const cadcam::nc::NcEntityBlock& entity = program.entities[entityIndex];
             const bool preserveLegacyOutputQuantization =
-                program.mode == cadcam::nc::NcProgramMode::Planar3Axis
-                || entity.metadata.sourceKind == geometry::SourceGeometryKind::Circle
-                || entity.metadata.sourceKind == geometry::SourceGeometryKind::Ellipse
-                || entity.metadata.sourceKind == geometry::SourceGeometryKind::Arc;
+                strategy->preserveLegacyOutputQuantization(entity);
             if (entity.metadata.entityId == 0
                 || entity.metadata.processOrder != static_cast<int>(entityIndex)
-                || entity.motions.empty()
-                || (rotary && entity.processUnitIndex < 0))
+                || entity.motions.empty())
             {
                 result.status = OperationStatus::Failed;
                 result.addDiagnostic(postDiagnostic(DiagnosticCode::NcProgramInvariantViolation,
@@ -302,32 +744,18 @@ namespace cadcam::infrastructure::nc
                     }));
                 return result;
             }
+            if (!strategy->validateEntity(entity, result, context)) return result;
 
             std::size_t motionIndex = 0;
             for (; motionIndex < entity.motions.size(); ++motionIndex)
             {
                 const cadcam::nc::NcMotion& motion = entity.motions[motionIndex];
                 if (motion.sourceKind != cadcam::nc::NcSourceMoveKind::Rapid) break;
-                if (rotary && cuttingState != CuttingState::Off)
+                if (!strategy->onLeadingRapid(entity, motionIndex, state, result, context))
                 {
-                    ++rapidWhileEnabledCount;
-                    result.status = OperationStatus::Conflict;
-                    result.addDiagnostic(postDiagnostic
-                    (
-                        DiagnosticCode::GCodeCuttingStateViolation,
-                        QStringLiteral("切削开启状态下出现了快速运动。"),
-                        context,
-                        entity.metadata.entityId,
-                        {
-                            { QStringLiteral("processUnitIndex"),
-                                entity.processUnitIndex },
-                            { QStringLiteral("motionIndex"),
-                                static_cast<qulonglong>(motionIndex) }
-                        }
-                    ));
                     return result;
                 }
-                if (!validMotion(motion, program.mode, true))
+                if (!strategy->isValidMotion(motion, true))
                 {
                     result.status = OperationStatus::Failed;
                     result.addDiagnostic(postDiagnostic(DiagnosticCode::NcProgramUnsupportedMotion,
@@ -349,52 +777,16 @@ namespace cadcam::infrastructure::nc
             appendTextBlock(lines, layerBlock.header);
             appendTextBlock(lines, colorBlock.header);
             appendTextBlock(lines, typeBlock.header);
-            if (rotary)
+            if (!strategy->beforeCuttingMotions(entity, lines, state, result, context))
             {
-                processUnitIndices.insert(entity.processUnitIndex);
-                if (entity.beforeCutting
-                    == cadcam::nc::NcCuttingControl::Enable)
-                {
-                    if (cuttingState != CuttingState::Off)
-                    {
-                        result.status = OperationStatus::Conflict;
-                        result.addDiagnostic(postDiagnostic
-                        (
-                            DiagnosticCode::GCodeCuttingStateViolation,
-                            QStringLiteral("加工单元重复开启切削状态。"),
-                            context,
-                            entity.metadata.entityId,
-                            {
-                                { QStringLiteral("processUnitIndex"),
-                                    entity.processUnitIndex }
-                            }
-                        ));
-                        return result;
-                    }
-                    appendTextBlock(lines, profile.processUnitBlock.header);
-                    cuttingState = CuttingState::On;
-                    ++enableCount;
-                }
-                else if (entity.beforeCutting
-                    == cadcam::nc::NcCuttingControl::Disable)
-                {
-                    result.status = OperationStatus::Conflict;
-                    result.addDiagnostic(postDiagnostic
-                    (
-                        DiagnosticCode::GCodeCuttingStateViolation,
-                        QStringLiteral("加工单元切削前控制语义无效。"),
-                        context,
-                        entity.metadata.entityId
-                    ));
-                    return result;
-                }
+                return result;
             }
 
             for (; motionIndex < entity.motions.size(); ++motionIndex)
             {
                 const cadcam::nc::NcMotion& motion = entity.motions[motionIndex];
                 if (motion.sourceKind == cadcam::nc::NcSourceMoveKind::Rapid
-                    || !validMotion(motion, program.mode, false)
+                    || !strategy->isValidMotion(motion, false)
                     || motion.entityId != entity.metadata.entityId
                     || motion.processGroupId != entity.metadata.processGroupId
                     )
@@ -411,23 +803,8 @@ namespace cadcam::infrastructure::nc
                         }));
                     return result;
                 }
-                if (rotary && cuttingState != CuttingState::On)
+                if (!strategy->validateCuttingMotion(entity, motionIndex, state, result, context))
                 {
-                    ++cuttingWhileDisabledCount;
-                    result.status = OperationStatus::Conflict;
-                    result.addDiagnostic(postDiagnostic
-                    (
-                        DiagnosticCode::GCodeCuttingStateViolation,
-                        QStringLiteral("切削关闭状态下出现了切削运动。"),
-                        context,
-                        entity.metadata.entityId,
-                        {
-                            { QStringLiteral("processUnitIndex"),
-                                entity.processUnitIndex },
-                            { QStringLiteral("motionIndex"),
-                                static_cast<qulonglong>(motionIndex) }
-                        }
-                    ));
                     return result;
                 }
                 const bool circular = motion.kind == cadcam::nc::NcMotionKind::CircularClockwise
@@ -442,71 +819,16 @@ namespace cadcam::infrastructure::nc
                     lines.push_back(QStringLiteral("G17"));
             }
 
-            if (rotary)
+            if (!strategy->afterCuttingMotions(entity, lines, state, result, context))
             {
-                if (entity.afterCutting
-                    == cadcam::nc::NcCuttingControl::Disable)
-                {
-                    if (cuttingState != CuttingState::On)
-                    {
-                        result.status = OperationStatus::Conflict;
-                        result.addDiagnostic(postDiagnostic
-                        (
-                            DiagnosticCode::GCodeCuttingStateViolation,
-                            QStringLiteral("加工单元结束时切削状态未开启。"),
-                            context,
-                            entity.metadata.entityId,
-                            {
-                                { QStringLiteral("processUnitIndex"),
-                                    entity.processUnitIndex }
-                            }
-                        ));
-                        return result;
-                    }
-                    appendTextBlock(lines, profile.processUnitBlock.footer);
-                    cuttingState = CuttingState::Off;
-                    ++disableCount;
-                }
-                else if (entity.afterCutting
-                    == cadcam::nc::NcCuttingControl::Enable)
-                {
-                    result.status = OperationStatus::Conflict;
-                    result.addDiagnostic(postDiagnostic
-                    (
-                        DiagnosticCode::GCodeCuttingStateViolation,
-                        QStringLiteral("加工单元切削后控制语义无效。"),
-                        context,
-                        entity.metadata.entityId
-                    ));
-                    return result;
-                }
+                return result;
             }
             appendTextBlock(lines, typeBlock.footer);
             appendTextBlock(lines, colorBlock.footer);
             appendTextBlock(lines, layerBlock.footer);
         }
 
-        if (rotary
-            && (cuttingState != CuttingState::Off
-                || enableCount != static_cast<int>(processUnitIndices.size())
-                || disableCount != static_cast<int>(processUnitIndices.size())))
-        {
-            result.status = OperationStatus::Conflict;
-            result.addDiagnostic(postDiagnostic
-            (
-                DiagnosticCode::GCodeCuttingStateViolation,
-                QStringLiteral("四轴程序结束时加工单元启停状态不完整。"),
-                context,
-                0,
-                {
-                    { QStringLiteral("processUnitCount"),
-                        static_cast<int>(processUnitIndices.size()) },
-                    { QStringLiteral("enableCount"), enableCount },
-                    { QStringLiteral("disableCount"), disableCount }
-                }
-            ));
-            return result;
-        }
+        if (!strategy->finalize(state, result, context)) return result;
         appendTextBlock(lines, profile.programFooter);
         if (lines.empty())
         {
@@ -515,22 +837,11 @@ namespace cadcam::infrastructure::nc
                 QStringLiteral("生成的 G 代码为空。"), context));
             return result;
         }
-        if (rotary)
-        {
-            qInfo().noquote() << QStringLiteral(
-                "[GCode][CuttingState] processUnitCount=%1 enableCount=%2 "
-                "disableCount=%3 rapidWhileEnabledCount=%4 "
-                "cuttingWhileDisabledCount=%5 "
-                "legacyRestartOptimization=false status=Success")
-                .arg(processUnitIndices.size())
-                .arg(enableCount)
-                .arg(disableCount)
-                .arg(rapidWhileEnabledCount)
-                .arg(cuttingWhileDisabledCount);
-        }
 
         result.status = OperationStatus::Success;
         result.value = lines.join(QStringLiteral("\r\n")) + QStringLiteral("\r\n");
         return result;
     }
+
 }
+
