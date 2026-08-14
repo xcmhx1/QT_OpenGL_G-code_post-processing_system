@@ -1,6 +1,0 @@
-R5 阶段汇总日志统一为结构化出口
-
-- 新增 core/diagnostics/SummaryLog.h：emitSummaryLog(component, event, message) 统一渲染 [component][event] 前缀（event 为空时输出单括号前缀），所有阶段汇总日志必须经过此出口。
-- 迁移全部 36 处汇总日志：ProcessPlanning（16 事件）、MachineTrajectory（Surface/Transfer/TransferPolicy/Clearance）、NcProgram/CuttingControl、GCode/CuttingState、GProfile/Migration、Performance/BoundaryAssignment、InternalPathWindow、断面候选与自动识别加工断面。
-- 输出文本与原格式一致；DebugMessageSink 的逐诊断输出保持原样。
-- 新头文件已注册 vcxproj 与 filters；Release|x64 构建通过。
