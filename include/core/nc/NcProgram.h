@@ -13,6 +13,8 @@ namespace cadcam::nc
     enum class NcProgramMode { Planar3Axis, Rotary4Axis };
     enum class NcMotionKind { Rapid, Linear, CircularClockwise, CircularCounterclockwise };
     enum class NcSourceMoveKind { Rapid, Cutting, CuttingConnection, Overcut };
+    // 单元级切割控制：Enable/Disable 语义与加工模式无关。
+    // 三轴程序默认不使用（None）；程序启用后与四轴共用同一渲染状态机。
     enum class NcCuttingControl { None, Enable, Disable };
     enum class NcPlane { XY, ZX, YZ };
 

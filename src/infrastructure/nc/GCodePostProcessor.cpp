@@ -221,17 +221,6 @@ namespace cadcam::infrastructure::nc
         const bool rotary =
             program.mode == cadcam::nc::NcProgramMode::Rotary4Axis;
 
-        struct RenderState
-        {
-            enum class CuttingState { Off, On };
-            CuttingState cuttingState = CuttingState::Off;
-            int enableCount = 0;
-            int disableCount = 0;
-            int rapidWhileEnabledCount = 0;
-            int cuttingWhileDisabledCount = 0;
-            std::set<int> processUnitIndices;
-        };
-
         class GCodeRenderStrategy
         {
         public:
@@ -252,49 +241,6 @@ namespace cadcam::infrastructure::nc
             virtual bool validateEntity
             (
                 const cadcam::nc::NcEntityBlock& entity,
-                OperationResult<QString>& result,
-                const OperationContext& context
-            ) = 0;
-
-            virtual bool onLeadingRapid
-            (
-                const cadcam::nc::NcEntityBlock& entity,
-                std::size_t motionIndex,
-                RenderState& state,
-                OperationResult<QString>& result,
-                const OperationContext& context
-            ) = 0;
-
-            virtual bool beforeCuttingMotions
-            (
-                const cadcam::nc::NcEntityBlock& entity,
-                QStringList& lines,
-                RenderState& state,
-                OperationResult<QString>& result,
-                const OperationContext& context
-            ) = 0;
-
-            virtual bool validateCuttingMotion
-            (
-                const cadcam::nc::NcEntityBlock& entity,
-                std::size_t motionIndex,
-                RenderState& state,
-                OperationResult<QString>& result,
-                const OperationContext& context
-            ) = 0;
-
-            virtual bool afterCuttingMotions
-            (
-                const cadcam::nc::NcEntityBlock& entity,
-                QStringList& lines,
-                RenderState& state,
-                OperationResult<QString>& result,
-                const OperationContext& context
-            ) = 0;
-
-            virtual bool finalize
-            (
-                RenderState& state,
                 OperationResult<QString>& result,
                 const OperationContext& context
             ) = 0;
@@ -351,95 +297,13 @@ namespace cadcam::infrastructure::nc
                 Q_UNUSED(context);
                 return true;
             }
-
-            bool onLeadingRapid
-            (
-                const cadcam::nc::NcEntityBlock& entity,
-                std::size_t motionIndex,
-                RenderState& state,
-                OperationResult<QString>& result,
-                const OperationContext& context
-            ) override
-            {
-                Q_UNUSED(entity);
-                Q_UNUSED(motionIndex);
-                Q_UNUSED(state);
-                Q_UNUSED(result);
-                Q_UNUSED(context);
-                return true;
-            }
-
-            bool beforeCuttingMotions
-            (
-                const cadcam::nc::NcEntityBlock& entity,
-                QStringList& lines,
-                RenderState& state,
-                OperationResult<QString>& result,
-                const OperationContext& context
-            ) override
-            {
-                Q_UNUSED(entity);
-                Q_UNUSED(lines);
-                Q_UNUSED(state);
-                Q_UNUSED(result);
-                Q_UNUSED(context);
-                return true;
-            }
-
-            bool validateCuttingMotion
-            (
-                const cadcam::nc::NcEntityBlock& entity,
-                std::size_t motionIndex,
-                RenderState& state,
-                OperationResult<QString>& result,
-                const OperationContext& context
-            ) override
-            {
-                Q_UNUSED(entity);
-                Q_UNUSED(motionIndex);
-                Q_UNUSED(state);
-                Q_UNUSED(result);
-                Q_UNUSED(context);
-                return true;
-            }
-
-            bool afterCuttingMotions
-            (
-                const cadcam::nc::NcEntityBlock& entity,
-                QStringList& lines,
-                RenderState& state,
-                OperationResult<QString>& result,
-                const OperationContext& context
-            ) override
-            {
-                Q_UNUSED(entity);
-                Q_UNUSED(lines);
-                Q_UNUSED(state);
-                Q_UNUSED(result);
-                Q_UNUSED(context);
-                return true;
-            }
-
-            bool finalize
-            (
-                RenderState& state,
-                OperationResult<QString>& result,
-                const OperationContext& context
-            ) override
-            {
-                Q_UNUSED(state);
-                Q_UNUSED(result);
-                Q_UNUSED(context);
-                return true;
-            }
         };
 
         class RotaryRenderStrategy final : public GCodeRenderStrategy
         {
         public:
-            explicit RotaryRenderStrategy(const GCodePostProcessorProfile& profile)
+            RotaryRenderStrategy()
                 : GCodeRenderStrategy(cadcam::nc::NcProgramMode::Rotary4Axis)
-                , m_profile(profile)
             {
             }
 
@@ -515,18 +379,39 @@ namespace cadcam::infrastructure::nc
                     }));
                 return false;
             }
+        };
+
+        // 单元级切割控制排序器：与加工模式无关，三轴与四轴共用同一状态机。
+        // 程序不含 Enable/Disable 块时保持未激活，不产生校验与输出，因此
+        // 三轴默认输出与历史行为完全一致；程序启用单元级控制后自动生效。
+        class CuttingControlSequencer
+        {
+        public:
+            explicit CuttingControlSequencer(const GCodePostProcessorProfile& profile)
+                : m_profile(profile)
+            {
+            }
+
+            void ensureActive(const cadcam::nc::NcEntityBlock& entity)
+            {
+                if (m_active) return;
+                if (entity.beforeCutting != cadcam::nc::NcCuttingControl::None
+                    || entity.afterCutting != cadcam::nc::NcCuttingControl::None)
+                {
+                    m_active = true;
+                }
+            }
 
             bool onLeadingRapid
             (
                 const cadcam::nc::NcEntityBlock& entity,
                 std::size_t motionIndex,
-                RenderState& state,
                 OperationResult<QString>& result,
                 const OperationContext& context
-            ) override
+            )
             {
-                if (state.cuttingState == RenderState::CuttingState::Off) return true;
-                ++state.rapidWhileEnabledCount;
+                if (!m_active || m_cuttingState == CuttingState::Off) return true;
+                ++m_rapidWhileEnabledCount;
                 result.status = OperationStatus::Conflict;
                 result.addDiagnostic(postDiagnostic
                 (
@@ -544,20 +429,20 @@ namespace cadcam::infrastructure::nc
                 return false;
             }
 
-            bool beforeCuttingMotions
+            bool beginBlock
             (
                 const cadcam::nc::NcEntityBlock& entity,
                 QStringList& lines,
-                RenderState& state,
                 OperationResult<QString>& result,
                 const OperationContext& context
-            ) override
+            )
             {
-                state.processUnitIndices.insert(entity.processUnitIndex);
+                if (!m_active) return true;
+                m_processUnitIndices.insert(entity.processUnitIndex);
                 if (entity.beforeCutting
                     == cadcam::nc::NcCuttingControl::Enable)
                 {
-                    if (state.cuttingState != RenderState::CuttingState::Off)
+                    if (m_cuttingState != CuttingState::Off)
                     {
                         result.status = OperationStatus::Conflict;
                         result.addDiagnostic(postDiagnostic
@@ -574,8 +459,8 @@ namespace cadcam::infrastructure::nc
                         return false;
                     }
                     appendTextBlock(lines, m_profile.processUnitBlock.header);
-                    state.cuttingState = RenderState::CuttingState::On;
-                    ++state.enableCount;
+                    m_cuttingState = CuttingState::On;
+                    ++m_enableCount;
                 }
                 else if (entity.beforeCutting
                     == cadcam::nc::NcCuttingControl::Disable)
@@ -593,17 +478,16 @@ namespace cadcam::infrastructure::nc
                 return true;
             }
 
-            bool validateCuttingMotion
+            bool checkCuttingMotion
             (
                 const cadcam::nc::NcEntityBlock& entity,
                 std::size_t motionIndex,
-                RenderState& state,
                 OperationResult<QString>& result,
                 const OperationContext& context
-            ) override
+            )
             {
-                if (state.cuttingState == RenderState::CuttingState::On) return true;
-                ++state.cuttingWhileDisabledCount;
+                if (!m_active || m_cuttingState == CuttingState::On) return true;
+                ++m_cuttingWhileDisabledCount;
                 result.status = OperationStatus::Conflict;
                 result.addDiagnostic(postDiagnostic
                 (
@@ -621,19 +505,19 @@ namespace cadcam::infrastructure::nc
                 return false;
             }
 
-            bool afterCuttingMotions
+            bool endBlock
             (
                 const cadcam::nc::NcEntityBlock& entity,
                 QStringList& lines,
-                RenderState& state,
                 OperationResult<QString>& result,
                 const OperationContext& context
-            ) override
+            )
             {
+                if (!m_active) return true;
                 if (entity.afterCutting
                     == cadcam::nc::NcCuttingControl::Disable)
                 {
-                    if (state.cuttingState != RenderState::CuttingState::On)
+                    if (m_cuttingState != CuttingState::On)
                     {
                         result.status = OperationStatus::Conflict;
                         result.addDiagnostic(postDiagnostic
@@ -650,8 +534,8 @@ namespace cadcam::infrastructure::nc
                         return false;
                     }
                     appendTextBlock(lines, m_profile.processUnitBlock.footer);
-                    state.cuttingState = RenderState::CuttingState::Off;
-                    ++state.disableCount;
+                    m_cuttingState = CuttingState::Off;
+                    ++m_disableCount;
                 }
                 else if (entity.afterCutting
                     == cadcam::nc::NcCuttingControl::Enable)
@@ -671,27 +555,27 @@ namespace cadcam::infrastructure::nc
 
             bool finalize
             (
-                RenderState& state,
                 OperationResult<QString>& result,
                 const OperationContext& context
-            ) override
+            )
             {
-                if (state.cuttingState != RenderState::CuttingState::Off
-                    || state.enableCount != static_cast<int>(state.processUnitIndices.size())
-                    || state.disableCount != static_cast<int>(state.processUnitIndices.size()))
+                if (!m_active) return true;
+                if (m_cuttingState != CuttingState::Off
+                    || m_enableCount != static_cast<int>(m_processUnitIndices.size())
+                    || m_disableCount != static_cast<int>(m_processUnitIndices.size()))
                 {
                     result.status = OperationStatus::Conflict;
                     result.addDiagnostic(postDiagnostic
                     (
                         DiagnosticCode::GCodeCuttingStateViolation,
-                        QStringLiteral("四轴程序结束时加工单元启停状态不完整。"),
+                        QStringLiteral("程序结束时加工单元启停状态不完整。"),
                         context,
                         0,
                         {
                             { QStringLiteral("processUnitCount"),
-                                static_cast<int>(state.processUnitIndices.size()) },
-                            { QStringLiteral("enableCount"), state.enableCount },
-                            { QStringLiteral("disableCount"), state.disableCount }
+                                static_cast<int>(m_processUnitIndices.size()) },
+                            { QStringLiteral("enableCount"), m_enableCount },
+                            { QStringLiteral("disableCount"), m_disableCount }
                         }
                     ));
                     return false;
@@ -701,20 +585,29 @@ namespace cadcam::infrastructure::nc
                     "disableCount=%3 rapidWhileEnabledCount=%4 "
                     "cuttingWhileDisabledCount=%5 "
                     "legacyRestartOptimization=false status=Success")
-                    .arg(state.processUnitIndices.size())
-                    .arg(state.enableCount)
-                    .arg(state.disableCount)
-                    .arg(state.rapidWhileEnabledCount)
-                    .arg(state.cuttingWhileDisabledCount);
+                    .arg(m_processUnitIndices.size())
+                    .arg(m_enableCount)
+                    .arg(m_disableCount)
+                    .arg(m_rapidWhileEnabledCount)
+                    .arg(m_cuttingWhileDisabledCount);
                 return true;
             }
 
         private:
+            enum class CuttingState { Off, On };
+
             const GCodePostProcessorProfile& m_profile;
+            bool m_active = false;
+            CuttingState m_cuttingState = CuttingState::Off;
+            int m_enableCount = 0;
+            int m_disableCount = 0;
+            int m_rapidWhileEnabledCount = 0;
+            int m_cuttingWhileDisabledCount = 0;
+            std::set<int> m_processUnitIndices;
         };
 
         std::unique_ptr<GCodeRenderStrategy> strategy = rotary
-            ? std::unique_ptr<GCodeRenderStrategy>(new RotaryRenderStrategy(profile))
+            ? std::unique_ptr<GCodeRenderStrategy>(new RotaryRenderStrategy())
             : std::unique_ptr<GCodeRenderStrategy>(new PlanarRenderStrategy());
         if (!strategy->validateProgram(profile, result, context)) return result;
 
@@ -723,7 +616,7 @@ namespace cadcam::infrastructure::nc
         for (const auto& comment : program.leadingComments)
             lines.push_back(QLatin1Char('(') + QString::fromStdString(comment.text) + QLatin1Char(')'));
 
-        RenderState state;
+        CuttingControlSequencer cuttingControl(profile);
         for (std::size_t entityIndex = 0; entityIndex < program.entities.size(); ++entityIndex)
         {
             const cadcam::nc::NcEntityBlock& entity = program.entities[entityIndex];
@@ -745,13 +638,14 @@ namespace cadcam::infrastructure::nc
                 return result;
             }
             if (!strategy->validateEntity(entity, result, context)) return result;
+            cuttingControl.ensureActive(entity);
 
             std::size_t motionIndex = 0;
             for (; motionIndex < entity.motions.size(); ++motionIndex)
             {
                 const cadcam::nc::NcMotion& motion = entity.motions[motionIndex];
                 if (motion.sourceKind != cadcam::nc::NcSourceMoveKind::Rapid) break;
-                if (!strategy->onLeadingRapid(entity, motionIndex, state, result, context))
+                if (!cuttingControl.onLeadingRapid(entity, motionIndex, result, context))
                 {
                     return result;
                 }
@@ -777,7 +671,7 @@ namespace cadcam::infrastructure::nc
             appendTextBlock(lines, layerBlock.header);
             appendTextBlock(lines, colorBlock.header);
             appendTextBlock(lines, typeBlock.header);
-            if (!strategy->beforeCuttingMotions(entity, lines, state, result, context))
+            if (!cuttingControl.beginBlock(entity, lines, result, context))
             {
                 return result;
             }
@@ -803,7 +697,7 @@ namespace cadcam::infrastructure::nc
                         }));
                     return result;
                 }
-                if (!strategy->validateCuttingMotion(entity, motionIndex, state, result, context))
+                if (!cuttingControl.checkCuttingMotion(entity, motionIndex, result, context))
                 {
                     return result;
                 }
@@ -819,7 +713,7 @@ namespace cadcam::infrastructure::nc
                     lines.push_back(QStringLiteral("G17"));
             }
 
-            if (!strategy->afterCuttingMotions(entity, lines, state, result, context))
+            if (!cuttingControl.endBlock(entity, lines, result, context))
             {
                 return result;
             }
@@ -828,7 +722,7 @@ namespace cadcam::infrastructure::nc
             appendTextBlock(lines, layerBlock.footer);
         }
 
-        if (!strategy->finalize(state, result, context)) return result;
+        if (!cuttingControl.finalize(result, context)) return result;
         appendTextBlock(lines, profile.programFooter);
         if (lines.empty())
         {
@@ -844,4 +738,5 @@ namespace cadcam::infrastructure::nc
     }
 
 }
+
 
