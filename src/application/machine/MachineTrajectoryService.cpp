@@ -285,9 +285,7 @@ OperationResult<cadcam::machine::MachineTrajectory> MachineTrajectoryService::bu
     }
     if (captured.value->contentRevision != plan.contentRevision
         || plan.contentRevision != document.contentRevision()
-        || plan.processStateRevision != processState.revision()
-        || (tubeSection.has_value() && tubeSection->contentRevision != 0
-            && tubeSection->contentRevision != plan.contentRevision))
+        || plan.processStateRevision != processState.revision())
     {
         result.status = OperationStatus::Conflict;
         result.addDiagnostic(serviceDiagnostic(DiagnosticCode::MachineTrajectoryRevisionMismatch,

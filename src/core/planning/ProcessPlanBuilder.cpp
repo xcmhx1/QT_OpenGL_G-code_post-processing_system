@@ -63,17 +63,6 @@ namespace cadcam::planning
                 diagnosticValues(input, policy)
             );
         }
-        if (input.tubeSection.has_value()
-            && input.tubeSection->contentRevision != input.contentRevision)
-        {
-            return failure<ProcessPlan>
-            (
-                OperationStatus::Conflict, context, DiagnosticCode::ProcessPlanningRevisionMismatch,
-                QStringLiteral("方管截面已过期，请重新识别后再排序。"),
-                QStringLiteral("TubeSectionModel revision does not match planning input."),
-                diagnosticValues(input, policy)
-            );
-        }
         if (policy.orderingStrategy == ProcessOrderingStrategy::LazyRotation && !input.tubeSection.has_value())
         {
             return failure<ProcessPlan>

@@ -3026,7 +3026,7 @@ bool Gcode_postprocessing_system::removeInternalMachiningPaths(bool interactive)
 
     const QString message = removableItems.isEmpty()
         ? QStringLiteral("内部线条清理完成：内缩窗口内没有可删除的内部图元。")
-        : QStringLiteral("内部线条清理完成：按最大圆角半径 %1 mm 加额外内缩 %2 mm 生成窗口（YZ 半宽 %3×%4），已删除 %5 个内部图元，可按 Ctrl+Z 撤销；撤销后请重新识别方管截面。")
+        : QStringLiteral("内部线条清理完成：按最大圆角半径 %1 mm 加额外内缩 %2 mm 生成窗口（YZ 半宽 %3×%4），已删除 %5 个内部图元，可按 Ctrl+Z 撤销。")
             .arg(result.insetDistance, 0, 'f', 3)
             .arg(result.windowExtraInset, 0, 'f', 3)
             .arg(result.windowHalfY, 0, 'f', 3)
