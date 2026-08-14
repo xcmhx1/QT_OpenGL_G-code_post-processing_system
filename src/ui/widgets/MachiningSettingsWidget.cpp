@@ -61,7 +61,7 @@ MachiningSettingsWidget::MachiningSettingsWidget(QWidget* parent)
     m_autoRecognizeEndCutsCheckBox->setToolTip(QStringLiteral("方管截面识别成功后，自动搜索并标记全部有效加工断面。"));
     m_autoRemoveInternalPathsCheckBox = new QCheckBox(QStringLiteral("自动清理内部线条"), automaticGroup);
     m_autoRemoveInternalPathsCheckBox->setToolTip(QStringLiteral(
-        "方管截面识别成功后，按圆角半径安全内缩，仅排除完整位于内缩区域的图元。"));
+        "方管截面识别成功后，自动删除完整位于内缩窗口内的内部线图元，删除可撤销。"));
     m_autoRecognizeEndCutsCheckBox->setContentsMargins(18, 0, 0, 0);
     m_autoRemoveInternalPathsCheckBox->setContentsMargins(18, 0, 0, 0);
     automaticLayout->addWidget(m_autoDeduplicateCheckBox);
@@ -99,7 +99,7 @@ MachiningSettingsWidget::MachiningSettingsWidget(QWidget* parent)
     statusLayout->addRow(QString(), m_applyManualSectionButton);
     statusLayout->addRow(QStringLiteral("圆角数量："), m_roundedCornerCountValue);
     statusLayout->addRow(QStringLiteral("加工断面："), m_rotaryEndCutCountValue);
-    statusLayout->addRow(QStringLiteral("内部线条："), m_internalPathCountValue);
+    statusLayout->addRow(QStringLiteral("手动内部线条："), m_internalPathCountValue);
     contentLayout->addWidget(statusGroup);
     contentLayout->addStretch(1);
     scrollArea->setWidget(content);

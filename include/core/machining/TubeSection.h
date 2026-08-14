@@ -48,29 +48,12 @@ namespace cadcam::machining
         std::vector<TubeCornerGeometry> corners;
     };
 
-    struct InternalPathCandidate
-    {
-        geometry::EntityId entityId = 0;
-        geometry::Path3D path;
-    };
-
-    struct InternalPathClassification
-    {
-        std::vector<geometry::EntityId> removableEntityIds;
-        int candidatePathCount = 0;
-        int outerBoundaryEntityCount = 0;
-        double insetDistance = 0.0;
-        int preservedSafetyBandCount = 0;
-        int skippedPathCount = 0;
-    };
-
     struct TubeSectionPolicy
     {
         double connectionTolerance = 1.0;
         double numericalEpsilon = 1.0e-5;
         double maximumPlaneDeviation = 0.1;
         double boundaryDistanceTolerance = 0.1;
-        double interiorDistanceTolerance = 0.1;
         double minimumSectionArea = 1.0e-6;
     };
 
@@ -90,14 +73,6 @@ namespace cadcam::machining
         (
             const topology::TopologyInput& input,
             const topology::PathTopology& topology,
-            const TubeSectionPolicy& policy,
-            const OperationContext& context
-        );
-
-        static OperationResult<InternalPathClassification> classifyInternalPaths
-        (
-            const std::vector<InternalPathCandidate>& candidates,
-            const TubeSectionModel& section,
             const TubeSectionPolicy& policy,
             const OperationContext& context
         );

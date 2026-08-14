@@ -9,11 +9,13 @@
 
 #include <QHash>
 
+#include <algorithm>
+#include <cmath>
+#include <set>
+
 namespace
 {
     using cadcam::geometry::EntityId;
-    using cadcam::machining::InternalPathClassification;
-    using cadcam::machining::InternalPathCandidate;
     using cadcam::machining::TubeCornerGeometry;
     using cadcam::machining::TubeCutBoundaryClassifier;
     using cadcam::machining::TubeSectionGeometry;
@@ -33,9 +35,15 @@ namespace
         QVector<Diagnostic> diagnostics;
     };
 
+    struct PreparedPath
+    {
+        EntityId entityId = 0;
+        cadcam::geometry::Path3D path;
+    };
+
     struct PreparedInternalPaths
     {
-        std::vector<InternalPathCandidate> candidates;
+        std::vector<PreparedPath> candidates;
         QVector<Diagnostic> diagnostics;
     };
 
@@ -68,8 +76,6 @@ namespace
         policy.maximumPlaneDeviation = 0.1;
         policy.boundaryDistanceTolerance = std::max
             (0.001, policy.connectionTolerance * 0.1);
-        policy.interiorDistanceTolerance = std::max
-            (0.0001, policy.connectionTolerance * 0.01);
         return policy;
     }
 
@@ -552,11 +558,10 @@ RotaryTubeSectionModel RotaryTubeGeometryAnalyzer::buildManualSectionModel
     return model;
 }
 
-RotaryInternalPathResult RotaryTubeGeometryAnalyzer::findInternalPaths
+RotaryInternalPathResult RotaryTubeGeometryAnalyzer::findInternalItemsByWindow
 (
     const RotaryTubeSectionModel& model,
-    const QVector<CadItem*>& sceneItems,
-    double connectionTolerance
+    const QVector<CadItem*>& sceneItems
 )
 {
     RotaryInternalPathResult result;
@@ -567,38 +572,102 @@ RotaryInternalPathResult RotaryTubeGeometryAnalyzer::findInternalPaths
         return result;
     }
 
-    const OperationContext context = createOperationContext
-        (QStringLiteral("ClassifyTubeInternalPaths"));
-    const PreparedInternalPaths prepared = prepareInternalPaths(sceneItems, context);
-    result.diagnostics = prepared.diagnostics;
-
-    const TubeSectionPolicy policy = buildPolicy(connectionTolerance);
-    const OperationResult<InternalPathClassification> classified =
-        TubeSectionAnalyzer::classifyInternalPaths
-        (
-            prepared.candidates,
-            *model.coreModel,
-            policy,
-            context
-        );
-    result.diagnostics += classified.diagnostics;
-
-    if (!classified.succeeded() || !classified.value.has_value())
+    const cadcam::machining::TubeSectionModel& core = *model.coreModel;
+    const double halfY = core.geometry.yLength * 0.5;
+    const double halfZ = core.geometry.zWidth * 0.5;
+    double inset = 0.0;
+    if (std::isfinite(core.cornerRadius) && core.cornerRadius >= 0.0)
     {
+        inset = core.cornerRadius;
+    }
+    for (const double radius : core.cornerRadii)
+    {
+        if (std::isfinite(radius) && radius >= 0.0)
+        {
+            inset = std::max(inset, radius);
+        }
+    }
+    result.insetDistance = inset;
+    const double shortSide = std::min(core.geometry.yLength, core.geometry.zWidth);
+    const double extraInset = std::max(0.5, 0.01 * shortSide);
+    result.windowExtraInset = extraInset;
+    const double windowHalfY = halfY - inset - extraInset;
+    const double windowHalfZ = halfZ - inset - extraInset;
+    result.windowHalfY = std::max(0.0, windowHalfY);
+    result.windowHalfZ = std::max(0.0, windowHalfZ);
+    const double minimumY = core.geometry.centerY - windowHalfY;
+    const double maximumY = core.geometry.centerY + windowHalfY;
+    const double minimumZ = core.geometry.centerZ - windowHalfZ;
+    const double maximumZ = core.geometry.centerZ + windowHalfZ;
+
+    const OperationContext context = createOperationContext
+        (QStringLiteral("SelectTubeInternalItemsByWindow"));
+
+    if (windowHalfY <= 0.0 || windowHalfZ <= 0.0)
+    {
+        result.windowCollapsed = true;
+        result.windowHalfY = 0.0;
+        result.windowHalfZ = 0.0;
+        Diagnostic diagnostic;
+        diagnostic.code = DiagnosticCode::TubeSectionInteriorClassificationFailed;
+        diagnostic.severity = DiagnosticSeverity::Warning;
+        diagnostic.component = QStringLiteral("RotaryTubeGeometryAnalyzer");
+        diagnostic.operation = context.operationName;
+        diagnostic.stage = QStringLiteral("select-tube-internal-items-by-window");
+        diagnostic.userMessage =
+            QStringLiteral("方管截面内缩窗口已坍缩，未删除任何内部图元。");
+        diagnostic.correlationId = context.correlationId;
+        diagnostic.context =
+        {
+            { QStringLiteral("insetDistance"), inset },
+            { QStringLiteral("windowExtraInset"), extraInset },
+            { QStringLiteral("halfY"), halfY },
+            { QStringLiteral("halfZ"), halfZ }
+        };
+        result.diagnostics.push_back(std::move(diagnostic));
         return result;
     }
-    result.candidatePathCount = classified.value->candidatePathCount;
-    result.outerBoundaryEntityCount = classified.value->outerBoundaryEntityCount;
-    result.insetDistance = classified.value->insetDistance;
-    result.preservedSafetyBandCount = classified.value->preservedSafetyBandCount;
-    result.skippedPathCount = classified.value->skippedPathCount;
+
+    const PreparedInternalPaths prepared = prepareInternalPaths(sceneItems, context);
+    result.diagnostics = prepared.diagnostics;
+    result.candidatePathCount = static_cast<int>(prepared.candidates.size());
 
     const QHash<EntityId, CadItem*> byId = itemMap(sceneItems);
+    const std::set<EntityId> outerIds
+        (core.outerBoundaryEntityIds.begin(), core.outerBoundaryEntityIds.end());
 
-    for (const EntityId entityId : classified.value->removableEntityIds)
+    for (const PreparedPath& candidate : prepared.candidates)
     {
-        const auto item = byId.constFind(entityId);
-        if (item != byId.cend()) result.removableItems.push_back(item.value());
+        if (outerIds.count(candidate.entityId) != 0U
+            || candidate.path.vertices.size() < 2U)
+        {
+            ++result.skippedPathCount;
+            continue;
+        }
+
+        const bool fullyInside = std::all_of
+        (
+            candidate.path.vertices.cbegin(), candidate.path.vertices.cend(),
+            [minimumY, maximumY, minimumZ, maximumZ]
+            (const cadcam::geometry::PathVertex3D& vertex)
+            {
+                const double y = vertex.position.y;
+                const double z = vertex.position.z;
+                return y > minimumY && y < maximumY
+                    && z > minimumZ && z < maximumZ;
+            }
+        );
+        if (!fullyInside)
+        {
+            ++result.outsideWindowCount;
+            continue;
+        }
+
+        const auto item = byId.constFind(candidate.entityId);
+        if (item != byId.cend())
+        {
+            result.removableItems.push_back(item.value());
+        }
     }
 
     return result;

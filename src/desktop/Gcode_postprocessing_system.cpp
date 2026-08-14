@@ -515,8 +515,8 @@ Gcode_postprocessing_system::Gcode_postprocessing_system(QWidget* parent)
     QAction* assignRotaryEndCutAction = new QAction(QStringLiteral("指定为加工断面"), this);
     QAction* assignWasteRotaryEndCutAction = new QAction(QStringLiteral("指定为废面"), this);
     QAction* recognizeRotaryTubeSectionAction = new QAction(QStringLiteral("识别方管垂直截面（外轮廓）"), this);
-    QAction* removeInternalPathsAction = new QAction(QStringLiteral("去除内部线条"), this);
-    QAction* restoreInternalPathsAction = new QAction(QStringLiteral("恢复内部线条"), this);
+    QAction* removeInternalPathsAction = new QAction(QStringLiteral("清理内部线条"), this);
+    QAction* restoreInternalPathsAction = new QAction(QStringLiteral("清除内部线条标记"), this);
     QAction* clearSelectedRotaryEndCutAssignmentsAction = new QAction(QStringLiteral("清除选中加工断面指定"), this);
     QAction* clearRotaryEndCutAssignmentsAction = new QAction(QStringLiteral("清除全部加工断面指定"), this);
 
@@ -740,8 +740,8 @@ void Gcode_postprocessing_system::showMachiningContextMenu(const QPoint& globalP
     QAction* restoreAllProcessSectionsAction = processSectionMenu->addAction(QStringLiteral("所有断面恢复"));
     QMenu* internalLineMenu = menu.addMenu(QStringLiteral("内部线条"));
     QAction* toggleInternalLineAction = internalLineMenu->addAction(QStringLiteral("内部线条指定/恢复"));
-    QAction* recognizeAllInternalLinesAction = internalLineMenu->addAction(QStringLiteral("所有线条识别"));
-    QAction* restoreAllInternalLinesAction = internalLineMenu->addAction(QStringLiteral("所有线条恢复"));
+    QAction* recognizeAllInternalLinesAction = internalLineMenu->addAction(QStringLiteral("自动清理内部线条"));
+    QAction* restoreAllInternalLinesAction = internalLineMenu->addAction(QStringLiteral("清除所有内部线条标记"));
     menu.addSeparator();
     QAction* clearAllAction = menu.addAction(QStringLiteral("清空所有面线"));
 

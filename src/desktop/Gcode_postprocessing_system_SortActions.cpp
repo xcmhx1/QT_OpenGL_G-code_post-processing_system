@@ -2961,73 +2961,91 @@ bool Gcode_postprocessing_system::removeInternalMachiningPaths(bool interactive)
         }
     }
 
-    const RotaryInternalPathResult result = RotaryTubeGeometryAnalyzer::findInternalPaths
-    (
-        m_rotaryTubeSectionModel,
-        sceneItems,
-        kEndCutConnectionTolerance
-    );
+    const RotaryInternalPathResult result =
+        RotaryTubeGeometryAnalyzer::findInternalItemsByWindow
+            (m_rotaryTubeSectionModel, sceneItems);
     if (!result.sectionAvailable)
     {
         const QString message =
-            QStringLiteral("未识别有效方管截面，未执行内部线条排除。");
+            QStringLiteral("未识别有效方管截面，未执行内部线条清理。");
         qInfo().noquote()
             << QStringLiteral(
-                "[InternalPathClassification] mode=TubeSectionInset sectionAvailable=false "
-                "candidatePathCount=0 outerBoundaryEntityCount=0 insetDistance=0 "
-                "removedEntityCount=0 preservedSafetyBandCount=0 skippedPathCount=0");
+                "[InternalPathWindow] sectionAvailable=false windowCollapsed=false "
+                "removedEntityCount=0 candidatePathCount=0");
+        ui->openGLWidget->appendCommandMessage(message);
+        statusBar()->showMessage(message, 6000);
+        return false;
+    }
+    if (result.windowCollapsed)
+    {
+        for (const Diagnostic& diagnostic : result.diagnostics)
+        {
+            if (diagnostic.severity == DiagnosticSeverity::Warning
+                && !diagnostic.userMessage.isEmpty())
+            {
+                ui->openGLWidget->appendCommandMessage(diagnostic.userMessage);
+            }
+        }
+        qInfo().noquote()
+            << QStringLiteral(
+                "[InternalPathWindow] sectionAvailable=true windowCollapsed=true "
+                "insetDistance=%1 windowExtraInset=%2 removedEntityCount=0")
+                .arg(result.insetDistance, 0, 'f', 6)
+                .arg(result.windowExtraInset, 0, 'f', 6);
+        statusBar()->showMessage
+            (QStringLiteral("内部线条清理窗口已坍缩，未删除任何图元。"), 6000);
+        return false;
+    }
+
+    QVector<CadItem*> removableItems;
+    for (CadItem* item : result.removableItems)
+    {
+        if (item != nullptr
+            && m_processState.stateOrDefault(item->m_entityId)
+                .overrideData.boundaryRole == cadcam::planning::BoundaryRole::None)
+        {
+            removableItems.push_back(item);
+        }
+    }
+
+    if (!removableItems.isEmpty()
+        && !m_editer.deleteEntities(removableItems))
+    {
+        const QString message = QStringLiteral("内部线条图元删除失败。");
         ui->openGLWidget->appendCommandMessage(message);
         statusBar()->showMessage(message, 6000);
         return false;
     }
 
-    QSet<CadItem*> internalItems;
-
-    for (CadItem* item : result.removableItems)
+    if (!removableItems.isEmpty())
     {
-        if (item != nullptr && m_processState.stateOrDefault(item->m_entityId)
-            .overrideData.boundaryRole == cadcam::planning::BoundaryRole::None)
-        {
-            internalItems.insert(item);
-        }
+        invalidateProcessOrdersAfterEndCutChange();
+        refreshWasteProcessingExclusions();
+        updateBoundaryViewer(ui->openGLWidget, m_boundaryAssignmentPerformanceReport);
     }
 
-    m_processState.beginBatch();
-    for (const std::unique_ptr<CadItem>& entity : m_document.m_entities)
-    {
-        if (entity != nullptr)
-        {
-            const bool shouldExclude = internalItems.contains(entity.get());
-            m_processState.setAutomaticInternalExclusion(entity->m_entityId, shouldExclude);
-        }
-    }
-    m_processState.endBatch();
-
-    invalidateProcessOrdersAfterEndCutChange();
-    refreshWasteProcessingExclusions();
-    QString message =
-        QStringLiteral("内部线条识别完成：按方管截面安全内缩 %1 mm，共排除 %2 个图元，安全带内保留 %3 个。")
-        .arg(result.insetDistance, 0, 'f', 3)
-        .arg(internalItems.size())
-        .arg(result.preservedSafetyBandCount);
+    const QString message = removableItems.isEmpty()
+        ? QStringLiteral("内部线条清理完成：内缩窗口内没有可删除的内部图元。")
+        : QStringLiteral("内部线条清理完成：按最大圆角半径 %1 mm 加额外内缩 %2 mm 生成窗口（YZ 半宽 %3×%4），已删除 %5 个内部图元，可按 Ctrl+Z 撤销；撤销后请重新识别方管截面。")
+            .arg(result.insetDistance, 0, 'f', 3)
+            .arg(result.windowExtraInset, 0, 'f', 3)
+            .arg(result.windowHalfY, 0, 'f', 3)
+            .arg(result.windowHalfZ, 0, 'f', 3)
+            .arg(removableItems.size());
     qInfo().noquote()
         << QStringLiteral(
-            "[InternalPathClassification] mode=TubeSectionInset sectionAvailable=true "
-            "candidatePathCount=%1 outerBoundaryEntityCount=%2 insetDistance=%3 "
-            "removedEntityCount=%4 preservedSafetyBandCount=%5 skippedPathCount=%6")
-            .arg(result.candidatePathCount)
-            .arg(result.outerBoundaryEntityCount)
+            "[InternalPathWindow] sectionAvailable=true windowCollapsed=false "
+            "insetDistance=%1 windowExtraInset=%2 windowHalfY=%3 windowHalfZ=%4 "
+            "candidatePathCount=%5 skippedPathCount=%6 outsideWindowCount=%7 "
+            "removedEntityCount=%8")
             .arg(result.insetDistance, 0, 'f', 6)
-            .arg(internalItems.size())
-            .arg(result.preservedSafetyBandCount)
-            .arg(result.skippedPathCount);
-    if (!internalItems.isEmpty()
-        && (!ui->openGLWidget->processVisualsVisible()
-            || !ui->openGLWidget->excludedEntitiesDimmed()))
-    {
-        message += QStringLiteral(" 内部线状态已标记；当前排除图元显示已关闭。");
-    }
-    ui->openGLWidget->appendCommandMessage(message);
+            .arg(result.windowExtraInset, 0, 'f', 6)
+            .arg(result.windowHalfY, 0, 'f', 6)
+            .arg(result.windowHalfZ, 0, 'f', 6)
+            .arg(result.candidatePathCount)
+            .arg(result.skippedPathCount)
+            .arg(result.outsideWindowCount)
+            .arg(removableItems.size());
     for (const Diagnostic& diagnostic : result.diagnostics)
     {
         if (diagnostic.severity == DiagnosticSeverity::Warning
@@ -3036,7 +3054,7 @@ bool Gcode_postprocessing_system::removeInternalMachiningPaths(bool interactive)
             ui->openGLWidget->appendCommandMessage(diagnostic.userMessage);
         }
     }
-    updateBoundaryViewer(ui->openGLWidget, m_boundaryAssignmentPerformanceReport);
+    ui->openGLWidget->appendCommandMessage(message);
     statusBar()->showMessage(message, 6000);
     return true;
 }
@@ -3074,8 +3092,8 @@ bool Gcode_postprocessing_system::restoreInternalMachiningPaths(bool interactive
     updateBoundaryViewer(ui->openGLWidget, m_boundaryAssignmentPerformanceReport);
 
     const QString message = restoredCount > 0
-        ? QStringLiteral("已恢复 %1 个由内部线识别排除的图元。").arg(restoredCount)
-        : QStringLiteral("当前没有由内部线识别排除的图元。");
+        ? QStringLiteral("已恢复 %1 个手动标记的内部线条参与状态。").arg(restoredCount)
+        : QStringLiteral("当前没有带内部线条标记的图元。");
     ui->openGLWidget->appendCommandMessage(message);
     statusBar()->showMessage(message, 4000);
     return restoredCount > 0;

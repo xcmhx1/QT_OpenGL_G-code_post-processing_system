@@ -45,13 +45,16 @@ struct RotaryTubeSectionModel
 struct RotaryInternalPathResult
 {
     bool sectionAvailable = false;
+    bool windowCollapsed = false;
     QVector<CadItem*> removableItems;
     QVector<Diagnostic> diagnostics;
     int candidatePathCount = 0;
-    int outerBoundaryEntityCount = 0;
-    double insetDistance = 0.0;
-    int preservedSafetyBandCount = 0;
     int skippedPathCount = 0;
+    int outsideWindowCount = 0;
+    double insetDistance = 0.0;
+    double windowExtraInset = 0.0;
+    double windowHalfY = 0.0;
+    double windowHalfZ = 0.0;
 };
 
 class RotaryTubeGeometryAnalyzer
@@ -83,10 +86,11 @@ public:
         std::uint64_t contentRevision = 1U
     );
 
-    static RotaryInternalPathResult findInternalPaths
+    // 在 YZ 平面按截面中心生成内缩窗口，返回完整位于窗口内的图元。
+    // 窗口按最大圆角半径内缩，并附加固定最小额外内缩，避免拟合精度导致误选。
+    static RotaryInternalPathResult findInternalItemsByWindow
     (
         const RotaryTubeSectionModel& model,
-        const QVector<CadItem*>& sceneItems,
-        double connectionTolerance = 1.0
+        const QVector<CadItem*>& sceneItems
     );
 };
