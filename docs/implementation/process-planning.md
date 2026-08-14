@@ -90,6 +90,7 @@ CadDocument + DocumentProcessState + 可选 TubeSectionModel
 → DocumentProcessPlanningAdapter::captureRotary
 → GeometryCompiler + PathTopology
 → ProcessPlanBuilder
+→ 严格闭环提取 + 开放连通分量连续链拆分
 → ProcessGroup 转换为 ProcessUnit
 → Rotary4Axis ProcessPlan
 ```
@@ -188,6 +189,7 @@ Application 的 `DocumentProcessState` 持有当前 `ProcessUnitSequence`。Core
 - 三轴当前使用最近距离计划，方向偏好会约束正向或反向候选。
 - 四轴可按配置选择最近距离或懒旋转策略。仅在智能重建、懒旋转且存在有效截面时启用 16 区位生产扫描；普通排序、最近距离和无截面四轴保持原流程。
 - 四轴普通拓扑连通分量先提取其中的严格闭环，每个真实闭环形成独立 `ClosedLoop`；移除闭环成员后，剩余图元按诱导连通关系重新分组。闭环与辅助支线或其他轮廓接触时，不再把整个分量降级为 `ConnectedChain`。
+- 四轴开放连通分量只有在一次端点连续遍历能够覆盖全部成员时才形成单个 `ConnectedChain`。存在分支、路径中部连接或方向约束而无法一次走完时，Core 按同一连接容差拆成多个可执行开放链；链内保持连续切削，链间使用正常安全转移，因此开放多图元路径不以闭合为导出前提。
 - 每个普通 `ProcessGroup` 在调度前使用全部成员的原始 `Path3D` 形成静态占用画像。`certainMask` 和 `possibleMask` 表达路径经过区位，`legalEntryMask` 表达实际可执行入口区位；唯一 `ownerZone` 表达该单元在当前加工分区中的生产归属。
 - 开放链和单图元只能从已有端点或合法参数进入，其 `ownerZone` 从占用区位与 `legalEntryMask` 的交集中选择；路径中部经过但无法起刀的区位不能取得单元归属。多图元闭环继续先按占用确定 owner，再使用连接点、曲线内部切点或可靠区位段中点建立入口。
 - Break 断面继续由现有工艺屏障划分加工分区。Break 专用遍历器仅在唯一简单环上分析四个平面和四个圆角强区位，八条分界母线不作为首选入口。
@@ -261,7 +263,8 @@ Application 的 `DocumentProcessState` 持有当前 `ProcessUnitSequence`。Core
 - `src/cad/editing/CadEditer_CommandActions.cpp`：提供不包含加工业务类型的回调命令，并接入统一 Undo/Redo 栈。
 - `src/application/planning/DocumentProcessPlanningAdapter.cpp`：将生产文档和加工状态转换为规划值对象。
 - `src/core/planning/PlanarProcessPlanBuilder.cpp`：构建三轴最近距离加工计划。
-- `src/core/planning/ProcessPlanBuilder.cpp`：构建四轴分组、断面约束和排序计划。
+- `src/core/planning/ProcessPlanBuilder.cpp`：保留四轴计划构建的唯一生产入口和阶段编排。
+- `src/core/planning/internal/ProcessPlanBuilder_*.inl`：按内部类型与曲线、截面映射、遍历与区位、区位诊断、闭环遍历、Break 区位段遍历、入口选择与完整性校验拆分四轴规划实现；这些片段仍在同一匿名命名空间和编译单元中执行，不形成并行算法或替代入口。
 - `src/core/planning/SingleClosedEntryRefiner.cpp`：在顺序和区位冻结后精化单图元圆与完整椭圆入口。
 - `src/core/machine/ProcessUnitExecutionResolver.cpp`：为入口精化和正式轨迹统一展开加工单元并计算真实最终执行状态。
 - `src/core/machining/TubeSectionProjector.cpp`：将 YZ 点投影到四个平面、四个圆角和八条分界母线，并生成加工单元区位画像。

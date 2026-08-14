@@ -128,6 +128,7 @@ if exist "$(VCRuntimeRedistDir)\*.dll" copy /Y "$(VCRuntimeRedistDir)\*.dll" "$(
   <ItemGroup>
     <QtRcc Include="Gcode_postprocessing_system.qrc" />
     <QtUic Include="Gcode_postprocessing_system.ui" />
+    <ResourceCompile Include="resources\ApplicationIcon.rc" />
   </ItemGroup>
   <ItemGroup>
     <None Include="AGENTS.md" />
@@ -136,6 +137,7 @@ if exist "$(VCRuntimeRedistDir)\*.dll" copy /Y "$(VCRuntimeRedistDir)\*.dll" "$(
     <None Include="license_request.bat" />
     <None Include="license.example.json" />
     <None Include="README.md" />
+    <None Include="resources\G.ico" />
     <None Include="resources\G.svg" />
     <None Include="tools\Generate-License.bat" />
     <None Include="tools\Generate-License.ps1" />
@@ -653,6 +655,13 @@ if exist "$(VCRuntimeRedistDir)\*.dll" copy /Y "$(VCRuntimeRedistDir)\*.dll" "$(
     <ClInclude Include="include\core\planning\ProcessPlanBuilder.h" />
     <ClInclude Include="include\core\planning\SingleClosedEntryRefiner.h" />
     <ClInclude Include="include\core\planning\PlanarProcessPlanBuilder.h" />
+    <ClInclude Include="src\core\planning\internal\ProcessPlanBuilder_InternalTypesAndCurves.inl" />
+    <ClInclude Include="src\core\planning\internal\ProcessPlanBuilder_SectionAndSurface.inl" />
+    <ClInclude Include="src\core\planning\internal\ProcessPlanBuilder_TraversalAndZones.inl" />
+    <ClInclude Include="src\core\planning\internal\ProcessPlanBuilder_ZoneProfilesAndDiagnostics.inl" />
+    <ClInclude Include="src\core\planning\internal\ProcessPlanBuilder_ClosedLoopTraversal.inl" />
+    <ClInclude Include="src\core\planning\internal\ProcessPlanBuilder_ClosedLoopZoneRun.inl" />
+    <ClInclude Include="src\core\planning\internal\ProcessPlanBuilder_EntrySelectionAndValidation.inl" />
     <ClInclude Include="include\application\planning\ProcessPlanningService.h" />
     <ClInclude Include="include\application\process\DocumentProcessState.h" />
     <ClInclude Include="include\application\process\ProcessPresentationSnapshot.h" />

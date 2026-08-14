@@ -12,6 +12,7 @@
 
 #include <QActionGroup>
 #include <QApplication>
+#include <QClipboard>
 #include <QCoreApplication>
 #include <QDir>
 #include <QDockWidget>
@@ -1010,14 +1011,28 @@ bool Gcode_postprocessing_system::ensureFeatureAvailable(AppFeature feature, con
         return true;
     }
 
+    const QString machineId = AppLicense::currentMachineId();
     const QString message = QStringLiteral("%1 属于 Pro 功能。\n\n当前授权：%2\n机器码：%3\n\n请将机器码发给软件提供方，获取 license.dat 后放到程序目录。")
-        .arg(actionName, m_license.statusText(), AppLicense::currentMachineId());
+        .arg(actionName, m_license.statusText(), machineId);
 
-    QMessageBox::information(this, QStringLiteral("需要授权"), message);
+    QMessageBox authorizationDialog(QMessageBox::Information,
+        QStringLiteral("需要授权"), message, QMessageBox::Close, this);
+    QAbstractButton* copyMachineIdButton = authorizationDialog.addButton(
+        QStringLiteral("复制机器码文本"), QMessageBox::ActionRole);
+    authorizationDialog.exec();
+
+    const bool machineIdCopied =
+        authorizationDialog.clickedButton() == copyMachineIdButton;
+    if (machineIdCopied)
+    {
+        QApplication::clipboard()->setText(machineId);
+    }
 
     if (ui != nullptr && ui->openGLWidget != nullptr)
     {
-        ui->openGLWidget->appendCommandMessage(QStringLiteral("%1 未执行：需要 Pro 授权。").arg(actionName));
+        ui->openGLWidget->appendCommandMessage(machineIdCopied
+            ? QStringLiteral("机器码已复制到剪贴板，可直接粘贴给软件提供方。")
+            : QStringLiteral("%1 未执行：需要 Pro 授权。").arg(actionName));
         ui->openGLWidget->refreshCommandPrompt();
     }
 

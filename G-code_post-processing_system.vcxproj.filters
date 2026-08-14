@@ -292,6 +292,9 @@
     <QtUic Include="Gcode_postprocessing_system.ui">
       <Filter>Form Files</Filter>
     </QtUic>
+    <ResourceCompile Include="resources\ApplicationIcon.rc">
+      <Filter>Resource Files</Filter>
+    </ResourceCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include="README.md">
@@ -319,6 +322,9 @@
       <Filter>Documentation</Filter>
     </None>
     <None Include="resources\G.svg">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="resources\G.ico">
       <Filter>Resource Files</Filter>
     </None>
   </ItemGroup>
@@ -869,6 +875,27 @@
     </ClInclude>
     <ClInclude Include="include\core\planning\SingleClosedEntryRefiner.h">
       <Filter>Header Files\core\planning</Filter>
+    </ClInclude>
+    <ClInclude Include="src\core\planning\internal\ProcessPlanBuilder_InternalTypesAndCurves.inl">
+      <Filter>Source Files\core\planning</Filter>
+    </ClInclude>
+    <ClInclude Include="src\core\planning\internal\ProcessPlanBuilder_SectionAndSurface.inl">
+      <Filter>Source Files\core\planning</Filter>
+    </ClInclude>
+    <ClInclude Include="src\core\planning\internal\ProcessPlanBuilder_TraversalAndZones.inl">
+      <Filter>Source Files\core\planning</Filter>
+    </ClInclude>
+    <ClInclude Include="src\core\planning\internal\ProcessPlanBuilder_ZoneProfilesAndDiagnostics.inl">
+      <Filter>Source Files\core\planning</Filter>
+    </ClInclude>
+    <ClInclude Include="src\core\planning\internal\ProcessPlanBuilder_ClosedLoopTraversal.inl">
+      <Filter>Source Files\core\planning</Filter>
+    </ClInclude>
+    <ClInclude Include="src\core\planning\internal\ProcessPlanBuilder_ClosedLoopZoneRun.inl">
+      <Filter>Source Files\core\planning</Filter>
+    </ClInclude>
+    <ClInclude Include="src\core\planning\internal\ProcessPlanBuilder_EntrySelectionAndValidation.inl">
+      <Filter>Source Files\core\planning</Filter>
     </ClInclude>
     <ClInclude Include="include\application\planning\ProcessPlanningService.h">
       <Filter>Header Files\application\planning</Filter>
