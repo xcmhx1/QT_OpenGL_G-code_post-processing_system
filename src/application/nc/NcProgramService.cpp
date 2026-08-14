@@ -12,7 +12,7 @@ OperationResult<cadcam::nc::NcProgram> NcProgramService::buildPlanarProgram
     CadDocument& document,
     const cadcam::process::DocumentProcessState& processState,
     const cadcam::planning::ProcessPlan& processPlan,
-    const GProfileToolTransferConfig& transferConfig,
+    const MachiningProcessConfig& processConfig,
     const OperationContext& context
 ) const
 {
@@ -58,9 +58,9 @@ OperationResult<cadcam::nc::NcProgram> NcProgramService::buildPlanarProgram
 
     cadcam::nc::PlanarNcBuildPolicy policy;
     policy.clearance.retractClearance =
-        transferConfig.rotationSafetyClearance;
+        processConfig.rotationSafetyClearance;
     policy.clearance.approachClearance =
-        transferConfig.sameZoneTransferClearance;
+        processConfig.sameZoneTransferClearance;
     qInfo().noquote()
         << QStringLiteral("[MachineTrajectory][Clearance] mode=Planar3Axis retractClearance=%1 approachClearance=%2")
             .arg(policy.clearance.retractClearance, 0, 'g', 15)
@@ -103,8 +103,7 @@ OperationResult<cadcam::nc::NcProgram> NcProgramService::buildRotaryProgram
     const cadcam::process::DocumentProcessState& processState,
     const cadcam::planning::ProcessPlan& processPlan,
     const std::optional<cadcam::machining::TubeSectionModel>& tubeSection,
-    const GProfileRotaryAxisConfig& rotaryConfig,
-    const GProfileToolTransferConfig& transferConfig,
+    const MachiningProcessConfig& processConfig,
     const OperationContext& context,
     const std::optional<cadcam::geometry::Vector2d>& explicitTubeCenter
 ) const
@@ -119,8 +118,7 @@ OperationResult<cadcam::nc::NcProgram> NcProgramService::buildRotaryProgram
         processState,
         processPlan,
         tubeSection,
-        rotaryConfig,
-        transferConfig,
+        processConfig,
         taskContext,
         explicitTubeCenter
     );

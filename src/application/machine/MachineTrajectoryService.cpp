@@ -259,8 +259,7 @@ OperationResult<cadcam::machine::MachineTrajectory> MachineTrajectoryService::bu
     const cadcam::process::DocumentProcessState& processState,
     const cadcam::planning::ProcessPlan& plan,
     const std::optional<cadcam::machining::TubeSectionModel>& tubeSection,
-    const GProfileRotaryAxisConfig& config,
-    const GProfileToolTransferConfig& transferConfig,
+    const MachiningProcessConfig& processConfig,
     const TaskContext& taskContext,
     const std::optional<cadcam::geometry::Vector2d>& explicitTubeCenter
 ) const
@@ -431,22 +430,25 @@ OperationResult<cadcam::machine::MachineTrajectory> MachineTrajectoryService::bu
     }
 
     machine::RotaryMachinePolicy policy;
-    policy.rotaryAxisY = config.centerY;
-    policy.rotaryAxisZ = config.centerZ;
-    policy.invertAAxisDirection = config.invertAAxisDirection;
-    policy.aAxisOffsetDegrees = config.aAxisOffsetDegrees;
-    policy.keepContinuousAngle = config.keepContinuousAngle;
-    policy.useInitialMachinePoint = config.useInitialMachinePoint;
-    policy.initialMachinePoint = { config.initialMachineX, config.initialMachineY, config.initialMachineZ, 0.0 };
-    policy.useSafeZBeforeRapid = config.useSafeZBeforeRapid;
+    policy.rotaryAxisY = processConfig.rotaryCenterY;
+    policy.rotaryAxisZ = processConfig.rotaryCenterZ;
+    policy.invertAAxisDirection = processConfig.invertAAxisDirection;
+    policy.aAxisOffsetDegrees = processConfig.aAxisOffsetDegrees;
+    policy.keepContinuousAngle = processConfig.keepContinuousAngle;
+    policy.useInitialMachinePoint = processConfig.useInitialMachinePoint;
+    policy.initialMachinePoint = { processConfig.initialMachineX, processConfig.initialMachineY, processConfig.initialMachineZ, 0.0 };
+    policy.useSafeZBeforeRapid = processConfig.useSafeZBeforeRapid;
     policy.transfer.rotationSafetyClearance =
-        transferConfig.rotationSafetyClearance;
+        processConfig.rotationSafetyClearance;
     policy.transfer.sameZoneTransferClearance =
-        transferConfig.sameZoneTransferClearance;
+        processConfig.sameZoneTransferClearance;
     policy.transfer.coordinatedTransferEnabled =
-        transferConfig.coordinatedTransferEnabled;
-    policy.machiningPlaneZOffset = config.machiningPlaneZOffset;
-    policy.overcutDistance = config.overcutDistance;
+        processConfig.coordinatedTransferEnabled;
+    policy.machiningPlaneZOffset = processConfig.machiningPlaneZOffset;
+    policy.overcutDistance = processConfig.overcutDistance;
+    // 显式接线连续连接容差：与规划使用的连接容差一致，不再依赖默认值巧合。
+    policy.continuousConnectionTolerance =
+        processConfig.continuousConnectionTolerance;
     if (tubeSection.has_value() && !tubeSection->geometry.boundary.empty())
     {
         policy.tubeCenterY = tubeSection->geometry.centerY;

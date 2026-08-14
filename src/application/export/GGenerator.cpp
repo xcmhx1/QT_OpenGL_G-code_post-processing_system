@@ -216,6 +216,8 @@ OperationResult<QString> GGenerator::buildRotaryProgramText(const OperationConte
     std::optional<cadcam::geometry::Vector2d> explicitCenter;
     if (m_rotaryTubeCenterValid)
         explicitCenter = cadcam::geometry::Vector2d{ m_rotaryTubeCenterY, m_rotaryTubeCenterZ };
+    const MachiningProcessConfig processConfig =
+        MachiningProcessConfig::fromProfile(*m_profile);
     NcProgramService service;
     auto program = service.buildRotaryProgram
     (
@@ -223,8 +225,7 @@ OperationResult<QString> GGenerator::buildRotaryProgramText(const OperationConte
         *m_processState,
         *m_processPlan,
         m_tubeSectionModel,
-        m_profile->rotaryAxisConfig(),
-        m_profile->toolTransferConfig(),
+        processConfig,
         context,
         explicitCenter
     );
@@ -284,10 +285,12 @@ OperationResult<QString> GGenerator::buildProgramText(const OperationContext& co
         return result;
     }
 
+    const MachiningProcessConfig processConfig =
+        MachiningProcessConfig::fromProfile(*m_profile);
     NcProgramService service;
     auto program = service.buildPlanarProgram
         (*m_document, *m_processState, *m_processPlan,
-            m_profile->toolTransferConfig(), context);
+            processConfig, context);
     result.mergeDiagnostics(program);
     if (!program.succeeded() || !program.value.has_value())
     {

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "infrastructure/config/GProfile.h"
+#include "infrastructure/config/MachiningProcessConfig.h"
 #include "application/tasks/TaskContext.h"
 #include "core/machining/TubeSection.h"
 #include "core/nc/NcProgram.h"
@@ -17,7 +17,7 @@ public:
         CadDocument& document,
         const cadcam::process::DocumentProcessState& processState,
         const cadcam::planning::ProcessPlan& processPlan,
-        const GProfileToolTransferConfig& transferConfig,
+        const MachiningProcessConfig& processConfig,
         const OperationContext& context
     ) const;
 
@@ -27,8 +27,7 @@ public:
         const cadcam::process::DocumentProcessState& processState,
         const cadcam::planning::ProcessPlan& processPlan,
         const std::optional<cadcam::machining::TubeSectionModel>& tubeSection,
-        const GProfileRotaryAxisConfig& rotaryConfig,
-        const GProfileToolTransferConfig& transferConfig,
+        const MachiningProcessConfig& processConfig,
         const OperationContext& context,
         const std::optional<cadcam::geometry::Vector2d>& explicitTubeCenter = std::nullopt
     ) const;

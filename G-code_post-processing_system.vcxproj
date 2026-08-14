@@ -588,6 +588,7 @@ if exist "$(VCRuntimeRedistDir)\*.dll" copy /Y "$(VCRuntimeRedistDir)\*.dll" "$(
     <ClInclude Include="include\infrastructure\config\GProfilePathStore.h" />
     <ClInclude Include="include\infrastructure\config\RecentDocumentStore.h" />
     <ClInclude Include="include\infrastructure\config\MachiningParameterStore.h" />
+    <ClInclude Include="include\infrastructure\config\MachiningProcessConfig.h" />
     <ClInclude Include="include\infrastructure\image\CadBitmapVectorizer.h" />
     <ClInclude Include="include\cad\editing\CadEditer.h" />
     <ClInclude Include="include\cad\editing\CadEditerWorkflowInternal.h" />
