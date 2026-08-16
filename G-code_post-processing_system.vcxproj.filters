@@ -727,9 +727,9 @@
       <Filter>Header Files\infrastructure\config</Filter>
     </ClInclude>
     <ClInclude Include="include\infrastructure\config\MachiningParameterStore.h">
-    <ClInclude Include="include\infrastructure\config\MachiningProcessConfig.h">
       <Filter>Header Files\infrastructure\config</Filter>
     </ClInclude>
+    <ClInclude Include="include\infrastructure\config\MachiningProcessConfig.h">
       <Filter>Header Files\infrastructure\config</Filter>
     </ClInclude>
     <ClInclude Include="include\ui\widgets\CadCommandLineWidget.h">
