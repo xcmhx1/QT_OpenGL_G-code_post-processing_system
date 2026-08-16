@@ -2994,48 +2994,21 @@ bool Gcode_postprocessing_system::removeInternalMachiningPaths(bool interactive)
             QStringLiteral("InternalPathWindow"),
             QStringLiteral("Status"),
             QStringLiteral("sectionAvailable=true windowCollapsed=true "
-                "insetDistance=%1 windowExtraInset=%2 removedEntityCount=0")
-                .arg(result.insetDistance, 0, 'f', 6)
-                .arg(result.windowExtraInset, 0, 'f', 6));
+                "insetDistance=%1 removedEntityCount=0")
+                .arg(result.insetDistance, 0, 'f', 6));
         statusBar()->showMessage
             (QStringLiteral("内部线条清理窗口已坍缩，未删除任何图元。"), 6000);
         return false;
     }
 
     QVector<CadItem*> removableItems;
-    int protectedByBoundaryCount = 0;
     for (CadItem* item : result.removableItems)
     {
-        if (item == nullptr)
+        if (item != nullptr)
         {
-            continue;
+            removableItems.push_back(item);
         }
-        const bool boundaryProtected =
-            m_processState.stateOrDefault(item->m_entityId)
-                .overrideData.boundaryRole
-                != cadcam::planning::BoundaryRole::None;
-        if (boundaryProtected)
-        {
-            ++protectedByBoundaryCount;
-            cadcam::core::emitSummaryLog
-            (
-                QStringLiteral("InternalPathWindow"),
-                QStringLiteral("Decision"),
-                QStringLiteral("entityId=%1 verdict=ProtectedByBoundaryRole")
-                    .arg(item->m_entityId)
-            );
-            continue;
-        }
-        removableItems.push_back(item);
     }
-    cadcam::core::emitSummaryLog
-    (
-        QStringLiteral("InternalPathWindow"),
-        QStringLiteral("Result"),
-        QStringLiteral("windowRemovedCount=%1 protectedByBoundaryCount=%2")
-            .arg(result.removableItems.size())
-            .arg(protectedByBoundaryCount)
-    );
 
     if (!removableItems.isEmpty()
         && !m_editer.deleteEntities(removableItems))
@@ -3061,13 +3034,12 @@ bool Gcode_postprocessing_system::removeInternalMachiningPaths(bool interactive)
     }
 
     const QString message = removableItems.isEmpty()
-        ? QStringLiteral("内部线条清理完成：内缩窗口内没有可删除的内部图元（候选 %1，窗口外保留 %2，跳过 %3）。")
+        ? QStringLiteral("内部线条清理完成：内缩窗口内没有与其相交的图元（候选 %1，窗口外保留 %2，跳过 %3）。")
             .arg(result.candidatePathCount)
             .arg(result.outsideWindowCount)
             .arg(result.skippedPathCount)
-        : QStringLiteral("内部线条清理完成：按最大圆角半径 %1 mm 加额外内缩 %2 mm 生成窗口（YZ 半宽 %3×%4），已删除 %5 个内部图元，可按 Ctrl+Z 撤销。")
+        : QStringLiteral("内部线条清理完成：按最大圆角半径 %1 mm 内缩生成窗口（YZ 半宽 %2×%3），已删除 %4 个相交图元，可按 Ctrl+Z 撤销。")
             .arg(result.insetDistance, 0, 'f', 3)
-            .arg(result.windowExtraInset, 0, 'f', 3)
             .arg(result.windowHalfY, 0, 'f', 3)
             .arg(result.windowHalfZ, 0, 'f', 3)
             .arg(removableItems.size());
@@ -3076,11 +3048,10 @@ bool Gcode_postprocessing_system::removeInternalMachiningPaths(bool interactive)
         QStringLiteral("InternalPathWindow"),
         QStringLiteral("Status"),
         QStringLiteral("sectionAvailable=true windowCollapsed=false "
-            "insetDistance=%1 windowExtraInset=%2 windowHalfY=%3 windowHalfZ=%4 "
-            "candidatePathCount=%5 skippedPathCount=%6 outsideWindowCount=%7 "
-            "removedEntityCount=%8")
+            "insetDistance=%1 windowHalfY=%2 windowHalfZ=%3 "
+            "candidatePathCount=%4 skippedPathCount=%5 outsideWindowCount=%6 "
+            "removedEntityCount=%7")
             .arg(result.insetDistance, 0, 'f', 6)
-            .arg(result.windowExtraInset, 0, 'f', 6)
             .arg(result.windowHalfY, 0, 'f', 6)
             .arg(result.windowHalfZ, 0, 'f', 6)
             .arg(result.candidatePathCount)

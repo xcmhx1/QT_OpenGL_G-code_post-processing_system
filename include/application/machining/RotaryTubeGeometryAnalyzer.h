@@ -52,7 +52,6 @@ struct RotaryInternalPathResult
     int skippedPathCount = 0;
     int outsideWindowCount = 0;
     double insetDistance = 0.0;
-    double windowExtraInset = 0.0;
     double windowHalfY = 0.0;
     double windowHalfZ = 0.0;
 };
@@ -86,8 +85,8 @@ public:
         std::uint64_t contentRevision = 1U
     );
 
-    // 在 YZ 平面按截面中心生成内缩窗口，返回完整位于窗口内的图元。
-    // 窗口按最大圆角半径内缩，并附加固定最小额外内缩，避免拟合精度导致误选。
+    // 在 YZ 平面按截面中心生成内缩窗口（外轮廓四边内缩一个最大圆角半径）。
+    // 路径 YZ 范围与窗口相交（含接触）的图元整体删除，不做外轮廓或断面过滤。
     static RotaryInternalPathResult findInternalItemsByWindow
     (
         const RotaryTubeSectionModel& model,

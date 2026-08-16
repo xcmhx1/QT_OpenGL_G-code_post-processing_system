@@ -643,11 +643,8 @@ RotaryInternalPathResult RotaryTubeGeometryAnalyzer::findInternalItemsByWindow
         }
     }
     result.insetDistance = inset;
-    const double shortSide = std::min(core.geometry.yLength, core.geometry.zWidth);
-    const double extraInset = std::max(0.5, 0.01 * shortSide);
-    result.windowExtraInset = extraInset;
-    const double windowHalfY = halfY - inset - extraInset;
-    const double windowHalfZ = halfZ - inset - extraInset;
+    const double windowHalfY = halfY - inset;
+    const double windowHalfZ = halfZ - inset;
     result.windowHalfY = std::max(0.0, windowHalfY);
     result.windowHalfZ = std::max(0.0, windowHalfZ);
     const double minimumY = core.geometry.centerY - windowHalfY;
@@ -659,13 +656,12 @@ RotaryInternalPathResult RotaryTubeGeometryAnalyzer::findInternalItemsByWindow
     (
         QStringLiteral("InternalPathWindow"),
         QStringLiteral("Window"),
-        QStringLiteral("centerY=%1 centerZ=%2 yLength=%3 zWidth=%4 inset=%5 extraInset=%6 halfY=%7 halfZ=%8 boundsY=[%9,%10] boundsZ=[%11,%12]")
+        QStringLiteral("centerY=%1 centerZ=%2 yLength=%3 zWidth=%4 inset=%5 halfY=%6 halfZ=%7 boundsY=[%8,%9] boundsZ=[%10,%11]")
             .arg(core.geometry.centerY, 0, 'g', 15)
             .arg(core.geometry.centerZ, 0, 'g', 15)
             .arg(core.geometry.yLength, 0, 'g', 15)
             .arg(core.geometry.zWidth, 0, 'g', 15)
             .arg(inset, 0, 'g', 15)
-            .arg(extraInset, 0, 'g', 15)
             .arg(windowHalfY, 0, 'g', 15)
             .arg(windowHalfZ, 0, 'g', 15)
             .arg(minimumY, 0, 'g', 15)
@@ -694,7 +690,6 @@ RotaryInternalPathResult RotaryTubeGeometryAnalyzer::findInternalItemsByWindow
         diagnostic.context =
         {
             { QStringLiteral("insetDistance"), inset },
-            { QStringLiteral("windowExtraInset"), extraInset },
             { QStringLiteral("halfY"), halfY },
             { QStringLiteral("halfZ"), halfZ }
         };
@@ -707,23 +702,9 @@ RotaryInternalPathResult RotaryTubeGeometryAnalyzer::findInternalItemsByWindow
     result.candidatePathCount = static_cast<int>(prepared.candidates.size());
 
     const QHash<EntityId, CadItem*> byId = itemMap(sceneItems);
-    const std::set<EntityId> outerIds
-        (core.outerBoundaryEntityIds.begin(), core.outerBoundaryEntityIds.end());
 
     for (const PreparedPath& candidate : prepared.candidates)
     {
-        if (outerIds.count(candidate.entityId) != 0U)
-        {
-            ++result.skippedPathCount;
-            cadcam::core::emitSummaryLog
-            (
-                QStringLiteral("InternalPathWindow"),
-                QStringLiteral("Decision"),
-                QStringLiteral("entityId=%1 verdict=SkippedOuterBoundary")
-                    .arg(candidate.entityId)
-            );
-            continue;
-        }
         if (candidate.path.vertices.size() < 2U)
         {
             ++result.skippedPathCount;
@@ -741,24 +722,21 @@ RotaryInternalPathResult RotaryTubeGeometryAnalyzer::findInternalItemsByWindow
         double pathMaximumY = -std::numeric_limits<double>::max();
         double pathMinimumZ = std::numeric_limits<double>::max();
         double pathMaximumZ = -std::numeric_limits<double>::max();
-        const bool fullyInside = std::all_of
-        (
-            candidate.path.vertices.cbegin(), candidate.path.vertices.cend(),
-            [minimumY, maximumY, minimumZ, maximumZ, &pathMinimumY,
-                &pathMaximumY, &pathMinimumZ, &pathMaximumZ]
-            (const cadcam::geometry::PathVertex3D& vertex)
-            {
-                const double y = vertex.position.y;
-                const double z = vertex.position.z;
-                pathMinimumY = std::min(pathMinimumY, y);
-                pathMaximumY = std::max(pathMaximumY, y);
-                pathMinimumZ = std::min(pathMinimumZ, z);
-                pathMaximumZ = std::max(pathMaximumZ, z);
-                return y > minimumY && y < maximumY
-                    && z > minimumZ && z < maximumZ;
-            }
-        );
-        if (!fullyInside)
+        for (const cadcam::geometry::PathVertex3D& vertex : candidate.path.vertices)
+        {
+            const double y = vertex.position.y;
+            const double z = vertex.position.z;
+            pathMinimumY = std::min(pathMinimumY, y);
+            pathMaximumY = std::max(pathMaximumY, y);
+            pathMinimumZ = std::min(pathMinimumZ, z);
+            pathMaximumZ = std::max(pathMaximumZ, z);
+        }
+
+        // 相交即删：路径 YZ 范围与内缩窗口相交（含接触）即整体删除。
+        const bool intersects =
+            pathMinimumY <= maximumY && pathMaximumY >= minimumY
+            && pathMinimumZ <= maximumZ && pathMaximumZ >= minimumZ;
+        if (!intersects)
         {
             ++result.outsideWindowCount;
             cadcam::core::emitSummaryLog
