@@ -25,7 +25,6 @@ public:
         double cornerRadius,
         int roundedCornerCount,
         bool manuallyConfigured,
-        double centerX,
         double centerY,
         double centerZ
     );

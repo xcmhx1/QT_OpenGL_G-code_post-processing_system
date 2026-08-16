@@ -200,7 +200,6 @@ void MachiningSettingsWidget::setRotaryTubeSectionProperties
     double cornerRadius,
     int roundedCornerCount,
     bool manuallyConfigured,
-    double centerX,
     double centerY,
     double centerZ
 )
@@ -221,8 +220,7 @@ void MachiningSettingsWidget::setRotaryTubeSectionProperties
         m_roundedCornerCountValue->setText(QString::number(std::clamp(roundedCornerCount, 0, 4)));
         m_centerLineValue->setText
         (
-            QStringLiteral("X=%1  Y=%2  Z=%3")
-                .arg(centerX, 0, 'f', 3)
+            QStringLiteral("Y=%1  Z=%2")
                 .arg(centerY, 0, 'f', 3)
                 .arg(centerZ, 0, 'f', 3)
         );
