@@ -2518,6 +2518,8 @@ Gcode_postprocessing_system::buildRotaryBoundaryOperationGeometry
     geometry.connectionTolerance = kEndCutConnectionTolerance;
     geometry.sceneItems.reserve(static_cast<qsizetype>(m_document.m_entities.size()));
 
+    // 加工断面操作的候选场景包含文档中的全部图元；
+    // requiredItems 仅用于调用方在场景之外补充的图元。
     const QSet<CadItem*> requiredSet(requiredItems.begin(), requiredItems.end());
     for (const std::unique_ptr<CadItem>& entity : m_document.m_entities)
     {
@@ -2525,13 +2527,9 @@ Gcode_postprocessing_system::buildRotaryBoundaryOperationGeometry
         {
             continue;
         }
-        const auto processState = m_processState.stateOrDefault(entity->m_entityId);
-        if (processState.overrideData.boundaryRole != cadcam::planning::BoundaryRole::None
-            || requiredSet.contains(entity.get()))
-        {
-            geometry.sceneItems.push_back(entity.get());
-        }
+        geometry.sceneItems.push_back(entity.get());
     }
+    Q_UNUSED(requiredSet);
 
     {
         BoundaryPerformanceTimer topologyTimer
