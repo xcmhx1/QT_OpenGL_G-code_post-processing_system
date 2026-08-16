@@ -3038,8 +3038,9 @@ bool Gcode_postprocessing_system::removeInternalMachiningPaths(bool interactive)
             .arg(result.candidatePathCount)
             .arg(result.outsideWindowCount)
             .arg(result.skippedPathCount)
-        : QStringLiteral("内部线条清理完成：按最大圆角半径 %1 mm 内缩生成窗口（YZ 半宽 %2×%3），已删除 %4 个相交图元，可按 Ctrl+Z 撤销。")
+        : QStringLiteral("内部线条清理完成：按最大圆角半径 %1 mm 加额外内缩 %2 mm 生成窗口（YZ 半宽 %3×%4），已删除 %5 个相交图元，可按 Ctrl+Z 撤销。")
             .arg(result.insetDistance, 0, 'f', 3)
+            .arg(result.windowExtraInset, 0, 'f', 3)
             .arg(result.windowHalfY, 0, 'f', 3)
             .arg(result.windowHalfZ, 0, 'f', 3)
             .arg(removableItems.size());
@@ -3048,10 +3049,11 @@ bool Gcode_postprocessing_system::removeInternalMachiningPaths(bool interactive)
         QStringLiteral("InternalPathWindow"),
         QStringLiteral("Status"),
         QStringLiteral("sectionAvailable=true windowCollapsed=false "
-            "insetDistance=%1 windowHalfY=%2 windowHalfZ=%3 "
-            "candidatePathCount=%4 skippedPathCount=%5 outsideWindowCount=%6 "
-            "removedEntityCount=%7")
+            "insetDistance=%1 windowExtraInset=%2 windowHalfY=%3 windowHalfZ=%4 "
+            "candidatePathCount=%5 skippedPathCount=%6 outsideWindowCount=%7 "
+            "removedEntityCount=%8")
             .arg(result.insetDistance, 0, 'f', 6)
+            .arg(result.windowExtraInset, 0, 'f', 6)
             .arg(result.windowHalfY, 0, 'f', 6)
             .arg(result.windowHalfZ, 0, 'f', 6)
             .arg(result.candidatePathCount)

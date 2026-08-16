@@ -90,6 +90,7 @@ MachiningSettingsWidget::MachiningSettingsWidget(QWidget* parent)
     m_applyManualSectionButton->setToolTip
         (QStringLiteral("手动设置优先用于后续内部线识别、加工断面、排序和导出。"));
     m_roundedCornerCountValue = createStatusValue(statusGroup);
+    m_centerLineValue = createStatusValue(statusGroup);
     m_rotaryEndCutCountValue = createStatusValue(statusGroup);
     statusLayout->addRow(QStringLiteral("截面状态："), m_sectionStatusValue);
     statusLayout->addRow(QStringLiteral("Y 长："), m_yLengthInput);
@@ -97,6 +98,7 @@ MachiningSettingsWidget::MachiningSettingsWidget(QWidget* parent)
     statusLayout->addRow(QStringLiteral("圆角半径："), m_cornerRadiusInput);
     statusLayout->addRow(QString(), m_applyManualSectionButton);
     statusLayout->addRow(QStringLiteral("圆角数量："), m_roundedCornerCountValue);
+    statusLayout->addRow(QStringLiteral("中心线位置："), m_centerLineValue);
     statusLayout->addRow(QStringLiteral("加工断面："), m_rotaryEndCutCountValue);
     contentLayout->addWidget(statusGroup);
     contentLayout->addStretch(1);
@@ -197,7 +199,10 @@ void MachiningSettingsWidget::setRotaryTubeSectionProperties
     double zWidth,
     double cornerRadius,
     int roundedCornerCount,
-    bool manuallyConfigured
+    bool manuallyConfigured,
+    double centerX,
+    double centerY,
+    double centerZ
 )
 {
     m_updatingUi = true;
@@ -214,6 +219,13 @@ void MachiningSettingsWidget::setRotaryTubeSectionProperties
         m_zWidthInput->setValue(zWidth);
         m_cornerRadiusInput->setValue(cornerRadius);
         m_roundedCornerCountValue->setText(QString::number(std::clamp(roundedCornerCount, 0, 4)));
+        m_centerLineValue->setText
+        (
+            QStringLiteral("X=%1  Y=%2  Z=%3")
+                .arg(centerX, 0, 'f', 3)
+                .arg(centerY, 0, 'f', 3)
+                .arg(centerZ, 0, 'f', 3)
+        );
     }
     else
     {
@@ -221,6 +233,7 @@ void MachiningSettingsWidget::setRotaryTubeSectionProperties
         m_zWidthInput->setValue(0.0);
         m_cornerRadiusInput->setValue(0.0);
         m_roundedCornerCountValue->setText(QStringLiteral("--"));
+        m_centerLineValue->setText(QStringLiteral("--"));
 
         if (!m_sectionBlinkTimer->isActive())
         {

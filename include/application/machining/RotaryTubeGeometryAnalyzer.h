@@ -52,6 +52,7 @@ struct RotaryInternalPathResult
     int skippedPathCount = 0;
     int outsideWindowCount = 0;
     double insetDistance = 0.0;
+    double windowExtraInset = 0.0;
     double windowHalfY = 0.0;
     double windowHalfZ = 0.0;
 };

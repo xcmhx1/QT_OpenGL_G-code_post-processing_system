@@ -24,7 +24,10 @@ public:
         double zWidth,
         double cornerRadius,
         int roundedCornerCount,
-        bool manuallyConfigured
+        bool manuallyConfigured,
+        double centerX,
+        double centerY,
+        double centerZ
     );
     void setRotaryEndCutCount(int count);
 
@@ -54,6 +57,7 @@ private:
     QDoubleSpinBox* m_cornerRadiusInput = nullptr;
     QPushButton* m_applyManualSectionButton = nullptr;
     QLabel* m_roundedCornerCountValue = nullptr;
+    QLabel* m_centerLineValue = nullptr;
     QLabel* m_rotaryEndCutCountValue = nullptr;
     QTimer* m_sectionBlinkTimer = nullptr;
     bool m_sectionRecognized = false;

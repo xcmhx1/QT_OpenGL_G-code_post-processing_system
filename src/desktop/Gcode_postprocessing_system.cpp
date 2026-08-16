@@ -2238,7 +2238,10 @@ void Gcode_postprocessing_system::syncMachiningSettingsState()
         m_rotaryTubeSectionModel.zWidth,
         m_rotaryTubeSectionModel.cornerRadius,
         m_rotaryTubeSectionModel.roundedCornerCount,
-        m_rotaryTubeSectionModel.manuallyConfigured
+        m_rotaryTubeSectionModel.manuallyConfigured,
+        m_rotaryTubeSectionModel.centerX,
+        m_rotaryTubeSectionModel.centerY,
+        m_rotaryTubeSectionModel.centerZ
     );
 
     QSet<int> rotaryEndCutIds;
