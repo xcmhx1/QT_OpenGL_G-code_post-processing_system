@@ -2984,8 +2984,7 @@ bool Gcode_postprocessing_system::removeInternalMachiningPaths(bool interactive)
     {
         for (const Diagnostic& diagnostic : result.diagnostics)
         {
-            if (diagnostic.severity == DiagnosticSeverity::Warning
-                && !diagnostic.userMessage.isEmpty())
+            if (!diagnostic.userMessage.isEmpty())
             {
                 ui->openGLWidget->appendCommandMessage(diagnostic.userMessage);
             }
@@ -3004,15 +3003,39 @@ bool Gcode_postprocessing_system::removeInternalMachiningPaths(bool interactive)
     }
 
     QVector<CadItem*> removableItems;
+    int protectedByBoundaryCount = 0;
     for (CadItem* item : result.removableItems)
     {
-        if (item != nullptr
-            && m_processState.stateOrDefault(item->m_entityId)
-                .overrideData.boundaryRole == cadcam::planning::BoundaryRole::None)
+        if (item == nullptr)
         {
-            removableItems.push_back(item);
+            continue;
         }
+        const bool boundaryProtected =
+            m_processState.stateOrDefault(item->m_entityId)
+                .overrideData.boundaryRole
+                != cadcam::planning::BoundaryRole::None;
+        if (boundaryProtected)
+        {
+            ++protectedByBoundaryCount;
+            cadcam::core::emitSummaryLog
+            (
+                QStringLiteral("InternalPathWindow"),
+                QStringLiteral("Decision"),
+                QStringLiteral("entityId=%1 verdict=ProtectedByBoundaryRole")
+                    .arg(item->m_entityId)
+            );
+            continue;
+        }
+        removableItems.push_back(item);
     }
+    cadcam::core::emitSummaryLog
+    (
+        QStringLiteral("InternalPathWindow"),
+        QStringLiteral("Result"),
+        QStringLiteral("windowRemovedCount=%1 protectedByBoundaryCount=%2")
+            .arg(result.removableItems.size())
+            .arg(protectedByBoundaryCount)
+    );
 
     if (!removableItems.isEmpty()
         && !m_editer.deleteEntities(removableItems))
@@ -3025,13 +3048,23 @@ bool Gcode_postprocessing_system::removeInternalMachiningPaths(bool interactive)
 
     if (!removableItems.isEmpty())
     {
+        cadcam::core::emitSummaryLog
+        (
+            QStringLiteral("InternalPathWindow"),
+            QStringLiteral("DeleteResult"),
+            QStringLiteral("deletedEntityCount=%1")
+                .arg(removableItems.size())
+        );
         invalidateProcessOrdersAfterEndCutChange();
         refreshWasteProcessingExclusions();
         updateBoundaryViewer(ui->openGLWidget, m_boundaryAssignmentPerformanceReport);
     }
 
     const QString message = removableItems.isEmpty()
-        ? QStringLiteral("内部线条清理完成：内缩窗口内没有可删除的内部图元。")
+        ? QStringLiteral("内部线条清理完成：内缩窗口内没有可删除的内部图元（候选 %1，窗口外保留 %2，跳过 %3）。")
+            .arg(result.candidatePathCount)
+            .arg(result.outsideWindowCount)
+            .arg(result.skippedPathCount)
         : QStringLiteral("内部线条清理完成：按最大圆角半径 %1 mm 加额外内缩 %2 mm 生成窗口（YZ 半宽 %3×%4），已删除 %5 个内部图元，可按 Ctrl+Z 撤销。")
             .arg(result.insetDistance, 0, 'f', 3)
             .arg(result.windowExtraInset, 0, 'f', 3)
@@ -3056,8 +3089,7 @@ bool Gcode_postprocessing_system::removeInternalMachiningPaths(bool interactive)
             .arg(removableItems.size()));
     for (const Diagnostic& diagnostic : result.diagnostics)
     {
-        if (diagnostic.severity == DiagnosticSeverity::Warning
-            && !diagnostic.userMessage.isEmpty())
+        if (!diagnostic.userMessage.isEmpty())
         {
             ui->openGLWidget->appendCommandMessage(diagnostic.userMessage);
         }

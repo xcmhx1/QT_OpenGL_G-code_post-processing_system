@@ -6,11 +6,13 @@
 #include "compatibility/legacy/LegacyCadItemTopologyAdapter.h"
 #include "core/geometry/GeometryCompiler.h"
 #include "infrastructure/dxf/DxfGeometryAdapter.h"
+#include "core/diagnostics/SummaryLog.h"
 
 #include <QHash>
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <set>
 
 namespace
@@ -129,11 +131,15 @@ namespace
         cadcam::geometry::GeometryCompiler compiler;
         cadcam::geometry::SamplingPolicy policy;
         cadcam::geometry::PathCompileOptions options;
+        int convertFailureCount = 0;
+        int compileFailureCount = 0;
+        int nullItemCount = 0;
 
         for (CadItem* item : sceneItems)
         {
             if (item == nullptr || item->m_nativeEntity == nullptr || item->m_entityId == 0U)
             {
+                ++nullItemCount;
                 continue;
             }
 
@@ -142,6 +148,24 @@ namespace
             prepared.diagnostics += source.diagnostics;
             if (!source.value.has_value())
             {
+                ++convertFailureCount;
+                QString reason;
+                for (const Diagnostic& diagnostic : source.diagnostics)
+                {
+                    if (!diagnostic.userMessage.isEmpty())
+                    {
+                        reason = diagnostic.userMessage;
+                        break;
+                    }
+                }
+                cadcam::core::emitSummaryLog
+                (
+                    QStringLiteral("InternalPathWindow"),
+                    QStringLiteral("ConvertFailed"),
+                    QStringLiteral("entityId=%1 reason=%2")
+                        .arg(item->m_entityId)
+                        .arg(reason)
+                );
                 continue;
             }
 
@@ -150,6 +174,26 @@ namespace
             prepared.diagnostics += path.diagnostics;
             if (!path.value.has_value())
             {
+                ++compileFailureCount;
+                QString reason;
+                for (const Diagnostic& diagnostic : path.diagnostics)
+                {
+                    if (!diagnostic.userMessage.isEmpty())
+                    {
+                        reason = diagnostic.userMessage;
+                        break;
+                    }
+                }
+                cadcam::core::emitSummaryLog
+                (
+                    QStringLiteral("InternalPathWindow"),
+                    QStringLiteral("CompileFailed"),
+                    QStringLiteral("entityId=%1 sourceKind=%2 reason=%3")
+                        .arg(item->m_entityId)
+                        .arg(QString::fromLatin1
+                            (cadcam::geometry::sourceGeometryKindName(source.value->kind)))
+                        .arg(reason)
+                );
                 continue;
             }
 
@@ -159,6 +203,17 @@ namespace
                 std::move(*path.value)
             });
         }
+        cadcam::core::emitSummaryLog
+        (
+            QStringLiteral("InternalPathWindow"),
+            QStringLiteral("CandidateSummary"),
+            QStringLiteral("sceneItemCount=%1 nullItemCount=%2 convertFailureCount=%3 compileFailureCount=%4 candidateCount=%5")
+                .arg(sceneItems.size())
+                .arg(nullItemCount)
+                .arg(convertFailureCount)
+                .arg(compileFailureCount)
+                .arg(prepared.candidates.size())
+        );
         return prepared;
     }
 
@@ -600,6 +655,25 @@ RotaryInternalPathResult RotaryTubeGeometryAnalyzer::findInternalItemsByWindow
     const double minimumZ = core.geometry.centerZ - windowHalfZ;
     const double maximumZ = core.geometry.centerZ + windowHalfZ;
 
+    cadcam::core::emitSummaryLog
+    (
+        QStringLiteral("InternalPathWindow"),
+        QStringLiteral("Window"),
+        QStringLiteral("centerY=%1 centerZ=%2 yLength=%3 zWidth=%4 inset=%5 extraInset=%6 halfY=%7 halfZ=%8 boundsY=[%9,%10] boundsZ=[%11,%12]")
+            .arg(core.geometry.centerY, 0, 'g', 15)
+            .arg(core.geometry.centerZ, 0, 'g', 15)
+            .arg(core.geometry.yLength, 0, 'g', 15)
+            .arg(core.geometry.zWidth, 0, 'g', 15)
+            .arg(inset, 0, 'g', 15)
+            .arg(extraInset, 0, 'g', 15)
+            .arg(windowHalfY, 0, 'g', 15)
+            .arg(windowHalfZ, 0, 'g', 15)
+            .arg(minimumY, 0, 'g', 15)
+            .arg(maximumY, 0, 'g', 15)
+            .arg(minimumZ, 0, 'g', 15)
+            .arg(maximumZ, 0, 'g', 15)
+    );
+
     const OperationContext context = createOperationContext
         (QStringLiteral("SelectTubeInternalItemsByWindow"));
 
@@ -638,21 +712,48 @@ RotaryInternalPathResult RotaryTubeGeometryAnalyzer::findInternalItemsByWindow
 
     for (const PreparedPath& candidate : prepared.candidates)
     {
-        if (outerIds.count(candidate.entityId) != 0U
-            || candidate.path.vertices.size() < 2U)
+        if (outerIds.count(candidate.entityId) != 0U)
         {
             ++result.skippedPathCount;
+            cadcam::core::emitSummaryLog
+            (
+                QStringLiteral("InternalPathWindow"),
+                QStringLiteral("Decision"),
+                QStringLiteral("entityId=%1 verdict=SkippedOuterBoundary")
+                    .arg(candidate.entityId)
+            );
+            continue;
+        }
+        if (candidate.path.vertices.size() < 2U)
+        {
+            ++result.skippedPathCount;
+            cadcam::core::emitSummaryLog
+            (
+                QStringLiteral("InternalPathWindow"),
+                QStringLiteral("Decision"),
+                QStringLiteral("entityId=%1 verdict=SkippedEmptyPath")
+                    .arg(candidate.entityId)
+            );
             continue;
         }
 
+        double pathMinimumY = std::numeric_limits<double>::max();
+        double pathMaximumY = -std::numeric_limits<double>::max();
+        double pathMinimumZ = std::numeric_limits<double>::max();
+        double pathMaximumZ = -std::numeric_limits<double>::max();
         const bool fullyInside = std::all_of
         (
             candidate.path.vertices.cbegin(), candidate.path.vertices.cend(),
-            [minimumY, maximumY, minimumZ, maximumZ]
+            [minimumY, maximumY, minimumZ, maximumZ, &pathMinimumY,
+                &pathMaximumY, &pathMinimumZ, &pathMaximumZ]
             (const cadcam::geometry::PathVertex3D& vertex)
             {
                 const double y = vertex.position.y;
                 const double z = vertex.position.z;
+                pathMinimumY = std::min(pathMinimumY, y);
+                pathMaximumY = std::max(pathMaximumY, y);
+                pathMinimumZ = std::min(pathMinimumZ, z);
+                pathMaximumZ = std::max(pathMaximumZ, z);
                 return y > minimumY && y < maximumY
                     && z > minimumZ && z < maximumZ;
             }
@@ -660,6 +761,18 @@ RotaryInternalPathResult RotaryTubeGeometryAnalyzer::findInternalItemsByWindow
         if (!fullyInside)
         {
             ++result.outsideWindowCount;
+            cadcam::core::emitSummaryLog
+            (
+                QStringLiteral("InternalPathWindow"),
+                QStringLiteral("Decision"),
+                QStringLiteral("entityId=%1 verdict=OutsideWindow pointCount=%2 boundsY=[%3,%4] boundsZ=[%5,%6]")
+                    .arg(candidate.entityId)
+                    .arg(candidate.path.vertices.size())
+                    .arg(pathMinimumY, 0, 'g', 15)
+                    .arg(pathMaximumY, 0, 'g', 15)
+                    .arg(pathMinimumZ, 0, 'g', 15)
+                    .arg(pathMaximumZ, 0, 'g', 15)
+            );
             continue;
         }
 
@@ -667,6 +780,24 @@ RotaryInternalPathResult RotaryTubeGeometryAnalyzer::findInternalItemsByWindow
         if (item != byId.cend())
         {
             result.removableItems.push_back(item.value());
+            cadcam::core::emitSummaryLog
+            (
+                QStringLiteral("InternalPathWindow"),
+                QStringLiteral("Decision"),
+                QStringLiteral("entityId=%1 verdict=Removed pointCount=%2")
+                    .arg(candidate.entityId)
+                    .arg(candidate.path.vertices.size())
+            );
+        }
+        else
+        {
+            cadcam::core::emitSummaryLog
+            (
+                QStringLiteral("InternalPathWindow"),
+                QStringLiteral("Decision"),
+                QStringLiteral("entityId=%1 verdict=ItemNotFound")
+                    .arg(candidate.entityId)
+            );
         }
     }
 
